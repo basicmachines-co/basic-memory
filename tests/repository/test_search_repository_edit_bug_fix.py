@@ -160,6 +160,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     results1_after = await repo1.search(search_text="project 1 content EDITED")
     assert len(results1_after) == 1
     assert results1_after[0].title == "Test Note in Project 1"
+    assert results1_after[0].content_snippet is not None
     assert "EDITED" in results1_after[0].content_snippet
 
     # CRITICAL TEST: Verify project 2's note is still there (the bug would delete it)
@@ -167,6 +168,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     assert len(results2_after) == 1, "Project 2's note disappeared after editing project 1's note!"
     assert results2_after[0].title == "Test Note in Project 2"
     assert results2_after[0].project_id == project2_id
+    assert results2_after[0].content_snippet is not None
     assert "original" in results2_after[0].content_snippet  # Should still be original
 
     # Double-check: project 1 should not be able to see project 2's note

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from basic_memory.cli import app as cli_app
 
 
@@ -38,7 +40,7 @@ def test_app_callback_registers_command_operation(monkeypatch) -> None:
     monkeypatch.setattr(cli_app.telemetry, "operation", fake_operation)
 
     ctx = FakeContext(invoked_subcommand="status")
-    cli_app.app_callback(ctx, version=None)
+    cli_app.app_callback(cast(Any, ctx), version=None)
 
     assert ctx.resources == [resource]
     assert operations == [

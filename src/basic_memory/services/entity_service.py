@@ -288,7 +288,9 @@ class EntityService(BaseService[EntityModel]):
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    schema.title, schema.note_type, content_frontmatter["permalink"]
+                    schema.title,
+                    schema.note_type,
+                    _coerce_to_string(content_frontmatter["permalink"]),
                 )
 
         # Get unique permalink (prioritizing content frontmatter) unless disabled
@@ -393,7 +395,9 @@ class EntityService(BaseService[EntityModel]):
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    schema.title, schema.note_type, content_frontmatter["permalink"]
+                    schema.title,
+                    schema.note_type,
+                    _coerce_to_string(content_frontmatter["permalink"]),
                 )
 
         # Check if we need to update the permalink based on content frontmatter (unless disabled)
@@ -522,7 +526,9 @@ class EntityService(BaseService[EntityModel]):
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    schema.title, schema.note_type, content_frontmatter["permalink"]
+                    schema.title,
+                    schema.note_type,
+                    _coerce_to_string(content_frontmatter["permalink"]),
                 )
 
         # --- Permalink Resolution ---
@@ -663,9 +669,9 @@ class EntityService(BaseService[EntityModel]):
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    update_data.get("title", entity.title),
-                    update_data.get("note_type", entity.note_type),
-                    content_frontmatter["permalink"],
+                    _coerce_to_string(update_data.get("title", entity.title)),
+                    _coerce_to_string(update_data.get("note_type", entity.note_type)),
+                    _coerce_to_string(content_frontmatter["permalink"]),
                 )
 
             metadata = normalize_frontmatter_metadata(content_frontmatter or {})
@@ -1002,7 +1008,7 @@ class EntityService(BaseService[EntityModel]):
                 target_entity: Optional[Entity] = None
                 if not isinstance(resolved, Exception):
                     # Type narrowing: resolved is Optional[Entity] here, not Exception
-                    target_entity = resolved  # type: ignore
+                    target_entity = resolved
 
                 # if the target is found, store the id
                 target_id = target_entity.id if target_entity else None

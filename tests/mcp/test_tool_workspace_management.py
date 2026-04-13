@@ -1,5 +1,7 @@
 """Tests for workspace MCP tools."""
 
+from typing import Any, cast
+
 import pytest
 
 from basic_memory.mcp.project_context import get_available_workspaces, set_workspace_provider
@@ -100,8 +102,8 @@ async def test_list_workspaces_uses_context_cache_path(monkeypatch):
         fake_get_available_workspaces,
     )
 
-    first = await list_workspaces(context=context)
-    second = await list_workspaces(context=context)
+    first = await list_workspaces(context=cast(Any, context))
+    second = await list_workspaces(context=cast(Any, context))
 
     assert "# Available Workspaces (1)" in first
     assert "# Available Workspaces (1)" in second
@@ -184,11 +186,11 @@ async def test_get_available_workspaces_provider_caches_in_context():
     context = _ContextState()
 
     # First call: provider is invoked, result cached
-    first = await get_available_workspaces(context=context)
+    first = await get_available_workspaces(context=cast(Any, context))
     assert len(first) == 1
     assert call_count["provider"] == 1
 
     # Second call: served from context cache, provider not called again
-    second = await get_available_workspaces(context=context)
+    second = await get_available_workspaces(context=cast(Any, context))
     assert len(second) == 1
     assert call_count["provider"] == 1

@@ -182,6 +182,7 @@ class TestValidateEnumField:
         assert result.passed is True  # warn mode
         fr = result.field_results[0]
         assert fr.status == "enum_mismatch"
+        assert fr.message is not None
         assert "archived" in fr.message
         assert len(result.warnings) == 1
 
@@ -323,6 +324,7 @@ class TestValidateFrontmatterFields:
         result = validate_note("test-note", schema, [], [], frontmatter={"status": "archived"})
         assert result.passed is True
         assert result.field_results[0].status == "enum_mismatch"
+        assert result.field_results[0].message is not None
         assert "archived" in result.field_results[0].message
         assert len(result.warnings) == 1
 

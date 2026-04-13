@@ -13,6 +13,8 @@ Uses postgres-fastembed combo (no OpenAI dependency) with the pgvector container
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from basic_memory.config import DatabaseBackend
@@ -194,7 +196,7 @@ async def test_postgres_vector_dimension_detection(postgres_engine_factory, tmp_
         postgres_engine_factory, PG_FASTEMBED, tmp_path, embedding_provider=provider
     )
 
-    repo = search_service.repository
+    repo = cast(Any, search_service.repository)
 
     # First entity triggers _ensure_vector_tables
     entity = await search_service.entity_repository.create(

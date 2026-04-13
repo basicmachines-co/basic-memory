@@ -149,7 +149,7 @@ class WatchService:
 
             # create coroutines to handle changes
             change_handlers = [
-                self.handle_changes(project, changes)  # pyright: ignore
+                self.handle_changes(project, set(changes))
                 for project, changes in project_changes.items()
             ]
 
@@ -502,19 +502,19 @@ class WatchService:
 
         # Add a concise summary instead of a divider
         if processed:
-            changes = []  # pyright: ignore
+            change_summary: list[str] = []
             if add_count > 0:
-                changes.append(f"[green]{add_count} added[/green]")  # pyright: ignore
+                change_summary.append(f"[green]{add_count} added[/green]")
             if modify_count > 0:
-                changes.append(f"[yellow]{modify_count} modified[/yellow]")  # pyright: ignore
+                change_summary.append(f"[yellow]{modify_count} modified[/yellow]")
             if moved_count > 0:
-                changes.append(f"[blue]{moved_count} moved[/blue]")  # pyright: ignore
+                change_summary.append(f"[blue]{moved_count} moved[/blue]")
             if delete_count > 0:
-                changes.append(f"[red]{delete_count} deleted[/red]")  # pyright: ignore
+                change_summary.append(f"[red]{delete_count} deleted[/red]")
 
-            if changes:
-                self.console.print(f"{', '.join(changes)}", style="dim")  # pyright: ignore
-                logger.info(f"changes: {len(changes)}")
+            if change_summary:
+                self.console.print(f"{', '.join(change_summary)}", style="dim")
+                logger.info(f"changes: {len(change_summary)}")
 
         duration_ms = int((time.time() - start_time) * 1000)
         self.state.last_scan = datetime.now()

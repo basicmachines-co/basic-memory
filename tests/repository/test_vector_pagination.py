@@ -6,11 +6,15 @@ which requires a sufficiently large candidate_limit multiplier.
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 @dataclass
@@ -43,7 +47,21 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     def _prepare_search_term(self, term, is_prefix=True):
         return term  # pragma: no cover
 
-    async def search(self, **kwargs):
+    async def search(
+        self,
+        search_text: str | None = None,
+        permalink: str | None = None,
+        permalink_match: str | None = None,
+        title: str | None = None,
+        note_types: list[str] | None = None,
+        after_date: datetime | None = None,
+        search_item_types: list[SearchItemType] | None = None,
+        metadata_filters: dict[str, Any] | None = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: float | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[SearchIndexRow]:
         return []  # pragma: no cover
 
     async def _ensure_vector_tables(self):
@@ -73,6 +91,20 @@ async def fake_scoped_session(session_maker):
     yield AsyncMock()
 
 
+class _EmbeddingProvider:
+    dimensions = 384
+    model_name = "stub"
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.0] * self.dimensions
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0] * self.dimensions for _ in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
+
+
 def _make_descending_vector_rows(count: int) -> list[dict]:
     """Build vector rows with scores descending from ~1.0 to ~0.5."""
     rows = []
@@ -98,8 +130,7 @@ async def test_page1_scores_gte_page2_scores():
     # 20 results with descending scores
     fake_rows = _make_descending_vector_rows(20)
 
-    mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _EmbeddingProvider()
 
     fake_index_rows = {i: FakeRow(id=i) for i in range(20)}
 

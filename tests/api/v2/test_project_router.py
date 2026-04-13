@@ -11,6 +11,11 @@ from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
 
 
+def _project_item(project: ProjectItem | None) -> ProjectItem:
+    assert project is not None
+    return project
+
+
 @pytest.mark.asyncio
 async def test_list_projects(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test listing projects returns default_project from the database."""
@@ -67,10 +72,12 @@ async def test_update_project_path_by_id(
         assert response.status_code == 200
         status_response = ProjectStatusResponse.model_validate(response.json())
         assert status_response.status == "success"
-        assert status_response.new_project.external_id == test_project.external_id
+        new_project = _project_item(status_response.new_project)
+        old_project = _project_item(status_response.old_project)
+        assert new_project.external_id == test_project.external_id
         # Normalize paths for cross-platform comparison (Windows uses backslashes, API returns forward slashes)
-        assert Path(status_response.new_project.path) == Path(new_path)
-        assert status_response.old_project.external_id == test_project.external_id
+        assert Path(new_project.path) == Path(new_path)
+        assert old_project.external_id == test_project.external_id
 
 
 @pytest.mark.asyncio
@@ -122,10 +129,12 @@ async def test_set_default_project_by_id(
     status_response = ProjectStatusResponse.model_validate(response.json())
     assert status_response.status == "success"
     assert status_response.default is True
-    assert status_response.new_project.external_id == created_project.external_id
-    assert status_response.new_project.is_default is True
-    assert status_response.old_project.external_id == test_project.external_id
-    assert status_response.old_project.is_default is False
+    new_project = _project_item(status_response.new_project)
+    old_project = _project_item(status_response.old_project)
+    assert new_project.external_id == created_project.external_id
+    assert new_project.is_default is True
+    assert old_project.external_id == test_project.external_id
+    assert old_project.is_default is False
 
 
 @pytest.mark.asyncio
@@ -155,7 +164,8 @@ async def test_delete_project_by_id(
     assert response.status_code == 200
     status_response = ProjectStatusResponse.model_validate(response.json())
     assert status_response.status == "success"
-    assert status_response.old_project.external_id == created_project.external_id
+    old_project = _project_item(status_response.old_project)
+    assert old_project.external_id == created_project.external_id
     assert status_response.new_project is None
 
     # Verify it's deleted - trying to get it should return 404

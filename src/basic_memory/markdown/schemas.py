@@ -1,9 +1,9 @@
 """Schema models for entity markdown files."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class Observation(BaseModel):
@@ -38,23 +38,47 @@ class Relation(BaseModel):
 class EntityFrontmatter(BaseModel):
     """Required frontmatter fields for an entity."""
 
-    metadata: dict = {}
+    if TYPE_CHECKING:
+        # Frontmatter may be built from raw YAML keys. The validator below
+        # gathers those keys into the metadata mapping used at runtime.
+        def __init__(self, **data: Any) -> None: ...
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def collect_metadata(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        if "metadata" not in data:
+            return {"metadata": data}
+
+        metadata = data.get("metadata") or {}
+        extras = {key: value for key, value in data.items() if key != "metadata"}
+        if extras:
+            return {"metadata": {**extras, **metadata}}
+        return data
 
     @property
     def tags(self) -> List[str]:
-        return self.metadata.get("tags") if self.metadata else None  # pyright: ignore
+        tags = self.metadata.get("tags")
+        return [str(tag) for tag in tags] if isinstance(tags, list) else []
 
     @property
     def title(self) -> str:
-        return self.metadata.get("title") if self.metadata else None  # pyright: ignore
+        title = self.metadata.get("title")
+        return title if isinstance(title, str) else ""
 
     @property
     def type(self) -> str:
-        return self.metadata.get("type", "note") if self.metadata else "note"  # pyright: ignore
+        note_type = self.metadata.get("type", "note")
+        return note_type if isinstance(note_type, str) else "note"
 
     @property
-    def permalink(self) -> str:
-        return self.metadata.get("permalink") if self.metadata else None  # pyright: ignore
+    def permalink(self) -> Optional[str]:
+        permalink = self.metadata.get("permalink")
+        return permalink if isinstance(permalink, str) else None
 
 
 class EntityMarkdown(BaseModel):

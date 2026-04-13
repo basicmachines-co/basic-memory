@@ -211,7 +211,7 @@ async def create_resource(
                 action="create",
                 phase="search_index",
             ):
-                await search_service.index_entity(entity)  # pyright: ignore
+                await search_service.index_entity(entity)
 
             return ResourceResponse(
                 entity_id=entity.id,
@@ -326,6 +326,8 @@ async def update_resource(
                         "updated_at": file_metadata.modified_at,
                     },
                 )
+            if updated_entity is None:
+                raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
             with telemetry.scope(
                 "api.resource.update.search_index",
@@ -333,7 +335,7 @@ async def update_resource(
                 action="update",
                 phase="search_index",
             ):
-                await search_service.index_entity(updated_entity)  # pyright: ignore
+                await search_service.index_entity(updated_entity)
 
             return ResourceResponse(
                 entity_id=entity.id,

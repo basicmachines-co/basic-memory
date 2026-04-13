@@ -81,7 +81,7 @@ def _reset_embedding_provider_cache_fixture():
 async def test_openai_provider_lazy_loads_and_reuses_client(monkeypatch):
     """Provider should instantiate AsyncOpenAI lazily and reuse a single client."""
     module = type(sys)("openai")
-    module.AsyncOpenAI = _StubAsyncOpenAI
+    setattr(module, "AsyncOpenAI", _StubAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", module)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     _StubAsyncOpenAI.init_count = 0
@@ -105,7 +105,7 @@ async def test_openai_provider_lazy_loads_and_reuses_client(monkeypatch):
 async def test_openai_provider_dimension_mismatch_raises_error(monkeypatch):
     """Provider should fail fast when response dimensions differ from configured dimensions."""
     module = type(sys)("openai")
-    module.AsyncOpenAI = _StubAsyncOpenAI
+    setattr(module, "AsyncOpenAI", _StubAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", module)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -139,7 +139,7 @@ async def test_openai_provider_missing_dependency_raises_actionable_error(monkey
 async def test_openai_provider_missing_api_key_raises_error(monkeypatch):
     """OPENAI_API_KEY is required unless api_key is passed explicitly."""
     module = type(sys)("openai")
-    module.AsyncOpenAI = _StubAsyncOpenAI
+    setattr(module, "AsyncOpenAI", _StubAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", module)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -421,7 +421,7 @@ async def test_openai_provider_runs_batches_concurrently_and_preserves_output_or
             self.embeddings = shared_api
 
     module = type(sys)("openai")
-    module.AsyncOpenAI = _ConcurrentAsyncOpenAI
+    setattr(module, "AsyncOpenAI", _ConcurrentAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", module)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -452,7 +452,7 @@ async def test_openai_provider_fails_fast_on_malformed_concurrent_batch(monkeypa
             self.embeddings = _MalformedEmbeddingsApi()
 
     module = type(sys)("openai")
-    module.AsyncOpenAI = _MalformedAsyncOpenAI
+    setattr(module, "AsyncOpenAI", _MalformedAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", module)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 

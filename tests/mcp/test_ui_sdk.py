@@ -5,9 +5,11 @@ Covers:
 - basic_memory.mcp.tools.ui_sdk (_text_block, search_notes_ui, read_note_ui)
 """
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from mcp.types import TextContent
 
 from basic_memory.mcp.ui.sdk import (
     MissingMCPUIServerError,
@@ -133,5 +135,6 @@ class TestTextBlock:
     def test_returns_single_text_content(self):
         blocks = _text_block("hello world")
         assert len(blocks) == 1
-        assert blocks[0].type == "text"
-        assert blocks[0].text == "hello world"
+        block = cast(TextContent, blocks[0])
+        assert block.type == "text"
+        assert block.text == "hello world"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from contextlib import contextmanager
+from typing import Any, cast
 
 import pytest
 
@@ -14,6 +15,7 @@ search_router_module = importlib.import_module("basic_memory.api.v2.routers.sear
 
 @pytest.mark.asyncio
 async def test_search_router_wraps_request_in_manual_operation() -> None:
+    router = cast(Any, search_router_module)
     operations: list[tuple[str, dict]] = []
 
     class FakeSearchService:
@@ -28,22 +30,22 @@ async def test_search_router_wraps_request_in_manual_operation() -> None:
     async def fake_to_search_results(entity_service, results):
         return []
 
-    original_operation = search_router_module.telemetry.operation
-    original_to_search_results = search_router_module.to_search_results
-    search_router_module.telemetry.operation = fake_operation
-    search_router_module.to_search_results = fake_to_search_results
+    original_operation = router.telemetry.operation
+    original_to_search_results = router.to_search_results
+    router.telemetry.operation = fake_operation
+    router.to_search_results = fake_to_search_results
     try:
-        response = await search_router_module.search(
+        response = await router.search(
             SearchQuery(text="hello world"),
             FakeSearchService(),
             object(),
-            project_id="project-123",
+            project_id=123,
             page=2,
             page_size=5,
         )
     finally:
-        search_router_module.telemetry.operation = original_operation
-        search_router_module.to_search_results = original_to_search_results
+        router.telemetry.operation = original_operation
+        router.to_search_results = original_to_search_results
 
     assert response.current_page == 2
     assert operations == [

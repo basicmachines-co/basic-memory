@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -26,6 +27,9 @@ class StubEmbeddingProvider:
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._vectorize(text) for text in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
 
     @staticmethod
     def _vectorize(text: str) -> list[float]:
@@ -81,8 +85,9 @@ def _enable_semantic(
         pytest.skip("sqlite-vec dependency is required for sqlite vector repository tests.")
 
     search_repository._semantic_enabled = True
-    search_repository._embedding_provider = embedding_provider or StubEmbeddingProvider()
-    search_repository._vector_dimensions = search_repository._embedding_provider.dimensions
+    provider = embedding_provider or StubEmbeddingProvider()
+    search_repository._embedding_provider = provider
+    search_repository._vector_dimensions = provider.dimensions
     search_repository._vector_tables_initialized = False
 
 
@@ -355,9 +360,10 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
 
     prepared = await repo._prepare_entity_vector_jobs_window([1, 2])
+    prepared_results = [result for result in prepared if not isinstance(result, BaseException)]
 
     assert fetched_windows == [[1, 2]]
-    assert [result.entity_id for result in prepared] == [1, 2]
+    assert [result.entity_id for result in prepared_results] == [1, 2]
     assert max_active_write_scopes == 1
 
 
@@ -418,9 +424,10 @@ async def test_sqlite_prepare_window_does_not_deadlock_when_vec_loading_inside_w
     monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
 
     prepared = await asyncio.wait_for(repo._prepare_entity_vector_jobs_window([1]), timeout=1.0)
+    prepared_results = [result for result in prepared if not isinstance(result, BaseException)]
 
-    assert len(prepared) == 1
-    assert prepared[0].entity_id == 1
+    assert len(prepared_results) == 1
+    assert prepared_results[0].entity_id == 1
 
 
 @pytest.mark.asyncio
@@ -535,7 +542,7 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository):
 
     async with db.scoped_session(search_repository.session_maker) as session:
         await search_repository._prepare_vector_session(session)
-        session.execute = capturing_execute
+        cast(Any, session).execute = capturing_execute
 
         query_embedding = [0.1] * search_repository._vector_dimensions
 

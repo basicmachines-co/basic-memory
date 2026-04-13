@@ -92,6 +92,9 @@ async def test_get_discussion_context_timeframe(client, test_graph, test_project
         timeframe="30d",
     )
 
+    assert isinstance(recent, dict)
+    assert isinstance(older, dict)
+
     # Calculate total related items
     total_recent_related = (
         sum(len(item["related_results"]) for item in recent["results"]) if recent["results"] else 0
@@ -161,6 +164,7 @@ async def test_build_context_string_depth_parameter(client, test_graph, test_pro
     # Test valid string depth parameter — should convert to int
     try:
         result = await build_context(url=test_url, depth="2", project=test_project.name)
+        assert isinstance(result, dict)
         assert isinstance(result["metadata"]["depth"], int)
         assert result["metadata"]["depth"] == 2
     except ToolError:

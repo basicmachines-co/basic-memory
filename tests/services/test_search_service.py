@@ -994,6 +994,7 @@ async def test_index_entity_with_duplicate_observations(
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
     entity = await entity_repo.get_by_permalink("test/duplicate-obs")
+    assert entity is not None
 
     # Verify we have duplicate observations
     assert len(entity.observations) == 2
@@ -1052,6 +1053,7 @@ async def test_index_entity_dedupes_observations_by_permalink(
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
     entity = await entity_repo.get_by_permalink("test/dedupe-test")
+    assert entity is not None
     assert len(entity.observations) == 3
 
     # Index the entity
@@ -1103,6 +1105,7 @@ async def test_index_entity_multiple_categories_same_content(
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
     entity = await entity_repo.get_by_permalink("test/multi-category")
+    assert entity is not None
     assert len(entity.observations) == 2
 
     # Verify permalinks are different due to different categories
@@ -1156,6 +1159,7 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
     }
     entity = await entity_repo.create(entity_data)
     entity = await entity_repo.get_by_permalink("test/nul-test")
+    assert entity is not None
 
     # Index with NUL-containing content (simulates rclone-preallocated file)
     nul_content = "# NUL Test\x00\x00\nSome content\x00here"

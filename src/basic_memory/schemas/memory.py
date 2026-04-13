@@ -103,7 +103,7 @@ MemoryUrl = Annotated[
 memory_url = TypeAdapter(MemoryUrl)
 
 
-def memory_url_path(url: memory_url) -> str:  # pyright: ignore
+def memory_url_path(url: str) -> str:
     """
     Returns the uri for a url value by removing the prefix "memory://" from a given MemoryUrl.
 

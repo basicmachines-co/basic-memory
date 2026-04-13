@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 from basic_memory.cli.main import app as cli_app
 from basic_memory.mcp.clients.project import ProjectClient
 from basic_memory.schemas.project_info import ProjectList
-from basic_memory.schemas.sync_report import SyncReportResponse
+from basic_memory.schemas.sync_report import SkippedFileResponse, SyncReportResponse
 
 # Importing registers subcommands on the shared app instance.
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
@@ -76,12 +76,12 @@ SYNC_REPORT_WITH_SKIPPED = SyncReportResponse(
     moves={},
     checksums={},
     skipped_files=[
-        {
-            "path": "bad/file.md",
-            "reason": "parse error",
-            "failure_count": 3,
-            "first_failed": datetime(2025, 6, 15, 12, 0, 0),
-        }
+        SkippedFileResponse(
+            path="bad/file.md",
+            reason="parse error",
+            failure_count=3,
+            first_failed=datetime(2025, 6, 15, 12, 0, 0),
+        )
     ],
     total=0,
 )

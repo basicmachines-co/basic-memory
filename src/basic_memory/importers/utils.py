@@ -39,23 +39,24 @@ def format_timestamp(timestamp: Any) -> str:  # pragma: no cover
     Returns:
         A formatted string representation of the timestamp.
     """
+    parsed_timestamp = timestamp
     if isinstance(timestamp, str):
         try:
             # Try ISO format
-            timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError:
             try:
                 # Try unix timestamp as string
-                timestamp = datetime.fromtimestamp(float(timestamp)).astimezone()
+                parsed_timestamp = datetime.fromtimestamp(float(timestamp)).astimezone()
             except ValueError:
                 # Return as is if we can't parse it
                 return timestamp
     elif isinstance(timestamp, (int, float)):
         # Unix timestamp
-        timestamp = datetime.fromtimestamp(timestamp).astimezone()
+        parsed_timestamp = datetime.fromtimestamp(timestamp).astimezone()
 
-    if isinstance(timestamp, datetime):
-        return timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(parsed_timestamp, datetime):
+        return parsed_timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
     # Return as is if we can't format it
-    return str(timestamp)  # pragma: no cover
+    return str(parsed_timestamp)  # pragma: no cover

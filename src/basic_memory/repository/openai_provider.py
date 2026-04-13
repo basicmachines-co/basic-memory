@@ -50,7 +50,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                 return self._client
 
             try:
-                from openai import AsyncOpenAI  # type: ignore[import-not-found]
+                from openai import AsyncOpenAI
             except ImportError as exc:  # pragma: no cover - covered via monkeypatch tests
                 raise SemanticDependenciesMissingError(
                     "OpenAI dependency is missing. "

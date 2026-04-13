@@ -42,7 +42,7 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
     direct_identifier = memory_url_path("Fallback Title Note")
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
-        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
                 raise RuntimeError("force direct lookup failure")
@@ -94,7 +94,7 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 
     # Ensure direct resolution doesn't short-circuit the fallback logic.
     class FailingKnowledgeClient(OriginalKnowledgeClient):
-        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             raise RuntimeError("force fallback")
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
@@ -123,7 +123,7 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
     OriginalKnowledgeClient = clients_mod.KnowledgeClient
 
     class StrictFailingKnowledgeClient(OriginalKnowledgeClient):
-        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             if strict:
                 raise RuntimeError("force strict direct lookup failure")
             return await super().resolve_entity(identifier, strict=strict)
@@ -286,7 +286,7 @@ async def test_read_note_memory_url_fallback_uses_search_tool_normalization(
     search_calls: list[tuple[str, str, str | None]] = []
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
-        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             if strict and identifier.endswith("test/memory-url-fallback-note"):
                 raise RuntimeError("force direct lookup failure")
             return await super().resolve_entity(identifier, strict=strict)

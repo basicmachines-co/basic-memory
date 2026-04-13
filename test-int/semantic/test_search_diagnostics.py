@@ -9,6 +9,8 @@ These tests isolate specific problems with the search pipeline:
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from basic_memory.config import DatabaseBackend
@@ -335,11 +337,10 @@ async def test_similarity_formula_analysis(sqlite_engine_factory, tmp_path):
 
         from basic_memory import db as bm_db
 
-        async with bm_db.scoped_session(service.repository.session_maker) as session:
-            await service.repository._prepare_vector_session(session)
-            raw_rows = await service.repository._run_vector_query(
-                session, query_embedding, candidate_limit=20
-            )
+        repo = cast(Any, service.repository)
+        async with bm_db.scoped_session(repo.session_maker) as session:
+            await repo._prepare_vector_session(session)
+            raw_rows = await repo._run_vector_query(session, query_embedding, candidate_limit=20)
 
         print(f"\nQuery: '{query_text}'")
         print(f"  {'chunk_key':<40} {'distance':>10} {'sim_old':>12} {'sim_new':>12}")
@@ -347,7 +348,7 @@ async def test_similarity_formula_analysis(sqlite_engine_factory, tmp_path):
             dist = float(row["best_distance"])
             sim_old = 1.0 / (1.0 + max(dist, 0.0))
             # New formula: L2 distance → cosine similarity for normalized embeddings
-            sim_new = service.repository._distance_to_similarity(dist)
+            sim_new = repo._distance_to_similarity(dist)
             print(f"  {row['chunk_key']:<40} {dist:>10.4f} {sim_old:>12.4f} {sim_new:>12.4f}")
 
 
@@ -431,7 +432,7 @@ async def test_chunking_produces_reasonable_chunks(sqlite_engine_factory, tmp_pa
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider
     )
-    repo = service.repository
+    repo = cast(Any, service.repository)
 
     # Simulate a typical entity with observations
     text_input = (

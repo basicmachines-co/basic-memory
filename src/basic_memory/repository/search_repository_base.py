@@ -1068,39 +1068,48 @@ class SearchRepositoryBase(ABC):
                 write_seconds_total=result.write_seconds_total,
             )
             batch_total_seconds = time.perf_counter() - batch_start
-            metric_attrs = {
-                "backend": backend_name,
-                "skip_only_batch": result.embedding_jobs_total == 0,
-            }
             telemetry.record_histogram(
                 "vector_sync_batch_total_seconds",
                 batch_total_seconds,
                 unit="s",
-                **metric_attrs,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
             )
             telemetry.add_counter(
-                "vector_sync_entities_total", result.entities_total, **metric_attrs
+                "vector_sync_entities_total",
+                result.entities_total,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
             )
             telemetry.add_counter(
                 "vector_sync_entities_skipped",
                 result.entities_skipped,
-                **metric_attrs,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
             )
             telemetry.add_counter(
                 "vector_sync_entities_deferred",
                 result.entities_deferred,
-                **metric_attrs,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
             )
             telemetry.add_counter(
                 "vector_sync_embedding_jobs_total",
                 result.embedding_jobs_total,
-                **metric_attrs,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
             )
-            telemetry.add_counter("vector_sync_chunks_total", result.chunks_total, **metric_attrs)
+            telemetry.add_counter(
+                "vector_sync_chunks_total",
+                result.chunks_total,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
+            )
             telemetry.add_counter(
                 "vector_sync_chunks_skipped",
                 result.chunks_skipped,
-                **metric_attrs,
+                backend=backend_name,
+                skip_only_batch=result.embedding_jobs_total == 0,
             )
             if batch_span is not None:
                 batch_span.set_attributes(
@@ -1675,33 +1684,33 @@ class SearchRepositoryBase(ABC):
     ) -> None:
         """Log completion and slow-entity warnings with a consistent format."""
         backend_name = type(self).__name__.removesuffix("SearchRepository").lower()
-        metric_attrs = {
-            "backend": backend_name,
-            "skip_only_entity": entity_skipped and embedding_jobs_count == 0,
-        }
         telemetry.record_histogram(
             "vector_sync_prepare_seconds",
             prepare_seconds,
             unit="s",
-            **metric_attrs,
+            backend=backend_name,
+            skip_only_entity=entity_skipped and embedding_jobs_count == 0,
         )
         telemetry.record_histogram(
             "vector_sync_queue_wait_seconds",
             queue_wait_seconds,
             unit="s",
-            **metric_attrs,
+            backend=backend_name,
+            skip_only_entity=entity_skipped and embedding_jobs_count == 0,
         )
         telemetry.record_histogram(
             "vector_sync_embed_seconds",
             embed_seconds,
             unit="s",
-            **metric_attrs,
+            backend=backend_name,
+            skip_only_entity=entity_skipped and embedding_jobs_count == 0,
         )
         telemetry.record_histogram(
             "vector_sync_write_seconds",
             write_seconds,
             unit="s",
-            **metric_attrs,
+            backend=backend_name,
+            skip_only_entity=entity_skipped and embedding_jobs_count == 0,
         )
         if total_seconds > 10:
             logger.warning(

@@ -358,4 +358,5 @@ async def test_parse_file_with_reserved_frontmatter_field_content(tmp_path):
     assert entity_markdown.frontmatter.metadata.get("content") == "Template for topic notes"
     assert entity_markdown.frontmatter.metadata.get("handler") == "some-handler-value"
     # The actual body content should be parsed correctly
+    assert entity_markdown.content is not None
     assert "Template Body" in entity_markdown.content

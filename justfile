@@ -170,13 +170,17 @@ lint: fix
 fix:
     uv run ruff check --fix --unsafe-fixes src tests test-int
 
-# Type check code (pyright)
+# Type check code (ty)
 typecheck:
+    uv run ty check src tests test-int
+
+# Type check code (pyright)
+typecheck-pyright:
     uv run pyright
 
 # Type check code (ty)
 typecheck-ty:
-    uv run ty check src/
+    just typecheck
 
 # Clean build artifacts and cache files
 clean:

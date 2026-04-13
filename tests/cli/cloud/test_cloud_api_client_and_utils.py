@@ -163,6 +163,7 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(
     created = await create_cloud_project("My Project", api_request=api_request)
     assert created.new_project is not None
     assert created.new_project["name"] == "My Project"
+    assert seen["create_payload"] is not None
     # Path should be permalink-like (kebab)
     assert seen["create_payload"]["path"] == "my-project"
     assert seen["create_payload"]["visibility"] == "workspace"

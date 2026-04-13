@@ -137,6 +137,7 @@ async def test_issue_254_reproduction(project_service: ProjectService):
         # Create project and entity
         await project_service.add_project(test_project_name, test_project_path)
         project = await project_service.get_project(test_project_name)
+        assert project is not None
 
         from basic_memory.repository.entity_repository import EntityRepository
 

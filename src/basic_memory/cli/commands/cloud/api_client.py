@@ -99,41 +99,39 @@ async def make_api_request(
             response = await client.request(method=method, url=url, headers=headers, json=json_data)
             response.raise_for_status()
             return response
+        except httpx.HTTPStatusError as e:
+            response = e.response
+
+            # Try to parse error detail from response
+            error_detail = None
+            try:
+                error_detail = response.json()
+            except Exception:
+                # If JSON parsing fails, we'll handle it as a generic error
+                pass
+
+            # Check for subscription_required error (403)
+            if response.status_code == 403 and isinstance(error_detail, dict):
+                # Handle both FastAPI HTTPException format (nested under "detail")
+                # and direct format
+                detail_obj = error_detail.get("detail", error_detail)
+                if (
+                    isinstance(detail_obj, dict)
+                    and detail_obj.get("error") == "subscription_required"
+                ):
+                    message = detail_obj.get("message", "Active subscription required")
+                    subscribe_url = detail_obj.get(
+                        "subscribe_url", "https://basicmemory.com/subscribe"
+                    )
+                    raise SubscriptionRequiredError(
+                        message=message, subscribe_url=subscribe_url
+                    ) from e
+
+            # Raise generic CloudAPIError with status code and detail
+            raise CloudAPIError(
+                f"API request failed: {e}",
+                status_code=response.status_code,
+                detail=error_detail if isinstance(error_detail, dict) else {},
+            ) from e
         except httpx.HTTPError as e:
-            # Check if this is a response error with response details
-            if hasattr(e, "response") and e.response is not None:  # pyright: ignore [reportAttributeAccessIssue]
-                response = e.response  # type: ignore
-
-                # Try to parse error detail from response
-                error_detail = None
-                try:
-                    error_detail = response.json()
-                except Exception:
-                    # If JSON parsing fails, we'll handle it as a generic error
-                    pass
-
-                # Check for subscription_required error (403)
-                if response.status_code == 403 and isinstance(error_detail, dict):
-                    # Handle both FastAPI HTTPException format (nested under "detail")
-                    # and direct format
-                    detail_obj = error_detail.get("detail", error_detail)
-                    if (
-                        isinstance(detail_obj, dict)
-                        and detail_obj.get("error") == "subscription_required"
-                    ):
-                        message = detail_obj.get("message", "Active subscription required")
-                        subscribe_url = detail_obj.get(
-                            "subscribe_url", "https://basicmemory.com/subscribe"
-                        )
-                        raise SubscriptionRequiredError(
-                            message=message, subscribe_url=subscribe_url
-                        ) from e
-
-                # Raise generic CloudAPIError with status code and detail
-                raise CloudAPIError(
-                    f"API request failed: {e}",
-                    status_code=response.status_code,
-                    detail=error_detail if isinstance(error_detail, dict) else {},
-                ) from e
-
             raise CloudAPIError(f"API request failed: {e}") from e

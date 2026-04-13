@@ -117,6 +117,7 @@ async def test_create_and_delete_project_and_name_match_branch(
         project_path=str(project_root),
         set_default=False,
     )
+    assert isinstance(result, str)
     assert result.startswith("✓")
     assert "My Project" in result
 
@@ -495,6 +496,7 @@ async def test_list_memory_projects_json_includes_workspace_info(app, test_proje
     ):
         result = await list_memory_projects(output_format="json", workspace="org-tenant-abc")
 
+    assert isinstance(result, dict)
     by_name = {p["name"]: p for p in result["projects"]}
 
     # Cloud project carries workspace info

@@ -175,7 +175,9 @@ async def test_semantic_vector_sync_batch_skips_embed_opt_out_and_reports_skips(
     result = await search_service.sync_entity_vectors_batch([41, 42])
 
     sync_batch.assert_awaited_once()
-    assert sync_batch.await_args.args[0] == [42]
+    sync_batch_args = sync_batch.await_args
+    assert sync_batch_args is not None
+    assert sync_batch_args.args[0] == [42]
     assert result.entities_total == 2
     assert result.entities_synced == 1
     assert result.entities_skipped == 1

@@ -58,18 +58,21 @@ def test_context_handling():
     tokens = md.parse("- type [[Target]] (unclosed")
     token = next(t for t in tokens if t.type == "inline")
     rel = parse_relation(token)
+    assert rel is not None
     assert rel["context"] is None
 
     # Multiple parens
     tokens = md.parse("- type [[Target]] (with (nested) parens)")
     token = next(t for t in tokens if t.type == "inline")
     rel = parse_relation(token)
+    assert rel is not None
     assert rel["context"] == "with (nested) parens"
 
     # Empty context
     tokens = md.parse("- type [[Target]] ()")
     token = next(t for t in tokens if t.type == "inline")
     rel = parse_relation(token)
+    assert rel is not None
     assert rel["context"] is None
 
 
@@ -103,18 +106,21 @@ def test_unicode_targets():
     tokens = md.parse("- type [[测试]]")
     token = next(t for t in tokens if t.type == "inline")
     rel = parse_relation(token)
+    assert rel is not None
     assert rel["target"] == "测试"
 
     # Unicode in type
     tokens = md.parse("- 使用 [[Target]]")
     token = next(t for t in tokens if t.type == "inline")
     rel = parse_relation(token)
+    assert rel is not None
     assert rel["type"] == "使用"
 
     # Unicode in context
     tokens = md.parse("- type [[Target]] (测试)")
     token = next(t for t in tokens if t.type == "inline")
     rel = parse_relation(token)
+    assert rel is not None
     assert rel["context"] == "测试"
 
     # Model validation with Unicode

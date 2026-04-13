@@ -1,6 +1,7 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
 from textwrap import dedent
+from typing import Any
 
 import pytest
 
@@ -204,6 +205,7 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
 
     assert "# Created note" in result1
     assert f"project: {test_project.name}" in result1
+    assert isinstance(result1, str)
 
     # Extract the auto-generated permalink
     initial_permalink = None
@@ -287,7 +289,7 @@ async def test_write_note_with_tag_array_from_bug_report(app, test_project):
     was passing an array of tags and getting a type mismatch error.
     """
     # This is the exact payload from the bug report
-    bug_payload = {
+    bug_payload: dict[str, Any] = {
         "project": test_project.name,
         "title": "Title",
         "directory": "folder",

@@ -6,6 +6,7 @@ have entity IDs in URLs - they generate formatted prompts from queries.
 """
 
 from datetime import datetime, timezone
+from typing import Any
 from fastapi import APIRouter, HTTPException, status, Path
 from loguru import logger
 
@@ -59,6 +60,7 @@ async def continue_conversation(
 
     # Initialize search results
     search_results = []
+    hierarchical_results_for_count = []
 
     # Get data needed for template
     if request.topic:
@@ -91,7 +93,8 @@ async def continue_conversation(
         # Limit to a reasonable number of total results
         all_hierarchical_results = all_hierarchical_results[:10]
 
-        template_context = {
+        hierarchical_results_for_count = all_hierarchical_results
+        template_context: dict[str, Any] = {
             "topic": request.topic,
             "timeframe": request.timeframe,
             "hierarchical_results": all_hierarchical_results,
@@ -110,6 +113,7 @@ async def continue_conversation(
 
         hierarchical_results = recent_context.results[:5]  # Limit to top 5 recent items
 
+        hierarchical_results_for_count = hierarchical_results
         template_context = {
             "topic": f"Recent Activity from ({request.timeframe})",
             "timeframe": request.timeframe,
@@ -128,9 +132,6 @@ async def continue_conversation(
         observation_count = 0
         relation_count = 0
         entity_count = 0
-
-        # Get the hierarchical results from the template context
-        hierarchical_results_for_count = template_context.get("hierarchical_results", [])
 
         # For topic-based search
         if request.topic:
@@ -159,29 +160,24 @@ async def continue_conversation(
                             elif related.type == "entity":  # pragma: no cover
                                 entity_count += 1  # pragma: no cover
 
-        # Build metadata
-        metadata = {
-            "query": request.topic,
-            "timeframe": request.timeframe,
-            "search_count": len(search_results)
-            if request.topic
-            else 0,  # Original search results count
-            "context_count": len(hierarchical_results_for_count),
-            "observation_count": observation_count,
-            "relation_count": relation_count,
-            "total_items": (
+        prompt_metadata = PromptMetadata(
+            query=request.topic,
+            timeframe=request.timeframe,
+            search_count=len(search_results) if request.topic else 0,
+            context_count=len(hierarchical_results_for_count),
+            observation_count=observation_count,
+            relation_count=relation_count,
+            total_items=(
                 len(hierarchical_results_for_count)
                 + observation_count
                 + relation_count
                 + entity_count
             ),
-            "search_limit": request.search_items_limit,
-            "context_depth": request.depth,
-            "related_limit": request.related_items_limit,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        prompt_metadata = PromptMetadata(**metadata)
+            search_limit=request.search_items_limit,
+            context_depth=request.depth,
+            related_limit=request.related_items_limit,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
 
         return PromptResponse(
             prompt=rendered_prompt, context=template_context, metadata=prompt_metadata
@@ -229,7 +225,7 @@ async def search_prompt(
     results = await search_service.search(query, limit=limit, offset=offset)
     search_results = await to_search_results(entity_service, results)
 
-    template_context = {
+    template_context: dict[str, Any] = {
         "query": request.query,
         "timeframe": request.timeframe,
         "results": search_results,
@@ -241,22 +237,19 @@ async def search_prompt(
         # Render template
         rendered_prompt = await template_loader.render("prompts/search.hbs", template_context)
 
-        # Build metadata
-        metadata = {
-            "query": request.query,
-            "timeframe": request.timeframe,
-            "search_count": len(search_results),
-            "context_count": len(search_results),
-            "observation_count": 0,  # Search results don't include observations
-            "relation_count": 0,  # Search results don't include relations
-            "total_items": len(search_results),
-            "search_limit": limit,
-            "context_depth": 0,  # No context depth for basic search
-            "related_limit": 0,  # No related items for basic search
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        prompt_metadata = PromptMetadata(**metadata)
+        prompt_metadata = PromptMetadata(
+            query=request.query,
+            timeframe=request.timeframe,
+            search_count=len(search_results),
+            context_count=len(search_results),
+            observation_count=0,
+            relation_count=0,
+            total_items=len(search_results),
+            search_limit=limit,
+            context_depth=0,
+            related_limit=0,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
 
         return PromptResponse(
             prompt=rendered_prompt, context=template_context, metadata=prompt_metadata

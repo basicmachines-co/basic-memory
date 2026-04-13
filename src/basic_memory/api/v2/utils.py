@@ -1,8 +1,6 @@
-from typing import Optional, List
+from typing import Any, Protocol, Optional, List, Sequence
 
 from basic_memory import telemetry
-from basic_memory.models import Entity as EntityModel
-from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import (
     EntitySummary,
@@ -13,19 +11,38 @@ from basic_memory.schemas.memory import (
     ContextResult,
 )
 from basic_memory.schemas.search import SearchItemType, SearchResult
-from basic_memory.services import EntityService
 from basic_memory.services.context_service import (
     ContextResultRow,
     ContextResult as ServiceContextResult,
 )
 
 
+class EntityBatchLookup(Protocol):
+    async def find_by_ids(self, ids: List[int]) -> Sequence[Any]: ...
+
+
+class EntityServiceBatchLookup(Protocol):
+    async def get_entities_by_id(self, ids: List[int]) -> Sequence[Any]: ...
+
+
+def _required_str(value: str | None, field_name: str) -> str:
+    """Return a required search field or fail before producing invalid response data."""
+    if value is None:
+        raise ValueError(f"Search result is missing required field: {field_name}")
+    return value
+
+
+def _search_item_type(value: str | SearchItemType) -> SearchItemType:
+    """Normalize repository row type strings into the public search enum."""
+    return value if isinstance(value, SearchItemType) else SearchItemType(value)
+
+
 async def to_graph_context(
     context_result: ServiceContextResult,
-    entity_repository: EntityRepository,
+    entity_repository: EntityBatchLookup,
     page: Optional[int] = None,
     page_size: Optional[int] = None,
-):
+) -> GraphContext:
     with telemetry.scope(
         "memory.hydrate_context",
         domain="memory",
@@ -44,17 +61,18 @@ async def to_graph_context(
                 + context_item.observations
                 + context_item.related_results
             ):
-                if item.type == SearchItemType.ENTITY:
+                item_type = _search_item_type(item.type)
+                if item_type == SearchItemType.ENTITY:
                     # Entity's own ID for its external_id
                     entity_ids_needed.add(item.id)
-                elif item.type == SearchItemType.OBSERVATION:
+                elif item_type == SearchItemType.OBSERVATION:
                     # Parent entity ID for entity_external_id
-                    if item.entity_id:  # pyright: ignore
-                        entity_ids_needed.add(item.entity_id)  # pyright: ignore
-                elif item.type == SearchItemType.RELATION:
+                    if item.entity_id:
+                        entity_ids_needed.add(item.entity_id)
+                elif item_type == SearchItemType.RELATION:
                     # Source and target entity IDs for external_ids
-                    if item.from_id:  # pyright: ignore
-                        entity_ids_needed.add(item.from_id)  # pyright: ignore
+                    if item.from_id:
+                        entity_ids_needed.add(item.from_id)
                     if item.to_id:
                         entity_ids_needed.add(item.to_id)
 
@@ -75,57 +93,60 @@ async def to_graph_context(
                 entity_external_id_lookup[e.id] = e.external_id
 
         # Helper function to convert items to summaries
-        def to_summary(item: SearchIndexRow | ContextResultRow):
-            match item.type:
+        def to_summary(
+            item: SearchIndexRow | ContextResultRow,
+        ) -> EntitySummary | ObservationSummary | RelationSummary:
+            item_type = _search_item_type(item.type)
+            match item_type:
                 case SearchItemType.ENTITY:
                     return EntitySummary(
                         external_id=entity_external_id_lookup.get(item.id, ""),
                         entity_id=item.id,
-                        title=item.title,  # pyright: ignore
+                        title=_required_str(item.title, "title"),
                         permalink=item.permalink,
                         content=item.content,
-                        file_path=item.file_path,
+                        file_path=_required_str(item.file_path, "file_path"),
                         created_at=item.created_at,
                     )
                 case SearchItemType.OBSERVATION:
                     entity_ext_id = None
-                    if item.entity_id:  # pyright: ignore
-                        entity_ext_id = entity_external_id_lookup.get(item.entity_id)  # pyright: ignore
+                    entity_title = None
+                    if item.entity_id:
+                        entity_ext_id = entity_external_id_lookup.get(item.entity_id)
+                        entity_title = entity_title_lookup.get(item.entity_id)
                     return ObservationSummary(
                         observation_id=item.id,
-                        entity_id=item.entity_id,  # pyright: ignore
+                        entity_id=item.entity_id,
                         entity_external_id=entity_ext_id,
-                        title=entity_title_lookup.get(item.entity_id),  # pyright: ignore
-                        file_path=item.file_path,
-                        category=item.category,  # pyright: ignore
-                        content=item.content,  # pyright: ignore
-                        permalink=item.permalink,  # pyright: ignore
+                        title=entity_title,
+                        file_path=_required_str(item.file_path, "file_path"),
+                        category=_required_str(item.category, "category"),
+                        content=_required_str(item.content, "content"),
+                        permalink=_required_str(item.permalink, "permalink"),
                         created_at=item.created_at,
                     )
                 case SearchItemType.RELATION:
-                    from_title = entity_title_lookup.get(item.from_id) if item.from_id else None  # pyright: ignore
+                    from_title = entity_title_lookup.get(item.from_id) if item.from_id else None
                     to_title = entity_title_lookup.get(item.to_id) if item.to_id else None
                     from_ext_id = (
                         entity_external_id_lookup.get(item.from_id) if item.from_id else None
-                    )  # pyright: ignore
+                    )
                     to_ext_id = entity_external_id_lookup.get(item.to_id) if item.to_id else None
                     return RelationSummary(
                         relation_id=item.id,
-                        entity_id=item.entity_id,  # pyright: ignore
-                        title=item.title,  # pyright: ignore
-                        file_path=item.file_path,
-                        permalink=item.permalink,  # pyright: ignore
-                        relation_type=item.relation_type,  # pyright: ignore
+                        entity_id=item.entity_id,
+                        title=_required_str(item.title, "title"),
+                        file_path=_required_str(item.file_path, "file_path"),
+                        permalink=_required_str(item.permalink, "permalink"),
+                        relation_type=_required_str(item.relation_type, "relation_type"),
                         from_entity=from_title,
-                        from_entity_id=item.from_id,  # pyright: ignore
+                        from_entity_id=item.from_id,
                         from_entity_external_id=from_ext_id,
                         to_entity=to_title,
                         to_entity_id=item.to_id,
                         to_entity_external_id=to_ext_id,
                         created_at=item.created_at,
                     )
-                case _:  # pragma: no cover
-                    raise ValueError(f"Unexpected type: {item.type}")
 
         with telemetry.scope(
             "memory.hydrate_context.shape_results",
@@ -137,12 +158,16 @@ async def to_graph_context(
             hierarchical_results = []
             for context_item in context_result.results:
                 primary_result = to_summary(context_item.primary_result)
-                observations = [to_summary(obs) for obs in context_item.observations]
+                observations = [
+                    summary
+                    for summary in (to_summary(obs) for obs in context_item.observations)
+                    if isinstance(summary, ObservationSummary)
+                ]
                 related = [to_summary(rel) for rel in context_item.related_results]
                 hierarchical_results.append(
                     ContextResult(
                         primary_result=primary_result,
-                        observations=observations,  # pyright: ignore[reportArgumentType]
+                        observations=observations,
                         related_results=related,
                     )
                 )
@@ -170,7 +195,9 @@ async def to_graph_context(
         )
 
 
-async def to_search_results(entity_service: EntityService, results: List[SearchIndexRow]):
+async def to_search_results(
+    entity_service: EntityServiceBatchLookup, results: List[SearchIndexRow]
+) -> list[SearchResult]:
     with telemetry.scope(
         "search.hydrate_results",
         domain="search",
@@ -187,7 +214,7 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                     all_entity_ids.add(eid)
 
         # Single batch fetch for all entities
-        entities_by_id: dict[int, EntityModel] = {}
+        entities_by_id: dict[int, Any] = {}
         with telemetry.scope(
             "search.hydrate_results.fetch_entities",
             domain="search",
@@ -222,20 +249,20 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                     entity_id = result.entity_id
 
                 # Look up entities by their specific IDs
-                parent_entity = entities_by_id.get(result.entity_id) if result.entity_id else None  # pyright: ignore
-                from_entity = entities_by_id.get(result.from_id) if result.from_id else None  # pyright: ignore
+                parent_entity = entities_by_id.get(result.entity_id) if result.entity_id else None
+                from_entity = entities_by_id.get(result.from_id) if result.from_id else None
                 to_entity = entities_by_id.get(result.to_id) if result.to_id else None
 
                 search_results.append(
                     SearchResult(
-                        title=result.title,  # pyright: ignore
-                        type=result.type,  # pyright: ignore
+                        title=_required_str(result.title, "title"),
+                        type=_search_item_type(result.type),
                         permalink=result.permalink,
-                        score=result.score,  # pyright: ignore
+                        score=result.score if result.score is not None else 0.0,
                         entity=parent_entity.permalink if parent_entity else None,
                         content=result.content,
                         matched_chunk=result.matched_chunk_text,
-                        file_path=result.file_path,
+                        file_path=_required_str(result.file_path, "file_path"),
                         metadata=result.metadata,
                         entity_id=entity_id,
                         observation_id=observation_id,

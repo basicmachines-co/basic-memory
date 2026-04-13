@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-import sqlalchemy
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
 from basic_memory.models import Entity, Observation, Project
@@ -59,7 +59,7 @@ async def test_create_observation_entity_does_not_exist(
         "content": "Test content",
         "context": "test-context",
     }
-    with pytest.raises(sqlalchemy.exc.IntegrityError):
+    with pytest.raises(IntegrityError):
         await observation_repository.create(observation_data)
 
 

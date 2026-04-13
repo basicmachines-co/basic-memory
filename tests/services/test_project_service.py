@@ -233,9 +233,10 @@ async def test_set_default_project_async(project_service: ProjectService, test_p
             assert project.is_default is True
 
             # Make sure old default is no longer default
-            old_default_project = await project_service.repository.get_by_name(original_default)
-            if old_default_project:
-                assert old_default_project.is_default is not True
+            if original_default:
+                old_default_project = await project_service.repository.get_by_name(original_default)
+                if old_default_project:
+                    assert old_default_project.is_default is not True
 
         finally:
             # Restore original default (only if it exists in database)
@@ -327,8 +328,10 @@ async def test_add_project_with_set_default_true(project_service: ProjectService
 
         try:
             # Get original default project from database
-            original_default_project = await project_service.repository.get_by_name(
-                original_default
+            original_default_project = (
+                await project_service.repository.get_by_name(original_default)
+                if original_default
+                else None
             )
 
             # Add project with set_default=True
@@ -345,7 +348,9 @@ async def test_add_project_with_set_default_true(project_service: ProjectService
 
             # Verify original default is no longer default in database
             if original_default_project:
+                assert original_default is not None
                 refreshed_original = await project_service.repository.get_by_name(original_default)
+                assert refreshed_original is not None
                 assert refreshed_original.is_default is not True
 
             # Verify only one project has is_default=True
@@ -394,8 +399,10 @@ async def test_add_project_with_set_default_false(project_service: ProjectServic
             assert new_project.is_default is not True
 
             # Verify original default is still default
-            original_default_project = await project_service.repository.get_by_name(
-                original_default
+            original_default_project = (
+                await project_service.repository.get_by_name(original_default)
+                if original_default
+                else None
             )
             if original_default_project:
                 assert original_default_project.is_default is True

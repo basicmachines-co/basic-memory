@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
+from typing import Any, cast
 
 from basic_memory.mcp import tools
 
@@ -134,7 +136,7 @@ TOOL_FUNCTIONS: dict[str, object] = {
 
 def _signature_params(tool_obj: object) -> list[str]:
     params = []
-    for param in inspect.signature(tool_obj).parameters.values():
+    for param in inspect.signature(cast(Callable[..., Any], tool_obj)).parameters.values():
         if param.name == "context":
             continue
         params.append(param.name)

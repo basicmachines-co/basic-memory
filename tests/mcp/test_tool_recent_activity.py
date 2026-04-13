@@ -1,6 +1,7 @@
 """Tests for discussion context MCP tool."""
 
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 import pytest
 
@@ -235,7 +236,7 @@ async def test_recent_activity_get_project_activity_timezone_normalization(monke
         path = "/tmp/p"
 
     proj_activity = await recent_activity_module._get_project_activity(
-        client=None, project_info=P(), params={}, depth=1
+        client=None, project_info=cast(Any, P()), params={}, depth=1
     )
     assert proj_activity.item_count == 2
     assert "folder" in proj_activity.active_folders

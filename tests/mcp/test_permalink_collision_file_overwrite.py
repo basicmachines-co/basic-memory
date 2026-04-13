@@ -172,6 +172,7 @@ async def test_notes_with_similar_titles_maintain_separate_files(app, test_proje
         )
 
         permalink = None
+        assert isinstance(result, str)
         # Extract permalink from result
         for line in result.split("\n"):
             if line.startswith("permalink:"):
@@ -180,6 +181,7 @@ async def test_notes_with_similar_titles_maintain_separate_files(app, test_proje
                 break
 
         # Verify each note can be read back with its own content
+        assert permalink is not None
         content = await read_note(permalink, project=test_project.name)
         assert f"Unique content for {title}" in content, (
             f"Note with title '{title}' should maintain its unique content"

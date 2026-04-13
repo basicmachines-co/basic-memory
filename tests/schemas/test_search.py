@@ -47,7 +47,10 @@ def test_search_retrieval_mode_defaults_to_fts():
     query = SearchQuery(text="search implementation")
     assert query.retrieval_mode == SearchRetrievalMode.FTS
 
-    vector_query = SearchQuery(text="search implementation", retrieval_mode="vector")
+    vector_query = SearchQuery(
+        text="search implementation",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+    )
     assert vector_query.retrieval_mode == SearchRetrievalMode.VECTOR
 
 

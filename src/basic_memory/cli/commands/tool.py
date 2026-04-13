@@ -345,7 +345,7 @@ def recent_activity(
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_recent_activity(
-                    type=type,  # pyright: ignore[reportArgumentType]
+                    type=type or "",
                     depth=depth if depth is not None else 1,
                     timeframe=timeframe if timeframe is not None else "7d",
                     page=page,

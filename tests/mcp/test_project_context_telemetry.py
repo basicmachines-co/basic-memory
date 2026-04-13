@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from contextlib import contextmanager
+from typing import Any, cast
 
 import pytest
 
@@ -60,7 +61,7 @@ async def test_resolve_workspace_parameter_emits_routing_span(monkeypatch) -> No
     monkeypatch.setattr(project_context.telemetry, "span", fake_span)
     monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
 
-    resolved = await project_context.resolve_workspace_parameter(context=context)
+    resolved = await project_context.resolve_workspace_parameter(context=cast(Any, context))
 
     assert resolved.tenant_id == workspace.tenant_id
     assert spans == [

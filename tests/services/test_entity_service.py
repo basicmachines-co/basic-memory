@@ -3,6 +3,7 @@
 import uuid
 from pathlib import Path
 from textwrap import dedent
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -19,6 +20,12 @@ from basic_memory.services.entity_service import EntityService
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import generate_permalink
+
+
+def _permalink(entity: EntityModel | EntitySchema) -> str:
+    permalink = entity.permalink
+    assert permalink is not None
+    return permalink
 
 
 class _DeleteTestEmbeddingProvider:
@@ -138,7 +145,7 @@ async def test_create_entity(
     assert len(entity.relations) == 0
 
     # Verify we can retrieve it using permalink
-    retrieved = await entity_service.get_by_permalink(entity.permalink)
+    retrieved = await entity_service.get_by_permalink(_permalink(entity))
     assert retrieved.title == "Test Entity"
     assert retrieved.note_type == "test"
     assert retrieved.created_at is not None
@@ -249,13 +256,13 @@ async def test_get_by_permalink(entity_service: EntityService):
     entity2 = await entity_service.create_entity(entity2_data)
 
     # Find by type1 and name
-    found = await entity_service.get_by_permalink(entity1_data.permalink)
+    found = await entity_service.get_by_permalink(_permalink(entity1_data))
     assert found is not None
     assert found.id == entity1.id
     assert found.note_type == entity1.note_type
 
     # Find by type2 and name
-    found = await entity_service.get_by_permalink(entity2_data.permalink)
+    found = await entity_service.get_by_permalink(_permalink(entity2_data))
     assert found is not None
     assert found.id == entity2.id
     assert found.note_type == entity2.note_type
@@ -276,7 +283,7 @@ async def test_get_entity_success(entity_service: EntityService):
     await entity_service.create_entity(entity_data)
 
     # Get by permalink
-    retrieved = await entity_service.get_by_permalink(entity_data.permalink)
+    retrieved = await entity_service.get_by_permalink(_permalink(entity_data))
 
     assert isinstance(retrieved, EntityModel)
     assert retrieved.title == "TestEntity"
@@ -294,12 +301,12 @@ async def test_delete_entity_success(entity_service: EntityService):
     await entity_service.create_entity(entity_data)
 
     # Act using permalink
-    result = await entity_service.delete_entity(entity_data.permalink)
+    result = await entity_service.delete_entity(_permalink(entity_data))
 
     # Assert
     assert result is True
     with pytest.raises(EntityNotFoundError):
-        await entity_service.get_by_permalink(entity_data.permalink)
+        await entity_service.get_by_permalink(_permalink(entity_data))
 
 
 @pytest.mark.asyncio
@@ -318,7 +325,7 @@ async def test_delete_entity_by_id(entity_service: EntityService):
     # Assert
     assert result is True
     with pytest.raises(EntityNotFoundError):
-        await entity_service.get_by_permalink(entity_data.permalink)
+        await entity_service.get_by_permalink(_permalink(entity_data))
 
 
 @pytest.mark.asyncio
@@ -332,7 +339,7 @@ async def test_delete_entity_removes_search_and_vector_state(
     if app_config.database_backend == DatabaseBackend.SQLITE:
         pytest.importorskip("sqlite_vec")
 
-    repository = search_service.repository
+    repository = cast(Any, search_service.repository)
     repository._semantic_enabled = True
     repository._embedding_provider = _DeleteTestEmbeddingProvider()
     repository._vector_dimensions = repository._embedding_provider.dimensions
@@ -403,7 +410,7 @@ async def test_create_entity_with_special_chars(entity_service: EntityService):
     assert entity.title == name
 
     # Verify after retrieval using permalink
-    await entity_service.get_by_permalink(entity_data.permalink)
+    await entity_service.get_by_permalink(_permalink(entity_data))
 
 
 @pytest.mark.asyncio
@@ -424,7 +431,7 @@ async def test_get_entities_by_permalinks(entity_service: EntityService):
     await entity_service.create_entity(entity2_data)
 
     # Open nodes by path IDs
-    permalinks = [entity1_data.permalink, entity2_data.permalink]
+    permalinks = [_permalink(entity1_data), _permalink(entity2_data)]
     found = await entity_service.get_entities_by_permalinks(permalinks)
 
     assert len(found) == 2
@@ -451,7 +458,7 @@ async def test_get_entities_some_not_found(entity_service: EntityService):
     await entity_service.create_entity(entity_data)
 
     # Try to open two nodes, one exists, one doesn't
-    permalinks = [entity_data.permalink, "type1/non_existent"]
+    permalinks = [_permalink(entity_data), "type1/non_existent"]
     found = await entity_service.get_entities_by_permalinks(permalinks)
 
     assert len(found) == 1
@@ -482,6 +489,7 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
     )
 
     entity = await entity_service.create_entity(schema)
+    assert entity.entity_metadata is not None
     assert entity.entity_metadata.get("status") == "draft"
 
     # Update content with a relation
@@ -599,12 +607,14 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
         )
     )
 
-    entity.content = "Updated content"
+    entity_for_update = cast(Any, entity)
+    entity_for_update.content = "Updated content"
 
     # Update name
-    updated, created = await entity_service.create_or_update_entity(entity)
+    updated, created = await entity_service.create_or_update_entity(entity_for_update)
 
     assert updated.title == "test"
+    assert updated.entity_metadata is not None
     assert updated.entity_metadata["status"] == "final"
     assert created is False
 
@@ -847,7 +857,7 @@ async def test_edit_entity_append(entity_service: EntityService, file_service: F
 
     # Edit entity with append operation
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink, operation="append", content="Appended content"
+        identifier=_permalink(entity), operation="append", content="Appended content"
     )
 
     # Verify content was appended
@@ -873,7 +883,7 @@ async def test_edit_entity_prepend(entity_service: EntityService, file_service: 
 
     # Edit entity with prepend operation
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink, operation="prepend", content="Prepended content"
+        identifier=_permalink(entity), operation="prepend", content="Prepended content"
     )
 
     # Verify content was prepended
@@ -899,7 +909,7 @@ async def test_edit_entity_find_replace(entity_service: EntityService, file_serv
 
     # Edit entity with find_replace operation
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="find_replace",
         content="new content",
         find_text="old content",
@@ -939,7 +949,7 @@ async def test_edit_entity_replace_section(
 
     # Edit entity with replace_section operation
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="replace_section",
         content="New section 1 content",
         section="## Section 1",
@@ -970,7 +980,7 @@ async def test_edit_entity_replace_section_create_new(
 
     # Edit entity with replace_section operation for non-existent section
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="replace_section",
         content="New section content",
         section="## New Section",
@@ -1007,7 +1017,7 @@ async def test_edit_entity_invalid_operation(entity_service: EntityService):
 
     with pytest.raises(ValueError, match="Unsupported operation"):
         await entity_service.edit_entity(
-            identifier=entity.permalink, operation="invalid_operation", content="content"
+            identifier=_permalink(entity), operation="invalid_operation", content="content"
         )
 
 
@@ -1026,7 +1036,7 @@ async def test_edit_entity_find_replace_missing_find_text(entity_service: Entity
 
     with pytest.raises(ValueError, match="find_text is required"):
         await entity_service.edit_entity(
-            identifier=entity.permalink, operation="find_replace", content="new content"
+            identifier=_permalink(entity), operation="find_replace", content="new content"
         )
 
 
@@ -1045,7 +1055,7 @@ async def test_edit_entity_replace_section_missing_section(entity_service: Entit
 
     with pytest.raises(ValueError, match="section is required"):
         await entity_service.edit_entity(
-            identifier=entity.permalink, operation="replace_section", content="new content"
+            identifier=_permalink(entity), operation="replace_section", content="new content"
         )
 
 
@@ -1079,7 +1089,7 @@ async def test_edit_entity_with_observations_and_relations(
 
     # Edit entity by appending content with new observations/relations
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="append",
         content="\n- [category] New observation\n- relates to [[New Entity]]",
     )
@@ -1185,7 +1195,7 @@ async def test_edit_entity_find_replace_not_found(entity_service: EntityService)
     # Try to replace text that doesn't exist
     with pytest.raises(ValueError, match="Text to replace not found: 'nonexistent'"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="find_replace",
             content="new content",
             find_text="nonexistent",
@@ -1210,7 +1220,7 @@ async def test_edit_entity_find_replace_multiple_occurrences_expected_one(
     # Try to replace with expected count of 1 when there are 2
     with pytest.raises(ValueError, match="Expected 1 occurrences of 'banana', but found 2"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="find_replace",
             content="replacement",
             find_text="banana",
@@ -1235,7 +1245,7 @@ async def test_edit_entity_find_replace_multiple_occurrences_success(
 
     # Replace with correct expected count
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="find_replace",
         content="apple",
         find_text="banana",
@@ -1264,7 +1274,7 @@ async def test_edit_entity_find_replace_empty_find_text(entity_service: EntitySe
     # Try with empty find_text
     with pytest.raises(ValueError, match="find_text cannot be empty or whitespace only"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="find_replace",
             content="new content",
             find_text="   ",  # whitespace only
@@ -1301,7 +1311,10 @@ async def test_edit_entity_find_replace_multiline(
     new_text = "This is new content\nthat replaces the old paragraph."
 
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink, operation="find_replace", content=new_text, find_text=find_text
+        identifier=_permalink(entity),
+        operation="find_replace",
+        content=new_text,
+        find_text=find_text,
     )
 
     # Verify replacement worked
@@ -1341,7 +1354,7 @@ async def test_edit_entity_replace_section_multiple_sections_error(entity_servic
     # Try to replace section when multiple exist
     with pytest.raises(ValueError, match="Multiple sections found with header '## Section 1'"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="replace_section",
             content="New content",
             section="## Section 1",
@@ -1364,7 +1377,7 @@ async def test_edit_entity_replace_section_empty_section(entity_service: EntityS
     # Try with empty section
     with pytest.raises(ValueError, match="section cannot be empty or whitespace only"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="replace_section",
             content="new content",
             section="   ",  # whitespace only
@@ -1398,7 +1411,7 @@ async def test_edit_entity_replace_section_header_variations(
 
     # Test replacing with different header format (no ##)
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="replace_section",
         content="New section content",
         section="Section Name",  # No ## prefix
@@ -1438,7 +1451,7 @@ async def test_edit_entity_replace_section_at_end_of_document(
 
     # Replace the last section
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="replace_section",
         content="New last section content",
         section="## Last Section",
@@ -1485,7 +1498,7 @@ async def test_edit_entity_replace_section_with_subsections(
 
     # Replace parent section (should only replace content until first subsection)
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="replace_section",
         content="New parent content",
         section="## Parent Section",
@@ -1530,7 +1543,7 @@ async def test_edit_entity_replace_section_strips_duplicate_header(
     # Replace section with content that includes the duplicate header
     # (This is what LLMs sometimes do)
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="replace_section",
         content="## Testing\nNew content for testing section",
         section="## Testing",
@@ -1577,7 +1590,7 @@ async def test_edit_entity_insert_before_section(
     )
 
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="insert_before_section",
         content="Inserted before section 2",
         section="## Section 2",
@@ -1617,7 +1630,7 @@ async def test_edit_entity_insert_after_section(
     )
 
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="insert_after_section",
         content="Inserted after section 1 heading",
         section="## Section 1",
@@ -1648,7 +1661,7 @@ async def test_edit_entity_insert_before_section_not_found(entity_service: Entit
 
     with pytest.raises(ValueError, match="Section '## Missing' not found"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="insert_before_section",
             content="new content",
             section="## Missing",
@@ -1669,7 +1682,7 @@ async def test_edit_entity_insert_after_section_not_found(entity_service: Entity
 
     with pytest.raises(ValueError, match="Section '## Missing' not found"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="insert_after_section",
             content="new content",
             section="## Missing",
@@ -1692,7 +1705,7 @@ async def test_edit_entity_insert_before_section_multiple_sections_error(
 
     with pytest.raises(ValueError, match="Multiple sections found"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="insert_before_section",
             content="new content",
             section="## Dup",
@@ -1715,7 +1728,7 @@ async def test_edit_entity_insert_before_section_missing_section_param(
 
     with pytest.raises(ValueError, match="section is required"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="insert_before_section",
             content="new content",
         )
@@ -1735,7 +1748,7 @@ async def test_edit_entity_insert_before_section_empty_section(entity_service: E
 
     with pytest.raises(ValueError, match="section cannot be empty"):
         await entity_service.edit_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             operation="insert_before_section",
             content="new content",
             section="   ",
@@ -1764,7 +1777,7 @@ async def test_edit_entity_insert_after_section_at_end_of_document(
     )
 
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="insert_after_section",
         content="Inserted after the last section heading",
         section="## Only Section",
@@ -1800,7 +1813,7 @@ async def test_edit_entity_insert_after_section_preserves_paragraph_separation(
     )
 
     updated = await entity_service.edit_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         operation="insert_after_section",
         content="Inserted line",
         section="## Section",
@@ -1840,7 +1853,7 @@ async def test_move_entity_success(
     # Move entity
     assert entity.permalink == f"{generate_permalink(project_config.name)}/original/test-note"
     await entity_service.move_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         destination_path="moved/test-note.md",
         project_config=project_config,
         app_config=app_config,
@@ -1854,7 +1867,7 @@ async def test_move_entity_success(
     assert new_path.exists()
 
     # Verify database was updated
-    updated_entity = await entity_service.get_by_permalink(entity.permalink)
+    updated_entity = await entity_service.get_by_permalink(_permalink(entity))
     assert updated_entity.file_path == "moved/test-note.md"
 
     # Verify file content is preserved
@@ -1886,7 +1899,7 @@ async def test_move_entity_with_permalink_update(
 
     # Move entity
     await entity_service.move_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         destination_path="moved/test-note.md",
         project_config=project_config,
         app_config=app_config,
@@ -1900,7 +1913,7 @@ async def test_move_entity_with_permalink_update(
 
     # Verify frontmatter was updated with new permalink
     new_content, _ = await file_service.read_file("moved/test-note.md")
-    assert moved_entity.permalink in new_content
+    assert _permalink(moved_entity) in new_content
 
 
 @pytest.mark.asyncio
@@ -1924,7 +1937,7 @@ async def test_move_entity_creates_destination_directory(
 
     # Move to deeply nested path that doesn't exist
     await entity_service.move_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         destination_path="deeply/nested/folders/test-note.md",
         project_config=project_config,
         app_config=app_config,
@@ -1978,7 +1991,7 @@ async def test_move_entity_source_file_missing(
 
     with pytest.raises(ValueError, match="Source file not found:"):
         await entity_service.move_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             destination_path="new/path.md",
             project_config=project_config,
             app_config=app_config,
@@ -2016,7 +2029,7 @@ async def test_move_entity_destination_exists(
     # Try to move entity1 to entity2's location
     with pytest.raises(ValueError, match="Destination already exists:"):
         await entity_service.move_entity(
-            identifier=entity1.permalink,
+            identifier=_permalink(entity1),
             destination_path=entity2.file_path,
             project_config=project_config,
             app_config=app_config,
@@ -2044,7 +2057,7 @@ async def test_move_entity_invalid_destination_path(
     # Test absolute path
     with pytest.raises(ValueError, match="Invalid destination path:"):
         await entity_service.move_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             destination_path="/absolute/path.md",
             project_config=project_config,
             app_config=app_config,
@@ -2053,7 +2066,7 @@ async def test_move_entity_invalid_destination_path(
     # Test empty path
     with pytest.raises(ValueError, match="Invalid destination path:"):
         await entity_service.move_entity(
-            identifier=entity.permalink,
+            identifier=_permalink(entity),
             destination_path="",
             project_config=project_config,
             app_config=app_config,
@@ -2131,7 +2144,7 @@ async def test_move_entity_preserves_observations_and_relations(
 
     # Move entity
     await entity_service.move_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         destination_path="moved/test-note.md",
         project_config=project_config,
         app_config=app_config,
@@ -2139,6 +2152,7 @@ async def test_move_entity_preserves_observations_and_relations(
 
     # Get moved entity
     moved_entity = await entity_service.link_resolver.resolve_link("moved/test-note.md")
+    assert moved_entity is not None
 
     # Verify observations and relations are preserved
     assert len(moved_entity.observations) == 1
@@ -2158,6 +2172,7 @@ async def test_move_entity_rollback_on_database_failure(
     file_service: FileService,
     project_config: ProjectConfig,
     entity_repository: EntityRepository,
+    monkeypatch,
 ):
     """Test that filesystem changes are rolled back on database failures."""
     # Create test entity
@@ -2175,33 +2190,25 @@ async def test_move_entity_rollback_on_database_failure(
 
     app_config = BasicMemoryConfig(update_permalinks_on_move=False)
 
-    # Mock repository update to fail
-    original_update = entity_repository.update
-
     async def failing_update(*args, **kwargs):
         return None  # Simulate failure
 
-    entity_repository.update = failing_update
+    monkeypatch.setattr(entity_repository, "update", failing_update)
 
-    try:
-        with pytest.raises(ValueError, match="Move failed:"):
-            await entity_service.move_entity(
-                identifier=entity.permalink,
-                destination_path="moved/test-note.md",
-                project_config=project_config,
-                app_config=app_config,
-            )
+    with pytest.raises(ValueError, match="Move failed:"):
+        await entity_service.move_entity(
+            identifier=_permalink(entity),
+            destination_path="moved/test-note.md",
+            project_config=project_config,
+            app_config=app_config,
+        )
 
-        # Verify rollback - original file should still exist
-        assert await file_service.exists(original_path)
+    # Verify rollback - original file should still exist
+    assert await file_service.exists(original_path)
 
-        # Verify destination file was cleaned up
-        destination_path = project_config.home / "moved/test-note.md"
-        assert not destination_path.exists()
-
-    finally:
-        # Restore original update method
-        entity_repository.update = original_update
+    # Verify destination file was cleaned up
+    destination_path = project_config.home / "moved/test-note.md"
+    assert not destination_path.exists()
 
 
 @pytest.mark.asyncio
@@ -2238,7 +2245,7 @@ async def test_move_entity_with_complex_observations(
 
     # Move entity
     await entity_service.move_entity(
-        identifier=entity.permalink,
+        identifier=_permalink(entity),
         destination_path="moved/complex-note.md",
         project_config=project_config,
         app_config=app_config,
@@ -2246,6 +2253,7 @@ async def test_move_entity_with_complex_observations(
 
     # Verify moved entity maintains structure
     moved_entity = await entity_service.link_resolver.resolve_link("moved/complex-note.md")
+    assert moved_entity is not None
 
     # Check observations with tags and context
     design_obs = [obs for obs in moved_entity.observations if obs.category == "design"][0]
@@ -2612,7 +2620,7 @@ async def test_delete_entity_by_permalink_already_deleted(entity_service: Entity
     assert await entity_service.delete_entity(created.id) is True
 
     # Delete again by permalink - should return True (EntityNotFoundError caught)
-    assert await entity_service.delete_entity(entity_data.permalink) is True
+    assert await entity_service.delete_entity(_permalink(entity_data)) is True
 
 
 @pytest.mark.asyncio

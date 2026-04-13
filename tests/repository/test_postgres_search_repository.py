@@ -36,6 +36,9 @@ class StubEmbeddingProvider:
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._vectorize(text) for text in texts]
 
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
+
     @staticmethod
     def _vectorize(text: str) -> list[float]:
         normalized = text.lower()
@@ -714,6 +717,9 @@ class StubEmbeddingProvider8d:
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [[0.0] * 8 for _ in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
 
 
 @pytest.mark.asyncio

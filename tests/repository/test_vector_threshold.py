@@ -2,15 +2,20 @@
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Optional, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
     SMALL_NOTE_CONTENT_LIMIT,
     TOP_CHUNKS_PER_RESULT,
     SearchRepositoryBase,
 )
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 @dataclass
@@ -46,7 +51,21 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     def _prepare_search_term(self, term, is_prefix=True):
         return term  # pragma: no cover
 
-    async def search(self, **kwargs):
+    async def search(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[list[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[list[SearchItemType]] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[SearchIndexRow]:
         return []  # pragma: no cover
 
     async def _ensure_vector_tables(self):
@@ -90,13 +109,20 @@ def _make_vector_rows(scores: list[float]) -> list[dict]:
     return rows
 
 
+def _fake_embedding_provider(mock_embed: AsyncMock) -> EmbeddingProvider:
+    return cast(
+        EmbeddingProvider,
+        type("EP", (), {"embed_query": mock_embed, "dimensions": 384})(),
+    )
+
+
 @asynccontextmanager
 async def fake_scoped_session(session_maker):
     """Fake scoped_session that yields a mock session object."""
     yield AsyncMock()
 
 
-COMMON_SEARCH_KWARGS = dict(
+COMMON_SEARCH_KWARGS: dict[str, Any] = dict(
     search_text="test",
     permalink=None,
     permalink_match=None,
@@ -119,7 +145,7 @@ async def test_threshold_zero_returns_all():
     fake_rows = _make_vector_rows([0.9, 0.5, 0.3])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     with (
         patch(
@@ -150,7 +176,7 @@ async def test_threshold_filters_low_scores():
     fake_rows = _make_vector_rows([0.9, 0.5, 0.3])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     with (
         patch(
@@ -183,7 +209,7 @@ async def test_threshold_returns_empty_when_all_below():
     fake_rows = _make_vector_rows([0.5, 0.4, 0.3])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     mock_fetch = AsyncMock()
 
@@ -214,7 +240,7 @@ async def test_per_query_min_similarity_overrides_instance_default():
     fake_rows = _make_vector_rows([0.9, 0.5, 0.3])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     with (
         patch(
@@ -247,7 +273,7 @@ async def test_per_query_min_similarity_tightens_threshold():
     fake_rows = _make_vector_rows([0.9, 0.5, 0.3])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     with (
         patch(
@@ -280,7 +306,7 @@ async def test_matched_chunk_text_populated_on_vector_results():
     fake_rows = _make_vector_rows([0.9, 0.7])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     with (
         patch(
@@ -335,7 +361,7 @@ async def test_top_n_chunks_joined_in_matched_chunk_text():
     fake_rows = _make_multi_chunk_vector_rows(si_id=0, scores=chunk_scores)
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     # content_snippet exceeds SMALL_NOTE_CONTENT_LIMIT → top-N chunks path
     large_content = "x" * (SMALL_NOTE_CONTENT_LIMIT + 1)
@@ -358,6 +384,7 @@ async def test_top_n_chunks_joined_in_matched_chunk_text():
 
     assert len(results) == 1
     text = results[0].matched_chunk_text
+    assert text is not None
 
     # Top 5 chunks by similarity: 0.9, 0.85, 0.8, 0.75, 0.6 (0.4 and 0.3 excluded)
     parts = text.split("\n---\n")
@@ -378,7 +405,7 @@ async def test_small_note_returns_full_content_as_matched_chunk():
     fake_rows = _make_vector_rows([0.9])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     small_content = "This is a short note with all the important details."
     assert len(small_content) <= SMALL_NOTE_CONTENT_LIMIT
@@ -413,7 +440,7 @@ async def test_large_note_returns_chunks_not_full_content():
     fake_rows = _make_vector_rows([0.9])
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
-    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
 
     large_content = "x" * (SMALL_NOTE_CONTENT_LIMIT + 500)
 

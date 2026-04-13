@@ -28,6 +28,7 @@ def test_invalid_context():
     tokens = md.parse("- [test] Content (unclosed")
     token = next(t for t in tokens if t.type == "inline")
     obs = parse_observation(token)
+    assert obs is not None
     assert obs["content"] == "Content (unclosed"
     assert obs["context"] is None
 
@@ -35,6 +36,7 @@ def test_invalid_context():
     tokens = md.parse("- [test] Content (with) extra) parens)")
     token = next(t for t in tokens if t.type == "inline")
     obs = parse_observation(token)
+    assert obs is not None
     assert obs["content"] == "Content"
     assert obs["context"] == "with) extra) parens"
 
@@ -48,6 +50,7 @@ def test_complex_format():
     token = next(t for t in tokens if t.type == "inline")
 
     obs = parse_observation(token)
+    assert obs is not None
     assert obs["category"] == "complex test"
     assert set(obs["tags"]) == {"tag1", "tag2", "tag3"}
     assert obs["content"] == "This is #tag1#tag2 with #tag3 content"
@@ -55,6 +58,7 @@ def test_complex_format():
     # Pydantic model validation
     observation = Observation.model_validate(obs)
     assert observation.category == "complex test"
+    assert observation.tags is not None
     assert set(observation.tags) == {"tag1", "tag2", "tag3"}
     assert observation.content == "This is #tag1#tag2 with #tag3 content"
 
@@ -99,6 +103,7 @@ def test_unicode_content():
     tokens = md.parse("- [test] Emoji test 👍 #emoji #test (Testing emoji)")
     token = next(t for t in tokens if t.type == "inline")
     obs = parse_observation(token)
+    assert obs is not None
     assert "👍" in obs["content"]
     assert "emoji" in obs["tags"]
 
@@ -106,6 +111,7 @@ def test_unicode_content():
     tokens = md.parse("- [中文] Chinese text 测试 #language (Script test)")
     token = next(t for t in tokens if t.type == "inline")
     obs = parse_observation(token)
+    assert obs is not None
     assert obs["category"] == "中文"
     assert "测试" in obs["content"]
 
@@ -113,6 +119,7 @@ def test_unicode_content():
     tokens = md.parse("- [test] Mixed 中文 and 👍 #mixed")
     token = next(t for t in tokens if t.type == "inline")
     obs = parse_observation(token)
+    assert obs is not None
     assert "中文" in obs["content"]
     assert "👍" in obs["content"]
 

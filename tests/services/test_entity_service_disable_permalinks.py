@@ -204,13 +204,14 @@ async def test_move_entity_with_permalinks_disabled(
     # Create entity
     entity = await entity_service.create_entity(entity_data)
     original_permalink = entity.permalink
+    assert original_permalink is not None
 
     # Now disable permalinks
     app_config_disabled = BasicMemoryConfig(disable_permalinks=True, update_permalinks_on_move=True)
 
     # Move entity
     moved = await entity_service.move_entity(
-        identifier=entity.permalink,
+        identifier=original_permalink,
         destination_path="new_folder/test_entity.md",
         project_config=project_config,
         app_config=app_config_disabled,

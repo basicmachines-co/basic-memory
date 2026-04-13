@@ -43,6 +43,7 @@ class TestInlineSchema:
             "schema": {"field": "string"},
         }
         result = await resolve_schema(frontmatter, mock_search_fn)
+        assert result is not None
         assert result.entity == "CustomType"
 
     @pytest.mark.asyncio
@@ -51,6 +52,7 @@ class TestInlineSchema:
             "schema": {"field": "string"},
         }
         result = await resolve_schema(frontmatter, mock_search_fn)
+        assert result is not None
         assert result.entity == "unknown"
 
     @pytest.mark.asyncio
@@ -61,6 +63,7 @@ class TestInlineSchema:
             "settings": {"validation": "strict"},
         }
         result = await resolve_schema(frontmatter, mock_search_fn)
+        assert result is not None
         assert result.validation_mode == "strict"
 
 

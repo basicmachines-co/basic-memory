@@ -75,6 +75,7 @@ async def test_parse_file_with_completely_invalid_yaml(tmp_path):
     assert result.frontmatter.title == "broken_yaml"  # Default from filename
     assert result.frontmatter.type == "note"  # Default type
     # Content should include the whole file since frontmatter parsing failed
+    assert result.content is not None
     assert "# Content" in result.content
 
 
@@ -374,6 +375,7 @@ async def test_frontmatter_roundtrip_preserves_user_metadata(tmp_path):
     assert result.frontmatter.type == "litnote"  # NOT overwritten to "note"
     assert "citekey" in result.frontmatter.metadata
     assert result.frontmatter.metadata["citekey"] == "authorTitleYear2024"
+    assert result.content is not None
 
     # Simulate what write_frontmatter does
     post = frontmatter.Post(result.content, **result.frontmatter.metadata)

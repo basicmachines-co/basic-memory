@@ -1,7 +1,7 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Optional, Literal
+from typing import Optional, Literal, cast
 
 import yaml
 
@@ -235,13 +235,22 @@ async def read_note(
                         "frontmatter": None,
                     }
 
-                def _search_results(payload: object) -> list[dict]:
+                def _search_results(payload: object) -> list[dict[str, object]]:
                     if not isinstance(payload, dict):
                         return []
-                    results = payload.get("results")
-                    return results if isinstance(results, list) else []
+                    payload_dict = cast(dict[str, object], payload)
+                    results = payload_dict.get("results")
+                    if not isinstance(results, list):
+                        return []
+                    return [
+                        cast(dict[str, object], result)
+                        for result in results
+                        if isinstance(result, dict)
+                    ]
 
-                async def _search_candidates(identifier_text: str, *, title_only: bool) -> dict:
+                async def _search_candidates(
+                    identifier_text: str, *, title_only: bool
+                ) -> dict[str, object]:
                     # Trigger: direct entity resolution failed for the caller's identifier.
                     # Why: search_notes applies the same memory:// normalization and tool-level
                     #      query handling as the rest of MCP routing, which raw client calls skip.
@@ -257,16 +266,16 @@ async def read_note(
                         output_format="json",
                         context=context,
                     )
-                    return response if isinstance(response, dict) else {}
+                    return cast(dict[str, object], response) if isinstance(response, dict) else {}
 
-                def _result_title(item: dict) -> str:
+                def _result_title(item: dict[str, object]) -> str:
                     return str(item.get("title") or "")
 
-                def _result_permalink(item: dict) -> Optional[str]:
+                def _result_permalink(item: dict[str, object]) -> Optional[str]:
                     value = item.get("permalink")
                     return str(value) if value else None
 
-                def _result_file_path(item: dict) -> Optional[str]:
+                def _result_file_path(item: dict[str, object]) -> Optional[str]:
                     value = item.get("file_path")
                     return str(value) if value else None
 

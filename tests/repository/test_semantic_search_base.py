@@ -6,13 +6,16 @@ _search_hybrid entity_id fusion key, and SemanticSearchDisabledError in SQLite.
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
+from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
     MAX_VECTOR_CHUNK_CHARS,
     SearchRepositoryBase,
@@ -71,7 +74,21 @@ class _ConcreteRepo(SearchRepositoryBase):
     def _prepare_search_term(self, term, is_prefix=True):
         return term
 
-    async def search(self, **kwargs):
+    async def search(
+        self,
+        search_text: str | None = None,
+        permalink: str | None = None,
+        permalink_match: str | None = None,
+        title: str | None = None,
+        note_types: list[str] | None = None,
+        after_date: datetime | None = None,
+        search_item_types: list[SearchItemType] | None = None,
+        metadata_filters: dict[str, Any] | None = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: float | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[SearchIndexRow]:
         return []
 
     async def _ensure_vector_tables(self):
@@ -637,9 +654,13 @@ async def test_prepare_window_uses_entity_local_timing_after_shared_reads(monkey
     )
 
     prepared = await repo._prepare_entity_vector_jobs_window([1, 2])
+    prepared_results = [
+        result for result in prepared if isinstance(result, _PreparedEntityVectorSync)
+    ]
 
-    assert [result.sync_start for result in prepared] == [10.0, 11.0]
-    assert [result.prepare_seconds for result in prepared] == [2.0, 2.0]
+    assert len(prepared_results) == 2
+    assert [result.sync_start for result in prepared_results] == [10.0, 11.0]
+    assert [result.prepare_seconds for result in prepared_results] == [2.0, 2.0]
 
 
 @pytest.mark.asyncio

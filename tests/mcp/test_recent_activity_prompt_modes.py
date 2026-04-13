@@ -5,6 +5,7 @@ These tests verify the prompt correctly uses the tool output and adds guidance.
 """
 
 import pytest
+from typing import Any, cast
 
 from basic_memory.mcp.prompts.recent_activity import recent_activity_prompt
 
@@ -102,7 +103,7 @@ async def test_recent_activity_prompt_defaults_timeframe(monkeypatch):
 
     monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity", fake_fn)
 
-    await recent_activity_prompt(timeframe=None, project=None)  # pyright: ignore[reportGeneralTypeIssues]
+    await recent_activity_prompt(timeframe=cast(Any, None), project=None)
 
     assert captured_kwargs["timeframe"] == "7d"
     assert captured_kwargs["project"] is None

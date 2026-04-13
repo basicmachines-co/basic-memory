@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, List, Tuple
 
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -121,6 +121,11 @@ class ProjectEntry(BaseModel):
 
 class BasicMemoryConfig(BaseSettings):
     """Pydantic model for Basic Memory global configuration."""
+
+    if TYPE_CHECKING:
+        # Pydantic accepts raw constructor data and validates/coerces it at runtime.
+        # Model attributes remain strongly typed after initialization.
+        def __init__(self, **data: Any) -> None: ...
 
     env: Environment = Field(default="dev", description="Environment name")
 

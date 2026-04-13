@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime, timedelta, timezone
 from io import StringIO
+from typing import Any, cast
 
 from rich.console import Console
 
@@ -34,6 +35,10 @@ class StubConfigManager:
     def save_config(self, config: BasicMemoryConfig) -> None:
         self._config = config
         self.save_calls += 1
+
+
+def _config_manager(manager: StubConfigManager) -> Any:
+    return cast(Any, manager)
 
 
 def _capture_console() -> tuple[Console, StringIO]:
@@ -91,7 +96,7 @@ def test_interval_gate_skips_check_when_recent(tmp_path):
     config.update_check_interval = 3600
     manager = StubConfigManager(config)
 
-    result = run_auto_update(config_manager=manager)
+    result = run_auto_update(config_manager=_config_manager(manager))
 
     assert result.status == AutoUpdateStatus.SKIPPED
     assert result.checked is False
@@ -103,7 +108,7 @@ def test_auto_update_disabled_skips_periodic(tmp_path):
     config.auto_update = False
     manager = StubConfigManager(config)
 
-    result = run_auto_update(config_manager=manager)
+    result = run_auto_update(config_manager=_config_manager(manager))
 
     assert result.status == AutoUpdateStatus.SKIPPED
     assert result.checked is False
@@ -121,7 +126,7 @@ def test_force_bypasses_auto_update_disabled(monkeypatch, tmp_path):
 
     result = run_auto_update(
         force=True,
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
     )
 
@@ -171,7 +176,7 @@ def test_homebrew_outdated_triggers_upgrade(monkeypatch, tmp_path):
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run_subprocess)
 
     result = run_auto_update(
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/opt/homebrew/Cellar/basic-memory/0.18.0/bin/python",
     )
 
@@ -196,7 +201,7 @@ def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run_subprocess)
 
     result = run_auto_update(
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
     )
 
@@ -215,7 +220,7 @@ def test_unknown_manager_returns_manual_update_guidance(monkeypatch, tmp_path):
 
     result = run_auto_update(
         force=True,
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/usr/local/bin/python3",
     )
 
@@ -229,7 +234,7 @@ def test_uvx_runtime_is_skipped(monkeypatch, tmp_path):
     manager = StubConfigManager(config)
 
     result = run_auto_update(
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/Users/me/.cache/uv/archive-v0/abc123/bin/python",
     )
 
@@ -256,7 +261,7 @@ def test_mcp_silent_mode_suppresses_subprocess_output(monkeypatch, tmp_path):
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run_subprocess)
 
     result = run_auto_update(
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
         silent=True,
     )
@@ -281,7 +286,7 @@ def test_subprocess_oserror_is_non_fatal(monkeypatch, tmp_path):
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _raise_oserror)
 
     result = run_auto_update(
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
     )
 
@@ -300,7 +305,7 @@ def test_mixed_timezone_timestamp_does_not_crash_interval_gate(monkeypatch, tmp_
     )
 
     result = run_auto_update(
-        config_manager=manager,
+        config_manager=_config_manager(manager),
         executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
     )
 

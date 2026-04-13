@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-import sqlalchemy
+from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
-from basic_memory.models import Entity, Relation, Project
+from basic_memory.models import Entity, Project, Relation
 from basic_memory.repository.relation_repository import RelationRepository
 
 
@@ -168,7 +168,7 @@ async def test_create_relation_entity_does_not_exist(
         "relation_type": "test_relation",
         "context": "test-context",
     }
-    with pytest.raises(sqlalchemy.exc.IntegrityError):
+    with pytest.raises(IntegrityError):
         await relation_repository.create(relation_data)
 
 
@@ -194,6 +194,7 @@ async def test_find_relation(relation_repository: RelationRepository, sample_rel
         to_permalink=sample_relation.to_entity.permalink,
         relation_type=sample_relation.relation_type,
     )
+    assert relation is not None
     assert relation.id == sample_relation.id
 
 

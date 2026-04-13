@@ -46,7 +46,7 @@ class _StubTextEmbedding:
 async def test_fastembed_provider_lazy_loads_and_reuses_model(monkeypatch):
     """Provider should instantiate FastEmbed lazily and reuse the loaded model."""
     module = type(sys)("fastembed")
-    module.TextEmbedding = _StubTextEmbedding
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
     monkeypatch.setitem(sys.modules, "fastembed", module)
     _StubTextEmbedding.init_count = 0
 
@@ -67,7 +67,7 @@ async def test_fastembed_provider_lazy_loads_and_reuses_model(monkeypatch):
 async def test_fastembed_provider_dimension_mismatch_raises_error(monkeypatch):
     """Provider should fail fast when model output dimensions differ from configured dimensions."""
     module = type(sys)("fastembed")
-    module.TextEmbedding = _StubTextEmbedding
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
     monkeypatch.setitem(sys.modules, "fastembed", module)
 
     provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
@@ -99,7 +99,7 @@ async def test_fastembed_provider_missing_dependency_raises_actionable_error(mon
 async def test_fastembed_provider_passes_runtime_knobs_to_fastembed(monkeypatch):
     """Provider should pass optional runtime tuning knobs through to FastEmbed."""
     module = type(sys)("fastembed")
-    module.TextEmbedding = _StubTextEmbedding
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
     monkeypatch.setitem(sys.modules, "fastembed", module)
     _StubTextEmbedding.last_init_kwargs = {}
     _StubTextEmbedding.last_embed_kwargs = {}
@@ -126,7 +126,7 @@ async def test_fastembed_provider_passes_runtime_knobs_to_fastembed(monkeypatch)
 async def test_fastembed_provider_parallel_one_disables_multiprocessing(monkeypatch):
     """parallel=1 should not pass FastEmbed multiprocessing kwargs."""
     module = type(sys)("fastembed")
-    module.TextEmbedding = _StubTextEmbedding
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
     monkeypatch.setitem(sys.modules, "fastembed", module)
     _StubTextEmbedding.last_embed_kwargs = {}
 
@@ -140,7 +140,7 @@ async def test_fastembed_provider_parallel_one_disables_multiprocessing(monkeypa
 async def test_fastembed_provider_parallel_two_passes_multiprocessing(monkeypatch):
     """parallel>1 should keep passing FastEmbed multiprocessing kwargs."""
     module = type(sys)("fastembed")
-    module.TextEmbedding = _StubTextEmbedding
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
     monkeypatch.setitem(sys.modules, "fastembed", module)
     _StubTextEmbedding.last_embed_kwargs = {}
 

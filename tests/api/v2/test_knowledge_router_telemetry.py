@@ -6,6 +6,7 @@ import importlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from fastapi import BackgroundTasks, Response
@@ -85,7 +86,7 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
             raise AssertionError("non-fast create should not re-read file content")
 
     result = await knowledge_router_module.create_entity(
-        project_id="project-123",
+        project_id=123,
         data=Entity(
             title="Telemetry Entity",
             directory="notes",
@@ -94,11 +95,11 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
             content="telemetry content",
         ),
         background_tasks=BackgroundTasks(),
-        entity_service=FakeEntityService(),
-        search_service=FakeSearchService(),
+        entity_service=cast(Any, FakeEntityService()),
+        search_service=cast(Any, FakeSearchService()),
         task_scheduler=FakeTaskScheduler(),
-        file_service=FakeFileService(),
-        app_config=SimpleNamespace(semantic_search_enabled=False),
+        file_service=cast(Any, FakeFileService()),
+        app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         fast=False,
     )
 
@@ -159,13 +160,13 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         ),
         response=response,
         background_tasks=BackgroundTasks(),
-        project_id="project-123",
-        entity_service=FakeEntityService(),
-        search_service=FakeSearchService(),
-        entity_repository=FakeEntityRepository(),
+        project_id=123,
+        entity_service=cast(Any, FakeEntityService()),
+        search_service=cast(Any, FakeSearchService()),
+        entity_repository=cast(Any, FakeEntityRepository()),
         task_scheduler=FakeTaskScheduler(),
-        file_service=FakeFileService(),
-        app_config=SimpleNamespace(semantic_search_enabled=False),
+        file_service=cast(Any, FakeFileService()),
+        app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
         fast=False,
     )
@@ -220,13 +221,13 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     result = await knowledge_router_module.edit_entity_by_id(
         data=EditEntityRequest(operation="append", content="edited telemetry content"),
         background_tasks=BackgroundTasks(),
-        project_id="project-123",
-        entity_service=FakeEntityService(),
-        search_service=FakeSearchService(),
-        entity_repository=FakeEntityRepository(),
+        project_id=123,
+        entity_service=cast(Any, FakeEntityService()),
+        search_service=cast(Any, FakeSearchService()),
+        entity_repository=cast(Any, FakeEntityRepository()),
         task_scheduler=FakeTaskScheduler(),
-        file_service=FakeFileService(),
-        app_config=SimpleNamespace(semantic_search_enabled=False),
+        file_service=cast(Any, FakeFileService()),
+        app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
         fast=False,
     )

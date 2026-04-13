@@ -141,6 +141,7 @@ async def test_update_preserves_content(markdown_processor: MarkdownProcessor, t
     result = await markdown_processor.read_file(path)
 
     # Original content preserved
+    assert result.content is not None
     assert "Original content here." in result.content
 
     # Both observations present

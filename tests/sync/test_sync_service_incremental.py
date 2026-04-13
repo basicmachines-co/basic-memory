@@ -19,7 +19,29 @@ import pytest
 
 from basic_memory.config import ProjectConfig
 from basic_memory.indexing.models import IndexingBatchResult
+from basic_memory.models import Project
 from basic_memory.sync.sync_service import SyncService
+
+
+async def _current_project(sync_service: SyncService) -> Project:
+    project_id = sync_service.entity_repository.project_id
+    assert project_id is not None
+
+    project = await sync_service.project_repository.find_by_id(project_id)
+    assert project is not None
+    return project
+
+
+def _last_scan_timestamp(project: Project) -> float:
+    timestamp = project.last_scan_timestamp
+    assert timestamp is not None
+    return timestamp
+
+
+def _last_file_count(project: Project) -> int:
+    file_count = project.last_file_count
+    assert file_count is not None
+    return file_count
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -59,11 +81,9 @@ async def test_first_sync_uses_full_scan(sync_service: SyncService, project_conf
     assert "file2.md" in report.new
 
     # Verify watermark was set
-    project = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
+    project = await _current_project(sync_service)
     assert project.last_scan_timestamp is not None
-    assert project.last_file_count >= 2  # May include config files
+    assert _last_file_count(project) >= 2  # May include config files
 
 
 @pytest.mark.asyncio
@@ -168,11 +188,8 @@ async def test_force_full_bypasses_watermark_optimization(
     assert len(report.new) == 2
 
     # Verify watermark was set
-    project = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
-    assert project.last_scan_timestamp is not None
-    initial_timestamp = project.last_scan_timestamp
+    project = await _current_project(sync_service)
+    initial_timestamp = _last_scan_timestamp(project)
 
     # Sleep to ensure time passes
     await sleep_past_watermark()
@@ -202,11 +219,8 @@ async def test_force_full_bypasses_watermark_optimization(
     assert "file1.md" in report.modified
 
     # Verify watermark was still updated after force_full
-    project = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
-    assert project.last_scan_timestamp is not None
-    assert project.last_scan_timestamp > initial_timestamp
+    project = await _current_project(sync_service)
+    assert _last_scan_timestamp(project) > initial_timestamp
 
 
 @pytest.mark.asyncio
@@ -534,9 +548,7 @@ async def test_watermark_updated_after_successful_sync(
     await create_test_file(project_dir / "file1.md", "# File 1")
 
     # Get project before sync
-    project_before = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
+    project_before = await _current_project(sync_service)
     assert project_before.last_scan_timestamp is None
     assert project_before.last_file_count is None
 
@@ -546,14 +558,12 @@ async def test_watermark_updated_after_successful_sync(
     sync_end = time.time()
 
     # Verify watermark was set
-    project_after = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
+    project_after = await _current_project(sync_service)
     assert project_after.last_scan_timestamp is not None
-    assert project_after.last_file_count >= 1  # May include config files
+    assert _last_file_count(project_after) >= 1  # May include config files
 
     # Watermark should be between sync start and end
-    assert sync_start <= project_after.last_scan_timestamp <= sync_end
+    assert sync_start <= _last_scan_timestamp(project_after) <= sync_end
 
 
 @pytest.mark.asyncio
@@ -572,14 +582,13 @@ async def test_watermark_uses_sync_start_time(
     sync_end = time.time()
 
     # Get watermark
-    project = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
+    project = await _current_project(sync_service)
 
     # Watermark should be closer to start than end
     # (In practice, watermark == sync_start_timestamp captured in sync())
-    time_from_start = abs(project.last_scan_timestamp - sync_start)
-    time_from_end = abs(project.last_scan_timestamp - sync_end)
+    project_timestamp = _last_scan_timestamp(project)
+    time_from_start = abs(project_timestamp - sync_start)
+    time_from_end = abs(project_timestamp - sync_end)
 
     assert time_from_start < time_from_end
 
@@ -600,10 +609,8 @@ async def test_watermark_file_count_accurate(
     await sync_service.sync(project_dir)
 
     # Verify file count
-    project1 = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
-    initial_count = project1.last_file_count
+    project1 = await _current_project(sync_service)
+    initial_count = _last_file_count(project1)
     assert initial_count >= 3  # May include config files
 
     # Add more files
@@ -615,10 +622,8 @@ async def test_watermark_file_count_accurate(
     await sync_service.sync(project_dir)
 
     # Verify updated count increased by 2
-    project2 = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
-    assert project2.last_file_count == initial_count + 2
+    project2 = await _current_project(sync_service)
+    assert _last_file_count(project2) == initial_count + 2
 
 
 # ==============================================================================
@@ -667,9 +672,7 @@ async def test_empty_directory_handles_incremental_scan(
     assert len(report1.new) == 0
 
     # Verify watermark was set even for empty directory
-    project = await sync_service.project_repository.find_by_id(
-        sync_service.entity_repository.project_id
-    )
+    project = await _current_project(sync_service)
     assert project.last_scan_timestamp is not None
     # May have config files, so just check it's set
     assert project.last_file_count is not None

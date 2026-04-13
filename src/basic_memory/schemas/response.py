@@ -194,7 +194,7 @@ class EntityResponse(SQLAlchemyModel):
     note_type: NoteType
 
     # COMPAT(v0.18): old clients expect entity_type; remove when no longer needed
-    @computed_field  # type: ignore[prop-decorator]
+    @computed_field
     @property
     def entity_type(self) -> str:
         return self.note_type
