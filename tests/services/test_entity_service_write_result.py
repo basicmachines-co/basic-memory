@@ -28,6 +28,28 @@ async def test_create_entity_with_content_returns_full_and_search_content(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("permalink_line", ["permalink:", "permalink: null", 'permalink: ""'])
+async def test_create_entity_ignores_empty_frontmatter_permalink(
+    entity_service, file_service, permalink_line: str
+) -> None:
+    result = await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Empty Frontmatter Permalink",
+            directory="notes",
+            note_type="note",
+            content=f"---\n{permalink_line}\n---\nCreate body content",
+        )
+    )
+
+    file_path = file_service.get_entity_path(result.entity)
+    file_content, _ = await file_service.read_file(file_path)
+
+    assert result.entity.permalink == "test-project/notes/empty-frontmatter-permalink"
+    assert "permalink: test-project/notes/empty-frontmatter-permalink" in file_content
+    assert "permalink: None" not in file_content
+
+
+@pytest.mark.asyncio
 async def test_update_entity_with_content_returns_full_and_search_content(
     entity_service, file_service
 ) -> None:

@@ -60,6 +60,11 @@ class EntityWriteResult:
     search_content: str
 
 
+def _frontmatter_permalink(value: object) -> str | None:
+    """Return an explicit frontmatter permalink only when YAML parsed a real string."""
+    return value if isinstance(value, str) and value else None
+
+
 class EntityService(BaseService[EntityModel]):
     """Service for managing entities in the database."""
 
@@ -287,11 +292,13 @@ class EntityService(BaseService[EntityModel]):
                 schema.note_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                content_markdown = self._build_frontmatter_markdown(
-                    schema.title,
-                    schema.note_type,
-                    _coerce_to_string(content_frontmatter["permalink"]),
-                )
+                content_permalink = _frontmatter_permalink(content_frontmatter["permalink"])
+                if content_permalink is not None:
+                    content_markdown = self._build_frontmatter_markdown(
+                        schema.title,
+                        schema.note_type,
+                        content_permalink,
+                    )
 
         # Get unique permalink (prioritizing content frontmatter) unless disabled
         if self.app_config and self.app_config.disable_permalinks:
@@ -394,11 +401,13 @@ class EntityService(BaseService[EntityModel]):
                 schema.note_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                content_markdown = self._build_frontmatter_markdown(
-                    schema.title,
-                    schema.note_type,
-                    _coerce_to_string(content_frontmatter["permalink"]),
-                )
+                content_permalink = _frontmatter_permalink(content_frontmatter["permalink"])
+                if content_permalink is not None:
+                    content_markdown = self._build_frontmatter_markdown(
+                        schema.title,
+                        schema.note_type,
+                        content_permalink,
+                    )
 
         # Check if we need to update the permalink based on content frontmatter (unless disabled)
         new_permalink = entity.permalink  # Default to existing
@@ -525,11 +534,13 @@ class EntityService(BaseService[EntityModel]):
                 schema.note_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                content_markdown = self._build_frontmatter_markdown(
-                    schema.title,
-                    schema.note_type,
-                    _coerce_to_string(content_frontmatter["permalink"]),
-                )
+                content_permalink = _frontmatter_permalink(content_frontmatter["permalink"])
+                if content_permalink is not None:
+                    content_markdown = self._build_frontmatter_markdown(
+                        schema.title,
+                        schema.note_type,
+                        content_permalink,
+                    )
 
         # --- Permalink Resolution ---
         if self.app_config and self.app_config.disable_permalinks:
@@ -668,11 +679,13 @@ class EntityService(BaseService[EntityModel]):
                 update_data["note_type"] = _coerce_to_string(content_frontmatter["type"])
 
             if "permalink" in content_frontmatter:
-                content_markdown = self._build_frontmatter_markdown(
-                    _coerce_to_string(update_data.get("title", entity.title)),
-                    _coerce_to_string(update_data.get("note_type", entity.note_type)),
-                    _coerce_to_string(content_frontmatter["permalink"]),
-                )
+                content_permalink = _frontmatter_permalink(content_frontmatter["permalink"])
+                if content_permalink is not None:
+                    content_markdown = self._build_frontmatter_markdown(
+                        _coerce_to_string(update_data.get("title", entity.title)),
+                        _coerce_to_string(update_data.get("note_type", entity.note_type)),
+                        content_permalink,
+                    )
 
             metadata = normalize_frontmatter_metadata(content_frontmatter or {})
             update_data["entity_metadata"] = {k: v for k, v in metadata.items() if v is not None}
