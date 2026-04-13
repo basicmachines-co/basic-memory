@@ -492,35 +492,12 @@ class LocalTaskScheduler:
 
 
 async def get_task_scheduler(
-    entity_service: EntityServiceV2ExternalDep,
     sync_service: SyncServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
 ) -> TaskScheduler:
     """Create a scheduler that maps task specs to coroutines."""
-
-    scheduler: LocalTaskScheduler | None = None
-
-    async def _reindex_entity(
-        entity_id: int,
-        resolve_relations: bool = False,
-        **_: Any,
-    ) -> None:
-        await entity_service.reindex_entity(entity_id)
-        # Trigger: caller requests relation resolution
-        # Why: resolve forward references created before the entity existed
-        # Outcome: updates unresolved relations pointing to this entity
-        if resolve_relations:
-            await sync_service.resolve_relations(entity_id=entity_id)
-        # Trigger: semantic search enabled in local config.
-        # Why: vector chunks are derived and should refresh after canonical reindex completes.
-        # Outcome: schedules out-of-band vector sync without extending write latency.
-        if app_config.semantic_search_enabled and scheduler is not None:
-            scheduler.schedule("sync_entity_vectors", entity_id=entity_id)
-
-    async def _resolve_relations(entity_id: int, **_: Any) -> None:
-        await sync_service.resolve_relations(entity_id=entity_id)
 
     async def _sync_entity_vectors(entity_id: int, **_: Any) -> None:
         await search_service.sync_entity_vectors(entity_id)
@@ -537,8 +514,6 @@ async def get_task_scheduler(
 
     scheduler = LocalTaskScheduler(
         {
-            "reindex_entity": _reindex_entity,
-            "resolve_relations": _resolve_relations,
             "sync_entity_vectors": _sync_entity_vectors,
             "sync_project": _sync_project,
             "reindex_project": _reindex_project,

@@ -44,6 +44,7 @@ class TestKnowledgeClient:
 
         async def mock_call_post(client, url, **kwargs):
             assert "/v2/projects/proj-123/knowledge/entities" in url
+            assert kwargs.get("params") is None
             return mock_response
 
         monkeypatch.setattr(knowledge_mod, "call_post", mock_call_post)
@@ -51,6 +52,66 @@ class TestKnowledgeClient:
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
         result = await client.create_entity({"title": "Test"})
+        assert result.title == "Test"
+
+    @pytest.mark.asyncio
+    async def test_update_entity(self, monkeypatch):
+        """Test update_entity calls correct endpoint without fast query params."""
+        from basic_memory.mcp.clients import knowledge as knowledge_mod
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "permalink": "test",
+            "title": "Test",
+            "file_path": "test.md",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "observations": [],
+            "relations": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
+
+        async def mock_call_put(client, url, **kwargs):
+            assert "/v2/projects/proj-123/knowledge/entities/entity-123" in url
+            assert kwargs.get("params") is None
+            return mock_response
+
+        monkeypatch.setattr(knowledge_mod, "call_put", mock_call_put)
+
+        mock_http = MagicMock()
+        client = KnowledgeClient(mock_http, "proj-123")
+        result = await client.update_entity("entity-123", {"title": "Test"})
+        assert result.title == "Test"
+
+    @pytest.mark.asyncio
+    async def test_patch_entity(self, monkeypatch):
+        """Test patch_entity calls correct endpoint without fast query params."""
+        from basic_memory.mcp.clients import knowledge as knowledge_mod
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "permalink": "test",
+            "title": "Test",
+            "file_path": "test.md",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "observations": [],
+            "relations": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
+
+        async def mock_call_patch(client, url, **kwargs):
+            assert "/v2/projects/proj-123/knowledge/entities/entity-123" in url
+            assert kwargs.get("params") is None
+            return mock_response
+
+        monkeypatch.setattr(knowledge_mod, "call_patch", mock_call_patch)
+
+        mock_http = MagicMock()
+        client = KnowledgeClient(mock_http, "proj-123")
+        result = await client.patch_entity("entity-123", {"operation": "append"})
         assert result.title == "Test"
 
     @pytest.mark.asyncio

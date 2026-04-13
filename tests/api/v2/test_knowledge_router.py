@@ -375,10 +375,10 @@ async def test_update_entity_by_id(
 
 
 @pytest.mark.asyncio
-async def test_update_entity_by_id_fast_does_not_duplicate(
+async def test_update_entity_by_id_does_not_duplicate(
     client: AsyncClient, v2_project_url, entity_repository
 ):
-    """Fast PUT updates the existing external_id without creating duplicates."""
+    """PUT updates the existing external_id without creating duplicates."""
     create_data = {
         "title": "07 - Get Started",
         "directory": "docs",
@@ -405,10 +405,10 @@ async def test_update_entity_by_id_fast_does_not_duplicate(
 
 
 @pytest.mark.asyncio
-async def test_put_entity_fast_returns_minimal_row(
+async def test_put_entity_with_fast_param_returns_fully_indexed_row(
     client: AsyncClient, v2_project_url, entity_repository
 ):
-    """Fast PUT returns a minimal row and persists the external_id immediately."""
+    """PUT ignores the legacy fast param and still returns a fully indexed row."""
     external_id = str(uuid.uuid4())
     update_data = {
         "title": "FastPutEntity",
@@ -431,18 +431,19 @@ async def test_put_entity_fast_returns_minimal_row(
     assert response.status_code == 201
     created_entity = EntityResponseV2.model_validate(response.json())
     assert created_entity.external_id == external_id
-    assert created_entity.observations == []
-    assert created_entity.relations == []
+    assert len(created_entity.observations) == 1
+    assert len(created_entity.relations) == 1
 
     db_entity = await entity_repository.get_by_external_id(external_id)
     assert db_entity is not None
 
 
 @pytest.mark.asyncio
-async def test_fast_create_schedules_reindex_task(
-    client: AsyncClient, v2_project_url, task_scheduler_spy
+async def test_create_with_fast_param_does_not_schedule_reindex_task(
+    client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
 ):
-    """Fast create should enqueue a background reindex task."""
+    """Legacy fast=true should not resurrect the removed reindex note-write path."""
+    app_config.semantic_search_enabled = False
     start_count = len(task_scheduler_spy)
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -454,18 +455,14 @@ async def test_fast_create_schedules_reindex_task(
         params={"fast": True},
     )
     assert response.status_code == 200
-    assert len(task_scheduler_spy) == start_count + 1
-    created_entity = EntityResponseV2.model_validate(response.json())
-    scheduled = task_scheduler_spy[-1]
-    assert scheduled["task_name"] == "reindex_entity"
-    assert scheduled["payload"]["entity_id"] == created_entity.id
+    assert len(task_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio
-async def test_non_fast_create_schedules_vector_sync_when_semantic_enabled(
+async def test_create_schedules_vector_sync_when_semantic_enabled(
     client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
 ):
-    """Non-fast create should schedule vector sync when semantic mode is enabled."""
+    """Create should schedule vector sync when semantic mode is enabled."""
     app_config.semantic_search_enabled = True
     start_count = len(task_scheduler_spy)
 
@@ -488,10 +485,10 @@ async def test_non_fast_create_schedules_vector_sync_when_semantic_enabled(
 
 
 @pytest.mark.asyncio
-async def test_non_fast_create_skips_vector_sync_when_semantic_disabled(
+async def test_create_skips_vector_sync_when_semantic_disabled(
     client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
 ):
-    """Non-fast create should not schedule vector sync when semantic mode is disabled."""
+    """Create should not schedule vector sync when semantic mode is disabled."""
     app_config.semantic_search_enabled = False
     start_count = len(task_scheduler_spy)
 

@@ -374,9 +374,7 @@ async def edit_note(
                                 directory=directory,
                                 operation=operation,
                             )
-                            result = await knowledge_client.create_entity(
-                                entity.model_dump(), fast=False
-                            )
+                            result = await knowledge_client.create_entity(entity.model_dump())
                             file_created = True
                         else:
                             # find_replace/replace_section require existing content — re-raise
@@ -399,9 +397,7 @@ async def edit_note(
                             edit_data["expected_replacements"] = str(effective_replacements)
 
                         # Call the PATCH endpoint
-                        result = await knowledge_client.patch_entity(
-                            entity_id, edit_data, fast=False
-                        )
+                        result = await knowledge_client.patch_entity(entity_id, edit_data)
 
                     # --- Format response ---
                     # result is always set: either by create_entity (auto-create) or patch_entity (edit)

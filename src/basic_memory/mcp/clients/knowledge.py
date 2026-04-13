@@ -44,9 +44,7 @@ class KnowledgeClient:
 
     # --- Entity CRUD Operations ---
 
-    async def create_entity(
-        self, entity_data: dict[str, Any], *, fast: bool | None = None
-    ) -> EntityResponse:
+    async def create_entity(self, entity_data: dict[str, Any]) -> EntityResponse:
         """Create a new entity.
 
         Args:
@@ -58,18 +56,15 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        params = {"fast": fast} if fast is not None else None
         with telemetry.scope(
             "mcp.client.knowledge.create_entity",
             client_name="knowledge",
             operation="create_entity",
-            fast=fast,
         ):
             response = await call_post(
                 self.http_client,
                 f"{self._base_path}/entities",
                 json=entity_data,
-                params=params,
                 client_name="knowledge",
                 operation="create_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities",
@@ -80,8 +75,6 @@ class KnowledgeClient:
         self,
         entity_id: str,
         entity_data: dict[str, Any],
-        *,
-        fast: bool | None = None,
     ) -> EntityResponse:
         """Update an existing entity (full replacement).
 
@@ -95,18 +88,15 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        params = {"fast": fast} if fast is not None else None
         with telemetry.scope(
             "mcp.client.knowledge.update_entity",
             client_name="knowledge",
             operation="update_entity",
-            fast=fast,
         ):
             response = await call_put(
                 self.http_client,
                 f"{self._base_path}/entities/{entity_id}",
                 json=entity_data,
-                params=params,
                 client_name="knowledge",
                 operation="update_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",
@@ -143,8 +133,6 @@ class KnowledgeClient:
         self,
         entity_id: str,
         patch_data: dict[str, Any],
-        *,
-        fast: bool | None = None,
     ) -> EntityResponse:
         """Partially update an entity.
 
@@ -158,18 +146,15 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        params = {"fast": fast} if fast is not None else None
         with telemetry.scope(
             "mcp.client.knowledge.patch_entity",
             client_name="knowledge",
             operation="patch_entity",
-            fast=fast,
         ):
             response = await call_patch(
                 self.http_client,
                 f"{self._base_path}/entities/{entity_id}",
                 json=patch_data,
-                params=params,
                 client_name="knowledge",
                 operation="patch_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",

@@ -1,4 +1,4 @@
-"""Task scheduler semantic indexing tests."""
+"""Task scheduler tests for derived async work."""
 
 import asyncio
 from pathlib import Path
@@ -8,14 +8,6 @@ import pytest
 
 from basic_memory.config import BasicMemoryConfig, ProjectConfig
 from basic_memory.deps.services import get_task_scheduler
-
-
-class StubEntityService:
-    def __init__(self) -> None:
-        self.reindexed: list[int] = []
-
-    async def reindex_entity(self, entity_id: int) -> None:
-        self.reindexed.append(entity_id)
 
 
 class StubSyncService:
@@ -43,69 +35,8 @@ class StubSearchService:
 
 
 @pytest.mark.asyncio
-async def test_reindex_entity_task_chains_vector_sync_when_semantic_enabled(tmp_path):
-    """Reindex task should enqueue vector sync when semantic mode is enabled."""
-    entity_service = StubEntityService()
-    sync_service = StubSyncService()
-    search_service = StubSearchService()
-    app_config = BasicMemoryConfig(
-        env="test",
-        projects={"test-project": str(tmp_path)},
-        default_project="test-project",
-        semantic_search_enabled=True,
-    )
-    project_config = ProjectConfig(name="test-project", home=tmp_path)
-
-    scheduler = await get_task_scheduler(
-        entity_service=cast(Any, entity_service),
-        sync_service=cast(Any, sync_service),
-        search_service=cast(Any, search_service),
-        project_config=project_config,
-        app_config=app_config,
-    )
-    # Enable background tasks for this test — uses stubs, no real DB race risk
-    cast(Any, scheduler)._test_mode = False
-    scheduler.schedule("reindex_entity", entity_id=42)
-    await asyncio.sleep(0.05)
-
-    assert entity_service.reindexed == [42]
-    assert search_service.vector_synced == [42]
-
-
-@pytest.mark.asyncio
-async def test_reindex_entity_task_skips_vector_sync_when_semantic_disabled(tmp_path):
-    """Reindex task should not enqueue vector sync when semantic mode is disabled."""
-    entity_service = StubEntityService()
-    sync_service = StubSyncService()
-    search_service = StubSearchService()
-    app_config = BasicMemoryConfig(
-        env="test",
-        projects={"test-project": str(tmp_path)},
-        default_project="test-project",
-        semantic_search_enabled=False,
-    )
-    project_config = ProjectConfig(name="test-project", home=tmp_path)
-
-    scheduler = await get_task_scheduler(
-        entity_service=cast(Any, entity_service),
-        sync_service=cast(Any, sync_service),
-        search_service=cast(Any, search_service),
-        project_config=project_config,
-        app_config=app_config,
-    )
-    # Enable background tasks for this test — uses stubs, no real DB race risk
-    cast(Any, scheduler)._test_mode = False
-    scheduler.schedule("reindex_entity", entity_id=42)
-    await asyncio.sleep(0.05)
-
-    assert entity_service.reindexed == [42]
-    assert search_service.vector_synced == []
-
-
-@pytest.mark.asyncio
 async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
     """Explicit sync_entity_vectors task should call SearchService sync method."""
-    entity_service = StubEntityService()
     sync_service = StubSyncService()
     search_service = StubSearchService()
     app_config = BasicMemoryConfig(
@@ -117,7 +48,6 @@ async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
     project_config = ProjectConfig(name="test-project", home=tmp_path)
 
     scheduler = await get_task_scheduler(
-        entity_service=cast(Any, entity_service),
         sync_service=cast(Any, sync_service),
         search_service=cast(Any, search_service),
         project_config=project_config,
@@ -129,3 +59,29 @@ async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
     await asyncio.sleep(0.05)
 
     assert search_service.vector_synced == [7]
+
+
+@pytest.mark.asyncio
+async def test_sync_project_task_maps_to_sync_service(tmp_path):
+    """Explicit sync_project task should call SyncService sync method."""
+    sync_service = StubSyncService()
+    search_service = StubSearchService()
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": str(tmp_path)},
+        default_project="test-project",
+        semantic_search_enabled=True,
+    )
+    project_config = ProjectConfig(name="test-project", home=tmp_path)
+
+    scheduler = await get_task_scheduler(
+        sync_service=cast(Any, sync_service),
+        search_service=cast(Any, search_service),
+        project_config=project_config,
+        app_config=app_config,
+    )
+    cast(Any, scheduler)._test_mode = False
+    scheduler.schedule("sync_project", force_full=True)
+    await asyncio.sleep(0.05)
+
+    assert sync_service.synced == [(str(tmp_path), "test-project", True)]

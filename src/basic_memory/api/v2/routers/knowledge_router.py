@@ -10,7 +10,7 @@ Key improvements:
 - Simplified caching strategies
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Response, Path, Query
+from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 from basic_memory import telemetry
@@ -24,7 +24,6 @@ from basic_memory.deps import (
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
     TaskSchedulerDep,
-    FileServiceV2ExternalDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
@@ -243,21 +242,15 @@ async def get_entity_by_id(
 async def create_entity(
     project_id: ProjectExternalIdPathDep,
     data: Entity,
-    background_tasks: BackgroundTasks,
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
-    file_service: FileServiceV2ExternalDep,
     app_config: AppConfigDep,
-    fast: bool = Query(
-        True, description="If true, write quickly and defer indexing to background tasks."
-    ),
 ) -> EntityResponseV2:
     """Create a new entity.
 
     Args:
         data: Entity data to create
-        fast: If True, defer indexing to background tasks
 
     Returns:
         Created entity with generated external_id (UUID) and file content
@@ -267,49 +260,26 @@ async def create_entity(
         entrypoint="api",
         domain="knowledge",
         action="create_entity",
-        fast=fast,
     ):
         logger.info(
             "API v2 request", endpoint="create_entity", note_type=data.note_type, title=data.title
         )
 
-        if fast:
-            entity = await entity_service.fast_write_entity(data)
-            written_content = None
-            search_content = None
-        else:
-            write_result = await entity_service.create_entity_with_content(data)
-            entity = write_result.entity
-            written_content = write_result.content
-            search_content = write_result.search_content
-
-        if fast:
-            task_scheduler.schedule(
-                "reindex_entity",
-                entity_id=entity.id,
-                project_id=project_id,
-            )
-        else:
-            await search_service.index_entity(entity, content=search_content)
-            _schedule_vector_sync_if_enabled(
-                task_scheduler=task_scheduler,
-                app_config=app_config,
-                entity_id=entity.id,
-                project_id=project_id,
-            )
+        # Note writes are now internally consistent before the response returns. We only leave
+        # truly derived work, like semantic vectors, on the async scheduler.
+        write_result = await entity_service.create_entity_with_content(data)
+        entity = write_result.entity
+        await search_service.index_entity(entity, content=write_result.search_content)
+        _schedule_vector_sync_if_enabled(
+            task_scheduler=task_scheduler,
+            app_config=app_config,
+            entity_id=entity.id,
+            project_id=project_id,
+        )
 
         result = EntityResponseV2.model_validate(entity)
-        if fast:
-            result = result.model_copy(update={"observations": [], "relations": []})
-
-        if fast:
-            content = await file_service.read_file_content(entity.file_path)
-        else:
-            # Non-fast writes already captured the markdown in memory. Reuse it here
-            # instead of re-reading the file; format_on_save is the one config that can
-            # still make the persisted file diverge because write_file only returns a checksum.
-            content = written_content
-        result = result.model_copy(update={"content": content})
+        # The write service already returns the canonical markdown accepted for this request.
+        result = result.model_copy(update={"content": write_result.content})
 
         logger.info(
             f"API v2 response: endpoint='create_entity' external_id={entity.external_id}, title={result.title}, permalink={result.permalink}, status_code=201"
@@ -324,18 +294,13 @@ async def create_entity(
 async def update_entity_by_id(
     data: Entity,
     response: Response,
-    background_tasks: BackgroundTasks,
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
-    file_service: FileServiceV2ExternalDep,
     app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
-    fast: bool = Query(
-        True, description="If true, write quickly and defer indexing to background tasks."
-    ),
 ) -> EntityResponseV2:
     """Update an entity by external ID.
 
@@ -344,7 +309,6 @@ async def update_entity_by_id(
     Args:
         entity_id: External ID (UUID string)
         data: Updated entity data
-        fast: If True, defer indexing to background tasks
 
     Returns:
         Updated entity with file content
@@ -354,72 +318,43 @@ async def update_entity_by_id(
         entrypoint="api",
         domain="knowledge",
         action="update_entity",
-        fast=fast,
     ):
         logger.info(f"API v2 request: update_entity_by_id entity_id={entity_id}")
 
         existing = await entity_repository.get_by_external_id(entity_id)
         created = existing is None
 
-        if fast:
-            entity = await entity_service.fast_write_entity(data, external_id=entity_id)
-            written_content = None
-            search_content = None
-            response.status_code = 200 if existing else 201
+        if existing:
+            write_result = await entity_service.update_entity_with_content(existing, data)
+            entity = write_result.entity
+            response.status_code = 200
         else:
-            if existing:
-                write_result = await entity_service.update_entity_with_content(existing, data)
-                entity = write_result.entity
-                written_content = write_result.content
-                search_content = write_result.search_content
-                response.status_code = 200
-            else:
-                write_result = await entity_service.create_entity_with_content(data)
-                entity = write_result.entity
-                written_content = write_result.content
-                search_content = write_result.search_content
-                if entity.external_id != entity_id:
-                    entity = await entity_repository.update(
-                        entity.id,
-                        {"external_id": entity_id},
+            write_result = await entity_service.create_entity_with_content(data)
+            entity = write_result.entity
+            if entity.external_id != entity_id:
+                entity = await entity_repository.update(
+                    entity.id,
+                    {"external_id": entity_id},
+                )
+                # external_id fixup only changes the DB row. The file content is unchanged,
+                # so the markdown captured during the write remains valid downstream.
+                if not entity:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Entity with external_id '{entity_id}' not found",
                     )
-                    # external_id fixup only changes the DB row. The file content is unchanged,
-                    # so the markdown captured during the write remains valid downstream.
-                    if not entity:
-                        raise HTTPException(
-                            status_code=404,
-                            detail=f"Entity with external_id '{entity_id}' not found",
-                        )
-                response.status_code = 201
+            response.status_code = 201
 
-        if fast:
-            task_scheduler.schedule(
-                "reindex_entity",
-                entity_id=entity.id,
-                project_id=project_id,
-                resolve_relations=created,
-            )
-        else:
-            await search_service.index_entity(entity, content=search_content)
-            _schedule_vector_sync_if_enabled(
-                task_scheduler=task_scheduler,
-                app_config=app_config,
-                entity_id=entity.id,
-                project_id=project_id,
-            )
+        await search_service.index_entity(entity, content=write_result.search_content)
+        _schedule_vector_sync_if_enabled(
+            task_scheduler=task_scheduler,
+            app_config=app_config,
+            entity_id=entity.id,
+            project_id=project_id,
+        )
 
         result = EntityResponseV2.model_validate(entity)
-        if fast:
-            result = result.model_copy(update={"observations": [], "relations": []})
-
-        if fast:
-            content = await file_service.read_file_content(entity.file_path)
-        else:
-            # Non-fast writes already captured the markdown in memory. Reuse it here
-            # instead of re-reading the file; format_on_save is the one config that can
-            # still make the persisted file diverge because write_file only returns a checksum.
-            content = written_content
-        result = result.model_copy(update={"content": content})
+        result = result.model_copy(update={"content": write_result.content})
 
         logger.info(
             f"API v2 response: external_id={entity_id}, created={created}, status_code={response.status_code}"
@@ -430,25 +365,19 @@ async def update_entity_by_id(
 @router.patch("/entities/{entity_id}", response_model=EntityResponseV2)
 async def edit_entity_by_id(
     data: EditEntityRequest,
-    background_tasks: BackgroundTasks,
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
-    file_service: FileServiceV2ExternalDep,
     app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
-    fast: bool = Query(
-        True, description="If true, write quickly and defer indexing to background tasks."
-    ),
 ) -> EntityResponseV2:
     """Edit an existing entity by external ID using operations like append, prepend, etc.
 
     Args:
         entity_id: External ID (UUID string)
         data: Edit operation details
-        fast: If True, defer indexing to background tasks
 
     Returns:
         Updated entity with file content
@@ -461,7 +390,6 @@ async def edit_entity_by_id(
         entrypoint="api",
         domain="knowledge",
         action="edit_entity",
-        fast=fast,
     ):
         logger.info(
             f"API v2 request: edit_entity_by_id entity_id={entity_id}, operation='{data.operation}'"
@@ -474,58 +402,26 @@ async def edit_entity_by_id(
             )
 
         try:
-            if fast:
-                updated_entity = await entity_service.fast_edit_entity(
-                    entity=entity,
-                    operation=data.operation,
-                    content=data.content,
-                    section=data.section,
-                    find_text=data.find_text,
-                    expected_replacements=data.expected_replacements,
-                )
-                written_content = None
-                search_content = None
-            else:
-                identifier = entity.permalink or entity.file_path
-                write_result = await entity_service.edit_entity_with_content(
-                    identifier=identifier,
-                    operation=data.operation,
-                    content=data.content,
-                    section=data.section,
-                    find_text=data.find_text,
-                    expected_replacements=data.expected_replacements,
-                )
-                updated_entity = write_result.entity
-                written_content = write_result.content
-                search_content = write_result.search_content
-
-            if fast:
-                task_scheduler.schedule(
-                    "reindex_entity",
-                    entity_id=updated_entity.id,
-                    project_id=project_id,
-                )
-            else:
-                await search_service.index_entity(updated_entity, content=search_content)
-                _schedule_vector_sync_if_enabled(
-                    task_scheduler=task_scheduler,
-                    app_config=app_config,
-                    entity_id=updated_entity.id,
-                    project_id=project_id,
-                )
+            identifier = entity.permalink or entity.file_path
+            write_result = await entity_service.edit_entity_with_content(
+                identifier=identifier,
+                operation=data.operation,
+                content=data.content,
+                section=data.section,
+                find_text=data.find_text,
+                expected_replacements=data.expected_replacements,
+            )
+            updated_entity = write_result.entity
+            await search_service.index_entity(updated_entity, content=write_result.search_content)
+            _schedule_vector_sync_if_enabled(
+                task_scheduler=task_scheduler,
+                app_config=app_config,
+                entity_id=updated_entity.id,
+                project_id=project_id,
+            )
 
             result = EntityResponseV2.model_validate(updated_entity)
-            if fast:
-                result = result.model_copy(update={"observations": [], "relations": []})
-
-            if fast:
-                content = await file_service.read_file_content(updated_entity.file_path)
-            else:
-                # Non-fast writes already captured the markdown in memory. Reuse it here
-                # instead of re-reading the file; format_on_save is the one config that can
-                # still make the persisted file diverge because write_file only returns a checksum.
-                content = written_content
-            result = result.model_copy(update={"content": content})
+            result = result.model_copy(update={"content": write_result.content})
 
             logger.info(
                 f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=200"
@@ -543,12 +439,10 @@ async def edit_entity_by_id(
 
 @router.delete("/entities/{entity_id}", response_model=DeleteEntitiesResponse)
 async def delete_entity_by_id(
-    background_tasks: BackgroundTasks,
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
-    search_service=Depends(lambda: None),  # Optional for now
 ) -> DeleteEntitiesResponse:
     """Delete an entity by external ID.
 
@@ -576,10 +470,6 @@ async def delete_entity_by_id(
         # Delete the entity using internal ID
         deleted = await entity_service.delete_entity(entity.id)
 
-        # Remove from search index if search service available
-        if search_service:
-            background_tasks.add_task(search_service.handle_delete, entity)  # pragma: no cover
-
         logger.info(f"API v2 response: external_id={entity_id}, deleted={deleted}")
 
         return DeleteEntitiesResponse(deleted=deleted)
@@ -591,7 +481,6 @@ async def delete_entity_by_id(
 @router.put("/entities/{entity_id}/move", response_model=EntityResponseV2)
 async def move_entity(
     data: MoveEntityRequestV2,
-    background_tasks: BackgroundTasks,
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
@@ -674,7 +563,6 @@ async def move_entity(
 @router.post("/move-directory", response_model=DirectoryMoveResult)
 async def move_directory(
     data: MoveDirectoryRequestV2,
-    background_tasks: BackgroundTasks,
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,

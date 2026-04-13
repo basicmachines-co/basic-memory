@@ -9,8 +9,6 @@ Verifies that:
 
 from __future__ import annotations
 
-import importlib
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,9 +24,6 @@ from basic_memory.markdown.schemas import (
 )
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.entity_service import EntityService
-
-entity_service_module = importlib.import_module("basic_memory.services.entity_service")
-
 
 # --- Helpers ---
 
@@ -46,17 +41,6 @@ def _make_markdown(
         created=datetime.now(timezone.utc),
         modified=datetime.now(timezone.utc),
     )
-
-
-def _capture_spans():
-    spans: list[tuple[str, dict]] = []
-
-    @contextmanager
-    def fake_span(name: str, **attrs):
-        spans.append((name, attrs))
-        yield
-
-    return spans, fake_span
 
 
 # --- Optimization 1: No redundant get_by_file_path in update_entity_relations ---
@@ -165,80 +149,6 @@ async def test_create_or_update_entity_uses_lightweight_exact_resolution(
         (schema.file_path, {"strict": True, "load_relations": False}),
         (schema.permalink, {"strict": True, "load_relations": False}),
     ]
-
-
-# --- Telemetry sub-spans ---
-
-
-@pytest.mark.asyncio
-async def test_upsert_update_emits_sub_spans(entity_service: EntityService, monkeypatch):
-    """upsert_entity_from_markdown (update path) should emit sub-spans for each DB phase."""
-    entity = await entity_service.create_entity(
-        EntitySchema(
-            title="Span Test",
-            directory="notes",
-            note_type="note",
-            content="# Span Test\n\n## Observations\n- [fact] original",
-        )
-    )
-
-    spans, fake_span = _capture_spans()
-    monkeypatch.setattr(entity_service_module.telemetry, "span", fake_span)
-
-    markdown = _make_markdown(
-        title="Span Test",
-        observations=[MarkdownObservation(content="updated", category="fact")],
-    )
-    await entity_service.upsert_entity_from_markdown(Path(entity.file_path), markdown, is_new=False)
-
-    span_names = [name for name, _ in spans]
-
-    # update_entity_and_observations sub-spans
-    assert "upsert.update.fetch_entity" in span_names
-    assert "upsert.update.delete_observations" in span_names
-    assert "upsert.update.insert_observations" in span_names
-    assert "upsert.update.save_entity" in span_names
-
-    # update_entity_relations sub-spans
-    assert "upsert.relations.delete_existing" in span_names
-    assert "upsert.relations.reload_entity" in span_names
-
-
-@pytest.mark.asyncio
-async def test_upsert_with_relations_emits_resolve_and_insert_spans(
-    entity_service: EntityService, monkeypatch
-):
-    """When relations exist, resolve_links and insert_relations spans should be emitted."""
-    # Create two entities so the relation can resolve
-    await entity_service.create_entity(
-        EntitySchema(
-            title="Target Entity",
-            directory="notes",
-            note_type="note",
-            content="# Target Entity",
-        )
-    )
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Source Entity",
-            directory="notes",
-            note_type="note",
-            content="# Source Entity",
-        )
-    )
-
-    spans, fake_span = _capture_spans()
-    monkeypatch.setattr(entity_service_module.telemetry, "span", fake_span)
-
-    markdown = _make_markdown(
-        title="Source Entity",
-        relations=[MarkdownRelation(type="links_to", target="Target Entity")],
-    )
-    await entity_service.upsert_entity_from_markdown(Path(source.file_path), markdown, is_new=False)
-
-    span_names = [name for name, _ in spans]
-    assert "upsert.relations.resolve_links" in span_names
-    assert "upsert.relations.insert_relations" in span_names
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from fastapi import BackgroundTasks, Response
+from fastapi import Response
 
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.request import EditEntityRequest
@@ -79,10 +79,6 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         def schedule(self, *args, **kwargs):
             return None
 
-    class FakeFileService:
-        async def read_file_content(self, path):
-            raise AssertionError("non-fast create should not re-read file content")
-
     result = await knowledge_router_module.create_entity(
         project_id=123,
         data=Entity(
@@ -92,13 +88,10 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
             content_type="text/markdown",
             content="telemetry content",
         ),
-        background_tasks=BackgroundTasks(),
         entity_service=cast(Any, FakeEntityService()),
         search_service=cast(Any, FakeSearchService()),
         task_scheduler=FakeTaskScheduler(),
-        file_service=cast(Any, FakeFileService()),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
-        fast=False,
     )
 
     assert result.content == response_content
@@ -134,10 +127,6 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         def schedule(self, *args, **kwargs):
             return None
 
-    class FakeFileService:
-        async def read_file_content(self, path):
-            raise AssertionError("non-fast update should not re-read file content")
-
     response = Response()
     result = await knowledge_router_module.update_entity_by_id(
         data=Entity(
@@ -148,16 +137,13 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
             content="updated telemetry content",
         ),
         response=response,
-        background_tasks=BackgroundTasks(),
         project_id=123,
         entity_service=cast(Any, FakeEntityService()),
         search_service=cast(Any, FakeSearchService()),
         entity_repository=cast(Any, FakeEntityRepository()),
         task_scheduler=FakeTaskScheduler(),
-        file_service=cast(Any, FakeFileService()),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
-        fast=False,
     )
 
     assert result.content == response_content
@@ -193,22 +179,15 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         def schedule(self, *args, **kwargs):
             return None
 
-    class FakeFileService:
-        async def read_file_content(self, path):
-            raise AssertionError("non-fast edit should not re-read file content")
-
     result = await knowledge_router_module.edit_entity_by_id(
         data=EditEntityRequest(operation="append", content="edited telemetry content"),
-        background_tasks=BackgroundTasks(),
         project_id=123,
         entity_service=cast(Any, FakeEntityService()),
         search_service=cast(Any, FakeSearchService()),
         entity_repository=cast(Any, FakeEntityRepository()),
         task_scheduler=FakeTaskScheduler(),
-        file_service=cast(Any, FakeFileService()),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
-        fast=False,
     )
 
     assert result.content == response_content

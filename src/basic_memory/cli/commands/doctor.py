@@ -69,7 +69,7 @@ async def run_doctor() -> None:
                     content=f"# {api_note_title}\n\n- [note] API to file check",
                     entity_metadata={"tags": ["doctor"]},
                 )
-                api_result = await knowledge_client.create_entity(api_note.model_dump(), fast=False)
+                api_result = await knowledge_client.create_entity(api_note.model_dump())
 
                 api_file = project_path / api_result.file_path
                 if not api_file.exists():
