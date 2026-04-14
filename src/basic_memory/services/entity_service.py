@@ -478,17 +478,28 @@ class EntityService(BaseService[EntityModel]):
         No database rows are mutated here.
         """
         schema = schema.model_copy(deep=True)
-        file_path = Path(entity.file_path)
+        file_path = Path(schema.file_path)
+        current_file_path = Path(entity.file_path)
         existing_markdown = await self.entity_parser.parse_markdown_content(
-            file_path=file_path,
+            file_path=current_file_path,
             content=existing_content,
         )
 
         content_markdown = self._apply_schema_frontmatter_overrides(schema)
+        # Trigger: a full replacement may also rename the note by changing title or directory.
+        # Why: cloud accepts the final markdown before S3 is updated, so the prepare contract must
+        #      describe the requested destination instead of silently keeping the old path.
+        # Outcome: unchanged paths preserve the current permalink; renamed paths resolve the
+        #          permalink from the requested destination unless frontmatter explicitly sets one.
+        current_permalink = (
+            entity.permalink
+            if file_path.as_posix() == current_file_path.as_posix()
+            else None
+        )
         resolved_permalink = await self._resolve_schema_permalink(
             schema,
             file_path=file_path,
-            current_permalink=entity.permalink,
+            current_permalink=current_permalink,
             content_markdown=content_markdown,
             skip_conflict_check=skip_conflict_check,
         )
@@ -686,11 +697,18 @@ class EntityService(BaseService[EntityModel]):
             prepared.file_path,
             prepared.markdown_content,
         )
+        previous_file_path = Path(entity.file_path)
         entity = await self.upsert_entity_from_markdown(
             prepared.file_path,
             prepared.entity_markdown,
             is_new=False,
+            existing_entity=entity,
         )
+        if prepared.file_path.as_posix() != previous_file_path.as_posix():
+            # Trigger: a full replacement changed the canonical note path.
+            # Why: the new file has already been written and the entity now points at it.
+            # Outcome: remove the stale old file so local Basic Memory mirrors cloud's PGQ cleanup.
+            await self.file_service.delete_file(previous_file_path)
         entity = await self.repository.update(entity.id, {"checksum": checksum})
         if not entity:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after update: {prepared.file_path}")
@@ -807,7 +825,11 @@ class EntityService(BaseService[EntityModel]):
             raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
     async def update_entity_and_observations(
-        self, file_path: Path, markdown: EntityMarkdown
+        self,
+        file_path: Path,
+        markdown: EntityMarkdown,
+        *,
+        existing_entity: EntityModel | None = None,
     ) -> EntityModel:
         """Update entity fields and observations.
 
@@ -816,7 +838,11 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        db_entity = await self.repository.get_by_file_path(file_path.as_posix())
+        db_entity = existing_entity or await self.repository.get_by_file_path(
+            file_path.as_posix()
+        )
+        if db_entity is None:  # pragma: no cover
+            raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
 
         # Clear observations for entity
         await self.observation_repository.delete_by_fields(entity_id=db_entity.id)
@@ -858,12 +884,17 @@ class EntityService(BaseService[EntityModel]):
         markdown: EntityMarkdown,
         *,
         is_new: bool,
+        existing_entity: EntityModel | None = None,
     ) -> EntityModel:
         """Create/update entity and relations from parsed markdown."""
         if is_new:
             created = await self.create_entity_from_markdown(file_path, markdown)
         else:
-            created = await self.update_entity_and_observations(file_path, markdown)
+            created = await self.update_entity_and_observations(
+                file_path,
+                markdown,
+                existing_entity=existing_entity,
+            )
         # Pass entity directly — avoids redundant get_by_file_path inside update_entity_relations
         return await self.update_entity_relations(created, markdown)
 

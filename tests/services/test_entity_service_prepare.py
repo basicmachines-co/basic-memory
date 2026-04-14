@@ -95,6 +95,44 @@ async def test_prepare_update_entity_content_matches_update_entity_with_content(
 
 
 @pytest.mark.asyncio
+async def test_prepare_update_entity_content_can_change_file_path(
+    entity_service,
+    file_service,
+) -> None:
+    """Full replacements should carry title/directory renames through prepare state."""
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Original Name",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+
+    existing_content = await file_service.read_file_content(created.file_path)
+    update_schema = EntitySchema(
+        title="Renamed Note",
+        directory="journal",
+        note_type="note",
+        content="Renamed body",
+    )
+
+    prepared = await entity_service.prepare_update_entity_content(
+        created,
+        update_schema,
+        existing_content,
+    )
+    result = await entity_service.update_entity_with_content(created, update_schema)
+
+    assert prepared.file_path.as_posix() == "journal/Renamed Note.md"
+    assert result.entity.file_path == "journal/Renamed Note.md"
+    assert result.content == prepared.markdown_content
+    assert prepared.entity_fields["permalink"] == result.entity.permalink
+    assert not await file_service.exists("notes/Original Name.md")
+    assert await file_service.exists("journal/Renamed Note.md")
+
+
+@pytest.mark.asyncio
 async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
     entity_service,
     file_service,
