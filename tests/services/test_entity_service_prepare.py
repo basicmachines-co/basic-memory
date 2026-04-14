@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from basic_memory.file_utils import parse_frontmatter
+from basic_memory.file_utils import ParseError, parse_frontmatter, remove_frontmatter
 from basic_memory.schemas import Entity as EntitySchema
 
 
@@ -128,3 +128,82 @@ async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
     assert prepared.entity_fields["title"] == result.entity.title
     assert prepared.entity_fields["note_type"] == result.entity.note_type
     assert prepared.entity_fields["permalink"] == result.entity.permalink
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_prepend_preserves_valid_frontmatter(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Prepared Prepend Frontmatter",
+            directory="notes",
+            note_type="note",
+            content="---\nstatus: draft\ntags:\n  - one\n---\nOriginal body",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="prepend",
+        content="Prepended line",
+    )
+
+    assert parse_frontmatter(prepared.markdown_content) == {
+        "title": "Prepared Prepend Frontmatter",
+        "type": "note",
+        "status": "draft",
+        "tags": ["one"],
+        "permalink": created.permalink,
+    }
+    assert remove_frontmatter(prepared.markdown_content) == "Prepended line\nOriginal body"
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_prepend_fails_for_malformed_frontmatter(
+    entity_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Prepared Prepend Parse Error",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+
+    malformed_content = "---\nstatus: [draft\n---\nOriginal body"
+
+    with pytest.raises(ParseError, match="Invalid YAML in frontmatter"):
+        await entity_service.prepare_edit_entity_content(
+            created,
+            malformed_content,
+            operation="prepend",
+            content="Prepended line",
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_prepend_without_frontmatter_uses_simple_prepend(
+    entity_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Prepared Prepend Simple",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        "Original body",
+        operation="prepend",
+        content="Prepended line",
+    )
+
+    assert prepared.markdown_content == "Prepended line\nOriginal body"

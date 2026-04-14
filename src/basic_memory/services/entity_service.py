@@ -1262,33 +1262,30 @@ class EntityService(BaseService[EntityModel]):
     def _prepend_after_frontmatter(self, current_content: str, content: str) -> str:
         """Prepend content after frontmatter, preserving frontmatter structure."""
 
-        # Check if file has frontmatter
+        # Trigger: the note starts with frontmatter delimiters.
+        # Why: prepend must preserve the existing YAML block and insert content into the body,
+        #      not silently rewrite malformed metadata into a corrupted accepted note state.
+        # Outcome: valid frontmatter is preserved, and malformed frontmatter fails fast.
         if has_frontmatter(current_content):
-            try:
-                # Parse and separate frontmatter from body
-                frontmatter_data = parse_frontmatter(current_content)
-                body_content = remove_frontmatter(current_content)
+            # Parse and separate frontmatter from body. Parse errors are intentional caller-visible
+            # failures so prepare_edit_entity_content can reject unsafe accepted writes.
+            frontmatter_data = parse_frontmatter(current_content)
+            body_content = remove_frontmatter(current_content)
 
-                # Prepend content to the body
-                if content and not content.endswith("\n"):
-                    new_body = content + "\n" + body_content
-                else:
-                    new_body = content + body_content
+            # Prepend content to the body
+            if content and not content.endswith("\n"):
+                new_body = content + "\n" + body_content
+            else:
+                new_body = content + body_content
 
-                # Reconstruct file with frontmatter + prepended body
-                yaml_fm = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
-                return f"---\n{yaml_fm}---\n\n{new_body.strip()}"
+            # Reconstruct file with frontmatter + prepended body
+            yaml_fm = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
+            return f"---\n{yaml_fm}---\n\n{new_body.strip()}"
 
-            except Exception as e:  # pragma: no cover
-                logger.warning(
-                    f"Failed to parse frontmatter during prepend: {e}"
-                )  # pragma: no cover
-                # Fall back to simple prepend if frontmatter parsing fails  # pragma: no cover
-
-        # No frontmatter or parsing failed - do simple prepend  # pragma: no cover
-        if content and not content.endswith("\n"):  # pragma: no cover
-            return content + "\n" + current_content  # pragma: no cover
-        return content + current_content  # pragma: no cover
+        # No frontmatter means prepend is a plain text edit.
+        if content and not content.endswith("\n"):
+            return content + "\n" + current_content
+        return content + current_content
 
     async def move_entity(
         self,
