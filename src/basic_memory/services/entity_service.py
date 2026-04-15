@@ -404,6 +404,16 @@ class EntityService(BaseService[EntityModel]):
             entity_markdown=entity_markdown,
         )
 
+    async def _read_persisted_write_content(self, file_path: Path) -> tuple[str, str]:
+        """Read the stored markdown after write-time formatting has finished."""
+        # Trigger: format-on-save or platform-specific text writes can change the stored markdown
+        # after prepare accepted the request.
+        # Why: API responses and inline search indexing should describe the note that actually
+        #      landed on disk, not the pre-write snapshot.
+        # Outcome: write helpers return persisted markdown plus search content derived from it.
+        persisted_content = await self.file_service.read_file_content(file_path)
+        return persisted_content, remove_frontmatter(persisted_content)
+
     async def prepare_create_entity_content(
         self,
         schema: EntitySchema,
@@ -661,10 +671,13 @@ class EntityService(BaseService[EntityModel]):
         updated = await self.repository.update(entity.id, {"checksum": checksum})
         if not updated:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
+        persisted_content, search_content = await self._read_persisted_write_content(
+            prepared.file_path
+        )
         return EntityWriteResult(
             entity=updated,
-            content=prepared.markdown_content,
-            search_content=prepared.search_content,
+            content=persisted_content,
+            search_content=search_content,
         )
 
     async def update_entity(self, entity: EntityModel, schema: EntitySchema) -> EntityModel:
@@ -712,11 +725,14 @@ class EntityService(BaseService[EntityModel]):
         entity = await self.repository.update(entity.id, {"checksum": checksum})
         if not entity:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after update: {prepared.file_path}")
+        persisted_content, search_content = await self._read_persisted_write_content(
+            prepared.file_path
+        )
 
         return EntityWriteResult(
             entity=entity,
-            content=prepared.markdown_content,
-            search_content=prepared.search_content,
+            content=persisted_content,
+            search_content=search_content,
         )
 
     async def delete_entity(self, permalink_or_id: str | int) -> bool:
@@ -1068,11 +1084,12 @@ class EntityService(BaseService[EntityModel]):
         entity = await self.repository.update(entity.id, {"checksum": checksum})
         if not entity:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
+        persisted_content, search_content = await self._read_persisted_write_content(file_path)
 
         return EntityWriteResult(
             entity=entity,
-            content=prepared.markdown_content,
-            search_content=prepared.search_content,
+            content=persisted_content,
+            search_content=search_content,
         )
 
     def apply_edit_operation(

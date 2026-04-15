@@ -1,9 +1,16 @@
 """Tests for EntityWriteResult content variants."""
 
+import sys
+
 import pytest
 
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.schemas import Entity as EntitySchema
+
+skip_on_windows = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="formatter command uses POSIX shell redirection",
+)
 
 
 @pytest.mark.asyncio
@@ -106,3 +113,30 @@ async def test_edit_entity_with_content_returns_full_and_search_content(
     assert result.content == file_content
     assert result.search_content == remove_frontmatter(file_content)
     assert result.search_content == "Edited body content"
+
+
+@skip_on_windows
+@pytest.mark.asyncio
+async def test_create_entity_with_content_returns_persisted_content_after_format_on_save(
+    entity_service, file_service, app_config
+) -> None:
+    app_config.format_on_save = True
+    app_config.formatter_command = "sh -c 'echo modified > {file}'"
+    file_service.app_config = app_config
+
+    result = await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="FormattedWriteResult",
+            directory="notes",
+            note_type="note",
+            content="Original body content",
+        )
+    )
+
+    file_path = file_service.get_entity_path(result.entity)
+    file_content, _ = await file_service.read_file(file_path)
+
+    assert file_content == "modified\n"
+    assert result.content == file_content
+    assert result.search_content == remove_frontmatter(file_content)
+    assert result.search_content == "modified"
