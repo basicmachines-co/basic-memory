@@ -6,6 +6,7 @@ import pytest
 
 from basic_memory.file_utils import ParseError, parse_frontmatter, remove_frontmatter
 from basic_memory.schemas import Entity as EntitySchema
+from basic_memory.services.exceptions import EntityAlreadyExistsError
 
 
 @pytest.mark.asyncio
@@ -130,6 +131,51 @@ async def test_prepare_update_entity_content_can_change_file_path(
     assert prepared.entity_fields["permalink"] == result.entity.permalink
     assert not await file_service.exists("notes/Original Name.md")
     assert await file_service.exists("journal/Renamed Note.md")
+
+
+@pytest.mark.asyncio
+async def test_update_entity_with_content_rejects_rename_conflicts_before_writing(
+    entity_service,
+    file_service,
+) -> None:
+    source = await entity_service.create_entity(
+        EntitySchema(
+            title="Source Note",
+            directory="notes",
+            note_type="note",
+            content="Source body",
+        )
+    )
+    target = await entity_service.create_entity(
+        EntitySchema(
+            title="Target Note",
+            directory="notes",
+            note_type="note",
+            content="Target body",
+        )
+    )
+
+    source_content = await file_service.read_file_content(source.file_path)
+    target_content = await file_service.read_file_content(target.file_path)
+
+    with pytest.raises(
+        EntityAlreadyExistsError,
+        match="file already exists at destination path: notes/Target Note.md",
+    ):
+        await entity_service.update_entity_with_content(
+            source,
+            EntitySchema(
+                title="Target Note",
+                directory="notes",
+                note_type="note",
+                content="Overwritten body",
+            ),
+        )
+
+    assert await file_service.read_file_content(source.file_path) == source_content
+    assert await file_service.read_file_content(target.file_path) == target_content
+    assert await file_service.exists(source.file_path)
+    assert await file_service.exists(target.file_path)
 
 
 @pytest.mark.asyncio

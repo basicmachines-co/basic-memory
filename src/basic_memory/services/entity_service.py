@@ -414,6 +414,17 @@ class EntityService(BaseService[EntityModel]):
         persisted_content = await self.file_service.read_file_content(file_path)
         return persisted_content, remove_frontmatter(persisted_content)
 
+    def _paths_share_storage_target(self, left: Path, right: Path) -> bool:
+        """Return whether two relative project paths point at the same stored file."""
+        left_abs_path = self.file_service.base_path / left
+        right_abs_path = self.file_service.base_path / right
+        if not left_abs_path.exists() or not right_abs_path.exists():
+            return False
+        try:
+            return left_abs_path.samefile(right_abs_path)
+        except OSError:
+            return False
+
     async def prepare_create_entity_content(
         self,
         schema: EntitySchema,
@@ -705,12 +716,24 @@ class EntityService(BaseService[EntityModel]):
             existing_content,
         )
         self._sync_prepared_schema_state(schema, prepared)
+        previous_file_path = Path(entity.file_path)
+        # Trigger: a full replacement also renames the note to a different canonical path.
+        # Why: Path.replace() overwrites existing files, so the destination must be conflict-free
+        #      before we write or we can clobber another note and only fail later at the DB layer.
+        # Outcome: conflicting rename attempts fail before touching either file on disk.
+        if (
+            prepared.file_path.as_posix() != previous_file_path.as_posix()
+            and await self.file_service.exists(prepared.file_path)
+            and not self._paths_share_storage_target(previous_file_path, prepared.file_path)
+        ):
+            raise EntityAlreadyExistsError(
+                f"file already exists at destination path: {prepared.file_path}"
+            )
         # --- Persist Prepared State ---
         checksum = await self.file_service.write_file(
             prepared.file_path,
             prepared.markdown_content,
         )
-        previous_file_path = Path(entity.file_path)
         entity = await self.upsert_entity_from_markdown(
             prepared.file_path,
             prepared.entity_markdown,
@@ -721,7 +744,8 @@ class EntityService(BaseService[EntityModel]):
             # Trigger: a full replacement changed the canonical note path.
             # Why: the new file has already been written and the entity now points at it.
             # Outcome: remove the stale old file so local Basic Memory mirrors cloud's PGQ cleanup.
-            await self.file_service.delete_file(previous_file_path)
+            if not self._paths_share_storage_target(previous_file_path, prepared.file_path):
+                await self.file_service.delete_file(previous_file_path)
         entity = await self.repository.update(entity.id, {"checksum": checksum})
         if not entity:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after update: {prepared.file_path}")
