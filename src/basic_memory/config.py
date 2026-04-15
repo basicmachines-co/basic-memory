@@ -50,6 +50,23 @@ def _default_semantic_search_enabled() -> bool:
     )
 
 
+def _default_fastembed_cache_dir() -> str:
+    """Default FastEmbed model cache to ~/.basic-memory/fastembed_cache.
+
+    FastEmbed's own default is <system-temp>/fastembed_cache (e.g. /tmp/fastembed_cache on
+    Linux), which is ephemeral in sandboxed runtimes like Codex CLI and can disappear between
+    invocations, causing ONNXRuntimeError: NO_SUCHFILE on every subsequent run.
+
+    By defaulting to a path inside the Basic Memory data directory we stay consistent with
+    where other app state lives and ensure the ONNX model survives across sessions.
+    Honors BASIC_MEMORY_CONFIG_DIR so isolated test environments remain self-contained.
+    """
+    if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+        return str(Path(config_dir) / "fastembed_cache")
+    home = os.getenv("HOME", str(Path.home()))
+    return str(Path(home) / DATA_DIR_NAME / "fastembed_cache")
+
+
 @dataclass
 class ProjectConfig:
     """Configuration for a specific basic-memory project."""
@@ -221,8 +238,11 @@ class BasicMemoryConfig(BaseSettings):
         le=16,
     )
     semantic_embedding_cache_dir: str | None = Field(
-        default=None,
-        description="Optional cache directory for FastEmbed model artifacts.",
+        default_factory=_default_fastembed_cache_dir,
+        description="Cache directory for FastEmbed model artifacts. Defaults to "
+        "~/.basic-memory/fastembed_cache to avoid FastEmbed's ephemeral /tmp default, "
+        "which breaks MCP in sandboxed runtimes (e.g. Codex CLI). "
+        "Set to null to use FastEmbed's own default.",
     )
     semantic_embedding_threads: int | None = Field(
         default=None,
