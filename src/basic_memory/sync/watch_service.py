@@ -89,7 +89,7 @@ class WatchService:
         self.app_config = app_config
         self.project_repository = project_repository
         self.state = WatchServiceState()
-        self.status_path = Path.home() / ".basic-memory" / WATCH_STATUS_JSON
+        self.status_path = app_config.data_dir_path / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
         self._sync_service_factory = sync_service_factory

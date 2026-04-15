@@ -5,10 +5,27 @@ from pathlib import Path
 
 from basic_memory.ignore_utils import (
     DEFAULT_IGNORE_PATTERNS,
+    get_bmignore_path,
     load_gitignore_patterns,
     should_ignore_path,
     filter_files,
 )
+
+
+def test_get_bmignore_path_honors_basic_memory_config_dir(tmp_path, monkeypatch):
+    """Regression guard for #742: .bmignore must follow BASIC_MEMORY_CONFIG_DIR."""
+    custom_dir = tmp_path / "instance-y" / "state"
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_dir))
+
+    assert get_bmignore_path() == custom_dir / ".bmignore"
+
+
+def test_get_bmignore_path_defaults_under_home(tmp_path, monkeypatch):
+    """Without BASIC_MEMORY_CONFIG_DIR, .bmignore lives under ~/.basic-memory."""
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    assert get_bmignore_path() == tmp_path / ".basic-memory" / ".bmignore"
 
 
 def test_load_default_patterns_only():

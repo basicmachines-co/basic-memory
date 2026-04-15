@@ -4,6 +4,8 @@ import fnmatch
 from pathlib import Path
 from typing import Set
 
+from basic_memory.config import resolve_data_dir
+
 
 # Common directories and patterns to ignore by default
 # These are used as fallback if .bmignore doesn't exist
@@ -61,9 +63,11 @@ def get_bmignore_path() -> Path:
     """Get path to .bmignore file.
 
     Returns:
-        Path to ~/.basic-memory/.bmignore
+        Path to <basic-memory data dir>/.bmignore, honoring
+        ``BASIC_MEMORY_CONFIG_DIR`` so isolated instances each keep their
+        own ignore file.
     """
-    return Path.home() / ".basic-memory" / ".bmignore"
+    return resolve_data_dir() / ".bmignore"
 
 
 def create_default_bmignore() -> None:

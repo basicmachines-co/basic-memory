@@ -3,12 +3,14 @@
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from watchfiles import Change
 
+from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.models.project import Project
-from basic_memory.sync.watch_service import WatchServiceState
+from basic_memory.sync.watch_service import WatchService, WatchServiceState
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -23,6 +25,23 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 def test_watch_service_init(watch_service, project_config):
     """Test watch service initialization."""
     assert watch_service.status_path.parent.exists()
+
+
+def test_watch_service_status_path_honors_basic_memory_config_dir(tmp_path, monkeypatch):
+    """Regression guard for #742: watch-status.json follows BASIC_MEMORY_CONFIG_DIR.
+
+    WatchService previously hardcoded ``Path.home() / ".basic-memory"`` which
+    split state across instances running under an isolated config dir. Ensure
+    the status path now lives under the configured data dir.
+    """
+    custom_dir = tmp_path / "instance-z" / "state"
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_dir))
+
+    app_config = BasicMemoryConfig(projects={"main": {"path": str(tmp_path / "project")}})
+    service = WatchService(app_config=app_config, project_repository=MagicMock())
+
+    assert service.status_path == custom_dir / WATCH_STATUS_JSON
+    assert service.status_path.parent.exists()
 
 
 def test_state_add_event():

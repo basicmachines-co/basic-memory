@@ -127,6 +127,27 @@ async def test_get_system_status(project_service: ProjectService):
 
 
 @pytest.mark.asyncio
+async def test_get_system_status_reads_watch_status_from_config_dir(
+    project_service: ProjectService, tmp_path, monkeypatch
+):
+    """Regression guard for #742: watch-status.json is read from the configured
+    data dir, not hardcoded to ~/.basic-memory."""
+    import json as _json
+    from basic_memory.config import WATCH_STATUS_JSON
+
+    custom_dir = tmp_path / "instance-v" / "state"
+    custom_dir.mkdir(parents=True)
+    (custom_dir / WATCH_STATUS_JSON).write_text(
+        _json.dumps({"running": True, "error_count": 7}), encoding="utf-8"
+    )
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_dir))
+
+    status = project_service.get_system_status()
+
+    assert status.watch_status == {"running": True, "error_count": 7}
+
+
+@pytest.mark.asyncio
 async def test_get_statistics(project_service: ProjectService, test_graph, test_project):
     """Test getting statistics."""
     # Get statistics

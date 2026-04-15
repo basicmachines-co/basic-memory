@@ -20,6 +20,7 @@ from loguru import logger
 from rich.console import Console
 
 from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
+from basic_memory.config import resolve_data_dir
 from basic_memory.utils import normalize_project_path
 
 console = Console()
@@ -138,13 +139,16 @@ def get_bmignore_filter_path() -> Path:
 def get_project_bisync_state(project_name: str) -> Path:
     """Get path to project's bisync state directory.
 
+    Honors ``BASIC_MEMORY_CONFIG_DIR`` so isolated instances each keep their
+    own bisync state alongside their config.
+
     Args:
         project_name: Name of the project
 
     Returns:
         Path to bisync state directory for this project
     """
-    return Path.home() / ".basic-memory" / "bisync-state" / project_name
+    return resolve_data_dir() / "bisync-state" / project_name
 
 
 def bisync_initialized(project_name: str) -> bool:

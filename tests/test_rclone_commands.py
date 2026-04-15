@@ -83,10 +83,19 @@ def test_get_project_remote_strips_app_data_prefix():
     assert get_project_remote(project, "my-bucket") == "basic-memory-cloud:my-bucket/research"
 
 
-def test_get_project_bisync_state():
+def test_get_project_bisync_state(monkeypatch):
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
     state_path = get_project_bisync_state("research")
     expected = Path.home() / ".basic-memory" / "bisync-state" / "research"
     assert state_path == expected
+
+
+def test_get_project_bisync_state_honors_basic_memory_config_dir(tmp_path, monkeypatch):
+    """Regression guard for #742: bisync state dir follows BASIC_MEMORY_CONFIG_DIR."""
+    custom_dir = tmp_path / "instance-w" / "state"
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_dir))
+
+    assert get_project_bisync_state("research") == custom_dir / "bisync-state" / "research"
 
 
 def test_bisync_initialized_false_when_not_exists(tmp_path, monkeypatch):
