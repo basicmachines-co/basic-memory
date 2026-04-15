@@ -128,9 +128,50 @@ async def test_prepare_update_entity_content_can_change_file_path(
     assert prepared.file_path.as_posix() == "journal/Renamed Note.md"
     assert result.entity.file_path == "journal/Renamed Note.md"
     assert result.content == prepared.markdown_content
+    assert prepared.entity_fields["permalink"] != created.permalink
     assert prepared.entity_fields["permalink"] == result.entity.permalink
     assert not await file_service.exists("notes/Original Name.md")
     assert await file_service.exists("journal/Renamed Note.md")
+
+
+@pytest.mark.asyncio
+async def test_prepare_update_entity_content_preserves_permalink_when_move_updates_disabled(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Stable Permalink",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+    entity_service.app_config.update_permalinks_on_move = False
+
+    existing_content = await file_service.read_file_content(created.file_path)
+    update_schema = EntitySchema(
+        title="Renamed Stable Permalink",
+        directory="journal",
+        note_type="note",
+        content="Renamed body",
+    )
+
+    prepared = await entity_service.prepare_update_entity_content(
+        created,
+        update_schema,
+        existing_content,
+    )
+    result = await entity_service.update_entity_with_content(created, update_schema)
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+
+    assert prepared.file_path.as_posix() == "journal/Renamed Stable Permalink.md"
+    assert result.entity.file_path == "journal/Renamed Stable Permalink.md"
+    assert prepared.entity_fields["permalink"] == created.permalink
+    assert result.entity.permalink == created.permalink
+    assert prepared_frontmatter["permalink"] == created.permalink
+    assert not await file_service.exists("notes/Stable Permalink.md")
+    assert await file_service.exists("journal/Renamed Stable Permalink.md")
 
 
 @pytest.mark.asyncio

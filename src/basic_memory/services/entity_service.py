@@ -511,10 +511,16 @@ class EntityService(BaseService[EntityModel]):
         # Trigger: a full replacement may also rename the note by changing title or directory.
         # Why: cloud accepts the final markdown before S3 is updated, so the prepare contract must
         #      describe the requested destination instead of silently keeping the old path.
-        # Outcome: unchanged paths preserve the current permalink; renamed paths resolve the
-        #          permalink from the requested destination unless frontmatter explicitly sets one.
+        # Outcome: unchanged paths preserve the current permalink; renamed paths only rotate the
+        #          permalink when move-policy allows it or frontmatter explicitly sets one.
+        update_permalink_on_rename = bool(
+            self.app_config and self.app_config.update_permalinks_on_move
+        )
         current_permalink = (
-            entity.permalink if file_path.as_posix() == current_file_path.as_posix() else None
+            entity.permalink
+            if file_path.as_posix() == current_file_path.as_posix()
+            or not update_permalink_on_rename
+            else None
         )
         resolved_permalink = await self._resolve_schema_permalink(
             schema,
