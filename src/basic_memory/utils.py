@@ -262,7 +262,8 @@ def setup_logging(
 
     Args:
         log_level: DEBUG, INFO, WARNING, ERROR
-        log_to_file: Write to ~/.basic-memory/basic-memory.log with rotation
+        log_to_file: Write to <basic-memory data dir>/basic-memory.log with rotation
+            (honors BASIC_MEMORY_CONFIG_DIR)
         log_to_stdout: Write to stderr (for Docker/cloud deployments)
         structured_context: Bind tenant_id, fly_region, etc. for cloud observability
     """

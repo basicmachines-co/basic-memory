@@ -180,7 +180,8 @@ def load_gitignore_patterns(base_path: Path, use_gitignore: bool = True) -> Set[
     """Load gitignore patterns from .gitignore file and .bmignore.
 
     Combines patterns from:
-    1. ~/.basic-memory/.bmignore (user's global ignore patterns)
+    1. <basic-memory data dir>/.bmignore (user's global ignore patterns, honors
+       BASIC_MEMORY_CONFIG_DIR)
     2. {base_path}/.gitignore (project-specific patterns, if use_gitignore=True)
 
     Args:
