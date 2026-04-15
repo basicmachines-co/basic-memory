@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 import frontmatter
 import yaml
 from loguru import logger
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
@@ -513,9 +514,7 @@ class EntityService(BaseService[EntityModel]):
         # Outcome: unchanged paths preserve the current permalink; renamed paths resolve the
         #          permalink from the requested destination unless frontmatter explicitly sets one.
         current_permalink = (
-            entity.permalink
-            if file_path.as_posix() == current_file_path.as_posix()
-            else None
+            entity.permalink if file_path.as_posix() == current_file_path.as_posix() else None
         )
         resolved_permalink = await self._resolve_schema_permalink(
             schema,
@@ -878,9 +877,17 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        db_entity = existing_entity or await self.repository.get_by_file_path(
-            file_path.as_posix()
-        )
+        db_entity = existing_entity
+        if db_entity is not None:
+            state = sa_inspect(db_entity)
+            # Trigger: update flows can hand us an entity loaded in a different session.
+            # Why: clearing and rebuilding observations touches relationship state that cannot
+            #      lazy-load from a detached ORM instance.
+            # Outcome: reload the canonical row before mutating observations.
+            if state.detached or "observations" in state.unloaded:
+                db_entity = await self.repository.get_by_id(db_entity.id)
+        else:
+            db_entity = await self.repository.get_by_file_path(file_path.as_posix())
         if db_entity is None:  # pragma: no cover
             raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
 

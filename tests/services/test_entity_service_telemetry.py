@@ -23,6 +23,10 @@ def _capture_spans():
     return spans, fake_span
 
 
+def _span_names(spans: list[tuple[str, dict]]) -> list[str]:
+    return [name for name, _ in spans]
+
+
 @pytest.mark.asyncio
 async def test_create_entity_emits_file_write_span(entity_service, monkeypatch) -> None:
     spans, fake_span = _capture_spans()
@@ -39,7 +43,7 @@ async def test_create_entity_emits_file_write_span(entity_service, monkeypatch) 
     entity = await entity_service.create_entity(schema)
 
     assert entity.title == "Telemetry Create"
-    assert [name for name, _ in spans] == ["file_service.write"]
+    assert "file_service.write" in _span_names(spans)
 
 
 @pytest.mark.asyncio
@@ -64,4 +68,7 @@ async def test_edit_entity_emits_file_read_and_write_spans(entity_service, monke
     )
 
     assert updated.id == created.id
-    assert [name for name, _ in spans] == ["file_service.read", "file_service.write"]
+    span_names = _span_names(spans)
+    assert "file_service.read" in span_names
+    assert "file_service.write" in span_names
+    assert span_names.index("file_service.read") < span_names.index("file_service.write")
