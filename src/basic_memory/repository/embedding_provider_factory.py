@@ -23,8 +23,17 @@ _FASTEMBED_MAX_THREADS = 8
 
 
 def _resolve_cache_dir(app_config: BasicMemoryConfig) -> str:
-    """Resolve the effective FastEmbed cache dir for this config."""
-    return app_config.semantic_embedding_cache_dir or default_fastembed_cache_dir()
+    """Resolve the effective FastEmbed cache dir for this config.
+
+    Uses an explicit ``is not None`` check — an empty string override from
+    config or ``BASIC_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`` is an invalid
+    path, not a request to fall back to the default, and FastEmbed's error
+    message is clearer than silently swapping in a different directory.
+    """
+    configured = app_config.semantic_embedding_cache_dir
+    if configured is not None:
+        return configured
+    return default_fastembed_cache_dir()
 
 
 def _available_cpu_count() -> int | None:

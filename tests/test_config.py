@@ -335,15 +335,30 @@ class TestDataDirHelpers:
 
         assert default_fastembed_cache_dir() == str(custom)
 
-    def test_default_fastembed_cache_dir_never_falls_back_to_tmp(self, config_home, monkeypatch):
-        """Regression guard for #741: default must not point at /tmp/fastembed_cache."""
+    def test_default_fastembed_cache_dir_never_falls_back_to_fastembed_tmp_default(
+        self, config_home, monkeypatch
+    ):
+        """Regression guard for #741.
+
+        FastEmbed's own fallback when ``cache_dir`` is ``None`` is
+        ``<system tmp>/fastembed_cache`` — the exact path that disappears in
+        sandboxed MCP runtimes (Codex CLI). Ensure Basic Memory's resolver
+        never lands on that path.
+
+        Compared as exact paths rather than ``startswith(tempfile.gettempdir())``
+        because the test runner itself can legitimately live under ``/tmp``
+        (pytest's ``tmp_path`` does on Linux CI), and that's not the bug we
+        care about here.
+        """
         monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
         monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
 
-        resolved = default_fastembed_cache_dir()
+        resolved = Path(default_fastembed_cache_dir())
 
-        assert "/tmp/fastembed_cache" not in resolved
-        assert not resolved.startswith(tempfile.gettempdir())
+        # Must equal the data-dir-relative default.
+        assert resolved == config_home / ".basic-memory" / "fastembed_cache"
+        # And must not equal FastEmbed's own <tempdir>/fastembed_cache fallback.
+        assert resolved != Path(tempfile.gettempdir()) / "fastembed_cache"
 
 
 class TestConfigManager:

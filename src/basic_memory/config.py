@@ -54,16 +54,16 @@ def resolve_data_dir() -> Path:
     """Resolve the Basic Memory data directory.
 
     Single source of truth for the per-user state directory. Honors
-    BASIC_MEMORY_CONFIG_DIR so each process/worktree can isolate config
-    and database state; otherwise falls back to ``~/.basic-memory``.
+    ``BASIC_MEMORY_CONFIG_DIR`` so each process/worktree can isolate config
+    and database state; otherwise falls back to ``<user home>/.basic-memory``.
 
-    Works cross-platform: ``Path.home()`` returns ``%USERPROFILE%`` on
-    Windows and ``$HOME`` on macOS/Linux.
+    Cross-platform: ``Path.home()`` reads ``$HOME`` on POSIX and
+    ``%USERPROFILE%`` on Windows, so there's no need to check ``$HOME``
+    explicitly here.
     """
     if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
         return Path(config_dir)
-    home = os.getenv("HOME", Path.home())
-    return Path(home) / DATA_DIR_NAME
+    return Path.home() / DATA_DIR_NAME
 
 
 def default_fastembed_cache_dir() -> str:
@@ -83,7 +83,7 @@ def default_fastembed_cache_dir() -> str:
       ONNX load raises ``NO_SUCHFILE``. Persisting the cache under the
       per-user data directory works identically on macOS, Linux, and Windows.
     """
-    if env_override := os.environ.get("FASTEMBED_CACHE_PATH"):
+    if env_override := os.getenv("FASTEMBED_CACHE_PATH"):
         return env_override
     return str(resolve_data_dir() / "fastembed_cache")
 
