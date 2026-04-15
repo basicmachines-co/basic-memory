@@ -732,7 +732,7 @@ class EntityService(BaseService[EntityModel]):
             and not self._paths_share_storage_target(previous_file_path, prepared.file_path)
         ):
             raise EntityAlreadyExistsError(
-                f"file already exists at destination path: {prepared.file_path}"
+                f"file already exists at destination path: {prepared.file_path.as_posix()}"
             )
         # --- Persist Prepared State ---
         checksum = await self.file_service.write_file(
