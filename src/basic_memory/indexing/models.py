@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.models import Entity
 
 
 @dataclass(slots=True)
@@ -73,6 +76,19 @@ class IndexedEntity:
     checksum: str
     content_type: str | None = None
     markdown_content: str | None = None
+
+
+@dataclass(slots=True)
+class SyncedMarkdownFile:
+    """Canonical result for syncing one markdown file end-to-end."""
+
+    entity: Entity
+    checksum: str
+    markdown_content: str
+    file_path: str
+    content_type: str
+    updated_at: datetime
+    size: int
 
 
 @dataclass(slots=True)

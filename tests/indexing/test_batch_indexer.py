@@ -15,6 +15,7 @@ from basic_memory.indexing import (
     IndexFrontmatterWriteResult,
     IndexInputFile,
 )
+from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import SyncFatalError
 
 
@@ -561,3 +562,65 @@ async def test_batch_indexer_re_raises_fatal_sync_errors(
             limit=1,
             worker=fatal_worker,
         )
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_index_markdown_file_rewrites_permalink_after_repository_conflict(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    existing = await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Existing Note",
+            directory="notes",
+            content="# Existing Note\n\nOriginal content.\n",
+        )
+    )
+    conflicting_permalink = existing.entity.permalink
+    assert conflicting_permalink is not None
+
+    path = "notes/race.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            f"""\
+            ---
+            title: Race Note
+            type: note
+            permalink: {conflicting_permalink}
+            ---
+
+            # Race Note
+
+            Body content.
+            """
+        ),
+    )
+
+    async def stale_permalink(*args, **kwargs) -> str:
+        return conflicting_permalink
+
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    monkeypatch.setattr(entity_service, "resolve_permalink", stale_permalink)
+    indexed = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    persisted_content = await file_service.read_file_content(path)
+    assert indexed.permalink == f"{conflicting_permalink}-1"
+    assert indexed.markdown_content == persisted_content

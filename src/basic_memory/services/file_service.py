@@ -273,6 +273,9 @@ class FileService:
             logger.warning("File not found", operation="read_file_content", path=str(full_path))
             raise
         except Exception as e:
+            if isinstance(e, FileNotFoundError):
+                logger.warning("File not found", operation="read_file", path=str(full_path))
+                raise
             logger.exception("File read error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")
 
@@ -366,6 +369,9 @@ class FileService:
                 )
                 return content, checksum
 
+        except FileNotFoundError as e:
+            logger.warning("File not found", operation="read_file", path=str(full_path))
+            raise FileOperationError(f"Failed to read file: {e}") from e
         except Exception as e:
             logger.exception("File read error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")

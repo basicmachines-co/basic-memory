@@ -43,10 +43,17 @@ class _PreparedMarkdownFile:
 class _PreparedEntity:
     path: str
     entity_id: int
+    permalink: str | None
     checksum: str
     content_type: str | None
     search_content: str | None
     markdown_content: str | None = None
+
+
+@dataclass(slots=True)
+class _PersistedMarkdownFile:
+    prepared: _PreparedMarkdownFile
+    entity: Entity
 
 
 class BatchIndexer:
@@ -118,6 +125,9 @@ class BatchIndexer:
         )
         error_by_path.update(markdown_errors)
         prepared_entities.update(markdown_upserts)
+        if existing_permalink_by_path is not None:
+            for path, prepared_entity in markdown_upserts.items():
+                existing_permalink_by_path[path] = prepared_entity.permalink
 
         regular_upserts, regular_errors = await self._run_bounded(
             regular_paths,
@@ -166,6 +176,57 @@ class BatchIndexer:
             relations_resolved=resolved_count,
             relations_unresolved=unresolved_count,
             search_indexed=search_indexed,
+        )
+
+    async def index_markdown_file(
+        self,
+        file: IndexInputFile,
+        *,
+        new: bool | None = None,
+        existing_permalink_by_path: dict[str, str | None] | None = None,
+        index_search: bool = True,
+    ) -> IndexedEntity:
+        """Index one markdown file using the same normalization and upsert path as batches."""
+        if not self._is_markdown(file):
+            raise ValueError(f"index_markdown_file requires markdown input: {file.path}")
+
+        prepared = await self._prepare_markdown_file(file)
+        if existing_permalink_by_path is None:
+            existing_permalink_by_path = {
+                path: permalink
+                for path, permalink in (
+                    await self.entity_repository.get_file_path_to_permalink_map()
+                ).items()
+            }
+
+        reserved_permalinks = {
+            permalink
+            for path, permalink in existing_permalink_by_path.items()
+            if path != file.path and permalink
+        }
+        prepared = await self._normalize_markdown_file(prepared, reserved_permalinks)
+        existing_permalink_by_path[file.path] = prepared.markdown.frontmatter.permalink
+
+        persisted = await self._persist_markdown_file(prepared, is_new=new)
+        existing_permalink_by_path[file.path] = persisted.entity.permalink
+        await self._resolve_batch_relations([persisted.entity.id], max_concurrent=1)
+
+        refreshed = await self.entity_repository.find_by_ids([persisted.entity.id])
+        if len(refreshed) != 1:  # pragma: no cover
+            raise ValueError(f"Failed to reload indexed entity for {file.path}")
+        entity = refreshed[0]
+        prepared_entity = self._build_prepared_entity(persisted.prepared, entity)
+
+        if index_search:
+            return await self._refresh_search_index(prepared_entity, entity)
+
+        return IndexedEntity(
+            path=prepared_entity.path,
+            entity_id=entity.id,
+            permalink=entity.permalink,
+            checksum=prepared_entity.checksum,
+            content_type=prepared_entity.content_type,
+            markdown_content=prepared_entity.markdown_content,
         )
 
     # --- Preparation ---
@@ -320,34 +381,8 @@ class BatchIndexer:
     # --- Persistence ---
 
     async def _upsert_markdown_file(self, prepared: _PreparedMarkdownFile) -> _PreparedEntity:
-        existing = await self.entity_repository.get_by_file_path(
-            prepared.file.path,
-            load_relations=False,
-        )
-        entity = await self.entity_service.upsert_entity_from_markdown(
-            Path(prepared.file.path),
-            prepared.markdown,
-            is_new=existing is None,
-        )
-        updated = await self.entity_repository.update(
-            entity.id,
-            self._entity_metadata_updates(prepared.file, prepared.final_checksum),
-        )
-        if updated is None:
-            raise ValueError(f"Failed to update markdown entity metadata for {prepared.file.path}")
-
-        return _PreparedEntity(
-            path=prepared.file.path,
-            entity_id=updated.id,
-            checksum=prepared.final_checksum,
-            content_type=prepared.file.content_type,
-            search_content=(
-                prepared.markdown.content
-                if prepared.markdown.content is not None
-                else prepared.content
-            ),
-            markdown_content=prepared.content,
-        )
+        persisted = await self._persist_markdown_file(prepared)
+        return self._build_prepared_entity(persisted.prepared, persisted.entity)
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
@@ -405,6 +440,7 @@ class BatchIndexer:
         return _PreparedEntity(
             path=file.path,
             entity_id=updated.id,
+            permalink=updated.permalink,
             checksum=checksum,
             content_type=file.content_type,
             search_content=None,
@@ -494,6 +530,84 @@ class BatchIndexer:
         )
 
     # --- Helpers ---
+
+    async def _persist_markdown_file(
+        self,
+        prepared: _PreparedMarkdownFile,
+        *,
+        is_new: bool | None = None,
+    ) -> _PersistedMarkdownFile:
+        existing = await self.entity_repository.get_by_file_path(
+            prepared.file.path,
+            load_relations=False,
+        )
+        if is_new is None:
+            is_new = existing is None
+        entity = await self.entity_service.upsert_entity_from_markdown(
+            Path(prepared.file.path),
+            prepared.markdown,
+            is_new=is_new,
+        )
+        prepared = await self._reconcile_persisted_permalink(prepared, entity)
+        updated = await self.entity_repository.update(
+            entity.id,
+            self._entity_metadata_updates(prepared.file, prepared.final_checksum),
+        )
+        if updated is None:
+            raise ValueError(f"Failed to update markdown entity metadata for {prepared.file.path}")
+        return _PersistedMarkdownFile(prepared=prepared, entity=updated)
+
+    async def _reconcile_persisted_permalink(
+        self,
+        prepared: _PreparedMarkdownFile,
+        entity: Entity,
+    ) -> _PreparedMarkdownFile:
+        if (
+            self.app_config.disable_permalinks
+            or entity.permalink is None
+            or entity.permalink == prepared.markdown.frontmatter.permalink
+        ):
+            return prepared
+
+        logger.debug(
+            "Updating permalink after upsert conflict resolution",
+            path=prepared.file.path,
+            old_permalink=prepared.markdown.frontmatter.permalink,
+            new_permalink=entity.permalink,
+        )
+        prepared.markdown.frontmatter.metadata["permalink"] = entity.permalink
+        write_result = await self.file_writer.write_frontmatter(
+            IndexFrontmatterUpdate(
+                path=prepared.file.path,
+                metadata={"permalink": entity.permalink},
+            )
+        )
+        return _PreparedMarkdownFile(
+            file=prepared.file,
+            content=write_result.content,
+            final_checksum=write_result.checksum,
+            markdown=prepared.markdown,
+            file_contains_frontmatter=prepared.file_contains_frontmatter,
+        )
+
+    def _build_prepared_entity(
+        self,
+        prepared: _PreparedMarkdownFile,
+        entity: Entity,
+    ) -> _PreparedEntity:
+        return _PreparedEntity(
+            path=prepared.file.path,
+            entity_id=entity.id,
+            permalink=entity.permalink,
+            checksum=prepared.final_checksum,
+            content_type=prepared.file.content_type,
+            search_content=(
+                prepared.markdown.content
+                if prepared.markdown.content is not None
+                else prepared.content
+            ),
+            markdown_content=prepared.content,
+        )
 
     async def _resolve_checksum(self, file: IndexInputFile) -> str:
         if file.checksum is not None:

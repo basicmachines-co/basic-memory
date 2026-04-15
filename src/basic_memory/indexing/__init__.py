@@ -12,6 +12,7 @@ from basic_memory.indexing.models import (
     IndexingBatchResult,
     IndexInputFile,
     IndexProgress,
+    SyncedMarkdownFile,
 )
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "IndexingBatchResult",
     "IndexInputFile",
     "IndexProgress",
+    "SyncedMarkdownFile",
     "build_index_batches",
 ]

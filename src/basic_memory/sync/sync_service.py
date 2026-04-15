@@ -18,8 +18,14 @@ from sqlalchemy.exc import IntegrityError
 from basic_memory import telemetry
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.file_utils import compute_checksum, has_frontmatter
-from basic_memory.indexing import BatchIndexer, IndexFileMetadata, IndexInputFile, IndexProgress
+from basic_memory.file_utils import compute_checksum, remove_frontmatter
+from basic_memory.indexing import (
+    BatchIndexer,
+    IndexFileMetadata,
+    IndexInputFile,
+    IndexProgress,
+    SyncedMarkdownFile,
+)
 from basic_memory.indexing.batching import build_index_batches
 from basic_memory.indexing.models import (
     IndexedEntity,
@@ -1052,91 +1058,82 @@ class SyncService:
         Returns:
             Tuple of (entity, checksum)
         """
-        # Parse markdown first to get any existing permalink
+        synced = await self.sync_one_markdown_file(path, new=new, index_search=False)
+        return synced.entity, synced.checksum
+
+    async def sync_one_markdown_file(
+        self,
+        path: str,
+        *,
+        new: bool = True,
+        index_search: bool = True,
+    ) -> SyncedMarkdownFile:
+        """Sync one markdown file and return the final canonical file state.
+
+        This method is the fail-fast single-file primitive for callers such as
+        cloud workers. It does not swallow unexpected exceptions.
+        """
         logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
 
-        file_content = await self.file_service.read_file_content(path)
-        file_contains_frontmatter = has_frontmatter(file_content)
-
-        # Get file timestamps for tracking modification times
+        initial_markdown_content = await self.file_service.read_file_content(path)
         file_metadata = await self.file_service.get_file_metadata(path)
-        created = file_metadata.created_at
-        modified = file_metadata.modified_at
-
-        # Parse markdown content with file metadata (avoids redundant file read/stat)
-        # This enables cloud implementations (S3FileService) to provide metadata from head_object
-        abs_path = self.file_service.base_path / path
-        entity_markdown = await self.entity_parser.parse_markdown_content(
-            file_path=abs_path,
-            content=file_content,
-            mtime=file_metadata.modified_at.timestamp(),
-            ctime=file_metadata.created_at.timestamp(),
+        initial_checksum = await compute_checksum(initial_markdown_content)
+        indexed = await self.batch_indexer.index_markdown_file(
+            IndexInputFile(
+                path=path,
+                size=file_metadata.size,
+                checksum=initial_checksum,
+                content_type=self.file_service.content_type(path),
+                last_modified=file_metadata.modified_at,
+                created_at=file_metadata.created_at,
+                content=initial_markdown_content.encode("utf-8"),
+            ),
+            new=new,
+            index_search=False,
         )
-
-        # Trigger: markdown file has no frontmatter and frontmatter enforcement is enabled
-        # Why: watch/sync consumers rely on normalized metadata and stable permalinks
-        # Outcome: file is updated in-place with derived title/type/permalink metadata
-        if not file_contains_frontmatter and self.app_config.ensure_frontmatter_on_sync:
-            permalink = await self.entity_service.resolve_permalink(
-                path, markdown=entity_markdown, skip_conflict_check=True
-            )
-            frontmatter_updates = {
-                "title": entity_markdown.frontmatter.title,
-                "type": entity_markdown.frontmatter.type,
-                "permalink": permalink,
-            }
-            await self.file_service.update_frontmatter(path, frontmatter_updates)
-            entity_markdown.frontmatter.metadata.update(frontmatter_updates)
-
-        # if the file contains frontmatter, resolve a permalink (unless disabled)
-        if file_contains_frontmatter and not self.app_config.disable_permalinks:
-            # Resolve permalink - skip conflict checks during bulk sync for performance
-            permalink = await self.entity_service.resolve_permalink(
-                path, markdown=entity_markdown, skip_conflict_check=True
-            )
-
-            # If permalink changed, update the file
-            if permalink != entity_markdown.frontmatter.permalink:
-                logger.debug(
-                    f"Updating permalink for path: {path}, old_permalink: {entity_markdown.frontmatter.permalink}, new_permalink: {permalink}"
-                )
-
-                entity_markdown.frontmatter.metadata["permalink"] = permalink
-                await self.file_service.update_frontmatter(path, {"permalink": permalink})
-
-        # Create/update entity and relations in one path
-        logger.debug(f"{'Creating' if new else 'Updating'} entity from markdown, path={path}")
-        entity = await self.entity_service.upsert_entity_from_markdown(
-            Path(path), entity_markdown, is_new=new
+        final_markdown_content = (
+            indexed.markdown_content
+            if indexed.markdown_content is not None
+            else initial_markdown_content
         )
-
-        # After updating relations, we need to compute the checksum again
-        # This is necessary for files with wikilinks to ensure consistent checksums
-        # after relation processing is complete
-        final_checksum = await self.file_service.compute_checksum(path)
-
-        # Update checksum, timestamps, and file metadata from file system
-        # Store mtime/size for efficient change detection in future scans
-        # This ensures temporal ordering in search and recent activity uses actual file modification times
-        await self.entity_repository.update(
-            entity.id,
+        file_metadata = await self.file_service.get_file_metadata(path)
+        refreshed_entities = await self.entity_repository.find_by_ids([indexed.entity_id])
+        if len(refreshed_entities) != 1:  # pragma: no cover
+            raise ValueError(f"Failed to reload synced markdown entity for {path}")
+        updated_entity = await self.entity_repository.update(
+            refreshed_entities[0].id,
             {
-                "checksum": final_checksum,
-                "created_at": created,
-                "updated_at": modified,
+                "checksum": indexed.checksum,
+                "created_at": file_metadata.created_at,
+                "updated_at": file_metadata.modified_at,
                 "mtime": file_metadata.modified_at.timestamp(),
                 "size": file_metadata.size,
             },
         )
+        if updated_entity is None:  # pragma: no cover
+            raise ValueError(f"Failed to update markdown entity metadata for {path}")
+
+        if index_search:
+            await self.search_service.index_entity_data(
+                updated_entity,
+                content=remove_frontmatter(final_markdown_content),
+            )
 
         logger.debug(
-            f"Markdown sync completed: path={path}, entity_id={entity.id}, "
-            f"observation_count={len(entity.observations)}, relation_count={len(entity.relations)}, "
-            f"checksum={final_checksum[:8]}"
+            f"Markdown sync completed: path={path}, entity_id={updated_entity.id}, "
+            f"observation_count={len(updated_entity.observations)}, "
+            f"relation_count={len(updated_entity.relations)}, checksum={indexed.checksum[:8]}"
         )
 
-        # Return the final checksum to ensure everything is consistent
-        return entity, final_checksum
+        return SyncedMarkdownFile(
+            entity=updated_entity,
+            checksum=indexed.checksum,
+            markdown_content=final_markdown_content,
+            file_path=path,
+            content_type=self.file_service.content_type(path),
+            updated_at=file_metadata.modified_at,
+            size=file_metadata.size,
+        )
 
     async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a non-markdown file with basic tracking.
