@@ -307,7 +307,13 @@ async def test_project(config_home, engine_factory) -> Project:
 
 @pytest.fixture
 def config_home(tmp_path, monkeypatch) -> Path:
+    # Patch both HOME and USERPROFILE so Path.home() returns the test dir on
+    # every platform — Path.home() reads HOME on POSIX and USERPROFILE on
+    # Windows, and ConfigManager.data_dir_path now goes through Path.home()
+    # via resolve_data_dir(). Must mirror tests/conftest.py:config_home.
     monkeypatch.setenv("HOME", str(tmp_path))
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
     # Set BASIC_MEMORY_HOME to the test directory
     monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path / "basic-memory"))
     return tmp_path
