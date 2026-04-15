@@ -10,6 +10,8 @@ from basic_memory.config import (
     ConfigManager,
     ProjectEntry,
     ProjectMode,
+    default_fastembed_cache_dir,
+    resolve_data_dir,
 )
 from pathlib import Path
 
@@ -128,6 +130,54 @@ class TestBasicMemoryConfig:
 
         assert config.data_dir_path == config_home / ".basic-memory"
         assert config.app_database_path == config_home / ".basic-memory" / "memory.db"
+
+    def test_semantic_embedding_cache_dir_field_stays_none_by_default(
+        self, config_home, monkeypatch
+    ):
+        """The raw config field stays None so it isn't persisted into config.json.
+
+        Resolution to a concrete path happens in embedding_provider_factory at
+        provider construction time, so ``BASIC_MEMORY_CONFIG_DIR`` and
+        ``FASTEMBED_CACHE_PATH`` changes take effect on every run instead of
+        being frozen by the first save. See #741.
+        """
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+
+        config = BasicMemoryConfig()
+
+        assert config.semantic_embedding_cache_dir is None
+
+    def test_semantic_embedding_cache_dir_not_persisted_in_model_dump(
+        self, config_home, monkeypatch
+    ):
+        """model_dump must not bake a resolved cache path into config.json.
+
+        Regression guard for #741: persisting the default would freeze stale
+        paths when users later change BASIC_MEMORY_CONFIG_DIR or
+        FASTEMBED_CACHE_PATH.
+        """
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+
+        dumped = BasicMemoryConfig().model_dump(mode="json")
+
+        assert dumped["semantic_embedding_cache_dir"] is None
+
+    def test_semantic_embedding_cache_dir_explicit_user_value_preserved(
+        self, config_home, monkeypatch
+    ):
+        """An explicit user override still round-trips through model_dump."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+
+        config = BasicMemoryConfig(semantic_embedding_cache_dir="/custom/explicit/path")
+
+        assert config.semantic_embedding_cache_dir == "/custom/explicit/path"
+        assert (
+            config.model_dump(mode="json")["semantic_embedding_cache_dir"]
+            == "/custom/explicit/path"
+        )
 
     def test_explicit_default_project_preserved(self, config_home, monkeypatch):
         """Test that a valid explicit default_project is not overwritten by model_post_init."""
@@ -250,6 +300,50 @@ class TestBasicMemoryConfig:
 
         loaded = config_manager.load_config()
         assert loaded.default_project == "work"
+
+
+class TestDataDirHelpers:
+    """Module-level helpers that resolve the Basic Memory data directory."""
+
+    def test_resolve_data_dir_defaults_to_home_dot_basic_memory(self, config_home, monkeypatch):
+        """Without BASIC_MEMORY_CONFIG_DIR, resolver returns ~/.basic-memory."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+
+        assert resolve_data_dir() == config_home / ".basic-memory"
+
+    def test_resolve_data_dir_honors_config_dir_env(self, tmp_path, monkeypatch):
+        """BASIC_MEMORY_CONFIG_DIR overrides the default location."""
+        custom = tmp_path / "elsewhere"
+        monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom))
+
+        assert resolve_data_dir() == custom
+
+    def test_default_fastembed_cache_dir_uses_data_dir(self, config_home, monkeypatch):
+        """Default cache path is a subdir of the Basic Memory data dir."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+
+        assert default_fastembed_cache_dir() == str(
+            config_home / ".basic-memory" / "fastembed_cache"
+        )
+
+    def test_default_fastembed_cache_dir_env_override(self, tmp_path, monkeypatch):
+        """FASTEMBED_CACHE_PATH is preferred when set."""
+        custom = tmp_path / "custom-cache"
+        monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(custom))
+        monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path / "state"))
+
+        assert default_fastembed_cache_dir() == str(custom)
+
+    def test_default_fastembed_cache_dir_never_falls_back_to_tmp(self, config_home, monkeypatch):
+        """Regression guard for #741: default must not point at /tmp/fastembed_cache."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+
+        resolved = default_fastembed_cache_dir()
+
+        assert "/tmp/fastembed_cache" not in resolved
+        assert not resolved.startswith(tempfile.gettempdir())
 
 
 class TestConfigManager:

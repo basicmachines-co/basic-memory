@@ -3,7 +3,7 @@
 import os
 from threading import Lock
 
-from basic_memory.config import BasicMemoryConfig
+from basic_memory.config import BasicMemoryConfig, default_fastembed_cache_dir
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 
 type ProviderCacheKey = tuple[
@@ -12,7 +12,7 @@ type ProviderCacheKey = tuple[
     int | None,
     int,
     int,
-    str | None,
+    str,
     int | None,
     int | None,
 ]
@@ -20,6 +20,11 @@ type ProviderCacheKey = tuple[
 _EMBEDDING_PROVIDER_CACHE: dict[ProviderCacheKey, EmbeddingProvider] = {}
 _EMBEDDING_PROVIDER_CACHE_LOCK = Lock()
 _FASTEMBED_MAX_THREADS = 8
+
+
+def _resolve_cache_dir(app_config: BasicMemoryConfig) -> str:
+    """Resolve the effective FastEmbed cache dir for this config."""
+    return app_config.semantic_embedding_cache_dir or default_fastembed_cache_dir()
 
 
 def _available_cpu_count() -> int | None:
@@ -61,7 +66,12 @@ def _resolve_fastembed_runtime_knobs(
 
 
 def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
-    """Build a stable cache key from provider-relevant semantic embedding config."""
+    """Build a stable cache key from provider-relevant semantic embedding config.
+
+    Uses the *resolved* cache dir — not the raw config field — so different
+    FASTEMBED_CACHE_PATH values produce distinct cache keys even when the
+    config field itself is unset.
+    """
     resolved_threads, resolved_parallel = _resolve_fastembed_runtime_knobs(app_config)
     return (
         app_config.semantic_embedding_provider.strip().lower(),
@@ -69,7 +79,7 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         app_config.semantic_embedding_dimensions,
         app_config.semantic_embedding_batch_size,
         app_config.semantic_embedding_request_concurrency,
-        app_config.semantic_embedding_cache_dir,
+        _resolve_cache_dir(app_config),
         resolved_threads,
         resolved_parallel,
     )
@@ -103,8 +113,12 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 
         resolved_threads, resolved_parallel = _resolve_fastembed_runtime_knobs(app_config)
-        if app_config.semantic_embedding_cache_dir is not None:
-            extra_kwargs["cache_dir"] = app_config.semantic_embedding_cache_dir
+        # Trigger: cache_dir is resolved rather than passed through directly.
+        # Why: FastEmbed's own default caches to <system tmp>/fastembed_cache,
+        #      which disappears in sandboxed MCP runtimes (e.g. Codex CLI). See #741.
+        # Outcome: always pass an explicit, user-writable cache dir so the ONNX
+        #          model persists across runs.
+        extra_kwargs["cache_dir"] = _resolve_cache_dir(app_config)
         if resolved_threads is not None:
             extra_kwargs["threads"] = resolved_threads
         if resolved_parallel is not None:

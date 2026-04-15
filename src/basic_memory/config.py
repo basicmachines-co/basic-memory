@@ -50,6 +50,44 @@ def _default_semantic_search_enabled() -> bool:
     )
 
 
+def resolve_data_dir() -> Path:
+    """Resolve the Basic Memory data directory.
+
+    Single source of truth for the per-user state directory. Honors
+    BASIC_MEMORY_CONFIG_DIR so each process/worktree can isolate config
+    and database state; otherwise falls back to ``~/.basic-memory``.
+
+    Works cross-platform: ``Path.home()`` returns ``%USERPROFILE%`` on
+    Windows and ``$HOME`` on macOS/Linux.
+    """
+    if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+        return Path(config_dir)
+    home = os.getenv("HOME", Path.home())
+    return Path(home) / DATA_DIR_NAME
+
+
+def default_fastembed_cache_dir() -> str:
+    """Return the default cache directory used for FastEmbed model artifacts.
+
+    Resolution order:
+      1. ``FASTEMBED_CACHE_PATH`` env var — honors FastEmbed's own convention
+         so users who already configure it through the environment keep working.
+      2. ``<basic-memory data dir>/fastembed_cache`` — the same stable,
+         user-writable directory Basic Memory already uses for config and
+         the default SQLite database. Honors ``BASIC_MEMORY_CONFIG_DIR``.
+
+    Why not ``tempfile.gettempdir()``?
+      FastEmbed's own default is ``<system tmp>/fastembed_cache``, which is
+      ephemeral in many sandboxed MCP runtimes (e.g. Codex CLI wipes /tmp
+      between invocations). The model then disappears and every subsequent
+      ONNX load raises ``NO_SUCHFILE``. Persisting the cache under the
+      per-user data directory works identically on macOS, Linux, and Windows.
+    """
+    if env_override := os.environ.get("FASTEMBED_CACHE_PATH"):
+        return env_override
+    return str(resolve_data_dir() / "fastembed_cache")
+
+
 @dataclass
 class ProjectConfig:
     """Configuration for a specific basic-memory project."""
@@ -222,7 +260,13 @@ class BasicMemoryConfig(BaseSettings):
     )
     semantic_embedding_cache_dir: str | None = Field(
         default=None,
-        description="Optional cache directory for FastEmbed model artifacts.",
+        description=(
+            "Optional override for the FastEmbed model cache directory. "
+            "When unset, Basic Memory resolves this at runtime to "
+            "<basic-memory data dir>/fastembed_cache (or FASTEMBED_CACHE_PATH "
+            "when that env var is set) so the model persists across runs "
+            "without hardcoding a path into config.json."
+        ),
     )
     semantic_embedding_threads: int | None = Field(
         default=None,
@@ -709,11 +753,7 @@ class BasicMemoryConfig(BaseSettings):
     @property
     def data_dir_path(self) -> Path:
         """Get app state directory for config and default SQLite database."""
-        if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
-            return Path(config_dir)
-
-        home = os.getenv("HOME", Path.home())
-        return Path(home) / DATA_DIR_NAME
+        return resolve_data_dir()
 
 
 # Module-level cache for configuration
@@ -731,16 +771,7 @@ class ConfigManager:
 
     def __init__(self) -> None:
         """Initialize the configuration manager."""
-        home = os.getenv("HOME", Path.home())
-        if isinstance(home, str):
-            home = Path(home)
-
-        # Allow override via environment variable
-        if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
-            self.config_dir = Path(config_dir)
-        else:
-            self.config_dir = home / DATA_DIR_NAME
-
+        self.config_dir = resolve_data_dir()
         self.config_file = self.config_dir / CONFIG_FILE_NAME
 
         # Ensure config directory exists

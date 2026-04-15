@@ -248,6 +248,7 @@ def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_s
 
 def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():
     """Factory should forward FastEmbed runtime tuning config fields."""
+    reset_embedding_provider_cache()
     config = BasicMemoryConfig(
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
@@ -263,6 +264,66 @@ def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():
     assert provider.cache_dir == "/tmp/fastembed-cache"
     assert provider.threads == 3
     assert provider.parallel == 2
+
+
+def test_embedding_provider_factory_uses_default_cache_dir_when_unset(config_home, monkeypatch):
+    """Factory should pass the data-dir-relative default when cache_dir is None.
+
+    Legacy configs that carry an explicit ``semantic_embedding_cache_dir: null``
+    must still get a user-writable cache path rather than letting FastEmbed fall
+    back to ``<tmp>/fastembed_cache``. See #741.
+    """
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+    reset_embedding_provider_cache()
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": str(config_home / "project")},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_cache_dir=None,
+    )
+
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    expected = str(config_home / ".basic-memory" / "fastembed_cache")
+    assert provider.cache_dir == expected
+
+
+def test_embedding_provider_factory_cache_key_reflects_resolved_cache_dir(
+    config_home, tmp_path, monkeypatch
+):
+    """Changing FASTEMBED_CACHE_PATH must yield a distinct cached provider.
+
+    The provider cache key uses the *resolved* cache dir rather than the raw
+    (nullable) config field, so env-driven path changes invalidate the cache
+    instead of silently returning a stale provider pointing at the old path.
+    """
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+    reset_embedding_provider_cache()
+
+    base_kwargs = dict(
+        env="test",
+        projects={"test-project": str(config_home / "project")},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_cache_dir=None,
+    )
+
+    provider_a = create_embedding_provider(BasicMemoryConfig(**base_kwargs))
+    assert isinstance(provider_a, FastEmbedEmbeddingProvider)
+
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "alt-cache"))
+    provider_b = create_embedding_provider(BasicMemoryConfig(**base_kwargs))
+
+    assert isinstance(provider_b, FastEmbedEmbeddingProvider)
+    assert provider_b is not provider_a
+    assert provider_a.cache_dir == str(config_home / ".basic-memory" / "fastembed_cache")
+    assert provider_b.cache_dir == str(tmp_path / "alt-cache")
 
 
 def test_fastembed_provider_reports_runtime_log_attrs():
