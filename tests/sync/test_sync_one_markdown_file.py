@@ -153,7 +153,7 @@ async def test_sync_one_markdown_file_returns_original_content_when_no_rewrite_n
 
     assert frontmatter_writer.await_count == 0
     assert result.markdown_content == persisted_content
-    assert file_path.read_text(encoding="utf-8") == persisted_content
+    assert file_path.read_bytes().decode("utf-8") == persisted_content
     assert result.checksum == await sync_service.file_service.compute_checksum(
         "notes/no-rewrite.md"
     )
@@ -248,7 +248,7 @@ async def test_sync_one_markdown_file_indexes_thematic_break_content_without_fro
     persisted_content = file_path.read_bytes().decode("utf-8")
 
     assert result.markdown_content == persisted_content
-    assert file_path.read_text(encoding="utf-8") == persisted_content
+    assert file_path.read_bytes().decode("utf-8") == persisted_content
     index_entity_data.assert_awaited_once_with(
         result.entity,
         content=persisted_content,

@@ -734,4 +734,4 @@ async def test_batch_indexer_does_not_inject_frontmatter_when_sync_enforcement_i
     assert entity.permalink == existing_permalink
     assert frontmatter_writer.await_count == 0
     assert indexed.markdown_content == persisted_content
-    assert await file_service.read_file_content(path) == persisted_content
+    assert (await file_service.read_file_bytes(path)).decode("utf-8") == persisted_content
