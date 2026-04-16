@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import text
 
+from basic_memory.file_utils import remove_frontmatter
 from basic_memory.indexing import (
     BatchIndexer,
     IndexFrontmatterUpdate,
@@ -624,3 +626,54 @@ async def test_batch_indexer_index_markdown_file_rewrites_permalink_after_reposi
     persisted_content = await file_service.read_file_content(path)
     assert indexed.permalink == f"{conflicting_permalink}-1"
     assert indexed.markdown_content == persisted_content
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_strips_frontmatter_from_search_content_when_body_is_empty(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    path = "notes/frontmatter-only.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            """
+            ---
+            title: Frontmatter Only
+            type: note
+            status: draft
+            ---
+            """
+        ).strip(),
+    )
+
+    index_entity_data = AsyncMock()
+    monkeypatch.setattr(search_service, "index_entity_data", index_entity_data)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path), index_search=True
+    )
+
+    persisted_content = await file_service.read_file_content(path)
+    entity = await entity_repository.get_by_file_path(path)
+    assert entity is not None
+    index_entity_data.assert_awaited_once()
+    await_args = index_entity_data.await_args
+    assert await_args is not None
+    args, kwargs = await_args
+    assert args[0].id == entity.id
+    assert kwargs["content"] == remove_frontmatter(persisted_content)

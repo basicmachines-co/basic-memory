@@ -1100,6 +1100,9 @@ class SyncService:
         refreshed_entities = await self.entity_repository.find_by_ids([indexed.entity_id])
         if len(refreshed_entities) != 1:  # pragma: no cover
             raise ValueError(f"Failed to reload synced markdown entity for {path}")
+        # Trigger: markdown sync may have rewritten frontmatter after the initial file metadata load.
+        # Why: the batch indexer persisted checksum/path data from the pre-rewrite IndexInputFile.
+        # Outcome: refresh size and mtime from the file as it actually exists on disk now.
         updated_entity = await self.entity_repository.update(
             refreshed_entities[0].id,
             {

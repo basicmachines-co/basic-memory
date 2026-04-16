@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.file_utils import compute_checksum, has_frontmatter
+from basic_memory.file_utils import compute_checksum, has_frontmatter, remove_frontmatter
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.indexing.models import (
     IndexedEntity,
@@ -604,7 +604,7 @@ class BatchIndexer:
             search_content=(
                 prepared.markdown.content
                 if prepared.markdown.content is not None
-                else prepared.content
+                else remove_frontmatter(prepared.content)
             ),
             markdown_content=prepared.content,
         )
