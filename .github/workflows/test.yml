@@ -5,9 +5,11 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  # Trigger: PR branch pushes already publish commit statuses that show up on the PR.
+  # Why: running the full matrix on both push and pull_request doubles CI time for the
+  #      exact same branch head commit.
+  # Outcome: each branch push runs the test suite once, including PR updates.
   push:
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
   static-checks:
