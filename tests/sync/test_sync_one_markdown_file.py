@@ -146,9 +146,14 @@ async def test_sync_one_markdown_file_returns_original_content_when_no_rewrite_n
 
     result = await sync_service.sync_one_markdown_file("notes/no-rewrite.md", index_search=False)
 
+    # Trigger: Windows persists CRLF for text files even when the test literal uses LF.
+    # Why: this assertion cares about "no rewrite happened", not about pinning one newline style.
+    # Outcome: compare against the exact markdown bytes stored on disk.
+    persisted_content = file_path.read_bytes().decode("utf-8")
+
     assert frontmatter_writer.await_count == 0
-    assert result.markdown_content == original_content
-    assert file_path.read_text(encoding="utf-8") == original_content
+    assert result.markdown_content == persisted_content
+    assert file_path.read_text(encoding="utf-8") == persisted_content
     assert result.checksum == await sync_service.file_service.compute_checksum(
         "notes/no-rewrite.md"
     )
@@ -216,3 +221,35 @@ async def test_sync_markdown_file_remains_tuple_compatible(sync_service, test_pr
     assert entity.file_path == "notes/compat.md"
     assert entity.permalink == f"{test_project.name}/notes/compat"
     assert checksum == await sync_service.file_service.compute_checksum("notes/compat.md")
+
+
+@pytest.mark.asyncio
+async def test_sync_one_markdown_file_indexes_thematic_break_content_without_frontmatter(
+    sync_service,
+    test_project,
+    app_config,
+    monkeypatch,
+):
+    """Leading thematic-break markdown should index as raw content when frontmatter is absent."""
+    app_config.ensure_frontmatter_on_sync = False
+
+    original_content = "---\nBody content after a thematic break.\n"
+    file_path = _write_markdown(
+        Path(test_project.path),
+        "notes/thematic-break.md",
+        original_content,
+    )
+
+    index_entity_data = AsyncMock()
+    monkeypatch.setattr(sync_service.search_service, "index_entity_data", index_entity_data)
+
+    result = await sync_service.sync_one_markdown_file("notes/thematic-break.md")
+
+    persisted_content = file_path.read_bytes().decode("utf-8")
+
+    assert result.markdown_content == persisted_content
+    assert file_path.read_text(encoding="utf-8") == persisted_content
+    index_entity_data.assert_awaited_once_with(
+        result.entity,
+        content=persisted_content,
+    )

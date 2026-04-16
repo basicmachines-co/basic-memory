@@ -562,8 +562,16 @@ class BatchIndexer:
         prepared: _PreparedMarkdownFile,
         entity: Entity,
     ) -> _PreparedMarkdownFile:
+        # Trigger: the source file started without frontmatter and sync is configured
+        #          to leave frontmatterless files alone.
+        # Why: upsert may still assign a DB permalink even when disk content should stay untouched.
+        # Outcome: skip reconciliation writes that would silently inject frontmatter.
         if (
             self.app_config.disable_permalinks
+            or (
+                not prepared.file_contains_frontmatter
+                and not self.app_config.ensure_frontmatter_on_sync
+            )
             or entity.permalink is None
             or entity.permalink == prepared.markdown.frontmatter.permalink
         ):

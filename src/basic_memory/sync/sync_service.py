@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from basic_memory import telemetry
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.file_utils import compute_checksum, remove_frontmatter
+from basic_memory.file_utils import ParseError, compute_checksum, remove_frontmatter
 from basic_memory.indexing import (
     BatchIndexer,
     IndexFileMetadata,
@@ -1126,9 +1126,18 @@ class SyncService:
             raise ValueError(f"Failed to update markdown entity metadata for {path}")
 
         if index_search:
+            # Trigger: markdown may start with '---' as a thematic break or malformed
+            #          frontmatter that the parser already treated as plain content.
+            # Why: one-file sync should not fail after the entity upsert just because
+            #      strict frontmatter stripping rejects that exact text shape.
+            # Outcome: fall back to indexing the raw markdown content for these cases.
+            try:
+                search_content = remove_frontmatter(final_markdown_content)
+            except ParseError:
+                search_content = final_markdown_content
             await self.search_service.index_entity_data(
                 updated_entity,
-                content=remove_frontmatter(final_markdown_content),
+                content=search_content,
             )
 
         logger.debug(

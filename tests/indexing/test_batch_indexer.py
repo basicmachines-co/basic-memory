@@ -677,3 +677,61 @@ async def test_batch_indexer_strips_frontmatter_from_search_content_when_body_is
     args, kwargs = await_args
     assert args[0].id == entity.id
     assert kwargs["content"] == remove_frontmatter(persisted_content)
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_does_not_inject_frontmatter_when_sync_enforcement_is_disabled(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    app_config.ensure_frontmatter_on_sync = False
+
+    created = await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Frontmatterless",
+            directory="notes",
+            content="# Frontmatterless\n\nOriginal content.\n",
+        )
+    )
+    path = created.entity.file_path
+    assert path is not None
+    existing_permalink = created.entity.permalink
+    assert existing_permalink is not None
+
+    original_content = "# Frontmatterless\n\nBody content.\n"
+    await _create_file(project_config.home / path, original_content)
+
+    original_writer = file_service.update_frontmatter_with_result
+    frontmatter_writer = AsyncMock(side_effect=original_writer)
+    monkeypatch.setattr(file_service, "update_frontmatter_with_result", frontmatter_writer)
+
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    indexed = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    # Trigger: Windows persists CRLF for text files even when the test literal uses LF.
+    # Why: this assertion cares about preserving a frontmatterless file, not about newline style.
+    # Outcome: compare against the exact content stored on disk after sync.
+    persisted_content = (project_config.home / path).read_bytes().decode("utf-8")
+    entity = await entity_repository.get_by_file_path(path)
+    assert entity is not None
+    assert entity.permalink == existing_permalink
+    assert frontmatter_writer.await_count == 0
+    assert indexed.markdown_content == persisted_content
+    assert await file_service.read_file_content(path) == persisted_content
