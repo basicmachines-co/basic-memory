@@ -1075,9 +1075,18 @@ class SyncService:
         """
         logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
 
-        initial_markdown_content = await self.file_service.read_file_content(path)
+        try:
+            initial_markdown_bytes = await self.file_service.read_file_bytes(path)
+        except FileOperationError as exc:
+            # Trigger: FileService wraps binary read failures in FileOperationError.
+            # Why: sync_file() treats bare FileNotFoundError as a deletion race and cleans up the DB row.
+            # Outcome: preserve that contract while still hashing the exact bytes we loaded.
+            if isinstance(exc.__cause__, FileNotFoundError):
+                raise exc.__cause__ from exc
+            raise
+        initial_markdown_content = initial_markdown_bytes.decode("utf-8")
         file_metadata = await self.file_service.get_file_metadata(path)
-        initial_checksum = await compute_checksum(initial_markdown_content)
+        initial_checksum = await compute_checksum(initial_markdown_bytes)
         indexed = await self.batch_indexer.index_markdown_file(
             IndexInputFile(
                 path=path,
@@ -1086,7 +1095,7 @@ class SyncService:
                 content_type=self.file_service.content_type(path),
                 last_modified=file_metadata.modified_at,
                 created_at=file_metadata.created_at,
-                content=initial_markdown_content.encode("utf-8"),
+                content=initial_markdown_bytes,
             ),
             new=new,
             index_search=False,

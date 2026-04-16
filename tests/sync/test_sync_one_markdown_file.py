@@ -160,7 +160,7 @@ async def test_sync_one_markdown_file_does_not_reread_for_initial_checksum_when_
     test_project,
     monkeypatch,
 ):
-    """Initial checksum comes from the loaded content, not a second storage read."""
+    """Initial checksum comes from the loaded file bytes, not a second storage read."""
     original_content = dedent(
         f"""\
         ---
@@ -174,7 +174,7 @@ async def test_sync_one_markdown_file_does_not_reread_for_initial_checksum_when_
         Body content.
         """
     )
-    _write_markdown(
+    file_path = _write_markdown(
         Path(test_project.path),
         "notes/no-rewrite.md",
         original_content,
@@ -186,7 +186,7 @@ async def test_sync_one_markdown_file_does_not_reread_for_initial_checksum_when_
     result = await sync_service.sync_one_markdown_file("notes/no-rewrite.md", index_search=False)
 
     checksum_spy.assert_not_awaited()
-    assert result.checksum == await compute_checksum(original_content)
+    assert result.checksum == await compute_checksum(file_path.read_bytes())
 
 
 @pytest.mark.asyncio
