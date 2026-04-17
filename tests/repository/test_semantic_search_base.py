@@ -712,8 +712,6 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
 
     monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
-    # Reset the module-level metric cache so the fake factories below win.
-    monkeypatch.setattr(search_repository_base_module, "_METRIC_INSTRUMENTS", {})
     monkeypatch.setattr(
         search_repository_base_module.logfire,
         "metric_histogram",
@@ -732,12 +730,14 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
 
     result = await repo.sync_entity_vectors_batch([1, 2])
 
+    # Batch-level histograms record once per batch using aggregated totals
+    # from VectorSyncBatchResult — not per entity. See _sync_entity_vectors_internal.
     assert result.entities_synced == 2
     histogram_names = [name for name, _, _ in histogram_calls]
-    assert histogram_names.count("vector_sync_prepare_seconds") == 2
-    assert histogram_names.count("vector_sync_queue_wait_seconds") == 2
-    assert histogram_names.count("vector_sync_embed_seconds") == 2
-    assert histogram_names.count("vector_sync_write_seconds") == 2
+    assert histogram_names.count("vector_sync_prepare_seconds") == 1
+    assert histogram_names.count("vector_sync_queue_wait_seconds") == 1
+    assert histogram_names.count("vector_sync_embed_seconds") == 1
+    assert histogram_names.count("vector_sync_write_seconds") == 1
     assert histogram_names.count("vector_sync_batch_total_seconds") == 1
     assert [name for name, _, _ in counter_calls].count("vector_sync_entities_total") == 1
 
