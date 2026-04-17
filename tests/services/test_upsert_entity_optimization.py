@@ -227,10 +227,44 @@ async def test_upsert_can_defer_relation_target_resolution(
     )
 
     resolve_link.assert_not_awaited()
-    outgoing = [relation for relation in updated.relations if relation.from_id == source.id]
+    outgoing = updated.outgoing_relations
     assert len(outgoing) == 1
     assert outgoing[0].to_id is None
     assert outgoing[0].to_name == "Deferred Target"
+
+
+@pytest.mark.asyncio
+async def test_upsert_deferred_relation_resolution_keeps_self_links_resolved(
+    entity_service: EntityService, monkeypatch
+):
+    """Deferred relation mode should still resolve self-links without a target lookup."""
+    source = await entity_service.create_entity(
+        EntitySchema(
+            title="Deferred Self",
+            directory="notes",
+            note_type="note",
+            content="# Deferred Self",
+        )
+    )
+    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
+
+    markdown = _make_markdown(
+        title="Deferred Self",
+        relations=[MarkdownRelation(type="links_to", target="Deferred Self")],
+    )
+    updated = await entity_service.upsert_entity_from_markdown(
+        Path(source.file_path),
+        markdown,
+        is_new=False,
+        resolve_relations=False,
+    )
+
+    resolve_link.assert_not_awaited()
+    outgoing = updated.outgoing_relations
+    assert len(outgoing) == 1
+    assert outgoing[0].to_id == source.id
+    assert outgoing[0].to_name == "Deferred Self"
 
 
 # --- Correctness: full round-trip ---

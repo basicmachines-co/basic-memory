@@ -1040,6 +1040,16 @@ class EntityService(BaseService[EntityModel]):
                     # Type narrowing: resolved is Optional[Entity] here, not Exception
                     target_entity = resolved  # pyright: ignore [reportAssignmentType]
 
+                if (
+                    target_entity is None
+                    and not resolve_targets
+                    and self._relation_target_matches_entity(rel.target, entity)
+                ):
+                    # Deferred relation mode avoids target lookups, but a self-link is already
+                    # known from the source entity. Resolving it here keeps the relation repair
+                    # pass from permanently ignoring this row as a self-reference.
+                    target_entity = entity
+
                 # if the target is found, store the id
                 target_id = target_entity.id if target_entity else None
                 # if the target is found, store the title, otherwise add the target for a "forward link"
@@ -1066,6 +1076,22 @@ class EntityService(BaseService[EntityModel]):
         # Reload entity with relations via PK lookup (faster than get_by_file_path string match).
         reloaded = await self.repository.find_by_ids([entity_id])
         return reloaded[0]
+
+    def _relation_target_matches_entity(self, target: str, entity: EntityModel) -> bool:
+        """Return whether a parsed markdown relation points back to its source entity."""
+        clean_target = target.strip()
+        if clean_target.startswith("[[") and clean_target.endswith("]]"):
+            clean_target = clean_target[2:-2].strip()
+        if "|" in clean_target:
+            clean_target = clean_target.split("|", 1)[0].strip()
+
+        candidates = {entity.title, entity.file_path}
+        if entity.permalink:
+            candidates.add(entity.permalink)
+        if entity.file_path.endswith(".md"):
+            candidates.add(entity.file_path[:-3])
+
+        return clean_target in candidates
 
     async def edit_entity(
         self,
