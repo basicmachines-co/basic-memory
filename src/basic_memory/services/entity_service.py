@@ -1040,15 +1040,8 @@ class EntityService(BaseService[EntityModel]):
                     # Type narrowing: resolved is Optional[Entity] here, not Exception
                     target_entity = resolved  # pyright: ignore [reportAssignmentType]
 
-                if (
-                    target_entity is None
-                    and not resolve_targets
-                    and self._relation_target_matches_entity(rel.target, entity)
-                ):
-                    # Deferred relation mode avoids target lookups, but a self-link is already
-                    # known from the source entity. Resolving it here keeps the relation repair
-                    # pass from permanently ignoring this row as a self-reference.
-                    target_entity = entity
+                if target_entity is None and not resolve_targets:
+                    target_entity = await self._resolve_deferred_self_relation(rel.target, entity)
 
                 # if the target is found, store the id
                 target_id = target_entity.id if target_entity else None
@@ -1077,21 +1070,36 @@ class EntityService(BaseService[EntityModel]):
         reloaded = await self.repository.find_by_ids([entity_id])
         return reloaded[0]
 
-    def _relation_target_matches_entity(self, target: str, entity: EntityModel) -> bool:
-        """Return whether a parsed markdown relation points back to its source entity."""
+    async def _resolve_deferred_self_relation(
+        self, target: str, entity: EntityModel
+    ) -> EntityModel | None:
+        """Resolve only self-relations that are safe to identify in deferred mode."""
         clean_target = target.strip()
         if clean_target.startswith("[[") and clean_target.endswith("]]"):
             clean_target = clean_target[2:-2].strip()
         if "|" in clean_target:
             clean_target = clean_target.split("|", 1)[0].strip()
 
-        candidates = {entity.title, entity.file_path}
+        candidates = {entity.file_path}
         if entity.permalink:
             candidates.add(entity.permalink)
         if entity.file_path.endswith(".md"):
             candidates.add(entity.file_path[:-3])
 
-        return clean_target in candidates
+        if clean_target in candidates:
+            return entity
+
+        if clean_target != entity.title:
+            return None
+
+        # Title-only links are ambiguous because Basic Memory allows duplicate titles.
+        # Collapse them to self only when the title lookup proves this source is the sole candidate;
+        # otherwise leave the relation unresolved so we do not create a wrong permanent edge.
+        title_matches = await self.repository.get_by_title(clean_target, load_relations=False)
+        if len(title_matches) == 1 and title_matches[0].id == entity.id:
+            return entity
+
+        return None
 
     async def edit_entity(
         self,

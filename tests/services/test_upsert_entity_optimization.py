@@ -267,6 +267,48 @@ async def test_upsert_deferred_relation_resolution_keeps_self_links_resolved(
     assert outgoing[0].to_name == "Deferred Self"
 
 
+@pytest.mark.asyncio
+async def test_upsert_deferred_relation_resolution_does_not_guess_duplicate_titles(
+    entity_service: EntityService, monkeypatch
+):
+    """Deferred relation mode should not treat duplicate titles as guaranteed self-links."""
+    source = await entity_service.create_entity(
+        EntitySchema(
+            title="Duplicate Title",
+            directory="notes/source",
+            note_type="note",
+            content="# Duplicate Title",
+        )
+    )
+    await entity_service.create_entity(
+        EntitySchema(
+            title="Duplicate Title",
+            directory="notes/other",
+            note_type="note",
+            content="# Duplicate Title",
+        )
+    )
+    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
+
+    markdown = _make_markdown(
+        title="Duplicate Title",
+        relations=[MarkdownRelation(type="links_to", target="Duplicate Title")],
+    )
+    updated = await entity_service.upsert_entity_from_markdown(
+        Path(source.file_path),
+        markdown,
+        is_new=False,
+        resolve_relations=False,
+    )
+
+    resolve_link.assert_not_awaited()
+    outgoing = updated.outgoing_relations
+    assert len(outgoing) == 1
+    assert outgoing[0].to_id is None
+    assert outgoing[0].to_name == "Duplicate Title"
+
+
 # --- Correctness: full round-trip ---
 
 
