@@ -109,15 +109,20 @@ def get_error_message(
         return f"HTTP error {status_code}: {method} request to '{path}' failed"
 
 
-def _extract_response_data(response: Response) -> typing.Any:
-    """Safely decode response payload for error reporting."""
-    try:
-        return response.json()
-    except Exception:
+def _extract_response_data(response: Response) -> Any:
+    """Decode the JSON payload of an API response for error reporting.
+
+    Upstream gateways (Fly, Cloudflare, load balancers) can return HTML
+    error pages before the request reaches our FastAPI app; those have no
+    structured `detail` to surface, so we skip them. A malformed body with
+    a JSON content-type is a server bug and we let it raise.
+    """
+    if "application/json" not in response.headers.get("content-type", ""):
         return None
+    return response.json()
 
 
-def _response_detail_text(response_data: typing.Any) -> str | None:
+def _response_detail_text(response_data: Any) -> str | None:
     """Extract textual error detail from API payloads."""
     if isinstance(response_data, dict):
         detail = response_data.get("detail")
@@ -168,30 +173,6 @@ def _resolve_error_message(
     return get_error_message(status_code, url, method)
 
 
-@contextmanager
-def _request_scope(
-    method: str,
-    *,
-    client_name: str | None,
-    operation: str | None,
-    path_template: str | None,
-    params: QueryParamTypes | None = None,
-    has_body: bool = False,
-):
-    """Create the shared MCP transport span used by all HTTP helpers."""
-    with logfire.span(
-        "mcp.http.request",
-        method=method,
-        client_name=client_name,
-        operation=operation,
-        path_template=path_template,
-        phase="request",
-        has_query=bool(params),
-        has_body=has_body,
-    ) as active_span:
-        yield active_span
-
-
 async def call_get(
     client: AsyncClient,
     url: URL | str,
@@ -231,12 +212,15 @@ async def call_get(
     request_span: logfire.LogfireSpan | None = None
 
     try:
-        with _request_scope(
-            "GET",
+        with logfire.span(
+            "mcp.http.request",
+            method="GET",
             client_name=client_name,
             operation=operation,
             path_template=path_template,
-            params=params,
+            phase="request",
+            has_query=bool(params),
+            has_body=False,
         ) as request_span:
             response = await client.get(
                 url,
@@ -328,12 +312,14 @@ async def call_put(
     request_span: logfire.LogfireSpan | None = None
 
     try:
-        with _request_scope(
-            "PUT",
+        with logfire.span(
+            "mcp.http.request",
+            method="PUT",
             client_name=client_name,
             operation=operation,
             path_template=path_template,
-            params=params,
+            phase="request",
+            has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
             response = await client.put(
@@ -430,12 +416,14 @@ async def call_patch(
     request_span: logfire.LogfireSpan | None = None
 
     try:
-        with _request_scope(
-            "PATCH",
+        with logfire.span(
+            "mcp.http.request",
+            method="PATCH",
             client_name=client_name,
             operation=operation,
             path_template=path_template,
-            params=params,
+            phase="request",
+            has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
             response = await client.patch(
@@ -538,12 +526,14 @@ async def call_post(
     request_span: logfire.LogfireSpan | None = None
 
     try:
-        with _request_scope(
-            "POST",
+        with logfire.span(
+            "mcp.http.request",
+            method="POST",
             client_name=client_name,
             operation=operation,
             path_template=path_template,
-            params=params,
+            phase="request",
+            has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
             response = await client.post(
@@ -665,12 +655,15 @@ async def call_delete(
     request_span: logfire.LogfireSpan | None = None
 
     try:
-        with _request_scope(
-            "DELETE",
+        with logfire.span(
+            "mcp.http.request",
+            method="DELETE",
             client_name=client_name,
             operation=operation,
             path_template=path_template,
-            params=params,
+            phase="request",
+            has_query=bool(params),
+            has_body=False,
         ) as request_span:
             response = await client.delete(
                 url=url,

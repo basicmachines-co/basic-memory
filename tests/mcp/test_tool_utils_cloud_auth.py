@@ -14,6 +14,7 @@ class _MockResponse:
         self.status_code = status_code
         self._payload = payload
         self.is_success = status_code < 400
+        self.headers = {"content-type": "application/json"}
 
     def json(self):
         return self._payload

@@ -24,6 +24,7 @@ def mock_response(monkeypatch):
             self.status_code = status_code
             self.is_success = status_code < 400
             self.json = lambda: {}
+            self.headers = {"content-type": "application/json"}
 
         def raise_for_status(self):
             if self.status_code >= 400:
