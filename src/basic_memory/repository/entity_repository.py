@@ -33,9 +33,7 @@ class EntityRepository(Repository[Entity]):
         """
         super().__init__(session_maker, Entity, project_id=project_id)
 
-    async def get_by_id(
-        self, entity_id: int, *, load_relations: bool = True
-    ) -> Optional[Entity]:  # pragma: no cover
+    async def get_by_id(self, entity_id: int, *, load_relations: bool = True) -> Optional[Entity]:
         """Get entity by numeric ID.
 
         Args:

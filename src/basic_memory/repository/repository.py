@@ -152,6 +152,7 @@ class Repository[T: Base]:
 
             session.add_all(models)
             await session.flush()
+            logger.debug(f"Added {len(models)} {self.Model.__name__} records")
             return len(models)
 
     def select(self, *entities: Any) -> Select:
