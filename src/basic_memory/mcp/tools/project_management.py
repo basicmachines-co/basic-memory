@@ -196,14 +196,42 @@ async def list_memory_projects(
 
     # --- Factory mode (cloud app) ---
     # Trigger: set_client_factory() was called (e.g., basic-memory-cloud)
-    # Why: there is no local ASGI server; the factory IS the only source
-    # Outcome: single fetch, no merge needed
+    # Why: there is no local ASGI server; the factory IS the cloud source
+    # Outcome: single fetch, projects reported as source="cloud" with workspace metadata
     if is_factory_mode():
         async with get_client() as client:
             project_client = ProjectClient(client)
             project_list = await project_client.list_projects()
 
-        merged = _merge_projects(project_list, None)
+        # Resolve workspace metadata so cloud projects carry their workspace info
+        cloud_ws_name: str | None = None
+        cloud_ws_type: str | None = None
+        cloud_ws_tenant_id: str | None = None
+        try:
+            from basic_memory.mcp.project_context import get_available_workspaces
+
+            workspaces = await get_available_workspaces(context)
+            if workspaces:
+                # In factory mode the user is authenticated to a single workspace;
+                # use the explicit workspace param or fall back to the first available.
+                matched = None
+                if workspace:
+                    matched = next((ws for ws in workspaces if ws.tenant_id == workspace), None)
+                if matched is None:
+                    matched = workspaces[0]
+                cloud_ws_name = matched.name
+                cloud_ws_type = matched.workspace_type
+                cloud_ws_tenant_id = matched.tenant_id
+        except Exception:
+            pass  # workspace lookup is best-effort
+
+        merged = _merge_projects(
+            None,
+            project_list,
+            cloud_workspace_name=cloud_ws_name,
+            cloud_workspace_type=cloud_ws_type,
+            cloud_workspace_tenant_id=cloud_ws_tenant_id,
+        )
         if output_format == "json":
             return _format_project_list_json(
                 merged, project_list.default_project, constrained_project

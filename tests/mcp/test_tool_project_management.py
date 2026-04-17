@@ -214,7 +214,74 @@ async def test_list_memory_projects_cloud_failure_graceful(app, test_project):
 
 @pytest.mark.asyncio
 async def test_list_memory_projects_factory_mode(app, test_project):
-    """In factory mode (cloud app), only the factory client is used — no cloud merge."""
+    """In factory mode (cloud app), projects are reported as cloud-sourced with workspace metadata."""
+    factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
+    factory_list = _make_list([factory_project], default="cloud-proj")
+
+    ws = _make_workspace("tenant-abc", "Personal", "personal")
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+            new_callable=AsyncMock,
+            return_value=factory_list,
+        ),
+        patch(
+            "basic_memory.mcp.project_context.get_available_workspaces",
+            new_callable=AsyncMock,
+            return_value=[ws],
+        ),
+    ):
+        result = await list_memory_projects()
+
+    assert "• cloud-proj (cloud)" in result
+
+
+@pytest.mark.asyncio
+async def test_list_memory_projects_factory_mode_json_includes_workspace(app, test_project):
+    """In factory mode, JSON output includes workspace metadata for cloud projects."""
+    factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
+    factory_list = _make_list([factory_project], default="cloud-proj")
+
+    ws = _make_workspace("tenant-abc", "My Org", "organization")
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+            new_callable=AsyncMock,
+            return_value=factory_list,
+        ),
+        patch(
+            "basic_memory.mcp.project_context.get_available_workspaces",
+            new_callable=AsyncMock,
+            return_value=[ws],
+        ),
+    ):
+        result = await list_memory_projects(output_format="json")
+
+    assert isinstance(result, dict)
+    projects = result["projects"]
+    assert len(projects) == 1
+    proj = projects[0]
+    assert proj["source"] == "cloud"
+    assert proj["cloud_path"] == "/cloud-proj"
+    assert proj["local_path"] is None
+    assert proj["workspace_name"] == "My Org"
+    assert proj["workspace_type"] == "organization"
+    assert proj["workspace_tenant_id"] == "tenant-abc"
+
+
+@pytest.mark.asyncio
+async def test_list_memory_projects_factory_mode_workspace_lookup_failure(app, test_project):
+    """In factory mode, workspace lookup failure still returns projects as cloud-sourced."""
     factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
     factory_list = _make_list([factory_project], default="cloud-proj")
 
@@ -228,12 +295,49 @@ async def test_list_memory_projects_factory_mode(app, test_project):
             new_callable=AsyncMock,
             return_value=factory_list,
         ),
+        patch(
+            "basic_memory.mcp.project_context.get_available_workspaces",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("no user context"),
+        ),
     ):
         result = await list_memory_projects()
 
-    assert "• cloud-proj (local)" in result
-    # has_cloud_credentials should not be called in factory mode
-    # (no cloud merge attempt)
+    # Still reported as cloud even without workspace metadata
+    assert "• cloud-proj (cloud)" in result
+
+
+@pytest.mark.asyncio
+async def test_list_memory_projects_factory_mode_explicit_workspace(app, test_project):
+    """In factory mode, explicit workspace param selects the matching workspace."""
+    factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
+    factory_list = _make_list([factory_project], default="cloud-proj")
+
+    personal_ws = _make_workspace("tenant-personal", "Personal", "personal")
+    org_ws = _make_workspace("tenant-org", "Acme Corp", "organization")
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+            new_callable=AsyncMock,
+            return_value=factory_list,
+        ),
+        patch(
+            "basic_memory.mcp.project_context.get_available_workspaces",
+            new_callable=AsyncMock,
+            return_value=[personal_ws, org_ws],
+        ),
+    ):
+        result = await list_memory_projects(output_format="json", workspace="tenant-org")
+
+    proj = result["projects"][0]
+    assert proj["workspace_name"] == "Acme Corp"
+    assert proj["workspace_type"] == "organization"
+    assert proj["workspace_tenant_id"] == "tenant-org"
 
 
 @pytest.mark.asyncio
