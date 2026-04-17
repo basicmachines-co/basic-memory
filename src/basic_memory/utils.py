@@ -327,9 +327,6 @@ def setup_logging(
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
 
-    for warning_message in telemetry.pop_telemetry_warnings():
-        logger.warning(warning_message)
-
 
 def _cleanup_windows_log_files(log_dir: Path, current_log_name: str) -> None:
     """Trim stale per-process Windows log files so the directory stays bounded."""

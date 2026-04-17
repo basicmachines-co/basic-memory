@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
 from contextlib import contextmanager
 
+import logfire
 import pytest
 
 from basic_memory.schemas import Entity as EntitySchema
-
-telemetry_module = importlib.import_module("basic_memory.telemetry")
 
 
 def _capture_spans():
@@ -30,7 +28,7 @@ def _span_names(spans: list[tuple[str, dict]]) -> list[str]:
 @pytest.mark.asyncio
 async def test_create_entity_emits_file_write_span(entity_service, monkeypatch) -> None:
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(telemetry_module, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     schema = EntitySchema(
         title="Telemetry Create",
@@ -59,7 +57,7 @@ async def test_edit_entity_emits_file_read_and_write_spans(entity_service, monke
     )
 
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(telemetry_module, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     updated = await entity_service.edit_entity(
         created.file_path,

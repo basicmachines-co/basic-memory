@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Query, Path
 from loguru import logger
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.deps import ContextServiceV2ExternalDep, EntityRepositoryV2ExternalDep
 from basic_memory.schemas.base import TimeFrame, parse_timeframe
 from basic_memory.schemas.memory import (
@@ -51,7 +51,7 @@ async def recent(
     Returns:
         GraphContext with recent activity and related entities
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.memory.recent_activity",
         entrypoint="api",
         domain="memory",
@@ -72,7 +72,7 @@ async def recent(
         limit = page_size
         offset = (page - 1) * page_size
 
-        with telemetry.scope(
+        with logfire.span(
             "api.memory.recent_activity.build_context",
             domain="memory",
             action="recent_activity",
@@ -88,7 +88,7 @@ async def recent(
                 offset=offset,
                 max_related=max_related,
             )
-        with telemetry.scope(
+        with logfire.span(
             "api.memory.recent_activity.shape_response",
             domain="memory",
             action="recent_activity",
@@ -137,7 +137,7 @@ async def get_memory_context(
     Returns:
         GraphContext with the entity and its related context
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.memory.build_context",
         entrypoint="api",
         domain="memory",
@@ -154,7 +154,7 @@ async def get_memory_context(
         limit = page_size
         offset = (page - 1) * page_size
 
-        with telemetry.scope(
+        with logfire.span(
             "api.memory.build_context.build_context",
             domain="memory",
             action="build_context",
@@ -170,7 +170,7 @@ async def get_memory_context(
                 offset=offset,
                 max_related=max_related,
             )
-        with telemetry.scope(
+        with logfire.span(
             "api.memory.build_context.shape_response",
             domain="memory",
             action="build_context",

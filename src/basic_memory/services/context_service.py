@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from loguru import logger
 from sqlalchemy import text
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
@@ -111,7 +111,7 @@ class ContextService:
             f"Building context for URI: '{memory_url}' depth: '{depth}' since: '{since}' limit: '{limit}' offset: '{offset}'  max_related: '{max_related}'"
         )
 
-        with telemetry.scope(
+        with logfire.span(
             "memory.build_context",
             domain="memory",
             action="build_context",
@@ -122,7 +122,7 @@ class ContextService:
             fetch_limit = limit + 1
 
             normalized_path: Optional[str] = None
-            with telemetry.scope(
+            with logfire.span(
                 "memory.build_context.resolve_primary",
                 domain="memory",
                 action="build_context",
@@ -180,7 +180,7 @@ class ContextService:
             type_id_pairs = [(r.type, r.id) for r in primary] if primary else []
             logger.debug(f"found primary type_id_pairs: {len(type_id_pairs)}")
 
-            with telemetry.scope(
+            with logfire.span(
                 "memory.build_context.find_related",
                 domain="memory",
                 action="build_context",
@@ -202,7 +202,7 @@ class ContextService:
 
             observations_by_entity = {}
             if include_observations and entity_ids:
-                with telemetry.scope(
+                with logfire.span(
                     "memory.build_context.load_observations",
                     domain="memory",
                     action="build_context",
@@ -226,7 +226,7 @@ class ContextService:
                 has_more=has_more,
             )
 
-            with telemetry.scope(
+            with logfire.span(
                 "memory.build_context.shape_results",
                 domain="memory",
                 action="build_context",

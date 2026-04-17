@@ -7,7 +7,7 @@ from typing import Optional
 
 from httpx import AsyncClient
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.memory import GraphContext
 
@@ -72,7 +72,7 @@ class MemoryClient:
         if timeframe:
             params["timeframe"] = timeframe
 
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.memory.build_context",
             client_name="memory",
             operation="build_context",
@@ -123,7 +123,7 @@ class MemoryClient:
             # Join types as comma-separated string if provided
             params["type"] = ",".join(types) if isinstance(types, list) else types
 
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.memory.recent_activity",
             client_name="memory",
             operation="recent_activity",

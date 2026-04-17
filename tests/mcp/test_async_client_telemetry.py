@@ -6,6 +6,7 @@ import importlib
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+import logfire
 import pytest
 
 async_client_module = importlib.import_module("basic_memory.mcp.async_client")
@@ -29,7 +30,7 @@ async def test_resolve_cloud_token_emits_failure_span(monkeypatch) -> None:
         spans.append((name, attrs))
         yield
 
-    monkeypatch.setattr(async_client_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
     monkeypatch.setattr("basic_memory.cli.auth.CLIAuth", FakeAuth)
     monkeypatch.setattr(async_client_module.logger, "error", error_messages.append)
 

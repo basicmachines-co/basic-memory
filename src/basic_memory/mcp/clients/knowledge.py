@@ -7,7 +7,7 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.mcp.tools.utils import call_get, call_post, call_put, call_patch, call_delete
 from basic_memory.schemas.response import (
     EntityResponse,
@@ -56,7 +56,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.create_entity",
             client_name="knowledge",
             operation="create_entity",
@@ -88,7 +88,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.update_entity",
             client_name="knowledge",
             operation="update_entity",
@@ -115,7 +115,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the entity is not found or request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.get_entity",
             client_name="knowledge",
             operation="get_entity",
@@ -146,7 +146,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.patch_entity",
             client_name="knowledge",
             operation="patch_entity",
@@ -173,7 +173,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the entity is not found or request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.delete_entity",
             client_name="knowledge",
             operation="delete_entity",
@@ -200,7 +200,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.move_entity",
             client_name="knowledge",
             operation="move_entity",
@@ -230,7 +230,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.move_directory",
             client_name="knowledge",
             operation="move_directory",
@@ -260,7 +260,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.delete_directory",
             client_name="knowledge",
             operation="delete_directory",
@@ -290,7 +290,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the identifier cannot be resolved
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.knowledge.resolve_entity",
             client_name="knowledge",
             operation="resolve_entity",

@@ -12,7 +12,7 @@ from basic_memory.cli.auto_update import maybe_run_periodic_auto_update  # noqa:
 from basic_memory.cli.container import CliContainer, set_container  # noqa: E402
 from basic_memory.cli.promo import maybe_show_cloud_promo, maybe_show_init_line  # noqa: E402
 from basic_memory.config import init_cli_logging  # noqa: E402
-from basic_memory import telemetry  # noqa: E402
+import logfire  # noqa: E402
 
 
 def version_callback(value: bool) -> None:
@@ -45,7 +45,7 @@ def app_callback(
     init_cli_logging()
     command_name = ctx.invoked_subcommand or "root"
     ctx.with_resource(
-        telemetry.operation(
+        logfire.span(
             f"cli.command.{command_name}",
             entrypoint="cli",
             command_name=command_name,

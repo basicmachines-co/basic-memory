@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 
+import logfire
 import pytest
 from fastapi import Response
 
@@ -55,7 +56,7 @@ def _assert_only_root_span(spans: list[tuple[str, dict]], expected_name: str) ->
 @pytest.mark.asyncio
 async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     entity = _fake_entity()
     response_content = (
@@ -101,7 +102,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
@@ -153,7 +154,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"

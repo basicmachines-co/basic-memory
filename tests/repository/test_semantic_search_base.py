@@ -696,17 +696,31 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
     counter_calls: list[tuple[str, float, dict]] = []
     perf_counter_values = iter([0.0, 3.0, 4.5, 6.0])
 
+    class _FakeHistogram:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def record(self, amount, attributes=None) -> None:
+            histogram_calls.append((self.name, amount, attributes or {}))
+
+    class _FakeCounter:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def add(self, amount, attributes=None) -> None:
+            counter_calls.append((self.name, amount, attributes or {}))
+
     monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
     monkeypatch.setattr(
-        search_repository_base_module.telemetry,
-        "record_histogram",
-        lambda name, amount, **attrs: histogram_calls.append((name, amount, attrs)),
+        search_repository_base_module.logfire,
+        "metric_histogram",
+        lambda name, **kwargs: _FakeHistogram(name),
     )
     monkeypatch.setattr(
-        search_repository_base_module.telemetry,
-        "add_counter",
-        lambda name, amount, **attrs: counter_calls.append((name, amount, attrs)),
+        search_repository_base_module.logfire,
+        "metric_counter",
+        lambda name, **kwargs: _FakeCounter(name),
     )
     monkeypatch.setattr(
         search_repository_base_module.time,

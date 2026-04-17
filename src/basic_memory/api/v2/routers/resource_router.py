@@ -15,7 +15,7 @@ from pathlib import Path as PathLib
 from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.deps import (
     ProjectConfigV2ExternalDep,
     FileServiceV2ExternalDep,
@@ -56,7 +56,7 @@ async def get_resource_content(
     Raises:
         HTTPException: 404 if entity or file not found
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.resource.get_content",
         entrypoint="api",
         domain="resource",
@@ -64,7 +64,7 @@ async def get_resource_content(
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
 
-        with telemetry.scope(
+        with logfire.span(
             "api.resource.get_content.load_entity",
             domain="resource",
             action="get_content",
@@ -74,7 +74,7 @@ async def get_resource_content(
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
-        with telemetry.scope(
+        with logfire.span(
             "api.resource.get_content.validate_path",
             domain="resource",
             action="get_content",
@@ -90,7 +90,7 @@ async def get_resource_content(
                     detail="Entity contains invalid file path",
                 )
 
-        with telemetry.scope(
+        with logfire.span(
             "api.resource.get_content.ensure_exists",
             domain="resource",
             action="get_content",
@@ -102,7 +102,7 @@ async def get_resource_content(
                     detail=f"File not found: {entity.file_path}",
                 )
 
-        with telemetry.scope(
+        with logfire.span(
             "api.resource.get_content.read_content",
             domain="resource",
             action="get_content",
@@ -139,7 +139,7 @@ async def create_resource(
     Raises:
         HTTPException: 400 for invalid file paths, 409 if file already exists
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.resource.create",
         entrypoint="api",
         domain="resource",
@@ -166,7 +166,7 @@ async def create_resource(
                     f"Use PUT /resource/{existing_entity.external_id} to update it.",
                 )
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.create.write_file",
                 domain="resource",
                 action="create",
@@ -175,7 +175,7 @@ async def create_resource(
                 await file_service.ensure_directory(PathLib(data.file_path).parent)
                 checksum = await file_service.write_file(data.file_path, data.content)
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.create.read_metadata",
                 domain="resource",
                 action="create",
@@ -197,7 +197,7 @@ async def create_resource(
                 created_at=file_metadata.created_at,
                 updated_at=file_metadata.modified_at,
             )
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.create.upsert_entity",
                 domain="resource",
                 action="create",
@@ -205,7 +205,7 @@ async def create_resource(
             ):
                 entity = await entity_repository.add(entity)
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.create.search_index",
                 domain="resource",
                 action="create",
@@ -258,7 +258,7 @@ async def update_resource(
     Raises:
         HTTPException: 404 if entity not found, 400 for invalid paths
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.resource.update",
         entrypoint="api",
         domain="resource",
@@ -282,7 +282,7 @@ async def update_resource(
                     "Path must be relative and stay within project boundaries.",
                 )
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.update.write_file",
                 domain="resource",
                 action="update",
@@ -297,7 +297,7 @@ async def update_resource(
 
                 checksum = await file_service.write_file(target_file_path, data.content)
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.update.read_metadata",
                 domain="resource",
                 action="update",
@@ -309,7 +309,7 @@ async def update_resource(
             content_type = file_service.content_type(target_file_path)
             note_type = "canvas" if target_file_path.endswith(".canvas") else "file"
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.update.update_entity",
                 domain="resource",
                 action="update",
@@ -329,7 +329,7 @@ async def update_resource(
             if updated_entity is None:
                 raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
-            with telemetry.scope(
+            with logfire.span(
                 "api.resource.update.search_index",
                 domain="resource",
                 action="update",

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import logfire
 import pytest
 
 from basic_memory.repository.search_index_row import SearchIndexRow
@@ -28,7 +29,7 @@ def _capture_spans():
 @pytest.mark.asyncio
 async def test_to_search_results_emits_hydration_spans(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(utils_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     class FakeEntityService:
         async def get_entities_by_id(self, ids):

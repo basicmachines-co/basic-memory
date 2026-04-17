@@ -6,7 +6,7 @@ V1 uses string-based project names which are less efficient and less stable.
 
 from fastapi import APIRouter, HTTPException, Path
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
@@ -48,7 +48,7 @@ async def search(
     Returns:
         SearchResponse with paginated search results
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.search",
         entrypoint="api",
         domain="search",
@@ -67,7 +67,7 @@ async def search(
         offset = (page - 1) * page_size
         fetch_limit = page_size + 1
         try:
-            with telemetry.scope(
+            with logfire.span(
                 "api.search.search.execute_query",
                 domain="search",
                 action="search",
@@ -83,7 +83,7 @@ async def search(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        with telemetry.scope(
+        with logfire.span(
             "api.search.search.paginate_results",
             domain="search",
             action="search",
@@ -94,7 +94,7 @@ async def search(
             if has_more:
                 results = results[:page_size]
 
-        with telemetry.scope(
+        with logfire.span(
             "api.search.search.hydrate_results",
             domain="search",
             action="search",
@@ -102,7 +102,7 @@ async def search(
             result_count=len(results),
         ):
             search_results = await to_search_results(entity_service, results)
-        with telemetry.scope(
+        with logfire.span(
             "api.search.search.build_response",
             domain="search",
             action="search",

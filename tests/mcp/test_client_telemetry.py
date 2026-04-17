@@ -6,6 +6,7 @@ import importlib
 from contextlib import contextmanager
 
 import httpx
+import logfire
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -20,29 +21,23 @@ def _capture_spans():
     @contextmanager
     def fake_span(name: str, **attrs):
         spans.append((name, attrs))
-        yield
 
-    @contextmanager
-    def fake_started_span(name: str, **attrs):
-        spans.append((name, attrs))
-
-        class FakeStartedSpan:
+        class FakeSpan:
             def set_attribute(self, key: str, value) -> None:
                 attrs[key] = value
 
             def set_attributes(self, new_attrs: dict) -> None:
                 attrs.update(new_attrs)
 
-        yield FakeStartedSpan()
+        yield FakeSpan()
 
-    return spans, fake_span, fake_started_span
+    return spans, fake_span
 
 
 @pytest.mark.asyncio
 async def test_knowledge_client_resolve_entity_emits_client_and_http_spans(monkeypatch) -> None:
-    spans, fake_span, fake_started_span = _capture_spans()
-    monkeypatch.setattr(knowledge_client_module.telemetry, "span", fake_span)
-    monkeypatch.setattr(utils_module.telemetry, "started_span", fake_started_span)
+    spans, fake_span = _capture_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
@@ -74,9 +69,8 @@ async def test_knowledge_client_resolve_entity_emits_client_and_http_spans(monke
 
 @pytest.mark.asyncio
 async def test_search_client_emits_client_and_http_spans(monkeypatch) -> None:
-    spans, fake_span, fake_started_span = _capture_spans()
-    monkeypatch.setattr(search_client_module.telemetry, "span", fake_span)
-    monkeypatch.setattr(utils_module.telemetry, "started_span", fake_started_span)
+    spans, fake_span = _capture_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
@@ -116,8 +110,8 @@ async def test_search_client_emits_client_and_http_spans(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_call_get_emits_http_outcome_for_client_errors(monkeypatch) -> None:
-    spans, _, fake_started_span = _capture_spans()
-    monkeypatch.setattr(utils_module.telemetry, "started_span", fake_started_span)
+    spans, fake_span = _capture_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
@@ -155,8 +149,8 @@ async def test_call_get_emits_http_outcome_for_client_errors(monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_call_get_emits_transport_error_outcome(monkeypatch) -> None:
-    spans, _, fake_started_span = _capture_spans()
-    monkeypatch.setattr(utils_module.telemetry, "started_span", fake_started_span)
+    spans, fake_span = _capture_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     async def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom", request=request)

@@ -3,10 +3,10 @@
 import textwrap
 from typing import Annotated, List, Union, Optional, Literal
 
+import logfire
 from loguru import logger
 from pydantic import BeforeValidator
 
-from basic_memory import telemetry
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
@@ -149,7 +149,7 @@ async def write_note(
         overwrite if overwrite is not None else ConfigManager().config.write_note_overwrite_default
     )
 
-    with telemetry.operation(
+    with logfire.span(
         "mcp.tool.write_note",
         entrypoint="mcp",
         tool_name="write_note",
@@ -160,169 +160,160 @@ async def write_note(
         output_format=output_format,
     ):
         async with get_project_client(project, workspace, context) as (client, active_project):
-            with telemetry.contextualize(
-                project_name=active_project.name,
-                workspace_id=workspace,
-                tool_name="write_note",
-            ):
-                logger.info(
-                    f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
-                )
+            logger.info(
+                f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
+            )
 
-                # Normalize "/" to empty string for root directory (must happen before validation)
-                if directory == "/":
-                    directory = ""
+            # Normalize "/" to empty string for root directory (must happen before validation)
+            if directory == "/":
+                directory = ""
 
-                # Validate directory path to prevent path traversal attacks
-                project_path = active_project.home
-                if directory and not validate_project_path(directory, project_path):
-                    logger.warning(
-                        "Attempted path traversal attack blocked",
-                        directory=directory,
-                        project=active_project.name,
-                    )
-                    if output_format == "json":
-                        return {
-                            "title": title,
-                            "permalink": None,
-                            "file_path": None,
-                            "checksum": None,
-                            "action": "created",
-                            "error": "SECURITY_VALIDATION_ERROR",
-                        }
-                    return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
-
-                # Process tags using the helper function
-                tag_list = parse_tags(tags)
-
-                # Build entity_metadata from optional metadata, then explicit tags on top
-                # Order matters: explicit tags parameter takes precedence over metadata["tags"]
-                entity_metadata = {}
-                if metadata:
-                    entity_metadata.update(metadata)
-                if tag_list:
-                    entity_metadata["tags"] = tag_list
-
-                entity = Entity(
-                    title=title,
+            # Validate directory path to prevent path traversal attacks
+            project_path = active_project.home
+            if directory and not validate_project_path(directory, project_path):
+                logger.warning(
+                    "Attempted path traversal attack blocked",
                     directory=directory,
-                    note_type=note_type,
-                    content_type="text/markdown",
-                    content=content,
-                    entity_metadata=entity_metadata or None,
-                )
-
-                # Import here to avoid circular import
-                from basic_memory.mcp.clients import KnowledgeClient
-
-                # Use typed KnowledgeClient for API calls
-                knowledge_client = KnowledgeClient(client, active_project.external_id)
-
-                # Try to create the entity first (optimistic create)
-                logger.debug(f"Attempting to create entity permalink={entity.permalink}")
-                action = "Created"  # Default to created
-                try:
-                    result = await knowledge_client.create_entity(entity.model_dump())
-                    action = "Created"
-                except Exception as e:
-                    # If creation failed due to conflict (already exists), try to update
-                    if (
-                        "409" in str(e)
-                        or "conflict" in str(e).lower()
-                        or "already exists" in str(e).lower()
-                    ):
-                        # Guard: block overwrite unless explicitly enabled
-                        if not effective_overwrite:
-                            logger.warning(
-                                f"write_note blocked: note already exists (overwrite not enabled) "
-                                f"permalink={entity.permalink}"
-                            )
-                            if output_format == "json":
-                                return {
-                                    "title": title,
-                                    "permalink": entity.permalink,
-                                    "file_path": None,
-                                    "checksum": None,
-                                    "action": "conflict",
-                                    "error": "NOTE_ALREADY_EXISTS",
-                                }
-                            return _format_overwrite_error(
-                                title, entity.permalink, active_project.name
-                            )
-
-                        logger.debug(
-                            f"Entity exists, updating instead permalink={entity.permalink}"
-                        )
-                        try:
-                            if not entity.permalink:
-                                raise ValueError(
-                                    "Entity permalink is required for updates"
-                                )  # pragma: no cover
-                            entity_id = await knowledge_client.resolve_entity(entity.permalink)
-                            result = await knowledge_client.update_entity(
-                                entity_id, entity.model_dump()
-                            )
-                            action = "Updated"
-                        except Exception as update_error:  # pragma: no cover
-                            # Re-raise the original error if update also fails
-                            raise e from update_error  # pragma: no cover
-                    else:
-                        # Re-raise if it's not a conflict error
-                        raise  # pragma: no cover
-                summary = [
-                    f"# {action} note",
-                    f"project: {active_project.name}",
-                    f"file_path: {result.file_path}",
-                    f"permalink: {result.permalink}",
-                    f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
-                ]
-
-                # Count observations by category
-                categories = {}
-                if result.observations:
-                    for obs in result.observations:
-                        categories[obs.category] = categories.get(obs.category, 0) + 1
-
-                    summary.append("\n## Observations")
-                    for category, count in sorted(categories.items()):
-                        summary.append(f"- {category}: {count}")
-
-                # Count resolved/unresolved relations
-                unresolved = 0
-                resolved = 0
-                if result.relations:
-                    unresolved = sum(1 for r in result.relations if not r.to_id)
-                    resolved = len(result.relations) - unresolved
-
-                    summary.append("\n## Relations")
-                    summary.append(f"- Resolved: {resolved}")
-                    if unresolved:
-                        summary.append(f"- Unresolved: {unresolved}")
-                        summary.append(
-                            "\nNote: Unresolved relations point to entities that don't exist yet."
-                        )
-                        summary.append(
-                            "They will be automatically resolved when target entities are created or during sync operations."
-                        )
-
-                if tag_list:
-                    summary.append(f"\n## Tags\n- {', '.join(tag_list)}")
-
-                # Log the response with structured data
-                logger.info(
-                    f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
+                    project=active_project.name,
                 )
                 if output_format == "json":
                     return {
-                        "title": result.title,
-                        "permalink": result.permalink,
-                        "file_path": result.file_path,
-                        "checksum": result.checksum,
-                        "action": action.lower(),
+                        "title": title,
+                        "permalink": None,
+                        "file_path": None,
+                        "checksum": None,
+                        "action": "created",
+                        "error": "SECURITY_VALIDATION_ERROR",
                     }
+                return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
 
-                summary_result = "\n".join(summary)
-                return add_project_metadata(summary_result, active_project.name)
+            # Process tags using the helper function
+            tag_list = parse_tags(tags)
+
+            # Build entity_metadata from optional metadata, then explicit tags on top
+            # Order matters: explicit tags parameter takes precedence over metadata["tags"]
+            entity_metadata = {}
+            if metadata:
+                entity_metadata.update(metadata)
+            if tag_list:
+                entity_metadata["tags"] = tag_list
+
+            entity = Entity(
+                title=title,
+                directory=directory,
+                note_type=note_type,
+                content_type="text/markdown",
+                content=content,
+                entity_metadata=entity_metadata or None,
+            )
+
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import KnowledgeClient
+
+            # Use typed KnowledgeClient for API calls
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+            # Try to create the entity first (optimistic create)
+            logger.debug(f"Attempting to create entity permalink={entity.permalink}")
+            action = "Created"  # Default to created
+            try:
+                result = await knowledge_client.create_entity(entity.model_dump())
+                action = "Created"
+            except Exception as e:
+                # If creation failed due to conflict (already exists), try to update
+                if (
+                    "409" in str(e)
+                    or "conflict" in str(e).lower()
+                    or "already exists" in str(e).lower()
+                ):
+                    # Guard: block overwrite unless explicitly enabled
+                    if not effective_overwrite:
+                        logger.warning(
+                            f"write_note blocked: note already exists (overwrite not enabled) "
+                            f"permalink={entity.permalink}"
+                        )
+                        if output_format == "json":
+                            return {
+                                "title": title,
+                                "permalink": entity.permalink,
+                                "file_path": None,
+                                "checksum": None,
+                                "action": "conflict",
+                                "error": "NOTE_ALREADY_EXISTS",
+                            }
+                        return _format_overwrite_error(title, entity.permalink, active_project.name)
+
+                    logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
+                    try:
+                        if not entity.permalink:
+                            raise ValueError(
+                                "Entity permalink is required for updates"
+                            )  # pragma: no cover
+                        entity_id = await knowledge_client.resolve_entity(entity.permalink)
+                        result = await knowledge_client.update_entity(
+                            entity_id, entity.model_dump()
+                        )
+                        action = "Updated"
+                    except Exception as update_error:  # pragma: no cover
+                        # Re-raise the original error if update also fails
+                        raise e from update_error  # pragma: no cover
+                else:
+                    # Re-raise if it's not a conflict error
+                    raise  # pragma: no cover
+            summary = [
+                f"# {action} note",
+                f"project: {active_project.name}",
+                f"file_path: {result.file_path}",
+                f"permalink: {result.permalink}",
+                f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+            ]
+
+            # Count observations by category
+            categories = {}
+            if result.observations:
+                for obs in result.observations:
+                    categories[obs.category] = categories.get(obs.category, 0) + 1
+
+                summary.append("\n## Observations")
+                for category, count in sorted(categories.items()):
+                    summary.append(f"- {category}: {count}")
+
+            # Count resolved/unresolved relations
+            unresolved = 0
+            resolved = 0
+            if result.relations:
+                unresolved = sum(1 for r in result.relations if not r.to_id)
+                resolved = len(result.relations) - unresolved
+
+                summary.append("\n## Relations")
+                summary.append(f"- Resolved: {resolved}")
+                if unresolved:
+                    summary.append(f"- Unresolved: {unresolved}")
+                    summary.append(
+                        "\nNote: Unresolved relations point to entities that don't exist yet."
+                    )
+                    summary.append(
+                        "They will be automatically resolved when target entities are created or during sync operations."
+                    )
+
+            if tag_list:
+                summary.append(f"\n## Tags\n- {', '.join(tag_list)}")
+
+            # Log the response with structured data
+            logger.info(
+                f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
+            )
+            if output_format == "json":
+                return {
+                    "title": result.title,
+                    "permalink": result.permalink,
+                    "file_path": result.file_path,
+                    "checksum": result.checksum,
+                    "action": action.lower(),
+                }
+
+            summary_result = "\n".join(summary)
+            return add_project_metadata(summary_result, active_project.name)
 
 
 def _format_overwrite_error(title: str, permalink: str | None, project_name: str) -> str:

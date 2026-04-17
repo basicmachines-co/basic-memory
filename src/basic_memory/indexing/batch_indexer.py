@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Mapping, TypeVar
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import compute_checksum, has_frontmatter, remove_frontmatter
 from basic_memory.markdown.schemas import EntityMarkdown
@@ -192,10 +192,10 @@ class BatchIndexer:
         if not self._is_markdown(file):
             raise ValueError(f"index_markdown_file requires markdown input: {file.path}")
 
-        with telemetry.span("index.markdown_file.prepare", path=file.path):
+        with logfire.span("index.markdown_file.prepare", path=file.path):
             prepared = await self._prepare_markdown_file(file)
         if existing_permalink_by_path is None:
-            with telemetry.span("index.markdown_file.load_permalink_map", path=file.path):
+            with logfire.span("index.markdown_file.load_permalink_map", path=file.path):
                 existing_permalink_by_path = {
                     path: permalink
                     for path, permalink in (
@@ -208,11 +208,11 @@ class BatchIndexer:
             for path, permalink in existing_permalink_by_path.items()
             if path != file.path and permalink
         }
-        with telemetry.span("index.markdown_file.normalize", path=file.path):
+        with logfire.span("index.markdown_file.normalize", path=file.path):
             prepared = await self._normalize_markdown_file(prepared, reserved_permalinks)
         existing_permalink_by_path[file.path] = prepared.markdown.frontmatter.permalink
 
-        with telemetry.span("index.markdown_file.persist", path=file.path, is_new=new):
+        with logfire.span("index.markdown_file.persist", path=file.path, is_new=new):
             persisted = await self._persist_markdown_file(
                 prepared,
                 is_new=new,
@@ -221,7 +221,7 @@ class BatchIndexer:
             )
         existing_permalink_by_path[file.path] = persisted.entity.permalink
 
-        with telemetry.span(
+        with logfire.span(
             "index.markdown_file.reload_entity",
             path=file.path,
             entity_id=persisted.entity.id,
@@ -233,7 +233,7 @@ class BatchIndexer:
         prepared_entity = self._build_prepared_entity(persisted.prepared, entity)
 
         if index_search:
-            with telemetry.span(
+            with logfire.span(
                 "index.markdown_file.refresh_search_index",
                 path=file.path,
                 entity_id=entity.id,

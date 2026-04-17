@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from contextlib import contextmanager
 
+import logfire
 import pytest
 
 build_context_module = importlib.import_module("basic_memory.mcp.tools.build_context")
@@ -14,34 +15,29 @@ search_module = importlib.import_module("basic_memory.mcp.tools.search")
 write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
 
 
-def _recording_contexts():
-    operations: list[tuple[str, dict]] = []
-    contexts: list[dict] = []
+def _recording_spans():
+    spans: list[tuple[str, dict]] = []
 
     @contextmanager
-    def fake_operation(name: str, **attrs):
-        operations.append((name, attrs))
+    def fake_span(name: str, **attrs):
+        spans.append((name, attrs))
         yield
 
-    @contextmanager
-    def fake_contextualize(**attrs):
-        contexts.append(attrs)
-        yield
-
-    return operations, contexts, fake_operation, fake_contextualize
+    return spans, fake_span
 
 
-def _contains_context(contexts: list[dict], expected: dict) -> bool:
-    return any(expected.items() <= context.items() for context in contexts)
+def _contains_span_attrs(spans: list[tuple[str, dict]], name: str, expected: dict) -> bool:
+    return any(
+        span_name == name and expected.items() <= attrs.items() for span_name, attrs in spans
+    )
 
 
 @pytest.mark.asyncio
 async def test_write_note_emits_root_operation_and_project_context(
     app, test_project, monkeypatch
 ) -> None:
-    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
-    monkeypatch.setattr(write_note_module.telemetry, "operation", fake_operation)
-    monkeypatch.setattr(write_note_module.telemetry, "contextualize", fake_contextualize)
+    spans, fake_span = _recording_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     await write_note_module.write_note(
         project=test_project.name,
@@ -51,7 +47,7 @@ async def test_write_note_emits_root_operation_and_project_context(
         output_format="json",
     )
 
-    assert operations[0] == (
+    assert spans[0] == (
         "mcp.tool.write_note",
         {
             "entrypoint": "mcp",
@@ -63,19 +59,14 @@ async def test_write_note_emits_root_operation_and_project_context(
             "output_format": "json",
         },
     )
-    assert "api.request.knowledge.create_entity" in [name for name, _ in operations]
-    assert _contains_context(
-        contexts,
+    span_names = [name for name, _ in spans]
+    assert "api.request.knowledge.create_entity" in span_names
+    assert _contains_span_attrs(
+        spans,
+        "routing.client_session",
         {
             "project_name": test_project.name,
             "route_mode": "local_asgi",
-        },
-    )
-    assert _contains_context(
-        contexts,
-        {
-            "project_name": test_project.name,
-            "tool_name": "write_note",
         },
     )
 
@@ -91,9 +82,8 @@ async def test_read_note_emits_root_operation_and_project_context(
         content="Readable telemetry content",
     )
 
-    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
-    monkeypatch.setattr(read_note_module.telemetry, "operation", fake_operation)
-    monkeypatch.setattr(read_note_module.telemetry, "contextualize", fake_contextualize)
+    spans, fake_span = _recording_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     await read_note_module.read_note(
         "notes/readable-telemetry-note",
@@ -102,7 +92,7 @@ async def test_read_note_emits_root_operation_and_project_context(
         include_frontmatter=True,
     )
 
-    assert operations[0] == (
+    assert spans[0] == (
         "mcp.tool.read_note",
         {
             "entrypoint": "mcp",
@@ -115,22 +105,16 @@ async def test_read_note_emits_root_operation_and_project_context(
             "include_frontmatter": True,
         },
     )
-    operation_names = [name for name, _ in operations]
-    assert "api.request.knowledge.resolve_entity" in operation_names
-    assert "api.request.resource.get_content" in operation_names
-    assert "api.request.knowledge.get_entity" in operation_names
-    assert _contains_context(
-        contexts,
+    span_names = [name for name, _ in spans]
+    assert "api.request.knowledge.resolve_entity" in span_names
+    assert "api.request.resource.get_content" in span_names
+    assert "api.request.knowledge.get_entity" in span_names
+    assert _contains_span_attrs(
+        spans,
+        "routing.client_session",
         {
             "project_name": test_project.name,
             "route_mode": "local_asgi",
-        },
-    )
-    assert _contains_context(
-        contexts,
-        {
-            "project_name": test_project.name,
-            "tool_name": "read_note",
         },
     )
 
@@ -147,9 +131,8 @@ async def test_search_notes_emits_root_operation_and_project_context(
         tags=["telemetry"],
     )
 
-    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
-    monkeypatch.setattr(search_module.telemetry, "operation", fake_operation)
-    monkeypatch.setattr(search_module.telemetry, "contextualize", fake_contextualize)
+    spans, fake_span = _recording_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     await search_module.search_notes(
         project=test_project.name,
@@ -159,7 +142,7 @@ async def test_search_notes_emits_root_operation_and_project_context(
         output_format="json",
     )
 
-    assert operations[0] == (
+    assert spans[0] == (
         "mcp.tool.search_notes",
         {
             "entrypoint": "mcp",
@@ -178,19 +161,14 @@ async def test_search_notes_emits_root_operation_and_project_context(
             "has_status_filter": False,
         },
     )
-    assert ("api.request.search",) == (operations[1][0],)
-    assert _contains_context(
-        contexts,
+    span_names = [name for name, _ in spans]
+    assert "api.request.search" in span_names
+    assert _contains_span_attrs(
+        spans,
+        "routing.client_session",
         {
             "project_name": test_project.name,
             "route_mode": "local_asgi",
-        },
-    )
-    assert _contains_context(
-        contexts,
-        {
-            "project_name": test_project.name,
-            "tool_name": "search_notes",
         },
     )
 
@@ -206,9 +184,8 @@ async def test_edit_note_emits_root_operation_and_project_context(
         content="Original telemetry content",
     )
 
-    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
-    monkeypatch.setattr(edit_note_module.telemetry, "operation", fake_operation)
-    monkeypatch.setattr(edit_note_module.telemetry, "contextualize", fake_contextualize)
+    spans, fake_span = _recording_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     await edit_note_module.edit_note(
         "notes/editable-telemetry-note",
@@ -218,7 +195,7 @@ async def test_edit_note_emits_root_operation_and_project_context(
         output_format="json",
     )
 
-    assert operations[0] == (
+    assert spans[0] == (
         "mcp.tool.edit_note",
         {
             "entrypoint": "mcp",
@@ -232,21 +209,15 @@ async def test_edit_note_emits_root_operation_and_project_context(
             "expected_replacements": 1,
         },
     )
-    operation_names = [name for name, _ in operations]
-    assert "api.request.knowledge.resolve_entity" in operation_names
-    assert "api.request.knowledge.edit_entity" in operation_names
-    assert _contains_context(
-        contexts,
+    span_names = [name for name, _ in spans]
+    assert "api.request.knowledge.resolve_entity" in span_names
+    assert "api.request.knowledge.edit_entity" in span_names
+    assert _contains_span_attrs(
+        spans,
+        "routing.client_session",
         {
             "project_name": test_project.name,
             "route_mode": "local_asgi",
-        },
-    )
-    assert _contains_context(
-        contexts,
-        {
-            "project_name": test_project.name,
-            "tool_name": "edit_note",
         },
     )
 
@@ -262,9 +233,8 @@ async def test_build_context_emits_root_operation_and_project_context(
         content="Context telemetry content",
     )
 
-    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
-    monkeypatch.setattr(build_context_module.telemetry, "operation", fake_operation)
-    monkeypatch.setattr(build_context_module.telemetry, "contextualize", fake_contextualize)
+    spans, fake_span = _recording_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     await build_context_module.build_context(
         url="memory://notes/context-telemetry-note",
@@ -277,7 +247,7 @@ async def test_build_context_emits_root_operation_and_project_context(
         output_format="json",
     )
 
-    assert operations[0] == (
+    assert spans[0] == (
         "mcp.tool.build_context",
         {
             "entrypoint": "mcp",
@@ -293,18 +263,13 @@ async def test_build_context_emits_root_operation_and_project_context(
             "is_memory_url": True,
         },
     )
-    assert "api.request.memory.build_context" in [name for name, _ in operations]
-    assert _contains_context(
-        contexts,
+    span_names = [name for name, _ in spans]
+    assert "api.request.memory.build_context" in span_names
+    assert _contains_span_attrs(
+        spans,
+        "routing.client_session",
         {
             "project_name": test_project.name,
             "route_mode": "local_asgi",
-        },
-    )
-    assert _contains_context(
-        contexts,
-        {
-            "project_name": test_project.name,
-            "tool_name": "build_context",
         },
     )

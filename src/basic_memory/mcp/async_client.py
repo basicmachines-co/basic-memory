@@ -5,7 +5,7 @@ from typing import AsyncIterator, Callable, Optional
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.config import ConfigManager, ProjectMode
 
@@ -44,7 +44,7 @@ def _asgi_client(timeout: Timeout) -> AsyncClient:
 
 async def _resolve_cloud_token(config) -> str:
     """Resolve cloud token with API key preferred, OAuth fallback."""
-    with telemetry.span(
+    with logfire.span(
         "routing.resolve_cloud_credentials",
         has_api_key=bool(config.cloud_api_key),
     ):

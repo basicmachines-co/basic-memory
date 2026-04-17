@@ -9,6 +9,7 @@ from textwrap import dedent
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import logfire
 import pytest
 
 from basic_memory.sync.sync_service import SyncReport
@@ -17,21 +18,15 @@ batch_indexer_module = importlib.import_module("basic_memory.indexing.batch_inde
 sync_service_module = importlib.import_module("basic_memory.sync.sync_service")
 
 
-def _capture_sync_telemetry():
-    operations: list[tuple[str, dict]] = []
+def _capture_spans():
     spans: list[tuple[str, dict]] = []
-
-    @contextmanager
-    def fake_operation(name: str, **attrs):
-        operations.append((name, attrs))
-        yield
 
     @contextmanager
     def fake_span(name: str, **attrs):
         spans.append((name, attrs))
         yield
 
-    return operations, spans, fake_operation, fake_span
+    return spans, fake_span
 
 
 def _write_markdown(project_root: Path, relative_path: str, content: str) -> Path:
@@ -44,7 +39,7 @@ def _write_markdown(project_root: Path, relative_path: str, content: str) -> Pat
 
 @pytest.mark.asyncio
 async def test_sync_emits_phase_spans(sync_service, project_config, monkeypatch) -> None:
-    operations, spans, fake_operation, fake_span = _capture_sync_telemetry()
+    spans, fake_span = _capture_spans()
     report = SyncReport(
         new={"new.md"},
         modified={"modified.md"},
@@ -76,8 +71,7 @@ async def test_sync_emits_phase_spans(sync_service, project_config, monkeypatch)
     async def fake_update(project_id, values):
         return None
 
-    monkeypatch.setattr(sync_service_module.telemetry, "operation", fake_operation)
-    monkeypatch.setattr(sync_service_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
     monkeypatch.setattr(sync_service, "scan", fake_scan)
     monkeypatch.setattr(sync_service, "handle_move", fake_handle_move)
     monkeypatch.setattr(sync_service, "handle_delete", fake_handle_delete)
@@ -95,26 +89,24 @@ async def test_sync_emits_phase_spans(sync_service, project_config, monkeypatch)
     )
 
     assert result is report
-    assert operations == [
-        (
-            "sync.project.run",
-            {"project_name": project_config.name, "force_full": True},
-        )
-    ]
-    assert [name for name, _ in spans] == [
-        "sync.project.scan",
-        "sync.project.apply_changes",
-        "sync.project.resolve_relations",
-        "sync.project.update_watermark",
-    ]
+    span_names = [name for name, _ in spans]
+    assert "sync.project.run" in span_names
+    assert "sync.project.scan" in span_names
+    assert "sync.project.apply_changes" in span_names
+    assert "sync.project.resolve_relations" in span_names
+    assert "sync.project.update_watermark" in span_names
+    # The root span carries the project_name/force_full attrs previously on operation()
+    root_span_attrs = next(attrs for name, attrs in spans if name == "sync.project.run")
+    assert root_span_attrs["project_name"] == project_config.name
+    assert root_span_attrs["force_full"] is True
 
 
 @pytest.mark.asyncio
 async def test_sync_one_markdown_file_emits_index_phase_spans(
     sync_service, test_project, monkeypatch
 ) -> None:
-    _, spans, _, fake_span = _capture_sync_telemetry()
-    monkeypatch.setattr(batch_indexer_module.telemetry, "span", fake_span)
+    spans, fake_span = _capture_spans()
+    monkeypatch.setattr(logfire, "span", fake_span)
     monkeypatch.setattr(sync_service.search_service, "index_entity_data", AsyncMock())
 
     _write_markdown(
@@ -152,7 +144,7 @@ async def test_sync_one_markdown_file_emits_index_phase_spans(
 
 @pytest.mark.asyncio
 async def test_sync_file_emits_failure_span(sync_service, monkeypatch) -> None:
-    _, spans, _, fake_span = _capture_sync_telemetry()
+    spans, fake_span = _capture_spans()
     recorded_failures: list[tuple[str, str]] = []
 
     async def fake_record_failure(path, error):
@@ -161,7 +153,7 @@ async def test_sync_file_emits_failure_span(sync_service, monkeypatch) -> None:
     async def fail_sync_markdown_file(path, new=True):
         raise ValueError("boom")
 
-    monkeypatch.setattr(sync_service_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
     monkeypatch.setattr(sync_service, "_should_skip_file", lambda path: _false_async())
     monkeypatch.setattr(sync_service.file_service, "is_markdown", lambda path: True)
     monkeypatch.setattr(sync_service, "sync_markdown_file", fail_sync_markdown_file)
@@ -170,7 +162,8 @@ async def test_sync_file_emits_failure_span(sync_service, monkeypatch) -> None:
     result = await sync_service.sync_file("notes/broken.md", new=True)
 
     assert result == (None, None)
-    assert spans == [
+    failure_spans = [span for span in spans if span[0] == "sync.file.failure"]
+    assert failure_spans == [
         (
             "sync.file.failure",
             {

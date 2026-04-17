@@ -1,6 +1,6 @@
 from typing import Any, Protocol, Optional, List, Sequence
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import (
     EntitySummary,
@@ -43,7 +43,7 @@ async def to_graph_context(
     page: Optional[int] = None,
     page_size: Optional[int] = None,
 ) -> GraphContext:
-    with telemetry.scope(
+    with logfire.span(
         "memory.hydrate_context",
         domain="memory",
         action="build_context",
@@ -80,7 +80,7 @@ async def to_graph_context(
         entity_title_lookup: dict[int, str] = {}
         entity_external_id_lookup: dict[int, str] = {}
         if entity_ids_needed:
-            with telemetry.scope(
+            with logfire.span(
                 "memory.hydrate_context.lookup_entities",
                 domain="memory",
                 action="build_context",
@@ -148,7 +148,7 @@ async def to_graph_context(
                         created_at=item.created_at,
                     )
 
-        with telemetry.scope(
+        with logfire.span(
             "memory.hydrate_context.shape_results",
             domain="memory",
             action="build_context",
@@ -198,7 +198,7 @@ async def to_graph_context(
 async def to_search_results(
     entity_service: EntityServiceBatchLookup, results: List[SearchIndexRow]
 ) -> list[SearchResult]:
-    with telemetry.scope(
+    with logfire.span(
         "search.hydrate_results",
         domain="search",
         action="search",
@@ -215,7 +215,7 @@ async def to_search_results(
 
         # Single batch fetch for all entities
         entities_by_id: dict[int, Any] = {}
-        with telemetry.scope(
+        with logfire.span(
             "search.hydrate_results.fetch_entities",
             domain="search",
             action="search",
@@ -227,7 +227,7 @@ async def to_search_results(
                 entities_by_id = {e.id: e for e in entities}
 
         search_results = []
-        with telemetry.scope(
+        with logfire.span(
             "search.hydrate_results.shape_results",
             domain="search",
             action="search",

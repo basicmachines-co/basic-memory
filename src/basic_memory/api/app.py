@@ -25,7 +25,7 @@ from basic_memory.api.v2.routers.project_router import (
     list_projects,
     synchronize_projects,
 )
-from basic_memory import telemetry
+import logfire
 from basic_memory.config import init_api_logging
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.initialization import initialize_app
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     set_container(container)
     app.state.container = container
 
-    with telemetry.operation(
+    with logfire.span(
         "api.lifecycle.startup",
         entrypoint="api",
         mode=container.mode.name.lower(),
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     yield
 
     # Shutdown - coordinator handles clean task cancellation
-    with telemetry.operation(
+    with logfire.span(
         "api.lifecycle.shutdown",
         entrypoint="api",
         mode=container.mode.name.lower(),

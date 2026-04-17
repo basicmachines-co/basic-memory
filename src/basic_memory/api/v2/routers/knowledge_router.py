@@ -13,7 +13,7 @@ Key improvements:
 from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -74,7 +74,7 @@ async def get_graph(
     Returns a flat node/edge structure optimized for rendering with graph libraries.
     Only includes resolved relations (where to_id is not null).
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.get_graph",
         entrypoint="api",
         domain="knowledge",
@@ -148,7 +148,7 @@ async def resolve_identifier(
             "resolution_method": "permalink"
         }
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.resolve_entity",
         entrypoint="api",
         domain="knowledge",
@@ -215,7 +215,7 @@ async def get_entity_by_id(
     Raises:
         HTTPException: 404 if entity not found
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.get_entity",
         entrypoint="api",
         domain="knowledge",
@@ -255,7 +255,7 @@ async def create_entity(
     Returns:
         Created entity with generated external_id (UUID) and file content
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.create_entity",
         entrypoint="api",
         domain="knowledge",
@@ -313,7 +313,7 @@ async def update_entity_by_id(
     Returns:
         Updated entity with file content
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.update_entity",
         entrypoint="api",
         domain="knowledge",
@@ -385,7 +385,7 @@ async def edit_entity_by_id(
     Raises:
         HTTPException: 404 if entity not found, 400 if edit fails
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.edit_entity",
         entrypoint="api",
         domain="knowledge",
@@ -454,7 +454,7 @@ async def delete_entity_by_id(
 
     Note: Returns deleted=False if entity doesn't exist (idempotent)
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.delete_entity",
         entrypoint="api",
         domain="knowledge",
@@ -503,7 +503,7 @@ async def move_entity(
     Returns:
         Updated entity with new file path
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.move_entity",
         entrypoint="api",
         domain="knowledge",
@@ -583,7 +583,7 @@ async def move_directory(
     Returns:
         DirectoryMoveResult with counts and details of moved files
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.move_directory",
         entrypoint="api",
         domain="knowledge",
@@ -647,7 +647,7 @@ async def delete_directory(
     Returns:
         DirectoryDeleteResult with counts and details of deleted files
     """
-    with telemetry.operation(
+    with logfire.span(
         "api.request.knowledge.delete_directory",
         entrypoint="api",
         domain="knowledge",

@@ -4,30 +4,26 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import logfire
 import pytest
 
 from basic_memory.mcp.server import lifespan, mcp
-import basic_memory.mcp.server as server_module
 
 
 @pytest.mark.asyncio
-async def test_mcp_lifespan_wraps_startup_and_shutdown(config_manager) -> None:
-    operations: list[tuple[str, dict]] = []
+async def test_mcp_lifespan_wraps_startup_and_shutdown(config_manager, monkeypatch) -> None:
+    spans: list[tuple[str, dict]] = []
 
     @contextmanager
-    def fake_operation(name: str, **attrs):
-        operations.append((name, attrs))
+    def fake_span(name: str, **attrs):
+        spans.append((name, attrs))
         yield
 
-    original_operation = server_module.telemetry.operation
-    server_module.telemetry.operation = fake_operation
-    try:
-        async with lifespan(mcp):
-            pass
-    finally:
-        server_module.telemetry.operation = original_operation
+    monkeypatch.setattr(logfire, "span", fake_span)
 
-    assert [name for name, _ in operations] == [
-        "mcp.lifecycle.startup",
-        "mcp.lifecycle.shutdown",
-    ]
+    async with lifespan(mcp):
+        pass
+
+    span_names = [name for name, _ in spans]
+    assert "mcp.lifecycle.startup" in span_names
+    assert "mcp.lifecycle.shutdown" in span_names

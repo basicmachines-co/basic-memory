@@ -12,7 +12,7 @@ import aiofiles
 
 import yaml
 
-from basic_memory import telemetry
+import logfire
 from basic_memory import file_utils
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -89,7 +89,7 @@ class FileService:
         """
         logger.debug(f"Reading entity content, entity_id={entity.id}, permalink={entity.permalink}")
 
-        with telemetry.scope(
+        with logfire.span(
             "file_service.read_content",
             domain="file_service",
             action="read_content",
@@ -191,7 +191,7 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            with telemetry.scope(
+            with logfire.span(
                 "file_service.write",
                 domain="file_service",
                 action="write",
@@ -249,7 +249,7 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            with telemetry.scope(
+            with logfire.span(
                 "file_service.read_content",
                 domain="file_service",
                 action="read_content",
@@ -299,7 +299,7 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            with telemetry.scope(
+            with logfire.span(
                 "file_service.read_content",
                 domain="file_service",
                 action="read_content",
@@ -342,7 +342,7 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            with telemetry.scope(
+            with logfire.span(
                 "file_service.read",
                 domain="file_service",
                 action="read",

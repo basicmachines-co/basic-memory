@@ -47,6 +47,7 @@ dependencies = [
     "fastembed>=0.7.4",
     "sqlite-vec>=0.1.6",
     "openai>=1.100.2",
+    "logfire>=4.19.0",
 ]
 
 [project.urls]
@@ -57,9 +58,6 @@ Documentation = "https://github.com/basicmachines-co/basic-memory#readme"
 [project.scripts]
 basic-memory = "basic_memory.cli.main:app"
 bm = "basic_memory.cli.main:app"
-
-[project.optional-dependencies]
-telemetry = ["logfire>=4.19.0"]
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]

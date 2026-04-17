@@ -15,7 +15,7 @@ from basic_memory.cli.auth import CLIAuth
 from basic_memory.db import scoped_session
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app
-from basic_memory import telemetry
+import logfire
 
 
 async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -63,7 +63,7 @@ async def lifespan(app: FastMCP):
     set_container(container)
 
     config = container.config
-    with telemetry.operation(
+    with logfire.span(
         "mcp.lifecycle.startup",
         entrypoint="mcp",
         mode=container.mode.name.lower(),
@@ -124,7 +124,7 @@ async def lifespan(app: FastMCP):
         yield
     finally:
         # Shutdown - coordinator handles clean task cancellation
-        with telemetry.operation(
+        with logfire.span(
             "mcp.lifecycle.shutdown",
             entrypoint="mcp",
             mode=container.mode.name.lower(),

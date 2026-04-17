@@ -2,11 +2,11 @@
 
 from typing import Optional, Literal
 
+import logfire
 from loguru import logger
 from fastmcp import Context
 
 from basic_memory.config import ConfigManager
-from basic_memory import telemetry
 from basic_memory.mcp.project_context import (
     detect_project_from_url_prefix,
     get_project_client,
@@ -202,7 +202,7 @@ async def build_context(
 
     # URL is already validated and normalized by MemoryUrl type annotation
 
-    with telemetry.operation(
+    with logfire.span(
         "mcp.tool.build_context",
         entrypoint="mcp",
         tool_name="build_context",
@@ -217,47 +217,42 @@ async def build_context(
         is_memory_url=str(url).startswith("memory://"),
     ):
         async with get_project_client(project, workspace, context) as (client, active_project):
-            with telemetry.contextualize(
-                project_name=active_project.name,
-                workspace_id=workspace,
-                tool_name="build_context",
-            ):
-                logger.info(
-                    f"MCP tool call tool=build_context project={active_project.name} "
-                    f"url={url} depth={depth} timeframe={timeframe} output_format={output_format}"
-                )
+            logger.info(
+                f"MCP tool call tool=build_context project={active_project.name} "
+                f"url={url} depth={depth} timeframe={timeframe} output_format={output_format}"
+            )
 
-                # Resolve memory:// identifier with project-prefix awareness
-                _, resolved_path, _ = await resolve_project_and_path(
-                    client,
-                    url,
-                    active_project.name,
-                    context,
-                )
+            # Resolve memory:// identifier with project-prefix awareness
+            _, resolved_path, _ = await resolve_project_and_path(
+                client,
+                url,
+                active_project.name,
+                context,
+            )
 
-                # Import here to avoid circular import
-                from basic_memory.mcp.clients import MemoryClient
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import MemoryClient
 
-                # Use typed MemoryClient for API calls
-                memory_client = MemoryClient(client, active_project.external_id)
-                graph = await memory_client.build_context(
-                    resolved_path,
-                    depth=depth or 1,
-                    timeframe=timeframe,
-                    page=page,
-                    page_size=page_size,
-                    max_related=max_related,
-                )
+            # Use typed MemoryClient for API calls
+            memory_client = MemoryClient(client, active_project.external_id)
+            graph = await memory_client.build_context(
+                resolved_path,
+                depth=depth or 1,
+                timeframe=timeframe,
+                page=page,
+                page_size=page_size,
+                max_related=max_related,
+            )
 
-                logger.info(
-                    f"MCP tool response: tool=build_context project={active_project.name} "
-                    f"uri={graph.metadata.uri or resolved_path} "
-                    f"primary_count={graph.metadata.primary_count or 0} "
-                    f"related_count={graph.metadata.related_count or 0} "
-                    f"output_format={output_format}"
-                )
+            logger.info(
+                f"MCP tool response: tool=build_context project={active_project.name} "
+                f"uri={graph.metadata.uri or resolved_path} "
+                f"primary_count={graph.metadata.primary_count or 0} "
+                f"related_count={graph.metadata.related_count or 0} "
+                f"output_format={output_format}"
+            )
 
-                if output_format == "text":
-                    return _format_context_markdown(graph, active_project.name)
+            if output_format == "text":
+                return _format_context_markdown(graph, active_project.name)
 
-                return graph.model_dump()
+            return graph.model_dump()

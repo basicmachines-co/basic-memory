@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
 from contextlib import contextmanager
 
 import pytest
 
 from basic_memory.schemas.search import SearchQuery
-
-search_service_module = importlib.import_module("basic_memory.services.search_service")
 
 
 def _capture_spans():
@@ -25,34 +22,31 @@ def _capture_spans():
 
 @pytest.mark.asyncio
 async def test_search_service_wraps_repository_search(search_service, monkeypatch) -> None:
+    import logfire
+
     spans, fake_span = _capture_spans()
-    monkeypatch.setattr(search_service_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     await search_service.search(SearchQuery(text="Root Entity"))
 
-    assert spans[0] == (
-        "search.execute",
-        {
-            "retrieval_mode": "fts",
-            "has_query": True,
-            "has_filters": False,
-            "limit": 10,
-            "offset": 0,
-        },
-    )
-    assert spans[1] == (
-        "search.repository_query",
-        {
-            "retrieval_mode": "fts",
-            "phase": "repository_query",
-            "has_query": True,
-            "has_filters": False,
-        },
-    )
+    assert spans == [
+        (
+            "search.execute",
+            {
+                "retrieval_mode": "fts",
+                "has_query": True,
+                "has_filters": False,
+                "limit": 10,
+                "offset": 0,
+            },
+        ),
+    ]
 
 
 @pytest.mark.asyncio
 async def test_search_service_emits_relaxed_retry_span(search_service, monkeypatch) -> None:
+    import logfire
+
     spans, fake_span = _capture_spans()
     calls: list[dict] = []
 
@@ -60,18 +54,16 @@ async def test_search_service_emits_relaxed_retry_span(search_service, monkeypat
         calls.append(kwargs)
         return []
 
-    monkeypatch.setattr(search_service_module.telemetry, "span", fake_span)
+    monkeypatch.setattr(logfire, "span", fake_span)
     monkeypatch.setattr(search_service.repository, "search", fake_repository_search)
 
     await search_service.search(SearchQuery(text="who are our main competitors and partners"))
 
     assert [name for name, _ in spans] == [
         "search.execute",
-        "search.repository_query",
         "search.relaxed_fts_retry",
-        "search.repository_query",
     ]
-    assert spans[2] == (
+    assert spans[1] == (
         "search.relaxed_fts_retry",
         {
             "retrieval_mode": "fts",

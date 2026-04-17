@@ -19,7 +19,7 @@ from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
 from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
@@ -159,7 +159,7 @@ async def resolve_project_parameter(
     Returns:
         Resolved project name or None if no resolution possible
     """
-    with telemetry.span(
+    with logfire.span(
         "routing.resolve_project",
         requested_project=project,
         allow_discovery=allow_discovery,
@@ -271,7 +271,7 @@ async def resolve_workspace_parameter(
     context: Optional[Context] = None,
 ) -> WorkspaceInfo:
     """Resolve workspace using explicit input, session cache, and cloud discovery."""
-    with telemetry.scope(
+    with logfire.span(
         "routing.resolve_workspace",
         workspace_requested=workspace is not None,
         has_context=context is not None,
@@ -347,7 +347,7 @@ async def get_active_project(
         ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
-    with telemetry.scope(
+    with logfire.span(
         "routing.validate_project",
         requested_project=project,
         has_context=context is not None,
@@ -431,7 +431,7 @@ async def resolve_project_and_path(
     is_memory_url = identifier.strip().startswith("memory://")
     config = ConfigManager().config
     include_project = config.permalinks_include_project if is_memory_url else None
-    with telemetry.scope(
+    with logfire.span(
         "routing.resolve_memory_url",
         is_memory_url=is_memory_url,
         requested_project=project,
@@ -628,7 +628,7 @@ async def get_project_client(
     # Outcome: factory client with optional workspace override via inner request headers
     if is_factory_mode():
         route_mode = "factory"
-        with telemetry.scope(
+        with logfire.span(
             "routing.client_session",
             project_name=resolved_project,
             route_mode=route_mode,
@@ -646,7 +646,7 @@ async def get_project_client(
     # Outcome: route strictly based on explicit flag, no workspace network calls
     if _explicit_routing() and _force_local_mode():
         route_mode = "explicit_local"
-        with telemetry.scope(
+        with logfire.span(
             "routing.client_session",
             project_name=resolved_project,
             route_mode=route_mode,
@@ -689,7 +689,7 @@ async def get_project_client(
         # which checks context cache, auto-selects single workspace, or errors
         if effective_workspace is not None:
             # Config-resolved workspace — pass directly to get_client, skip network lookup
-            with telemetry.scope(
+            with logfire.span(
                 "routing.client_session",
                 project_name=resolved_project,
                 route_mode=route_mode,
@@ -705,7 +705,7 @@ async def get_project_client(
         else:
             # No config-based workspace — use resolve_workspace_parameter for discovery
             active_ws = await resolve_workspace_parameter(workspace=None, context=context)
-            with telemetry.scope(
+            with logfire.span(
                 "routing.client_session",
                 project_name=resolved_project,
                 route_mode=route_mode,
@@ -722,7 +722,7 @@ async def get_project_client(
 
     # Step 4: Local routing (default)
     route_mode = "local_asgi"
-    with telemetry.scope(
+    with logfire.span(
         "routing.client_session",
         project_name=resolved_project,
         route_mode=route_mode,

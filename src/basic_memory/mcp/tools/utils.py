@@ -6,8 +6,9 @@ to the Basic Memory API, with improved error handling and logging.
 
 import typing
 from contextlib import contextmanager
-from typing import Optional
+from typing import Any, Optional
 
+import logfire
 from httpx import Response, URL, AsyncClient, HTTPStatusError
 from httpx._client import UseClientDefault, USE_CLIENT_DEFAULT
 from httpx._types import (
@@ -24,7 +25,6 @@ from httpx._types import (
 from loguru import logger
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory import telemetry
 from basic_memory.config import ConfigManager
 
 
@@ -200,7 +200,7 @@ def _request_scope(
     has_body: bool = False,
 ):
     """Create the shared MCP transport span used by all HTTP helpers."""
-    attrs = {
+    attrs: dict[str, Any] = {
         "method": method,
         "client_name": client_name,
         "operation": operation,
@@ -209,9 +209,8 @@ def _request_scope(
         "has_query": bool(params),
         "has_body": has_body,
     }
-    with telemetry.contextualize(**attrs):
-        with telemetry.started_span("mcp.http.request", **attrs) as active_span:
-            yield _RequestSpan(active_span)
+    with logfire.span("mcp.http.request", **attrs) as active_span:
+        yield _RequestSpan(active_span)
 
 
 async def call_get(

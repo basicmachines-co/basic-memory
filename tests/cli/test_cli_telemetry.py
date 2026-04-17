@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import logfire
+
 from basic_memory.cli import app as cli_app
 
 
@@ -33,11 +35,11 @@ def test_app_callback_registers_command_operation(monkeypatch) -> None:
     monkeypatch.setattr(cli_app, "maybe_show_cloud_promo", lambda command_name: None)
     monkeypatch.setattr(cli_app, "maybe_run_periodic_auto_update", lambda command_name: None)
 
-    def fake_operation(name: str, **attrs):
+    def fake_span(name: str, **attrs):
         operations.append((name, attrs))
         return resource
 
-    monkeypatch.setattr(cli_app.telemetry, "operation", fake_operation)
+    monkeypatch.setattr(logfire, "span", fake_span)
 
     ctx = FakeContext(invoked_subcommand="status")
     cli_app.app_callback(cast(Any, ctx), version=None)

@@ -7,7 +7,7 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.search import SearchResponse
 
@@ -57,7 +57,7 @@ class SearchClient:
         Raises:
             ToolError: If the request fails
         """
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.search.search",
             client_name="search",
             operation="search",

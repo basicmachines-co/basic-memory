@@ -7,7 +7,7 @@ from typing import Optional
 
 from httpx import AsyncClient, Response
 
-from basic_memory import telemetry
+import logfire
 from basic_memory.mcp.tools.utils import call_get
 
 
@@ -65,7 +65,7 @@ class ResourceClient:
         if page_size is not None:
             params["page_size"] = page_size
 
-        with telemetry.scope(
+        with logfire.span(
             "mcp.client.resource.read",
             client_name="resource",
             operation="read",
