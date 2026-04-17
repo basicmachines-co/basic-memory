@@ -334,6 +334,7 @@ async def test_list_memory_projects_factory_mode_explicit_workspace(app, test_pr
     ):
         result = await list_memory_projects(output_format="json", workspace="tenant-org")
 
+    assert isinstance(result, dict)
     proj = result["projects"][0]
     assert proj["workspace_name"] == "Acme Corp"
     assert proj["workspace_type"] == "organization"
@@ -467,7 +468,11 @@ def test_merge_projects_overlap():
 
 
 def _make_workspace(
-    tenant_id: str, name: str, workspace_type: str = "personal", role: str = "owner"
+    tenant_id: str,
+    name: str,
+    workspace_type: str = "personal",
+    role: str = "owner",
+    organization_id: str | None = None,
 ):
     """Create a WorkspaceInfo for testing."""
     from basic_memory.schemas.cloud import WorkspaceInfo
@@ -477,6 +482,7 @@ def _make_workspace(
         name=name,
         workspace_type=workspace_type,
         role=role,
+        organization_id=organization_id,
         has_active_subscription=True,
     )
 

@@ -199,7 +199,7 @@ async def list_memory_projects(
     # Why: there is no local ASGI server; the factory IS the cloud source
     # Outcome: single fetch, projects reported as source="cloud" with workspace metadata
     if is_factory_mode():
-        async with get_client() as client:
+        async with get_client(workspace=workspace) as client:
             project_client = ProjectClient(client)
             project_list = await project_client.list_projects()
 
