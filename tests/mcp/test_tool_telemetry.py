@@ -15,13 +15,23 @@ search_module = importlib.import_module("basic_memory.mcp.tools.search")
 write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
 
 
+class _NoopSpan:
+    """Minimal stand-in for a live logfire span during tests."""
+
+    def set_attributes(self, attrs: dict) -> None:
+        pass
+
+    def set_attribute(self, key: str, value) -> None:
+        pass
+
+
 def _recording_spans():
     spans: list[tuple[str, dict]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):
         spans.append((name, attrs))
-        yield
+        yield _NoopSpan()
 
     return spans, fake_span
 
