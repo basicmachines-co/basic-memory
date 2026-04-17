@@ -33,7 +33,9 @@ class EntityRepository(Repository[Entity]):
         """
         super().__init__(session_maker, Entity, project_id=project_id)
 
-    async def get_by_id(self, entity_id: int) -> Optional[Entity]:  # pragma: no cover
+    async def get_by_id(
+        self, entity_id: int, *, load_relations: bool = True
+    ) -> Optional[Entity]:  # pragma: no cover
         """Get entity by numeric ID.
 
         Args:
@@ -43,6 +45,10 @@ class EntityRepository(Repository[Entity]):
             Entity if found, None otherwise
         """
         async with db.scoped_session(self.session_maker) as session:
+            if not load_relations:
+                result = await session.execute(self.select().where(Entity.id == entity_id))
+                return result.scalars().one_or_none()
+
             return await self.select_by_id(session, entity_id)
 
     async def _find_one_by_query(self, query, *, load_relations: bool) -> Optional[Entity]:

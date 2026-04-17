@@ -13,6 +13,7 @@ from sqlalchemy import (
     Result,
     and_,
     delete,
+    update as sqlalchemy_update,
 )
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import NoResultFound
@@ -139,6 +140,19 @@ class Repository[T: Base]:
 
             # Query within same session
             return await self.select_by_ids(session, [m.id for m in models])  # pyright: ignore [reportAttributeAccessIssue]
+
+    async def add_all_no_return(self, models: List[T]) -> int:
+        """Insert models without reloading them afterward."""
+        if not models:
+            return 0
+
+        async with db.scoped_session(self.session_maker) as session:
+            for model in models:
+                self._set_project_id_if_needed(model)
+
+            session.add_all(models)
+            await session.flush()
+            return len(models)
 
     def select(self, *entities: Any) -> Select:
         """Create a new SELECT statement.
@@ -297,6 +311,25 @@ class Repository[T: Base]:
             except NoResultFound:
                 logger.debug(f"No {self.Model.__name__} found to update: {entity_id}")
                 return None
+
+    async def update_fields(self, entity_id: Any, entity_data: dict[str, Any]) -> bool:
+        """Update columns without reloading the model graph afterward."""
+        update_data = {k: v for k, v in entity_data.items() if k in self.valid_columns}
+        if not update_data:
+            return True
+
+        async with db.scoped_session(self.session_maker) as session:
+            conditions = [self.primary_key == entity_id]
+            if self.has_project_id and self.project_id is not None:
+                conditions.append(getattr(self.Model, "project_id") == self.project_id)
+
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    sqlalchemy_update(self.Model).where(and_(*conditions)).values(**update_data)
+                ),
+            )
+            return result.rowcount > 0
 
     async def delete(self, entity_id: int) -> bool:
         """Delete an entity from the database."""

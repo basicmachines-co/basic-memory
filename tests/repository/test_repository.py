@@ -60,6 +60,19 @@ async def test_add_all(repository):
 
 
 @pytest.mark.asyncio
+async def test_add_all_no_return(repository):
+    """Bulk inserts can skip the follow-up reload when callers do not need rows back."""
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(3)]
+
+    inserted = await repository.add_all_no_return(instances)
+
+    assert inserted == 3
+    found = await repository.find_by_id("test_0")
+    assert found is not None
+    assert found.name == "Test 0"
+
+
+@pytest.mark.asyncio
 async def test_bulk_create(repository):
     """Test bulk creation of entities."""
     # Create test instances
@@ -149,6 +162,28 @@ async def test_update(repository):
     modified = await repository.update(instance.id, {"name": "Updated"})
     assert modified is not None
     assert modified.name == "Updated"
+
+
+@pytest.mark.asyncio
+async def test_update_fields(repository):
+    """Column-only updates can skip eager reloads on write-heavy paths."""
+    instance = ModelTest(id="test_add", name="Test Add")
+    await repository.add(instance)
+
+    updated = await repository.update_fields(instance.id, {"name": "Updated"})
+
+    assert updated is True
+    found = await repository.find_by_id(instance.id)
+    assert found is not None
+    assert found.name == "Updated"
+
+
+@pytest.mark.asyncio
+async def test_update_fields_not_found(repository):
+    """Column-only updates still report when no row matched."""
+    updated = await repository.update_fields("missing", {"name": "Updated"})
+
+    assert updated is False
 
 
 @pytest.mark.asyncio

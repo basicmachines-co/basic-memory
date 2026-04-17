@@ -1,5 +1,6 @@
 """Service for managing entities in the database."""
 
+import asyncio
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -9,8 +10,6 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 import frontmatter
 import yaml
 from loguru import logger
-from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import (
@@ -883,24 +882,23 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        db_entity = existing_entity
-        if db_entity is not None:
-            state = sa_inspect(db_entity)
-            # Trigger: update flows can hand us an entity loaded in a different session.
-            # Why: clearing and rebuilding observations touches relationship state that cannot
-            #      lazy-load from a detached ORM instance.
-            # Outcome: reload the canonical row before mutating observations.
-            if state.detached or "observations" in state.unloaded:
-                db_entity = await self.repository.get_by_id(db_entity.id)
+        if existing_entity is not None:
+            db_entity = await self.repository.get_by_id(
+                existing_entity.id,
+                load_relations=False,
+            )
         else:
-            db_entity = await self.repository.get_by_file_path(file_path.as_posix())
+            db_entity = await self.repository.get_by_file_path(
+                file_path.as_posix(),
+                load_relations=False,
+            )
         if db_entity is None:  # pragma: no cover
             raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
 
-        # Clear observations for entity
+        # Observations are owned by the markdown file, so re-indexing replaces the old set.
+        # We only need the entity id here; loading the old relationship collection is wasted work.
         await self.observation_repository.delete_by_fields(entity_id=db_entity.id)
 
-        # add new observations
         observations = [
             Observation(
                 project_id=self.observation_repository.project_id,
@@ -912,10 +910,9 @@ class EntityService(BaseService[EntityModel]):
             )
             for obs in markdown.observations
         ]
-        await self.observation_repository.add_all(observations)
+        await self.observation_repository.add_all_no_return(observations)
 
-        # update values from markdown
-        db_entity = entity_model_from_markdown(file_path, markdown, db_entity)
+        self._apply_markdown_entity_fields(db_entity, file_path, markdown)
 
         # checksum value is None == not finished with sync
         db_entity.checksum = None
@@ -925,11 +922,49 @@ class EntityService(BaseService[EntityModel]):
         if user_id is not None:
             db_entity.last_updated_by = user_id
 
-        # update entity
-        return await self.repository.update(
+        entity_updates = {
+            "title": db_entity.title,
+            "note_type": db_entity.note_type,
+            "permalink": db_entity.permalink,
+            "file_path": db_entity.file_path,
+            "content_type": db_entity.content_type,
+            "created_at": db_entity.created_at,
+            "updated_at": db_entity.updated_at,
+            "entity_metadata": db_entity.entity_metadata,
+            "checksum": db_entity.checksum,
+            "last_updated_by": db_entity.last_updated_by,
+        }
+        updated = await self.repository.update_fields(
             db_entity.id,
-            db_entity,
+            entity_updates,
         )
+        if not updated:  # pragma: no cover
+            raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
+        return db_entity
+
+    def _apply_markdown_entity_fields(
+        self,
+        entity: EntityModel,
+        file_path: Path,
+        markdown: EntityMarkdown,
+    ) -> None:
+        """Apply parsed markdown scalar fields without touching ORM relationships."""
+        if not markdown.created or not markdown.modified:  # pragma: no cover
+            raise ValueError("Both created and modified dates are required in markdown")
+
+        entity.title = markdown.frontmatter.title
+        entity.note_type = markdown.frontmatter.type
+        if markdown.frontmatter.permalink is not None:
+            entity.permalink = markdown.frontmatter.permalink
+        entity.file_path = file_path.as_posix()
+        entity.content_type = "text/markdown"
+        entity.created_at = markdown.created
+        entity.updated_at = markdown.modified
+
+        normalized_metadata = normalize_frontmatter_metadata(markdown.frontmatter.metadata or {})
+        entity.entity_metadata = {
+            key: value for key, value in normalized_metadata.items() if value is not None
+        }
 
     async def upsert_entity_from_markdown(
         self,
@@ -938,6 +973,8 @@ class EntityService(BaseService[EntityModel]):
         *,
         is_new: bool,
         existing_entity: EntityModel | None = None,
+        resolve_relations: bool = True,
+        reload_entity: bool = True,
     ) -> EntityModel:
         """Create/update entity and relations from parsed markdown."""
         if is_new:
@@ -948,13 +985,21 @@ class EntityService(BaseService[EntityModel]):
                 markdown,
                 existing_entity=existing_entity,
             )
-        # Pass entity directly — avoids redundant get_by_file_path inside update_entity_relations
-        return await self.update_entity_relations(created, markdown)
+        # Pass the entity through so relation work does not have to rediscover the source row.
+        return await self.update_entity_relations(
+            created,
+            markdown,
+            resolve_targets=resolve_relations,
+            reload_entity=reload_entity,
+        )
 
     async def update_entity_relations(
         self,
         entity: EntityModel,
         markdown: EntityMarkdown,
+        *,
+        resolve_targets: bool = True,
+        reload_entity: bool = True,
     ) -> EntityModel:
         """Update relations for entity.
 
@@ -967,24 +1012,24 @@ class EntityService(BaseService[EntityModel]):
         # Clear existing relations first
         await self.relation_repository.delete_outgoing_relations_from_entity(entity_id)
 
-        # Batch resolve all relation targets in parallel
         if markdown.relations:
-            import asyncio
-
-            # Create tasks for all relation lookups
-            # Use strict=True to disable fuzzy search - only exact matches should create resolved relations
-            # This ensures forward references (links to non-existent entities) remain unresolved (to_id=NULL)
-            lookup_tasks = [
-                self.link_resolver.resolve_link(
-                    rel.target,
-                    strict=True,
-                    load_relations=False,
+            if resolve_targets:
+                # Exact target resolution is useful for local sync, but expensive for cloud
+                # one-file jobs. Cloud can write unresolved rows and let a relation repair pass
+                # fill in to_id later.
+                resolved_entities = await asyncio.gather(
+                    *(
+                        self.link_resolver.resolve_link(
+                            rel.target,
+                            strict=True,
+                            load_relations=False,
+                        )
+                        for rel in markdown.relations
+                    ),
+                    return_exceptions=True,
                 )
-                for rel in markdown.relations
-            ]
-
-            # Execute all lookups in parallel
-            resolved_entities = await asyncio.gather(*lookup_tasks, return_exceptions=True)
+            else:
+                resolved_entities = [None] * len(markdown.relations)
 
             # Process results and create relation records
             relations_to_add = []
@@ -1013,22 +1058,12 @@ class EntityService(BaseService[EntityModel]):
 
             # Batch insert all relations
             if relations_to_add:
-                try:
-                    await self.relation_repository.add_all(relations_to_add)
-                except IntegrityError:
-                    # Some relations might be duplicates - fall back to individual inserts
-                    logger.debug("Batch relation insert failed, trying individual inserts")
-                    for relation in relations_to_add:
-                        try:
-                            await self.relation_repository.add(relation)
-                        except IntegrityError:
-                            # Unique constraint violation - relation already exists
-                            logger.debug(
-                                f"Skipping duplicate relation {relation.relation_type} from {entity.permalink}"
-                            )
-                            continue
+                await self.relation_repository.add_all_ignore_duplicates(relations_to_add)
 
-        # Reload entity with relations via PK lookup (faster than get_by_file_path string match)
+        if not reload_entity:
+            return entity
+
+        # Reload entity with relations via PK lookup (faster than get_by_file_path string match).
         reloaded = await self.repository.find_by_ids([entity_id])
         return reloaded[0]
 

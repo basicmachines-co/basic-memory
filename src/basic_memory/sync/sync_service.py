@@ -1067,6 +1067,7 @@ class SyncService:
         *,
         new: bool = True,
         index_search: bool = True,
+        resolve_relations: bool = True,
     ) -> SyncedMarkdownFile:
         """Sync one markdown file and return the final canonical file state.
 
@@ -1115,6 +1116,7 @@ class SyncService:
             ),
             new=new,
             index_search=False,
+            resolve_relations=resolve_relations,
         )
         final_markdown_content = (
             indexed.markdown_content

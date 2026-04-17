@@ -629,6 +629,66 @@ async def test_batch_indexer_index_markdown_file_rewrites_permalink_after_reposi
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Deferred Target",
+            directory="notes",
+            content="# Deferred Target\n",
+        )
+    )
+    path = "notes/deferred-source.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            """
+            ---
+            title: Deferred Source
+            type: note
+            ---
+
+            # Deferred Source
+
+            - links_to [[Deferred Target]]
+            """
+        ),
+    )
+
+    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+        resolve_relations=False,
+    )
+
+    resolve_link.assert_not_awaited()
+    source = await entity_repository.get_by_file_path(path)
+    assert source is not None
+    assert len(source.outgoing_relations) == 1
+    assert source.outgoing_relations[0].to_id is None
+    assert source.outgoing_relations[0].to_name == "Deferred Target"
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_strips_frontmatter_from_search_content_when_body_is_empty(
     app_config,
     entity_service,

@@ -186,6 +186,7 @@ class BatchIndexer:
         new: bool | None = None,
         existing_permalink_by_path: dict[str, str | None] | None = None,
         index_search: bool = True,
+        resolve_relations: bool = True,
     ) -> IndexedEntity:
         """Index one markdown file using the same normalization and upsert path as batches."""
         if not self._is_markdown(file):
@@ -212,7 +213,12 @@ class BatchIndexer:
         existing_permalink_by_path[file.path] = prepared.markdown.frontmatter.permalink
 
         with telemetry.span("index.markdown_file.persist", path=file.path, is_new=new):
-            persisted = await self._persist_markdown_file(prepared, is_new=new)
+            persisted = await self._persist_markdown_file(
+                prepared,
+                is_new=new,
+                resolve_relations=resolve_relations,
+                reload_entity=False,
+            )
         existing_permalink_by_path[file.path] = persisted.entity.permalink
 
         with telemetry.span(
@@ -550,6 +556,8 @@ class BatchIndexer:
         prepared: _PreparedMarkdownFile,
         *,
         is_new: bool | None = None,
+        resolve_relations: bool = True,
+        reload_entity: bool = True,
     ) -> _PersistedMarkdownFile:
         existing = await self.entity_repository.get_by_file_path(
             prepared.file.path,
@@ -561,15 +569,20 @@ class BatchIndexer:
             Path(prepared.file.path),
             prepared.markdown,
             is_new=is_new,
+            existing_entity=existing,
+            resolve_relations=resolve_relations,
+            reload_entity=reload_entity,
         )
         prepared = await self._reconcile_persisted_permalink(prepared, entity)
-        updated = await self.entity_repository.update(
+        metadata_updates = self._entity_metadata_updates(prepared.file, prepared.final_checksum)
+        updated = await self.entity_repository.update_fields(
             entity.id,
-            self._entity_metadata_updates(prepared.file, prepared.final_checksum),
+            metadata_updates,
         )
-        if updated is None:
+        if not updated:
             raise ValueError(f"Failed to update markdown entity metadata for {prepared.file.path}")
-        return _PersistedMarkdownFile(prepared=prepared, entity=updated)
+        self._apply_entity_metadata_updates(entity, metadata_updates)
+        return _PersistedMarkdownFile(prepared=prepared, entity=entity)
 
     async def _reconcile_persisted_permalink(
         self,
@@ -658,6 +671,11 @@ class BatchIndexer:
         if file.content_type is not None:
             updates["content_type"] = file.content_type
         return updates
+
+    def _apply_entity_metadata_updates(self, entity: Entity, updates: dict[str, object]) -> None:
+        """Keep the returned entity aligned with metadata written without reload."""
+        for key, value in updates.items():
+            setattr(entity, key, value)
 
     def _is_markdown(self, file: IndexInputFile) -> bool:
         if file.content_type is not None:

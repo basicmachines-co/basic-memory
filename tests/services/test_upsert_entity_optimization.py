@@ -191,6 +191,48 @@ async def test_upsert_with_relations_uses_lightweight_exact_resolution(
     ]
 
 
+@pytest.mark.asyncio
+async def test_upsert_can_defer_relation_target_resolution(
+    entity_service: EntityService, monkeypatch
+):
+    """Cloud one-file indexing can store unresolved relation rows for later repair."""
+    await entity_service.create_entity(
+        EntitySchema(
+            title="Deferred Target",
+            directory="notes",
+            note_type="note",
+            content="# Deferred Target",
+        )
+    )
+    source = await entity_service.create_entity(
+        EntitySchema(
+            title="Deferred Source",
+            directory="notes",
+            note_type="note",
+            content="# Deferred Source",
+        )
+    )
+    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
+
+    markdown = _make_markdown(
+        title="Deferred Source",
+        relations=[MarkdownRelation(type="links_to", target="Deferred Target")],
+    )
+    updated = await entity_service.upsert_entity_from_markdown(
+        Path(source.file_path),
+        markdown,
+        is_new=False,
+        resolve_relations=False,
+    )
+
+    resolve_link.assert_not_awaited()
+    outgoing = [relation for relation in updated.relations if relation.from_id == source.id]
+    assert len(outgoing) == 1
+    assert outgoing[0].to_id is None
+    assert outgoing[0].to_name == "Deferred Target"
+
+
 # --- Correctness: full round-trip ---
 
 

@@ -292,6 +292,53 @@ async def test_sync_one_markdown_file_indexes_when_checksum_differs(
 
 
 @pytest.mark.asyncio
+async def test_sync_one_markdown_file_can_defer_relation_resolution(
+    sync_service,
+    entity_service,
+    test_project,
+    monkeypatch,
+):
+    """Cloud callers can keep one-file sync cheap and repair relations later."""
+    await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Deferred Target",
+            directory="notes",
+            content="# Deferred Target\n",
+        )
+    )
+    _write_markdown(
+        Path(test_project.path),
+        "notes/deferred-source.md",
+        dedent(
+            """
+            ---
+            title: Deferred Source
+            type: note
+            ---
+
+            # Deferred Source
+
+            - links_to [[Deferred Target]]
+            """
+        ),
+    )
+
+    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
+    monkeypatch.setattr(sync_service.entity_service.link_resolver, "resolve_link", resolve_link)
+
+    result = await sync_service.sync_one_markdown_file(
+        "notes/deferred-source.md",
+        index_search=False,
+        resolve_relations=False,
+    )
+
+    resolve_link.assert_not_awaited()
+    assert len(result.entity.outgoing_relations) == 1
+    assert result.entity.outgoing_relations[0].to_id is None
+    assert result.entity.outgoing_relations[0].to_name == "Deferred Target"
+
+
+@pytest.mark.asyncio
 async def test_sync_markdown_file_remains_tuple_compatible(sync_service, test_project):
     """The legacy tuple-returning API still works for existing callers."""
     _write_markdown(
