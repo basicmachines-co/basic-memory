@@ -712,6 +712,8 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
 
     monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+    # Reset the module-level metric cache so the fake factories below win.
+    monkeypatch.setattr(search_repository_base_module, "_METRIC_INSTRUMENTS", {})
     monkeypatch.setattr(
         search_repository_base_module.logfire,
         "metric_histogram",

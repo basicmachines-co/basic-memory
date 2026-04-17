@@ -41,6 +41,29 @@ OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
 _SQLITE_MAX_PREPARE_WINDOW = 8
 
 
+# Cache instruments so the per-entity hot path in _log_vector_sync_complete
+# doesn't re-enter the OTel MeterProvider lookup on every sample.
+_METRIC_INSTRUMENTS: dict[tuple[str, str, str], Any] = {}
+
+
+def _metric_histogram(name: str, unit: str = "") -> Any:
+    key = ("histogram", name, unit)
+    instrument = _METRIC_INSTRUMENTS.get(key)
+    if instrument is None:
+        instrument = logfire.metric_histogram(name, unit=unit)
+        _METRIC_INSTRUMENTS[key] = instrument
+    return instrument
+
+
+def _metric_counter(name: str) -> Any:
+    key = ("counter", name, "")
+    instrument = _METRIC_INSTRUMENTS.get(key)
+    if instrument is None:
+        instrument = logfire.metric_counter(name)
+        _METRIC_INSTRUMENTS[key] = instrument
+    return instrument
+
+
 @dataclass
 class VectorSyncBatchResult:
     """Aggregate result for batched semantic vector sync runs."""
@@ -1069,7 +1092,7 @@ class SearchRepositoryBase(ABC):
                 write_seconds_total=result.write_seconds_total,
             )
             batch_total_seconds = time.perf_counter() - batch_start
-            logfire.metric_histogram(
+            _metric_histogram(
                 "vector_sync_batch_total_seconds",
                 unit="s",
             ).record(
@@ -1079,42 +1102,42 @@ class SearchRepositoryBase(ABC):
                     "skip_only_batch": result.embedding_jobs_total == 0,
                 },
             )
-            logfire.metric_counter("vector_sync_entities_total").add(
+            _metric_counter("vector_sync_entities_total").add(
                 result.entities_total,
                 attributes={
                     "backend": backend_name,
                     "skip_only_batch": result.embedding_jobs_total == 0,
                 },
             )
-            logfire.metric_counter("vector_sync_entities_skipped").add(
+            _metric_counter("vector_sync_entities_skipped").add(
                 result.entities_skipped,
                 attributes={
                     "backend": backend_name,
                     "skip_only_batch": result.embedding_jobs_total == 0,
                 },
             )
-            logfire.metric_counter("vector_sync_entities_deferred").add(
+            _metric_counter("vector_sync_entities_deferred").add(
                 result.entities_deferred,
                 attributes={
                     "backend": backend_name,
                     "skip_only_batch": result.embedding_jobs_total == 0,
                 },
             )
-            logfire.metric_counter("vector_sync_embedding_jobs_total").add(
+            _metric_counter("vector_sync_embedding_jobs_total").add(
                 result.embedding_jobs_total,
                 attributes={
                     "backend": backend_name,
                     "skip_only_batch": result.embedding_jobs_total == 0,
                 },
             )
-            logfire.metric_counter("vector_sync_chunks_total").add(
+            _metric_counter("vector_sync_chunks_total").add(
                 result.chunks_total,
                 attributes={
                     "backend": backend_name,
                     "skip_only_batch": result.embedding_jobs_total == 0,
                 },
             )
-            logfire.metric_counter("vector_sync_chunks_skipped").add(
+            _metric_counter("vector_sync_chunks_skipped").add(
                 result.chunks_skipped,
                 attributes={
                     "backend": backend_name,
@@ -1694,7 +1717,7 @@ class SearchRepositoryBase(ABC):
     ) -> None:
         """Log completion and slow-entity warnings with a consistent format."""
         backend_name = type(self).__name__.removesuffix("SearchRepository").lower()
-        logfire.metric_histogram(
+        _metric_histogram(
             "vector_sync_prepare_seconds",
             unit="s",
         ).record(
@@ -1704,7 +1727,7 @@ class SearchRepositoryBase(ABC):
                 "skip_only_entity": entity_skipped and embedding_jobs_count == 0,
             },
         )
-        logfire.metric_histogram(
+        _metric_histogram(
             "vector_sync_queue_wait_seconds",
             unit="s",
         ).record(
@@ -1714,7 +1737,7 @@ class SearchRepositoryBase(ABC):
                 "skip_only_entity": entity_skipped and embedding_jobs_count == 0,
             },
         )
-        logfire.metric_histogram(
+        _metric_histogram(
             "vector_sync_embed_seconds",
             unit="s",
         ).record(
@@ -1724,7 +1747,7 @@ class SearchRepositoryBase(ABC):
                 "skip_only_entity": entity_skipped and embedding_jobs_count == 0,
             },
         )
-        logfire.metric_histogram(
+        _metric_histogram(
             "vector_sync_write_seconds",
             unit="s",
         ).record(
