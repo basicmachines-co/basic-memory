@@ -439,9 +439,10 @@ async def _fetch_workspace_project_entries(
     )
     entries: list[WorkspaceProjectEntry] = []
     for project in project_list.projects:
-        if default_permalink and project.permalink == default_permalink:
-            project.is_default = True
-        entries.append(WorkspaceProjectEntry(workspace=workspace, project=project))
+        entry_project = project
+        if default_permalink and project.permalink == default_permalink and not project.is_default:
+            entry_project = project.model_copy(update={"is_default": True})
+        entries.append(WorkspaceProjectEntry(workspace=workspace, project=entry_project))
 
     if context:  # pragma: no cover
         await context.info(
@@ -481,6 +482,13 @@ async def _ensure_workspace_project_index(
         )
 
     return index
+
+
+async def ensure_workspace_project_index(
+    context: Optional[Context] = None,
+) -> WorkspaceProjectIndex:
+    """Public wrapper for loading the session-local workspace/project lookup index."""
+    return await _ensure_workspace_project_index(context=context)
 
 
 async def resolve_workspace_project_identifier(

@@ -14,7 +14,7 @@ from basic_memory.config import ConfigManager, has_cloud_credentials
 from basic_memory.mcp.async_client import get_client, get_cloud_proxy_client, is_factory_mode
 from basic_memory.mcp.project_context import (
     WorkspaceProjectEntry,
-    _ensure_workspace_project_index,
+    ensure_workspace_project_index,
     resolve_workspace_parameter,
 )
 from basic_memory.mcp.server import mcp
@@ -317,6 +317,8 @@ async def list_memory_projects(
         cloud_ws_name: str | None = None
         cloud_ws_type: str | None = None
         cloud_ws_tenant_id: str | None = None
+        cloud_ws_slug: str | None = None
+        cloud_ws_is_default = False
         try:
             from basic_memory.mcp.project_context import get_available_workspaces
 
@@ -332,6 +334,8 @@ async def list_memory_projects(
                 cloud_ws_name = matched.name
                 cloud_ws_type = matched.workspace_type
                 cloud_ws_tenant_id = matched.tenant_id
+                cloud_ws_slug = matched.slug
+                cloud_ws_is_default = matched.is_default
         except Exception:
             pass  # workspace lookup is best-effort
 
@@ -341,6 +345,8 @@ async def list_memory_projects(
             cloud_workspace_name=cloud_ws_name,
             cloud_workspace_type=cloud_ws_type,
             cloud_workspace_tenant_id=cloud_ws_tenant_id,
+            cloud_workspace_slug=cloud_ws_slug,
+            cloud_workspace_is_default=cloud_ws_is_default,
         )
         if output_format == "json":
             return _format_project_list_json(
@@ -376,7 +382,7 @@ async def list_memory_projects(
             cloud_ws_is_default = active_workspace.is_default
         else:
             try:
-                workspace_index = await _ensure_workspace_project_index(context=context)
+                workspace_index = await ensure_workspace_project_index(context=context)
                 cloud_entries = workspace_index.entries
             except Exception as exc:
                 logger.warning(

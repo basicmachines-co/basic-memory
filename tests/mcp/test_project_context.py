@@ -6,6 +6,7 @@ test config file and pytest monkeypatch for environment variables.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, cast
 
 import pytest
@@ -422,6 +423,44 @@ async def test_workspace_project_index_caches_and_invalidates(monkeypatch):
     await invalidate_workspace_project_index(_ctx(context))
     await _ensure_workspace_project_index(context=_ctx(context))
     assert calls == ["personal", "acme", "personal", "acme"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_workspace_project_entries_copies_default_project(monkeypatch):
+    import basic_memory.mcp.async_client as async_client
+    from basic_memory.mcp.project_context import _fetch_workspace_project_entries
+    from basic_memory.schemas.project_info import ProjectList
+
+    workspace = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    project = _project("Default Notes", id=3, external_id="default-notes-id")
+    project_list = ProjectList(projects=[project], default_project="Default Notes")
+
+    @asynccontextmanager
+    async def fake_get_client(*args, **kwargs) -> AsyncIterator[object]:
+        yield object()
+
+    async def fake_list_projects(self):
+        return project_list
+
+    monkeypatch.setattr(async_client, "is_factory_mode", lambda: True)
+    monkeypatch.setattr(async_client, "get_client", fake_get_client)
+    monkeypatch.setattr(
+        "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+        fake_list_projects,
+    )
+
+    entries = await _fetch_workspace_project_entries(workspace)
+
+    assert project.is_default is False
+    assert entries[0].project is not project
+    assert entries[0].project.is_default is True
 
 
 @pytest.mark.asyncio

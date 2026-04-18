@@ -168,7 +168,7 @@ async def test_list_memory_projects_local_and_cloud_merge(app, test_project):
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.tools.project_management._ensure_workspace_project_index",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
             return_value=workspace_index,
         ),
@@ -207,7 +207,7 @@ async def test_list_memory_projects_cloud_failure_graceful(app, test_project):
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.tools.project_management._ensure_workspace_project_index",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
             side_effect=RuntimeError("cloud unavailable"),
         ),
@@ -283,6 +283,9 @@ async def test_list_memory_projects_factory_mode_json_includes_workspace(app, te
     assert proj["workspace_name"] == "My Org"
     assert proj["workspace_type"] == "organization"
     assert proj["workspace_tenant_id"] == "tenant-abc"
+    assert proj["workspace_slug"] == "my-org"
+    assert proj["workspace_is_default"] is False
+    assert proj["qualified_name"] == "my-org/cloud-proj"
 
 
 @pytest.mark.asyncio
@@ -374,7 +377,7 @@ async def test_list_memory_projects_json_with_cloud(app, test_project):
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.tools.project_management._ensure_workspace_project_index",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
             return_value=workspace_index,
         ),
@@ -566,7 +569,7 @@ async def test_list_memory_projects_aggregates_without_config_workspace(app, tes
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.tools.project_management._ensure_workspace_project_index",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
             return_value=workspace_index,
         ) as mock_index,
