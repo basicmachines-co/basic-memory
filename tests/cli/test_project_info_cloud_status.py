@@ -136,6 +136,25 @@ def _cloud_index_status(
     )
 
 
+def _workspace(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    name: str,
+    role: str,
+    slug: str | None = None,
+    is_default: bool = False,
+) -> WorkspaceInfo:
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug or name.casefold().replace(" ", "-"),
+        name=name,
+        role=role,
+        is_default=is_default,
+    )
+
+
 def test_project_info_local_output_is_unchanged(runner: CliRunner, write_config, monkeypatch):
     """Local project info should not attempt cloud augmentation."""
     write_config(
@@ -432,11 +451,13 @@ async def test_resolve_cloud_status_workspace_id_async_auto_discovers_single_wor
 
     async def fake_get_available_workspaces():
         return [
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="11111111-1111-1111-1111-111111111111",
                 workspace_type="personal",
+                slug="personal",
                 name="Personal",
                 role="owner",
+                is_default=True,
             )
         ]
 

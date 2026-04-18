@@ -46,8 +46,10 @@ async def test_resolve_workspace_parameter_emits_routing_span(monkeypatch) -> No
     workspace = WorkspaceInfo(
         tenant_id="11111111-1111-1111-1111-111111111111",
         workspace_type="personal",
+        slug="personal",
         name="Personal",
         role="owner",
+        is_default=True,
     )
 
     async def fake_get_available_workspaces(context=None):

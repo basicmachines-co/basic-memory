@@ -6,6 +6,42 @@ from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_available_workspaces
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
+
+
+def _personal_workspace() -> WorkspaceInfo:
+    """Return a display-only personal workspace when discovery has no rows.
+
+    This keeps list_workspaces friendly for non-teams or local-only users. It is not
+    the cloud routing source of truth; project-scoped routing still depends on real
+    workspace discovery and the workspace project index in project_context.
+    """
+    return WorkspaceInfo(
+        tenant_id="personal",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+        has_active_subscription=True,
+    )
+
+
+def _workspace_list_response(workspaces: list[WorkspaceInfo]) -> WorkspaceListResponse:
+    """Build the structured MCP response from the shared cloud workspace schema."""
+    if not workspaces:
+        workspaces = [_personal_workspace()]
+
+    default_workspace_id = next(
+        (workspace.tenant_id for workspace in workspaces if workspace.is_default),
+        None,
+    )
+    return WorkspaceListResponse(
+        workspaces=workspaces,
+        count=len(workspaces),
+        default_workspace_id=default_workspace_id,
+        current_workspace_id=None,
+    )
 
 
 @mcp.tool(
@@ -24,40 +60,18 @@ async def list_workspaces(
         context: Optional FastMCP context for progress/status logging.
     """
     workspaces = await get_available_workspaces(context=context)
+    response = _workspace_list_response(workspaces)
 
     if output_format == "json":
-        return {
-            "workspaces": [
-                {
-                    "tenant_id": ws.tenant_id,
-                    "name": ws.name,
-                    "workspace_type": ws.workspace_type,
-                    "role": ws.role,
-                    "organization_id": ws.organization_id,
-                    "has_active_subscription": ws.has_active_subscription,
-                }
-                for ws in workspaces
-            ],
-            "count": len(workspaces),
-        }
+        return response.model_dump(mode="json")
 
-    if not workspaces:
-        return (
-            "# No Workspaces Available\n\n"
-            "No accessible workspaces were found for this account. "
-            "Ensure the account has an active subscription and tenant access."
-        )
-
-    lines = [
-        f"# Available Workspaces ({len(workspaces)})",
-        "",
-        "Use `workspace` as either the `tenant_id` or unique `name` in project-scoped tool calls.",
-        "",
-    ]
-    for workspace in workspaces:
+    lines = [f"# Available Workspaces ({response.count})", ""]
+    for workspace in response.workspaces:
+        default_label = ", default" if workspace.is_default else ""
         lines.append(
             f"- {workspace.name} "
-            f"(type={workspace.workspace_type}, role={workspace.role}, tenant_id={workspace.tenant_id})"
+            f"(slug={workspace.slug}, type={workspace.workspace_type}, "
+            f"role={workspace.role}{default_label}, tenant_id={workspace.tenant_id})"
         )
 
     return "\n".join(lines)

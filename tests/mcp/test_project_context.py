@@ -28,6 +28,45 @@ def _ctx(context: _ContextState) -> Any:
     return cast(Any, context)
 
 
+def _workspace(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    name: str,
+    role: str,
+    slug: str | None = None,
+    is_default: bool = False,
+):
+    from basic_memory.schemas.cloud import WorkspaceInfo
+
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug or name.casefold().replace(" ", "-"),
+        name=name,
+        role=role,
+        is_default=is_default,
+    )
+
+
+def _project(
+    name: str,
+    *,
+    id: int = 1,
+    external_id: str = "11111111-1111-1111-1111-111111111111",
+    is_default: bool = False,
+):
+    from basic_memory.schemas.project_info import ProjectItem
+
+    return ProjectItem(
+        id=id,
+        external_id=external_id,
+        name=name,
+        path=f"/{name}",
+        is_default=is_default,
+    )
+
+
 @pytest.mark.asyncio
 async def test_returns_none_when_no_default_and_no_project(config_manager, monkeypatch):
     from basic_memory.mcp.project_context import resolve_project_parameter
@@ -174,14 +213,15 @@ async def test_env_constraint_overrides_default(config_manager, config_home, mon
 @pytest.mark.asyncio
 async def test_workspace_auto_selects_single_and_caches(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
     context = _ContextState()
-    only_workspace = WorkspaceInfo(
+    only_workspace = _workspace(
         tenant_id="11111111-1111-1111-1111-111111111111",
         workspace_type="personal",
+        slug="personal",
         name="Personal",
         role="owner",
+        is_default=True,
     )
 
     async def fake_get_available_workspaces(context=None):
@@ -200,18 +240,20 @@ async def test_workspace_auto_selects_single_and_caches(monkeypatch):
 @pytest.mark.asyncio
 async def test_workspace_requires_user_choice_when_multiple(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
     workspaces = [
-        WorkspaceInfo(
+        _workspace(
             tenant_id="11111111-1111-1111-1111-111111111111",
             workspace_type="personal",
+            slug="personal",
             name="Personal",
             role="owner",
+            is_default=True,
         ),
-        WorkspaceInfo(
+        _workspace(
             tenant_id="22222222-2222-2222-2222-222222222222",
             workspace_type="organization",
+            slug="team",
             name="Team",
             role="editor",
         ),
@@ -232,20 +274,22 @@ async def test_workspace_requires_user_choice_when_multiple(monkeypatch):
 @pytest.mark.asyncio
 async def test_workspace_explicit_selection_by_tenant_id_or_name(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
-    team_workspace = WorkspaceInfo(
+    team_workspace = _workspace(
         tenant_id="22222222-2222-2222-2222-222222222222",
         workspace_type="organization",
+        slug="team",
         name="Team",
         role="editor",
     )
     workspaces = [
-        WorkspaceInfo(
+        _workspace(
             tenant_id="11111111-1111-1111-1111-111111111111",
             workspace_type="personal",
+            slug="personal",
             name="Personal",
             role="owner",
+            is_default=True,
         ),
         team_workspace,
     ]
@@ -268,14 +312,15 @@ async def test_workspace_explicit_selection_by_tenant_id_or_name(monkeypatch):
 @pytest.mark.asyncio
 async def test_workspace_invalid_selection_lists_choices(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
     workspaces = [
-        WorkspaceInfo(
+        _workspace(
             tenant_id="11111111-1111-1111-1111-111111111111",
             workspace_type="personal",
+            slug="personal",
             name="Personal",
             role="owner",
+            is_default=True,
         )
     ]
 
@@ -294,13 +339,14 @@ async def test_workspace_invalid_selection_lists_choices(monkeypatch):
 @pytest.mark.asyncio
 async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
-    cached_workspace = WorkspaceInfo(
+    cached_workspace = _workspace(
         tenant_id="11111111-1111-1111-1111-111111111111",
         workspace_type="personal",
+        slug="personal",
         name="Personal",
         role="owner",
+        is_default=True,
     )
     context = _ContextState()
     await context.set_state("active_workspace", cached_workspace.model_dump())
@@ -315,6 +361,169 @@ async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
 
     resolved = await resolve_workspace_parameter(context=_ctx(context))
     assert resolved.tenant_id == cached_workspace.tenant_id
+
+
+@pytest.mark.asyncio
+async def test_workspace_project_index_caches_and_invalidates(monkeypatch):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _ensure_workspace_project_index,
+        invalidate_workspace_project_index,
+    )
+
+    context = _ContextState()
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    acme = _workspace(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+    )
+    calls: list[str] = []
+
+    async def fake_get_available_workspaces(context=None):
+        return [personal, acme]
+
+    async def fake_fetch_workspace_project_entries(workspace, context=None):
+        calls.append(workspace.slug)
+        project = _project(
+            f"{workspace.slug}-notes",
+            id=len(calls),
+            external_id=f"{workspace.slug}-project-id",
+        )
+        return (WorkspaceProjectEntry(workspace=workspace, project=project),)
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(
+        project_context,
+        "_fetch_workspace_project_entries",
+        fake_fetch_workspace_project_entries,
+    )
+
+    first = await _ensure_workspace_project_index(context=_ctx(context))
+    second = await _ensure_workspace_project_index(context=_ctx(context))
+
+    assert [entry.qualified_name for entry in first.entries] == [
+        "personal/personal-notes",
+        "acme/acme-notes",
+    ]
+    assert second.entries == first.entries
+    assert calls == ["personal", "acme"]
+
+    await invalidate_workspace_project_index(_ctx(context))
+    await _ensure_workspace_project_index(context=_ctx(context))
+    assert calls == ["personal", "acme", "personal", "acme"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_project_identifier_handles_qualified_and_collisions(monkeypatch):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_project_identifier,
+    )
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    acme = _workspace(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=personal,
+            project=_project("Meeting Notes", id=1, external_id="personal-project-id"),
+        ),
+        WorkspaceProjectEntry(
+            workspace=acme,
+            project=_project("Meeting Notes", id=2, external_id="acme-project-id"),
+        ),
+    )
+    index = _build_workspace_project_index((personal, acme), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    resolved = await resolve_workspace_project_identifier("acme/meeting-notes")
+    assert resolved.workspace.slug == "acme"
+    assert resolved.project.external_id == "acme-project-id"
+
+    with pytest.raises(ValueError, match="Use: personal/meeting-notes or acme/meeting-notes"):
+        await resolve_workspace_project_identifier("meeting-notes")
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_project_identifier_uses_active_workspace_for_duplicate(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_project_identifier,
+    )
+
+    context = _ContextState()
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    acme = _workspace(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+    )
+    await context.set_state("active_workspace", acme.model_dump())
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=personal,
+            project=_project("Meeting Notes", id=1, external_id="personal-project-id"),
+        ),
+        WorkspaceProjectEntry(
+            workspace=acme,
+            project=_project("Meeting Notes", id=2, external_id="acme-project-id"),
+        ),
+    )
+    index = _build_workspace_project_index((personal, acme), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    resolved = await resolve_workspace_project_identifier(
+        "meeting-notes",
+        context=_ctx(context),
+    )
+    assert resolved.workspace.slug == "acme"
+    assert resolved.project.external_id == "acme-project-id"
 
 
 @pytest.mark.asyncio
@@ -599,114 +808,196 @@ class TestGetProjectClientRoutingOrder:
         config.cloud_api_key = "bmc_test123"
         config_manager.save_config(config)
 
-        # Patch resolve_workspace_parameter to fail if called — it should be skipped
-        async def fail_if_called(**kwargs):  # pragma: no cover
-            raise AssertionError(
-                "resolve_workspace_parameter should not be called when workspace_id is set"
-            )
+        from contextlib import asynccontextmanager
+        from basic_memory.schemas.project_info import ProjectItem
+
+        workspace_info = _workspace(
+            tenant_id="per-project-tenant-id",
+            workspace_type="organization",
+            slug="configured",
+            name="Configured",
+            role="owner",
+        )
+        seen: dict[str, object] = {}
+
+        async def fake_resolve_workspace_parameter(workspace=None, context=None):
+            assert workspace == "per-project-tenant-id"
+            return workspace_info
 
         monkeypatch.setattr(
             "basic_memory.mcp.project_context.resolve_workspace_parameter",
-            fail_if_called,
+            fake_resolve_workspace_parameter,
         )
 
-        # Will fail at cloud client creation (no real cloud), but proves workspace
-        # resolution was skipped
-        with pytest.raises(Exception) as exc_info:
-            async with get_project_client(project="cloud-proj"):
-                pass
+        @asynccontextmanager
+        async def fake_get_client(project_name=None, workspace=None):
+            seen["project_name"] = project_name
+            seen["workspace"] = workspace
+            yield object()
 
-        # Should not be a workspace resolution error
-        error_msg = str(exc_info.value).lower()
-        assert "resolve_workspace_parameter should not be called" not in error_msg
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            return ProjectItem(
+                id=1,
+                external_id="cloud-project-id",
+                name=project_name,
+                path="/cloud-proj",
+                is_default=False,
+            )
+
+        monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.get_active_project",
+            fake_get_active_project,
+        )
+
+        async with get_project_client(project="cloud-proj") as (_client, active_project):
+            assert active_project.external_id == "cloud-project-id"
+
+        assert seen == {"project_name": "cloud-proj", "workspace": "per-project-tenant-id"}
 
     @pytest.mark.asyncio
-    async def test_cloud_project_uses_default_workspace(self, config_manager, monkeypatch):
-        """Cloud project without workspace_id should fall back to default_workspace."""
+    async def test_cloud_project_uses_workspace_project_index(self, config_manager, monkeypatch):
+        """Cloud project without workspace_id resolves its workspace from the project index."""
+        from contextlib import asynccontextmanager
+
         from basic_memory.mcp.project_context import get_project_client
         from basic_memory.config import ProjectEntry, ProjectMode
+        from basic_memory.schemas.project_info import ProjectItem
 
         config = config_manager.load_config()
         config.projects["cloud-proj"] = ProjectEntry(
             path=str(config_manager.config_dir.parent / "cloud-proj"),
             mode=ProjectMode.CLOUD,
         )
-        config.default_workspace = "global-default-tenant-id"
         config.cloud_api_key = "bmc_test123"
         config_manager.save_config(config)
 
-        # Patch resolve_workspace_parameter to fail if called — it should be skipped
-        async def fail_if_called(**kwargs):  # pragma: no cover
-            raise AssertionError(
-                "resolve_workspace_parameter should not be called when default_workspace is set"
+        workspace = _workspace(
+            tenant_id="acme-tenant",
+            workspace_type="organization",
+            slug="acme",
+            name="Acme",
+            role="editor",
+        )
+        project = _project("Cloud Proj", id=42, external_id="cloud-project-id")
+        seen: dict[str, object] = {}
+
+        async def fake_resolve_workspace_project_identifier(project_name, context=None):
+            from basic_memory.mcp.project_context import WorkspaceProjectEntry
+
+            assert project_name == "cloud-proj"
+            return WorkspaceProjectEntry(workspace=workspace, project=project)
+
+        @asynccontextmanager
+        async def fake_get_client(project_name=None, workspace=None):
+            seen["project_name"] = project_name
+            seen["workspace"] = workspace
+            yield object()
+
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            assert project_name == "Cloud Proj"
+            return ProjectItem(
+                id=project.id,
+                external_id=project.external_id,
+                name=project.name,
+                path=project.path,
+                is_default=False,
             )
 
         monkeypatch.setattr(
-            "basic_memory.mcp.project_context.resolve_workspace_parameter",
-            fail_if_called,
+            "basic_memory.mcp.project_context.resolve_workspace_project_identifier",
+            fake_resolve_workspace_project_identifier,
+        )
+        monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.get_active_project", fake_get_active_project
         )
 
-        # Will fail at cloud client creation, but proves workspace resolution was skipped
-        with pytest.raises(Exception) as exc_info:
-            async with get_project_client(project="cloud-proj"):
-                pass
+        async with get_project_client(project="cloud-proj") as (_client, active_project):
+            assert active_project.external_id == "cloud-project-id"
 
-        error_msg = str(exc_info.value).lower()
-        assert "resolve_workspace_parameter should not be called" not in error_msg
+        assert seen == {"project_name": "Cloud Proj", "workspace": "acme-tenant"}
 
     @pytest.mark.asyncio
     async def test_cloud_only_project_routes_to_cloud(self, config_manager, monkeypatch):
         """Project NOT in local config should route to cloud (not default to LOCAL).
 
         Cloud-only projects aren't registered in local config. The routing logic
-        should detect this and use CLOUD mode, falling back to default_workspace.
+        should detect this and resolve the owning workspace from the cloud index.
         """
+        from contextlib import asynccontextmanager
+
         from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.schemas.project_info import ProjectItem
 
         config = config_manager.load_config()
         # Do NOT add "cloud-only-proj" to config.projects — it's cloud-only
-        config.default_workspace = "global-default-tenant-id"
         config.cloud_api_key = "bmc_test123"
         config_manager.save_config(config)
 
-        # Patch resolve_workspace_parameter to fail if called — it should be skipped
-        # because default_workspace is set (priority 3)
-        async def fail_if_called(**kwargs):  # pragma: no cover
-            raise AssertionError(
-                "resolve_workspace_parameter should not be called when default_workspace is set"
+        workspace = _workspace(
+            tenant_id="personal-tenant",
+            workspace_type="personal",
+            slug="personal",
+            name="Personal",
+            role="owner",
+            is_default=True,
+        )
+        project = _project("Cloud Only Proj", id=5, external_id="cloud-only-id")
+        seen: dict[str, object] = {}
+
+        async def fake_resolve_workspace_project_identifier(project_name, context=None):
+            from basic_memory.mcp.project_context import WorkspaceProjectEntry
+
+            assert project_name == "cloud-only-proj"
+            return WorkspaceProjectEntry(workspace=workspace, project=project)
+
+        @asynccontextmanager
+        async def fake_get_client(project_name=None, workspace=None):
+            seen["project_name"] = project_name
+            seen["workspace"] = workspace
+            yield object()
+
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            return ProjectItem(
+                id=project.id,
+                external_id=project.external_id,
+                name=project.name,
+                path=project.path,
+                is_default=False,
             )
 
         monkeypatch.setattr(
-            "basic_memory.mcp.project_context.resolve_workspace_parameter",
-            fail_if_called,
+            "basic_memory.mcp.project_context.resolve_workspace_project_identifier",
+            fake_resolve_workspace_project_identifier,
+        )
+        monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.get_active_project",
+            fake_get_active_project,
         )
 
-        # Will fail at cloud client creation (no real cloud), but proves cloud routing
-        # was selected instead of local routing
-        with pytest.raises(Exception) as exc_info:
-            async with get_project_client(project="cloud-only-proj"):
-                pass
+        async with get_project_client(project="cloud-only-proj") as (_client, active_project):
+            assert active_project.external_id == "cloud-only-id"
 
-        # The error should NOT be about workspace resolution or local routing
-        error_msg = str(exc_info.value).lower()
-        assert "resolve_workspace_parameter should not be called" not in error_msg
-        # Should not get a local ASGI routing error
-        assert "no project found" not in error_msg
+        assert seen == {"project_name": "Cloud Only Proj", "workspace": "personal-tenant"}
 
     @pytest.mark.asyncio
-    async def test_factory_mode_skips_workspace_resolution(self, config_manager, monkeypatch):
-        """When a client factory is set (in-process cloud server), skip workspace resolution.
+    async def test_factory_mode_uses_workspace_index_without_control_plane(
+        self, config_manager, monkeypatch
+    ):
+        """Factory mode resolves workspace locally and avoids control-plane HTTP.
 
         The cloud MCP server calls set_client_factory() so that get_client() routes
-        requests through TenantASGITransport. In this mode, workspace and tenant context
-        are already resolved by the transport layer. Attempting cloud workspace resolution
-        would call the production control-plane API and fail with 401.
+        requests through TenantASGITransport. Workspace discovery comes from the
+        injected provider/index path, not from the production control-plane API.
         """
         from contextlib import asynccontextmanager
 
         from basic_memory.mcp import async_client
         from basic_memory.mcp.project_context import get_project_client
         from basic_memory.config import ProjectEntry, ProjectMode
+        from basic_memory.schemas.project_info import ProjectItem
 
         config = config_manager.load_config()
         config.projects["cloud-proj"] = ProjectEntry(
@@ -715,28 +1006,47 @@ class TestGetProjectClientRoutingOrder:
         )
         config_manager.save_config(config)
 
+        workspace = _workspace(
+            tenant_id="team-tenant",
+            workspace_type="organization",
+            slug="team",
+            name="Team",
+            role="editor",
+        )
+        project = _project("Cloud Proj", id=9, external_id="factory-project-id")
+
         # Set up a factory (simulates what cloud MCP server does)
         @asynccontextmanager
         async def fake_factory(workspace: Any = None) -> AsyncIterator[Any]:
-            from httpx import ASGITransport, AsyncClient
-            from basic_memory.api.app import app as fastapi_app
-
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app),
-                base_url="http://test",
-            ) as client:
-                yield client
+            assert workspace == "team-tenant"
+            yield object()
 
         original_factory = async_client._client_factory
         async_client.set_client_factory(fake_factory)
 
-        # Patch workspace resolution to fail if called — factory mode should skip it
-        async def fail_if_called(**kwargs):  # pragma: no cover
-            raise AssertionError("resolve_workspace_parameter must not be called in factory mode")
+        async def fake_resolve_workspace_project_identifier(project_name, context=None):
+            from basic_memory.mcp.project_context import WorkspaceProjectEntry
+
+            assert project_name == "cloud-proj"
+            return WorkspaceProjectEntry(workspace=workspace, project=project)
+
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            assert project_name == "Cloud Proj"
+            return ProjectItem(
+                id=project.id,
+                external_id=project.external_id,
+                name=project.name,
+                path=project.path,
+                is_default=False,
+            )
 
         monkeypatch.setattr(
-            "basic_memory.mcp.project_context.resolve_workspace_parameter",
-            fail_if_called,
+            "basic_memory.mcp.project_context.resolve_workspace_project_identifier",
+            fake_resolve_workspace_project_identifier,
+        )
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.get_active_project",
+            fake_get_active_project,
         )
 
         # Patch get_cloud_control_plane_client to fail if called
@@ -753,15 +1063,8 @@ class TestGetProjectClientRoutingOrder:
         )
 
         try:
-            # Will fail at project validation (no real project in DB), but proves
-            # workspace resolution and control-plane calls were skipped
-            with pytest.raises(Exception) as exc_info:
-                async with get_project_client(project="cloud-proj"):
-                    pass
-
-            error_msg = str(exc_info.value).lower()
-            assert "resolve_workspace_parameter must not be called" not in error_msg
-            assert "get_cloud_control_plane_client must not be called" not in error_msg
+            async with get_project_client(project="cloud-proj") as (_client, active_project):
+                assert active_project.external_id == "factory-project-id"
         finally:
             # Restore original factory to avoid polluting other tests
             async_client._client_factory = original_factory

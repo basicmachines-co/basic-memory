@@ -63,8 +63,10 @@ class WorkspaceInfo(BaseModel):
 
     tenant_id: str = Field(..., description="Workspace tenant identifier")
     workspace_type: str = Field(..., description="Workspace type (personal or organization)")
+    slug: str = Field(..., description="Stable workspace slug for qualified project routing")
     name: str = Field(..., description="Workspace display name")
     role: str = Field(..., description="Current user's role in the workspace")
+    is_default: bool = Field(..., description="Whether this is the default cloud workspace")
     organization_id: str | None = Field(None, description="Organization ID for org workspaces")
     has_active_subscription: bool = Field(
         default=False, description="Whether the workspace has an active subscription"
@@ -78,6 +80,9 @@ class WorkspaceListResponse(BaseModel):
         default_factory=list, description="Available workspaces"
     )
     count: int = Field(default=0, description="Number of available workspaces")
+    default_workspace_id: str | None = Field(
+        default=None, description="Default workspace tenant ID when available"
+    )
     current_workspace_id: str | None = Field(
         default=None, description="Current workspace tenant ID when available"
     )

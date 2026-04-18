@@ -11,6 +11,27 @@ from basic_memory.cli.app import app
 import basic_memory.cli.commands.project  # noqa: F401
 
 
+def _workspace(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    name: str,
+    role: str,
+    slug: str | None = None,
+    is_default: bool = False,
+):
+    from basic_memory.schemas.cloud import WorkspaceInfo
+
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug or name.casefold().replace(" ", "-"),
+        name=name,
+        role=role,
+        is_default=is_default,
+    )
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -196,7 +217,6 @@ class TestSetCloudWithWorkspace:
     def test_set_cloud_with_workspace_stores_workspace_id(self, runner, mock_config, monkeypatch):
         """Test that --workspace resolves to tenant_id and stores it."""
         from basic_memory import config as config_module
-        from basic_memory.schemas.cloud import WorkspaceInfo
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
@@ -204,11 +224,13 @@ class TestSetCloudWithWorkspace:
 
         async def fake_get_available_workspaces():
             return [
-                WorkspaceInfo(
+                _workspace(
                     tenant_id="11111111-1111-1111-1111-111111111111",
                     workspace_type="personal",
+                    slug="personal",
                     name="Personal",
                     role="owner",
+                    is_default=True,
                 ),
             ]
 
@@ -235,7 +257,6 @@ class TestSetCloudWithWorkspace:
     def test_set_cloud_with_workspace_not_found(self, runner, mock_config, monkeypatch):
         """Test --workspace with unknown workspace name."""
         from basic_memory import config as config_module
-        from basic_memory.schemas.cloud import WorkspaceInfo
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
@@ -243,11 +264,13 @@ class TestSetCloudWithWorkspace:
 
         async def fake_get_available_workspaces():
             return [
-                WorkspaceInfo(
+                _workspace(
                     tenant_id="11111111-1111-1111-1111-111111111111",
                     workspace_type="personal",
+                    slug="personal",
                     name="Personal",
                     role="owner",
+                    is_default=True,
                 ),
             ]
 

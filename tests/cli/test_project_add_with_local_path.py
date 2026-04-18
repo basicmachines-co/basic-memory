@@ -15,6 +15,27 @@ from basic_memory.schemas.project_info import ProjectStatusResponse
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
 
 
+def _workspace(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    name: str,
+    role: str,
+    slug: str | None = None,
+    is_default: bool = False,
+):
+    from basic_memory.schemas.cloud import WorkspaceInfo
+
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug or name.casefold().replace(" ", "-"),
+        name=name,
+        role=role,
+        is_default=is_default,
+    )
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -202,17 +223,18 @@ def test_project_add_cloud_workspace_resolves_and_persists(
     runner, mock_config, mock_api_client, monkeypatch, tmp_path
 ):
     """Cloud project add should resolve workspace names to tenant IDs."""
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
     local_sync_dir = tmp_path / "sync" / "team-notes"
 
     async def fake_get_available_workspaces():
         return [
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="11111111-1111-1111-1111-111111111111",
                 workspace_type="organization",
+                slug="basic-memory",
                 name="Basic Memory",
                 role="owner",
+                is_default=True,
             ),
         ]
 
@@ -257,15 +279,16 @@ def test_project_add_cloud_workspace_persists_without_local_path(
     runner, mock_config, mock_api_client, monkeypatch
 ):
     """Cloud project add should persist workspace routing even without local sync."""
-    from basic_memory.schemas.cloud import WorkspaceInfo
 
     async def fake_get_available_workspaces():
         return [
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="11111111-1111-1111-1111-111111111111",
                 workspace_type="organization",
+                slug="basic-memory",
                 name="Basic Memory",
                 role="owner",
+                is_default=True,
             ),
         ]
 

@@ -9,6 +9,25 @@ from basic_memory.mcp.tools.workspaces import list_workspaces
 from basic_memory.schemas.cloud import WorkspaceInfo
 
 
+def _workspace(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    name: str,
+    role: str,
+    slug: str | None = None,
+    is_default: bool = False,
+) -> WorkspaceInfo:
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug or name.casefold().replace(" ", "-"),
+        name=name,
+        role=role,
+        is_default=is_default,
+    )
+
+
 class _ContextState:
     def __init__(self):
         self._state: dict[str, object] = {}
@@ -24,15 +43,18 @@ class _ContextState:
 async def test_list_workspaces_formats_workspace_rows(monkeypatch):
     async def fake_get_available_workspaces(context=None):
         return [
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="11111111-1111-1111-1111-111111111111",
                 workspace_type="personal",
+                slug="personal",
                 name="Personal",
                 role="owner",
+                is_default=True,
             ),
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="22222222-2222-2222-2222-222222222222",
                 workspace_type="organization",
+                slug="team",
                 name="Team",
                 role="editor",
             ),
@@ -45,8 +67,45 @@ async def test_list_workspaces_formats_workspace_rows(monkeypatch):
 
     result = await list_workspaces()
     assert "# Available Workspaces (2)" in result
-    assert "Personal (type=personal, role=owner" in result
-    assert "Team (type=organization, role=editor" in result
+    assert "Personal (slug=personal, type=personal, role=owner" in result
+    assert "Team (slug=team, type=organization, role=editor" in result
+
+
+@pytest.mark.asyncio
+async def test_list_workspaces_json_uses_workspace_list_schema(monkeypatch):
+    async def fake_get_available_workspaces(context=None):
+        return [
+            _workspace(
+                tenant_id="11111111-1111-1111-1111-111111111111",
+                workspace_type="personal",
+                slug="personal",
+                name="Personal",
+                role="owner",
+                is_default=True,
+            ),
+            _workspace(
+                tenant_id="22222222-2222-2222-2222-222222222222",
+                workspace_type="organization",
+                slug="team",
+                name="Team",
+                role="editor",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.tools.workspaces.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    result = await list_workspaces(output_format="json")
+
+    assert isinstance(result, dict)
+    assert result["count"] == 2
+    assert result["default_workspace_id"] == "11111111-1111-1111-1111-111111111111"
+    assert result["current_workspace_id"] is None
+    assert result["workspaces"][0]["slug"] == "personal"
+    assert result["workspaces"][0]["is_default"] is True
+    assert result["workspaces"][1]["slug"] == "team"
 
 
 @pytest.mark.asyncio
@@ -60,7 +119,14 @@ async def test_list_workspaces_handles_empty_list(monkeypatch):
     )
 
     result = await list_workspaces()
-    assert "# No Workspaces Available" in result
+    assert "# Available Workspaces (1)" in result
+    assert "Personal (slug=personal, type=personal, role=owner, default" in result
+
+    json_result = await list_workspaces(output_format="json")
+    assert isinstance(json_result, dict)
+    assert json_result["count"] == 1
+    assert json_result["default_workspace_id"] == "personal"
+    assert json_result["workspaces"][0]["slug"] == "personal"
 
 
 @pytest.mark.asyncio
@@ -81,9 +147,10 @@ async def test_list_workspaces_oauth_error_bubbles_up(monkeypatch):
 async def test_list_workspaces_uses_context_cache_path(monkeypatch):
     context = _ContextState()
     call_count = {"fetches": 0}
-    workspace = WorkspaceInfo(
+    workspace = _workspace(
         tenant_id="33333333-3333-3333-3333-333333333333",
         workspace_type="personal",
+        slug="cached",
         name="Cached",
         role="owner",
     )
@@ -126,11 +193,13 @@ def _reset_workspace_provider(monkeypatch):
 async def test_get_available_workspaces_uses_provider_when_set():
     """When a workspace provider is injected, it is called instead of the control-plane client."""
     expected = [
-        WorkspaceInfo(
+        _workspace(
             tenant_id="aaaa-bbbb",
             workspace_type="personal",
+            slug="injected",
             name="Injected",
             role="owner",
+            is_default=True,
         ),
     ]
 
@@ -163,7 +232,8 @@ async def test_get_available_workspaces_falls_back_without_provider(monkeypatch)
 
     result = await list_workspaces()
     assert called["control_plane"]
-    assert "# No Workspaces Available" in result
+    assert "# Available Workspaces (1)" in result
+    assert "Personal (slug=personal, type=personal, role=owner, default" in result
 
 
 @pytest.mark.asyncio
@@ -171,9 +241,10 @@ async def test_get_available_workspaces_falls_back_without_provider(monkeypatch)
 async def test_get_available_workspaces_provider_caches_in_context():
     """Provider results are cached in the MCP context for subsequent calls."""
     call_count = {"provider": 0}
-    workspace = WorkspaceInfo(
+    workspace = _workspace(
         tenant_id="cccc-dddd",
         workspace_type="organization",
+        slug="cached-provider",
         name="Cached Provider",
         role="editor",
     )

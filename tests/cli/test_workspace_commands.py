@@ -16,6 +16,25 @@ import basic_memory.cli.commands.cloud as cloud_cmd  # noqa: F401
 import basic_memory.cli.commands.cloud.workspace as workspace_cmd  # noqa: F401
 
 
+def _workspace(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    name: str,
+    role: str,
+    slug: str | None = None,
+    is_default: bool = False,
+) -> WorkspaceInfo:
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug or name.casefold().replace(" ", "-"),
+        name=name,
+        role=role,
+        is_default=is_default,
+    )
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -24,15 +43,18 @@ def runner():
 def test_workspace_list_prints_available_workspaces(runner, monkeypatch):
     async def fake_get_available_workspaces(context=None):
         return [
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="11111111-1111-1111-1111-111111111111",
                 workspace_type="personal",
+                slug="personal",
                 name="Personal",
                 role="owner",
+                is_default=True,
             ),
-            WorkspaceInfo(
+            _workspace(
                 tenant_id="22222222-2222-2222-2222-222222222222",
                 workspace_type="organization",
+                slug="team",
                 name="Team",
                 role="editor",
             ),
@@ -88,11 +110,13 @@ class TestWorkspaceSetDefault:
     def test_set_default_workspace_by_name(self, runner, monkeypatch):
         async def fake_get_available_workspaces(context=None):
             return [
-                WorkspaceInfo(
+                _workspace(
                     tenant_id="11111111-1111-1111-1111-111111111111",
                     workspace_type="personal",
+                    slug="personal",
                     name="Personal",
                     role="owner",
+                    is_default=True,
                 ),
             ]
 
@@ -116,9 +140,10 @@ class TestWorkspaceSetDefault:
     def test_set_default_workspace_by_tenant_id(self, runner, monkeypatch):
         async def fake_get_available_workspaces(context=None):
             return [
-                WorkspaceInfo(
+                _workspace(
                     tenant_id="22222222-2222-2222-2222-222222222222",
                     workspace_type="organization",
+                    slug="team",
                     name="Team",
                     role="editor",
                 ),
@@ -138,11 +163,13 @@ class TestWorkspaceSetDefault:
     def test_set_default_workspace_not_found(self, runner, monkeypatch):
         async def fake_get_available_workspaces(context=None):
             return [
-                WorkspaceInfo(
+                _workspace(
                     tenant_id="11111111-1111-1111-1111-111111111111",
                     workspace_type="personal",
+                    slug="personal",
                     name="Personal",
                     role="owner",
+                    is_default=True,
                 ),
             ]
 

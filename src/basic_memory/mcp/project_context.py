@@ -8,8 +8,10 @@ The resolve_project_parameter function is a thin wrapper for backwards
 compatibility with existing MCP tools.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Awaitable, Callable, Optional, List, Tuple
+from dataclasses import dataclass
+from typing import AsyncIterator, Awaitable, Callable, Optional, List, Tuple, cast
 
 from httpx import AsyncClient
 from httpx._types import (
@@ -20,7 +22,7 @@ from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
 import logfire
-from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, has_cloud_credentials
 from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
@@ -33,6 +35,28 @@ from basic_memory.utils import generate_permalink, normalize_project_reference
 # The cloud MCP server sets a provider that queries its own database directly,
 # avoiding the control-plane HTTP round-trip that requires local credentials.
 _workspace_provider: Optional[Callable[[], Awaitable[list[WorkspaceInfo]]]] = None
+_WORKSPACE_PROJECT_INDEX_STATE_KEY = "workspace_project_index"
+
+
+@dataclass(frozen=True)
+class WorkspaceProjectEntry:
+    """A cloud project resolved together with the workspace that owns it."""
+
+    workspace: WorkspaceInfo
+    project: ProjectItem
+
+    @property
+    def qualified_name(self) -> str:
+        return f"{self.workspace.slug}/{self.project.permalink}"
+
+
+@dataclass(frozen=True)
+class WorkspaceProjectIndex:
+    """Session-local cloud project lookup index keyed by project permalink."""
+
+    workspaces: tuple[WorkspaceInfo, ...]
+    entries: tuple[WorkspaceProjectEntry, ...]
+    entries_by_permalink: dict[str, tuple[WorkspaceProjectEntry, ...]]
 
 
 def set_workspace_provider(provider: Callable[[], Awaitable[list[WorkspaceInfo]]]) -> None:
@@ -86,6 +110,37 @@ async def _set_cached_active_project(
     await context.set_state("active_project", active_project.model_dump())
     if active_project.is_default:
         await context.set_state("default_project_name", active_project.name)
+
+
+async def _get_cached_active_workspace(context: Optional[Context]) -> Optional[WorkspaceInfo]:
+    """Return the cached active workspace from context when available."""
+    if not context:
+        return None
+
+    cached_raw = await context.get_state("active_workspace")
+    if isinstance(cached_raw, dict):
+        return WorkspaceInfo.model_validate(cached_raw)
+    return None
+
+
+async def _set_cached_active_workspace(
+    context: Optional[Context],
+    active_workspace: WorkspaceInfo,
+) -> None:
+    """Persist workspace context and clear project cache when the tenant changes."""
+    if not context:
+        return
+
+    cached_workspace = await _get_cached_active_workspace(context)
+    if cached_workspace and cached_workspace.tenant_id != active_workspace.tenant_id:
+        # Trigger: project routing moved to another workspace
+        # Why: project names are only unique inside one workspace, so a cached
+        #   ProjectItem from the previous tenant can point at the wrong project
+        # Outcome: force the next validation call to resolve within the new tenant
+        await context.set_state("active_project", None)
+        await context.set_state("default_project_name", None)
+
+    await context.set_state("active_workspace", active_workspace.model_dump())
 
 
 async def _get_cached_default_project(context: Optional[Context]) -> Optional[str]:
@@ -211,8 +266,10 @@ async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = N
 
 
 def _workspace_matches_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
-    """Return True when identifier matches workspace tenant_id or name."""
+    """Return True when identifier matches workspace tenant_id, slug, or name."""
     if workspace.tenant_id == identifier:
+        return True
+    if workspace.slug.casefold() == identifier.casefold():
         return True
     return workspace.name.lower() == identifier.lower()
 
@@ -223,11 +280,99 @@ def _workspace_choices(workspaces: list[WorkspaceInfo]) -> str:
         [
             (
                 f"- {item.name} "
-                f"(type={item.workspace_type}, role={item.role}, tenant_id={item.tenant_id})"
+                f"(slug={item.slug}, type={item.workspace_type}, "
+                f"role={item.role}, tenant_id={item.tenant_id})"
             )
             for item in workspaces
         ]
     )
+
+
+def _workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | None:
+    """Deserialize a cached workspace project index from MCP context state."""
+    if not isinstance(raw, dict):
+        return None
+
+    raw_mapping = cast(dict[str, object], raw)
+    workspaces_raw = raw_mapping.get("workspaces")
+    entries_raw = raw_mapping.get("entries")
+    if not isinstance(workspaces_raw, list) or not isinstance(entries_raw, list):
+        return None
+
+    workspaces = tuple(WorkspaceInfo.model_validate(item) for item in workspaces_raw)
+    entries_list: list[WorkspaceProjectEntry] = []
+    for item in entries_raw:
+        if not isinstance(item, dict):
+            continue
+        item_mapping = cast(dict[str, object], item)
+        workspace_raw = item_mapping.get("workspace")
+        project_raw = item_mapping.get("project")
+        if workspace_raw is None or project_raw is None:
+            continue
+        entries_list.append(
+            WorkspaceProjectEntry(
+                workspace=WorkspaceInfo.model_validate(workspace_raw),
+                project=ProjectItem.model_validate(project_raw),
+            )
+        )
+    entries = tuple(entries_list)
+    return _build_workspace_project_index(workspaces, entries)
+
+
+def _workspace_project_index_to_state(index: WorkspaceProjectIndex) -> dict:
+    """Serialize a workspace project index for MCP context state."""
+    return {
+        "workspaces": [workspace.model_dump() for workspace in index.workspaces],
+        "entries": [
+            {
+                "workspace": entry.workspace.model_dump(),
+                "project": entry.project.model_dump(),
+            }
+            for entry in index.entries
+        ],
+    }
+
+
+def _build_workspace_project_index(
+    workspaces: tuple[WorkspaceInfo, ...],
+    entries: tuple[WorkspaceProjectEntry, ...],
+) -> WorkspaceProjectIndex:
+    """Build the permalink lookup table for workspace-project entries."""
+    grouped: dict[str, list[WorkspaceProjectEntry]] = {}
+    for entry in entries:
+        grouped.setdefault(entry.project.permalink, []).append(entry)
+
+    return WorkspaceProjectIndex(
+        workspaces=workspaces,
+        entries=entries,
+        entries_by_permalink={
+            permalink: tuple(items)
+            for permalink, items in sorted(grouped.items(), key=lambda item: item[0])
+        },
+    )
+
+
+def _split_qualified_project_identifier(identifier: str) -> tuple[str | None, str]:
+    """Split ``<workspace-slug>/<project>`` identifiers for cloud routing."""
+    cleaned = identifier.strip()
+    if "/" not in cleaned:
+        return None, cleaned
+
+    workspace_slug, project_identifier = cleaned.split("/", 1)
+    if not workspace_slug or not project_identifier:
+        return None, cleaned
+    return workspace_slug, project_identifier
+
+
+def _unqualified_project_identifier(identifier: str) -> str:
+    """Return the project segment from an optional qualified project identifier."""
+    _, project_identifier = _split_qualified_project_identifier(identifier)
+    return project_identifier
+
+
+def _format_qualified_choices(entries: tuple[WorkspaceProjectEntry, ...]) -> str:
+    """Format qualified project choices for collision errors."""
+    return " or ".join(entry.qualified_name for entry in entries)
 
 
 async def get_available_workspaces(context: Optional[Context] = None) -> list[WorkspaceInfo]:
@@ -264,6 +409,167 @@ async def get_available_workspaces(context: Optional[Context] = None) -> list[Wo
         )
 
     return workspace_list.workspaces
+
+
+async def invalidate_workspace_project_index(context: Optional[Context] = None) -> None:
+    """Invalidate the cached cloud workspace/project lookup index."""
+    if context:
+        await context.set_state(_WORKSPACE_PROJECT_INDEX_STATE_KEY, None)
+
+
+async def _fetch_workspace_project_entries(
+    workspace: WorkspaceInfo,
+    context: Optional[Context] = None,
+) -> tuple[WorkspaceProjectEntry, ...]:
+    """Fetch projects for one workspace and tag each project with workspace metadata."""
+    from basic_memory.mcp.async_client import get_client, get_cloud_proxy_client, is_factory_mode
+    from basic_memory.mcp.clients import ProjectClient
+
+    client_context = (
+        get_client(workspace=workspace.tenant_id)
+        if is_factory_mode()
+        else get_cloud_proxy_client(workspace=workspace.tenant_id)
+    )
+
+    async with client_context as client:
+        project_list = await ProjectClient(client).list_projects()
+
+    default_permalink = (
+        generate_permalink(project_list.default_project) if project_list.default_project else None
+    )
+    entries: list[WorkspaceProjectEntry] = []
+    for project in project_list.projects:
+        if default_permalink and project.permalink == default_permalink:
+            project.is_default = True
+        entries.append(WorkspaceProjectEntry(workspace=workspace, project=project))
+
+    if context:  # pragma: no cover
+        await context.info(
+            f"Discovered {len(entries)} cloud projects in workspace {workspace.slug}"
+        )
+
+    return tuple(entries)
+
+
+async def _ensure_workspace_project_index(
+    context: Optional[Context] = None,
+) -> WorkspaceProjectIndex:
+    """Build or load the session-local workspace/project lookup index."""
+    if context:
+        cached_raw = await context.get_state(_WORKSPACE_PROJECT_INDEX_STATE_KEY)
+        cached_index = _workspace_project_index_from_state(cached_raw)
+        if cached_index is not None:
+            return cached_index
+
+    workspaces = tuple(await get_available_workspaces(context=context))
+    if not workspaces:
+        raise ValueError(
+            "No accessible workspaces found for this account. "
+            "Ensure you have an active subscription and tenant access."
+        )
+
+    fetched_entries = await asyncio.gather(
+        *[_fetch_workspace_project_entries(workspace, context=context) for workspace in workspaces]
+    )
+    entries = tuple(entry for workspace_entries in fetched_entries for entry in workspace_entries)
+    index = _build_workspace_project_index(workspaces, entries)
+
+    if context:
+        await context.set_state(
+            _WORKSPACE_PROJECT_INDEX_STATE_KEY,
+            _workspace_project_index_to_state(index),
+        )
+
+    return index
+
+
+async def resolve_workspace_project_identifier(
+    project: str,
+    context: Optional[Context] = None,
+) -> WorkspaceProjectEntry:
+    """Resolve an unqualified or ``<workspace>/<project>`` cloud project identifier."""
+    index = await _ensure_workspace_project_index(context=context)
+    workspace_slug, project_identifier = _split_qualified_project_identifier(project)
+    project_permalink = generate_permalink(project_identifier)
+
+    if workspace_slug:
+        workspace_matches = [
+            workspace
+            for workspace in index.workspaces
+            if workspace.slug.casefold() == workspace_slug.casefold()
+        ]
+        if not workspace_matches:
+            available = ", ".join(workspace.slug for workspace in index.workspaces)
+            raise ValueError(
+                f"Workspace '{workspace_slug}' was not found. "
+                f"Available workspace slugs: {available}"
+            )
+
+        workspace = workspace_matches[0]
+        matches = [
+            entry
+            for entry in index.entries_by_permalink.get(project_permalink, ())
+            if entry.workspace.tenant_id == workspace.tenant_id
+        ]
+        if not matches:
+            available = ", ".join(
+                entry.qualified_name
+                for entry in index.entries
+                if entry.workspace.tenant_id == workspace.tenant_id
+            )
+            raise ValueError(
+                f"Project '{project_identifier}' was not found in workspace "
+                f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
+            )
+        return matches[0]
+
+    matches = index.entries_by_permalink.get(project_permalink, ())
+    if not matches:
+        available = ", ".join(entry.qualified_name for entry in index.entries)
+        raise ValueError(
+            f"Project '{project}' was not found in any accessible cloud workspace. "
+            f"Available projects: {available}"
+        )
+
+    cached_workspace = await _get_cached_active_workspace(context)
+    if cached_workspace:
+        cached_matches = [
+            entry for entry in matches if entry.workspace.tenant_id == cached_workspace.tenant_id
+        ]
+        if cached_matches:
+            return cached_matches[0]
+
+    if len(matches) > 1:
+        choices = _format_qualified_choices(matches)
+        details = "\n".join(
+            f"- {entry.workspace.name} ({entry.workspace.slug}): {entry.qualified_name}"
+            for entry in matches
+        )
+        raise ValueError(
+            f"Project '{project}' exists in multiple workspaces. Use: {choices}\n{details}"
+        )
+
+    return matches[0]
+
+
+async def _default_workspace_project_entry(
+    context: Optional[Context] = None,
+) -> WorkspaceProjectEntry | None:
+    """Return the default project from the default cloud workspace, when available."""
+    index = await _ensure_workspace_project_index(context=context)
+    default_workspace = next(
+        (workspace for workspace in index.workspaces if workspace.is_default),
+        None,
+    )
+    if default_workspace is None:
+        return None
+
+    default_entries = [
+        entry
+        for entry in index.entries
+        if entry.workspace.tenant_id == default_workspace.tenant_id and entry.project.is_default
+    ]
+    return default_entries[0] if default_entries else None
 
 
 async def resolve_workspace_parameter(
@@ -320,8 +626,8 @@ async def resolve_workspace_parameter(
                 f"Available workspaces:\n{_workspace_choices(workspaces)}"
             )
 
+        await _set_cached_active_workspace(context, selected_workspace)
         if context:
-            await context.set_state("active_workspace", selected_workspace.model_dump())
             logger.debug(f"Cached workspace in context: {selected_workspace.tenant_id}")
 
         return selected_workspace
@@ -575,18 +881,16 @@ async def get_project_client(
     network), creates the correctly-routed client, then validates via API.
 
     Routing decision order:
-    1. Explicit --local/--cloud flags → skip workspace, use flag routing
-    2. Cloud routing (explicit --cloud OR project mode CLOUD) →
-       resolve workspace via priority chain, create cloud client
-    3. Otherwise → local ASGI client
+    1. Explicit --local flag → skip workspace, use local routing
+    2. Factory/cloud routing → resolve project through workspace/project index
+    3. Cloud project mode → resolve project through workspace/project index
+    4. Otherwise → local ASGI client
 
     Workspace resolution priority (when cloud routing):
     1. Explicit ``workspace`` parameter
     2. Per-project ``workspace_id`` from config
-    3. Global ``default_workspace`` from config
-    4. MCP session cache (context)
-    5. Auto-select if single workspace
-    6. Error listing choices
+    3. Qualified project identifier (``<workspace-slug>/<project>``)
+    4. Workspace/project index lookup with collision detection
 
     Args:
         project: Optional explicit project parameter
@@ -610,6 +914,25 @@ async def get_project_client(
 
     # Step 1: Resolve project name from config (no network call)
     resolved_project = await resolve_project_parameter(project, context=context)
+    config = ConfigManager().config
+    factory_mode = is_factory_mode()
+    explicit_cloud_routing = _explicit_routing() and not _force_local_mode()
+    cloud_default_entry: WorkspaceProjectEntry | None = None
+
+    if (
+        resolved_project is None
+        and not (_explicit_routing() and _force_local_mode())
+        and (
+            factory_mode
+            or explicit_cloud_routing
+            or (not config.projects and has_cloud_credentials(config))
+        )
+    ):
+        cloud_default_entry = await _default_workspace_project_entry(context=context)
+        if cloud_default_entry is not None:
+            resolved_project = cloud_default_entry.project.name
+            await _set_cached_active_workspace(context, cloud_default_entry.workspace)
+
     if not resolved_project:
         # Fall back to local client to discover projects and raise helpful error
         async with get_client() as client:
@@ -619,26 +942,6 @@ async def get_project_client(
                 "Either set 'default_project' in config, or use 'project' argument.\n"
                 f"Available projects: {project_names}"
             )
-
-    # Step 1b: Factory injection (in-process cloud server)
-    # Trigger: set_client_factory() was called (e.g., by cloud MCP server)
-    # Why: the factory's transport layer handles auth and tenant resolution;
-    #   we pass workspace through so the transport can route to the correct
-    #   workspace when the tool specifies one different from the connection default
-    # Outcome: factory client with optional workspace override via inner request headers
-    if is_factory_mode():
-        route_mode = "factory"
-        with logfire.span(
-            "routing.client_session",
-            project_name=resolved_project,
-            route_mode=route_mode,
-            workspace_id=workspace,
-        ):
-            logger.debug("Using injected client factory for project routing")
-            async with get_client(workspace=workspace) as client:
-                active_project = await get_active_project(client, resolved_project, context)
-                yield client, active_project
-        return
 
     # Step 2: Check explicit routing BEFORE workspace resolution
     # Trigger: CLI passed --local or --cloud
@@ -658,66 +961,64 @@ async def get_project_client(
         return
 
     # Step 3: Determine if cloud routing is needed
-    config = ConfigManager().config
     project_entry = config.projects.get(resolved_project)
     project_mode = config.get_project_mode(resolved_project)
 
     # Trigger: workspace provided for a local project (without explicit --cloud)
     # Why: workspace selection is a cloud routing concern only
     # Outcome: fail fast with a deterministic guidance message
-    if project_mode != ProjectMode.CLOUD and workspace is not None and not _explicit_routing():
+    if (
+        not factory_mode
+        and project_mode != ProjectMode.CLOUD
+        and workspace is not None
+        and not _explicit_routing()
+    ):
         raise ValueError(
             f"Workspace '{workspace}' cannot be used with local project '{resolved_project}'. "
             "Workspace selection is only supported for cloud-mode projects."
         )
 
-    if project_mode == ProjectMode.CLOUD or (_explicit_routing() and not _force_local_mode()):
-        # --- Cloud routing: resolve workspace with priority chain ---
-        effective_workspace = workspace
+    if factory_mode or project_mode == ProjectMode.CLOUD or explicit_cloud_routing:
+        route_mode = "factory" if factory_mode else "cloud_proxy"
+        active_ws: WorkspaceInfo
+        project_for_api = _unqualified_project_identifier(resolved_project)
 
-        # Priority 2: per-project workspace_id from config
-        if effective_workspace is None and project_entry and project_entry.workspace_id:
-            effective_workspace = project_entry.workspace_id
-
-        # Priority 3: global default_workspace from config
-        if effective_workspace is None and config.default_workspace:
-            effective_workspace = config.default_workspace
-
-        route_mode = "cloud_proxy"
-
-        # Priorities 4-6: if still unresolved, fall back to resolve_workspace_parameter
-        # which checks context cache, auto-selects single workspace, or errors
-        if effective_workspace is not None:
-            # Config-resolved workspace — pass directly to get_client, skip network lookup
-            with logfire.span(
-                "routing.client_session",
-                project_name=resolved_project,
-                route_mode=route_mode,
-                workspace_id=effective_workspace,
-            ):
-                logger.debug("Using configured workspace for cloud project routing")
-                async with get_client(
-                    project_name=resolved_project,
-                    workspace=effective_workspace,
-                ) as client:
-                    active_project = await get_active_project(client, resolved_project, context)
-                    yield client, active_project
+        # Trigger: a script or config entry pins the tenant explicitly
+        # Why: explicit tenant configuration remains the escape hatch during migration
+        # Outcome: route to that workspace, but validate the project name inside it
+        if workspace is not None:
+            active_ws = await resolve_workspace_parameter(workspace=workspace, context=context)
+        elif project_entry and project_entry.workspace_id:
+            active_ws = await resolve_workspace_parameter(
+                workspace=project_entry.workspace_id,
+                context=context,
+            )
         else:
-            # No config-based workspace — use resolve_workspace_parameter for discovery
-            active_ws = await resolve_workspace_parameter(workspace=None, context=context)
-            with logfire.span(
-                "routing.client_session",
-                project_name=resolved_project,
-                route_mode=route_mode,
-                workspace_id=active_ws.tenant_id,
+            resolved_entry = cloud_default_entry
+            if resolved_entry is None or not _project_matches_identifier(
+                resolved_entry.project, resolved_project
             ):
-                logger.debug("Resolved workspace dynamically for cloud project routing")
-                async with get_client(
-                    project_name=resolved_project,
-                    workspace=active_ws.tenant_id,
-                ) as client:
-                    active_project = await get_active_project(client, resolved_project, context)
-                    yield client, active_project
+                resolved_entry = await resolve_workspace_project_identifier(
+                    resolved_project,
+                    context=context,
+                )
+            active_ws = resolved_entry.workspace
+            project_for_api = resolved_entry.project.name
+
+        await _set_cached_active_workspace(context, active_ws)
+        with logfire.span(
+            "routing.client_session",
+            project_name=project_for_api,
+            route_mode=route_mode,
+            workspace_id=active_ws.tenant_id,
+        ):
+            logger.debug("Using resolved workspace for cloud project routing")
+            async with get_client(
+                project_name=project_for_api,
+                workspace=active_ws.tenant_id,
+            ) as client:
+                active_project = await get_active_project(client, project_for_api, context)
+                yield client, active_project
         return
 
     # Step 4: Local routing (default)

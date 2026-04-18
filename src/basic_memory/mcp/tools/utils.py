@@ -5,7 +5,6 @@ to the Basic Memory API, with improved error handling and logging.
 """
 
 import typing
-from contextlib import contextmanager
 from typing import Any, Optional
 
 import logfire
