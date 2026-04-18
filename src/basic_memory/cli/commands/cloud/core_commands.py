@@ -31,8 +31,72 @@ from basic_memory.cli.commands.cloud.rclone_installer import (
     RcloneInstallError,
     install_rclone,
 )
+from basic_memory.mcp.project_context import get_available_workspaces
 
 console = Console()
+
+
+async def _select_default_workspace_on_login() -> None:
+    """Prompt workspace selection after login when multiple workspaces exist.
+
+    Single workspace: auto-set as default silently.
+    Multiple workspaces: show a numbered list and prompt for selection.
+    Failure is non-fatal — user can always run 'bm cloud workspace set-default'.
+    """
+    try:
+        workspaces = await get_available_workspaces()
+    except Exception:
+        console.print(
+            "[dim]Workspace discovery unavailable; run 'bm cloud workspace set-default' if needed.[/dim]"
+        )
+        return
+
+    if not workspaces:
+        return
+
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    if len(workspaces) == 1:
+        config.default_workspace = workspaces[0].tenant_id
+        config_manager.save_config(config)
+        console.print(f"[dim]Default workspace: {workspaces[0].name}[/dim]")
+        return
+
+    # Multiple workspaces — prompt user to pick one.
+    console.print("\n[bold]Multiple workspaces available:[/bold]")
+    for i, ws in enumerate(workspaces, 1):
+        console.print(f"  {i}. {ws.name} ({ws.workspace_type}) — {ws.tenant_id}")
+
+    raw = typer.prompt(
+        "Select default workspace (number, or press Enter to skip)",
+        default="",
+    )
+    raw = raw.strip()
+
+    if not raw:
+        console.print(
+            "[dim]No default workspace set; run 'bm cloud workspace set-default' to choose.[/dim]"
+        )
+        return
+
+    try:
+        idx = int(raw) - 1
+    except ValueError:
+        console.print(
+            f"[yellow]'{raw}' is not a valid number; run 'bm cloud workspace set-default' to choose.[/yellow]"
+        )
+        return
+
+    if 0 <= idx < len(workspaces):
+        selected = workspaces[idx]
+        config.default_workspace = selected.tenant_id
+        config_manager.save_config(config)
+        console.print(f"[green]Default workspace set to '{selected.name}'[/green]")
+    else:
+        console.print(
+            f"[yellow]Selection out of range; run 'bm cloud workspace set-default' to choose.[/yellow]"
+        )
 
 
 @cloud_app.command()
@@ -58,6 +122,11 @@ def login():
             console.print("[green]Cloud authentication successful[/green]")
             console.print(f"[dim]Cloud host ready: {host_url}[/dim]")
 
+            # Prompt workspace selection when multiple are available so users
+            # don't get silently locked to a stale default_workspace from a
+            # previous session.
+            await _select_default_workspace_on_login()
+
         except SubscriptionRequiredError as e:
             track(EVENT_CLOUD_LOGIN_SUB_REQUIRED)
             console.print("\n[red]Subscription Required[/red]\n")
@@ -76,10 +145,21 @@ def login():
 
 @cloud_app.command()
 def logout():
-    """Remove stored OAuth tokens."""
-    config = ConfigManager().config
+    """Remove stored OAuth tokens and reset workspace selection."""
+    config_manager = ConfigManager()
+    config = config_manager.config
     auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
     auth.logout()
+
+    # Trigger: session is ending, so any previously selected workspace is no
+    # longer meaningful for the next authenticated user.
+    # Why: prevents stale default_workspace from silently routing to the wrong
+    #   tenant (e.g., an org workspace) on re-login.
+    # Outcome: next login will prompt workspace selection afresh.
+    if config.default_workspace is not None:
+        config.default_workspace = None
+        config_manager.save_config(config)
+
     console.print("[dim]API key (if configured) remains available for cloud project routing.[/dim]")
 
 
