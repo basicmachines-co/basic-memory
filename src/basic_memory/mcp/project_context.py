@@ -57,6 +57,7 @@ class WorkspaceProjectIndex:
     workspaces: tuple[WorkspaceInfo, ...]
     entries: tuple[WorkspaceProjectEntry, ...]
     entries_by_permalink: dict[str, tuple[WorkspaceProjectEntry, ...]]
+    failed_workspaces: tuple[WorkspaceInfo, ...] = ()
 
 
 def set_workspace_provider(provider: Callable[[], Awaitable[list[WorkspaceInfo]]]) -> None:
@@ -300,6 +301,12 @@ def _workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | 
         return None
 
     workspaces = tuple(WorkspaceInfo.model_validate(item) for item in workspaces_raw)
+    failed_workspaces_raw = raw_mapping.get("failed_workspaces")
+    failed_workspaces = (
+        tuple(WorkspaceInfo.model_validate(item) for item in failed_workspaces_raw)
+        if isinstance(failed_workspaces_raw, list)
+        else ()
+    )
     entries_list: list[WorkspaceProjectEntry] = []
     for item in entries_raw:
         if not isinstance(item, dict):
@@ -316,13 +323,18 @@ def _workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | 
             )
         )
     entries = tuple(entries_list)
-    return _build_workspace_project_index(workspaces, entries)
+    return _build_workspace_project_index(
+        workspaces,
+        entries,
+        failed_workspaces=failed_workspaces,
+    )
 
 
 def _workspace_project_index_to_state(index: WorkspaceProjectIndex) -> dict:
     """Serialize a workspace project index for MCP context state."""
     return {
         "workspaces": [workspace.model_dump() for workspace in index.workspaces],
+        "failed_workspaces": [workspace.model_dump() for workspace in index.failed_workspaces],
         "entries": [
             {
                 "workspace": entry.workspace.model_dump(),
@@ -336,6 +348,8 @@ def _workspace_project_index_to_state(index: WorkspaceProjectIndex) -> dict:
 def _build_workspace_project_index(
     workspaces: tuple[WorkspaceInfo, ...],
     entries: tuple[WorkspaceProjectEntry, ...],
+    *,
+    failed_workspaces: tuple[WorkspaceInfo, ...] = (),
 ) -> WorkspaceProjectIndex:
     """Build the permalink lookup table for workspace-project entries."""
     grouped: dict[str, list[WorkspaceProjectEntry]] = {}
@@ -349,6 +363,7 @@ def _build_workspace_project_index(
             permalink: tuple(items)
             for permalink, items in sorted(grouped.items(), key=lambda item: item[0])
         },
+        failed_workspaces=failed_workspaces,
     )
 
 
@@ -469,11 +484,50 @@ async def _ensure_workspace_project_index(
             "Ensure you have an active subscription and tenant access."
         )
 
-    fetched_entries = await asyncio.gather(
-        *[_fetch_workspace_project_entries(workspace, context=context) for workspace in workspaces]
+    fetched_results = await asyncio.gather(
+        *[_fetch_workspace_project_entries(workspace, context=context) for workspace in workspaces],
+        return_exceptions=True,
     )
-    entries = tuple(entry for workspace_entries in fetched_entries for entry in workspace_entries)
-    index = _build_workspace_project_index(workspaces, entries)
+    entries_list: list[WorkspaceProjectEntry] = []
+    failed_workspaces: list[WorkspaceInfo] = []
+    successful_fetches = 0
+    for workspace, result in zip(workspaces, fetched_results, strict=True):
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result
+            # Trigger: one workspace project listing failed during a multi-workspace index.
+            # Why: a transient or unauthorized tenant should not break qualified routing for
+            #   healthy workspaces, but unqualified routing still needs to know the index is partial.
+            # Outcome: keep successful workspace entries and record the failed workspace.
+            failed_workspaces.append(workspace)
+            logger.warning(
+                f"Cloud project discovery failed for workspace {workspace.slug} "
+                f"({workspace.tenant_id}): {result}"
+            )
+            if context:  # pragma: no cover
+                await context.info(
+                    f"Cloud project discovery failed for workspace {workspace.slug}; "
+                    "continuing with other workspaces"
+                )
+            continue
+
+        workspace_entries = cast(tuple[WorkspaceProjectEntry, ...], result)
+        successful_fetches += 1
+        entries_list.extend(workspace_entries)
+
+    if failed_workspaces and successful_fetches == 0:
+        failed_labels = ", ".join(workspace.slug for workspace in failed_workspaces)
+        raise ValueError(
+            "Unable to discover projects in any accessible workspace. "
+            f"Failed workspaces: {failed_labels}"
+        )
+
+    entries = tuple(entries_list)
+    index = _build_workspace_project_index(
+        workspaces,
+        entries,
+        failed_workspaces=tuple(failed_workspaces),
+    )
 
     if context:
         await context.set_state(
@@ -520,6 +574,14 @@ async def resolve_workspace_project_identifier(
             if entry.workspace.tenant_id == workspace.tenant_id
         ]
         if not matches:
+            if any(
+                failed_workspace.tenant_id == workspace.tenant_id
+                for failed_workspace in index.failed_workspaces
+            ):
+                raise ValueError(
+                    f"Projects for workspace '{workspace.name}' ({workspace.slug}) "
+                    "could not be loaded. Retry after workspace discovery recovers."
+                )
             available = ", ".join(
                 entry.qualified_name
                 for entry in index.entries
@@ -533,10 +595,17 @@ async def resolve_workspace_project_identifier(
 
     matches = index.entries_by_permalink.get(project_permalink, ())
     if not matches:
+        failed_note = ""
+        if index.failed_workspaces:
+            failed = ", ".join(workspace.slug for workspace in index.failed_workspaces)
+            failed_note = (
+                f" Project discovery failed for workspace(s): {failed}; "
+                "retry or use a qualified project from an indexed workspace."
+            )
         available = ", ".join(entry.qualified_name for entry in index.entries)
         raise ValueError(
-            f"Project '{project}' was not found in any accessible cloud workspace. "
-            f"Available projects: {available}"
+            f"Project '{project}' was not found in indexed cloud workspaces. "
+            f"Available projects: {available}.{failed_note}"
         )
 
     cached_workspace = await _get_cached_active_workspace(context)
@@ -555,6 +624,15 @@ async def resolve_workspace_project_identifier(
         )
         raise ValueError(
             f"Project '{project}' exists in multiple workspaces. Use: {choices}\n{details}"
+        )
+
+    if index.failed_workspaces:
+        qualified_name = matches[0].qualified_name
+        failed = ", ".join(workspace.slug for workspace in index.failed_workspaces)
+        raise ValueError(
+            f"Project '{project}' was found as {qualified_name}, but project discovery "
+            f"failed for workspace(s): {failed}. Use '{qualified_name}' to route "
+            "explicitly, or retry after discovery recovers."
         )
 
     return matches[0]

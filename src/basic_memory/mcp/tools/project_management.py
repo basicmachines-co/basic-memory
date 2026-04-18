@@ -250,7 +250,7 @@ def _format_project_list_text(merged: list[dict]) -> str:
         source = project["source"]
         qualified_name = project.get("qualified_name")
         qualified_suffix = f" [{qualified_name}]" if qualified_name else ""
-        result += f"• {label} ({source}){qualified_suffix}\n"
+        result += f"- {label} ({source}){qualified_suffix}\n"
 
     result += "\n" + "─" * 40 + "\n"
     result += "Next: Ask which project to use for this session.\n"

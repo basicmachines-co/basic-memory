@@ -24,6 +24,9 @@ class _ContextState:
     async def set_state(self, key: str, value: object, **kwargs) -> None:
         self._state[key] = value
 
+    async def info(self, message: str) -> None:
+        self._state["info_message"] = message
+
 
 def _ctx(context: _ContextState) -> Any:
     return cast(Any, context)
@@ -423,6 +426,101 @@ async def test_workspace_project_index_caches_and_invalidates(monkeypatch):
     await invalidate_workspace_project_index(_ctx(context))
     await _ensure_workspace_project_index(context=_ctx(context))
     assert calls == ["personal", "acme", "personal", "acme"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_project_index_keeps_successes_when_workspace_fetch_fails(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _ensure_workspace_project_index,
+        resolve_workspace_project_identifier,
+    )
+
+    context = _ContextState()
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    acme = _workspace(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+    )
+    project = _project("Meeting Notes", id=7, external_id="personal-meeting-notes")
+
+    async def fake_get_available_workspaces(context=None):
+        return [personal, acme]
+
+    async def fake_fetch_workspace_project_entries(workspace, context=None):
+        if workspace.slug == "acme":
+            raise RuntimeError("acme unavailable")
+        return (WorkspaceProjectEntry(workspace=workspace, project=project),)
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(
+        project_context,
+        "_fetch_workspace_project_entries",
+        fake_fetch_workspace_project_entries,
+    )
+
+    index = await _ensure_workspace_project_index(context=_ctx(context))
+
+    assert [entry.qualified_name for entry in index.entries] == ["personal/meeting-notes"]
+    assert [workspace.slug for workspace in index.failed_workspaces] == ["acme"]
+
+    resolved = await resolve_workspace_project_identifier(
+        "personal/meeting-notes",
+        context=_ctx(context),
+    )
+    assert resolved.project.external_id == "personal-meeting-notes"
+
+    with pytest.raises(ValueError, match="Use 'personal/meeting-notes'"):
+        await resolve_workspace_project_identifier(
+            "meeting-notes",
+            context=_ctx(context),
+        )
+
+
+@pytest.mark.asyncio
+async def test_workspace_project_index_raises_when_all_workspace_fetches_fail(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import _ensure_workspace_project_index
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+
+    async def fake_get_available_workspaces(context=None):
+        return [personal]
+
+    async def fake_fetch_workspace_project_entries(workspace, context=None):
+        raise RuntimeError("tenant unavailable")
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(
+        project_context,
+        "_fetch_workspace_project_entries",
+        fake_fetch_workspace_project_entries,
+    )
+
+    with pytest.raises(ValueError, match="Unable to discover projects"):
+        await _ensure_workspace_project_index()
 
 
 @pytest.mark.asyncio

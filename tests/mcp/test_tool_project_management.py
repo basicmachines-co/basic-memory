@@ -47,7 +47,7 @@ def _make_list(projects: list[ProjectItem], default: str | None = None) -> Proje
 async def test_list_memory_projects_unconstrained(app, test_project):
     result = await list_memory_projects()
     assert "Available projects:" in result
-    assert f"• {test_project.name}" in result
+    assert f"- {test_project.name}" in result
 
 
 @pytest.mark.asyncio
@@ -77,9 +77,9 @@ async def test_list_memory_projects_shows_display_name(app, client, test_project
         result = await list_memory_projects()
 
     # Regular project shows name with source label
-    assert "• main (local)" in result
+    assert "- main (local)" in result
     # Private project shows display_name with slug in parentheses, then source
-    assert "• My Notes (private-fb83af23) (local)" in result
+    assert "- My Notes (private-fb83af23) (local)" in result
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_list_memory_projects_no_display_name_shows_name_only(app, client,
     ):
         result = await list_memory_projects()
 
-    assert "• my-project (local)" in result
+    assert "- my-project (local)" in result
 
 
 @pytest.mark.asyncio
@@ -176,11 +176,11 @@ async def test_list_memory_projects_local_and_cloud_merge(app, test_project):
         result = await list_memory_projects()
 
     # Both local+cloud project shows merged source
-    assert "• main (local+cloud)" in result
+    assert "- main (local+cloud)" in result
     # Local-only project
-    assert "• specs (local)" in result
+    assert "- specs (local)" in result
     # Cloud-only project
-    assert "• basic-memory-llc (cloud)" in result
+    assert "- basic-memory-llc (cloud)" in result
 
 
 @pytest.mark.asyncio
@@ -193,7 +193,7 @@ async def test_list_memory_projects_no_cloud_credentials(app, test_project):
         result = await list_memory_projects()
 
     assert "Available projects:" in result
-    assert f"• {test_project.name} (local)" in result
+    assert f"- {test_project.name} (local)" in result
     # No cloud source labels
     assert "cloud)" not in result
 
@@ -215,7 +215,7 @@ async def test_list_memory_projects_cloud_failure_graceful(app, test_project):
         result = await list_memory_projects()
 
     assert "Available projects:" in result
-    assert f"• {test_project.name} (local)" in result
+    assert f"- {test_project.name} (local)" in result
 
 
 @pytest.mark.asyncio
@@ -244,7 +244,7 @@ async def test_list_memory_projects_factory_mode(app, test_project):
     ):
         result = await list_memory_projects()
 
-    assert "• cloud-proj (cloud)" in result
+    assert "- cloud-proj (cloud)" in result
 
 
 @pytest.mark.asyncio
@@ -313,7 +313,7 @@ async def test_list_memory_projects_factory_mode_workspace_lookup_failure(app, t
         result = await list_memory_projects()
 
     # Still reported as cloud even without workspace metadata
-    assert "• cloud-proj (cloud)" in result
+    assert "- cloud-proj (cloud)" in result
 
 
 @pytest.mark.asyncio
@@ -579,7 +579,7 @@ async def test_list_memory_projects_aggregates_without_config_workspace(app, tes
         result = await list_memory_projects()
 
     mock_index.assert_awaited_once()
-    assert "• cloud-proj (cloud) [default/cloud-proj]" in result
+    assert "- cloud-proj (cloud) [default/cloud-proj]" in result
 
 
 @pytest.mark.asyncio
