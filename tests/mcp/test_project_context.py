@@ -948,22 +948,14 @@ class TestGetProjectClientRoutingOrder:
         from contextlib import asynccontextmanager
         from basic_memory.schemas.project_info import ProjectItem
 
-        workspace_info = _workspace(
-            tenant_id="per-project-tenant-id",
-            workspace_type="organization",
-            slug="configured",
-            name="Configured",
-            role="owner",
-        )
         seen: dict[str, object] = {}
 
-        async def fake_resolve_workspace_parameter(workspace=None, context=None):
-            assert workspace == "per-project-tenant-id"
-            return workspace_info
+        async def fail_resolve_workspace_parameter(workspace=None, context=None):
+            raise AssertionError("Configured workspace_id should route without workspace discovery")
 
         monkeypatch.setattr(
             "basic_memory.mcp.project_context.resolve_workspace_parameter",
-            fake_resolve_workspace_parameter,
+            fail_resolve_workspace_parameter,
         )
 
         @asynccontextmanager

@@ -219,6 +219,35 @@ async def test_list_memory_projects_cloud_failure_graceful(app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_list_memory_projects_explicit_workspace_discovery_failure_graceful(
+    app,
+    test_project,
+):
+    """Explicit workspace discovery failure still returns the local project list."""
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.has_cloud_credentials",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("workspace discovery unavailable"),
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management._fetch_cloud_projects",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_fetch,
+    ):
+        result = await list_memory_projects(workspace="tenant-abc")
+
+    mock_fetch.assert_awaited_once_with("tenant-abc", None)
+    assert "Available projects:" in result
+    assert f"- {test_project.name} (local)" in result
+
+
+@pytest.mark.asyncio
 async def test_list_memory_projects_factory_mode(app, test_project):
     """In factory mode (cloud app), projects are reported as cloud-sourced with workspace metadata."""
     factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)

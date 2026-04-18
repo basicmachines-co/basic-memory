@@ -373,13 +373,27 @@ async def list_memory_projects(
     config = ConfigManager().config
     if has_cloud_credentials(config):
         if workspace:
-            active_workspace = await resolve_workspace_parameter(workspace, context)
-            cloud_list = await _fetch_cloud_projects(active_workspace.tenant_id, context)
-            cloud_ws_name = active_workspace.name
-            cloud_ws_type = active_workspace.workspace_type
-            cloud_ws_tenant_id = active_workspace.tenant_id
-            cloud_ws_slug = active_workspace.slug
-            cloud_ws_is_default = active_workspace.is_default
+            try:
+                active_workspace = await resolve_workspace_parameter(workspace, context)
+            except Exception as exc:
+                logger.warning(
+                    f"Cloud workspace discovery failed while listing projects for "
+                    f"workspace '{workspace}'; trying direct workspace routing before "
+                    f"falling back to local-only project list: {exc}"
+                )
+                if context:  # pragma: no cover
+                    await context.info(
+                        "Cloud workspace discovery failed while listing projects; "
+                        "trying direct workspace routing"
+                    )
+                cloud_list = await _fetch_cloud_projects(workspace, context)
+            else:
+                cloud_list = await _fetch_cloud_projects(active_workspace.tenant_id, context)
+                cloud_ws_name = active_workspace.name
+                cloud_ws_type = active_workspace.workspace_type
+                cloud_ws_tenant_id = active_workspace.tenant_id
+                cloud_ws_slug = active_workspace.slug
+                cloud_ws_is_default = active_workspace.is_default
         else:
             try:
                 workspace_index = await ensure_workspace_project_index(context=context)

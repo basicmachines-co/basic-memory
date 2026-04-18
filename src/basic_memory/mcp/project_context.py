@@ -1066,7 +1066,8 @@ async def get_project_client(
 
     if factory_mode or project_mode == ProjectMode.CLOUD or explicit_cloud_routing:
         route_mode = "factory" if factory_mode else "cloud_proxy"
-        active_ws: WorkspaceInfo
+        active_ws: WorkspaceInfo | None = None
+        workspace_id: str
         project_for_api = _unqualified_project_identifier(resolved_project)
 
         # Trigger: a script or config entry pins the tenant explicitly
@@ -1074,11 +1075,13 @@ async def get_project_client(
         # Outcome: route to that workspace, but validate the project name inside it
         if workspace is not None:
             active_ws = await resolve_workspace_parameter(workspace=workspace, context=context)
+            workspace_id = active_ws.tenant_id
         elif project_entry and project_entry.workspace_id:
-            active_ws = await resolve_workspace_parameter(
-                workspace=project_entry.workspace_id,
-                context=context,
-            )
+            # Trigger: the local project config already stores the cloud tenant id.
+            # Why: routing can send that id directly; requiring workspace discovery here
+            #   would turn a control-plane listing outage into a project routing failure.
+            # Outcome: preserve project-scoped routing even when discovery is unavailable.
+            workspace_id = project_entry.workspace_id
         else:
             resolved_entry = cloud_default_entry
             if resolved_entry is None or not _project_matches_identifier(
@@ -1089,19 +1092,21 @@ async def get_project_client(
                     context=context,
                 )
             active_ws = resolved_entry.workspace
+            workspace_id = active_ws.tenant_id
             project_for_api = resolved_entry.project.name
 
-        await _set_cached_active_workspace(context, active_ws)
+        if active_ws is not None:
+            await _set_cached_active_workspace(context, active_ws)
         with logfire.span(
             "routing.client_session",
             project_name=project_for_api,
             route_mode=route_mode,
-            workspace_id=active_ws.tenant_id,
+            workspace_id=workspace_id,
         ):
             logger.debug("Using resolved workspace for cloud project routing")
             async with get_client(
                 project_name=project_for_api,
-                workspace=active_ws.tenant_id,
+                workspace=workspace_id,
             ) as client:
                 active_project = await get_active_project(client, project_for_api, context)
                 yield client, active_project
