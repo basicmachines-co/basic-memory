@@ -344,3 +344,88 @@ async def test_new_project_addition_scenario(monkeypatch, tmp_path):
     assert cycle_count == 3
     assert any(len(p) == 1 for p in project_lists_used)
     assert any(len(p) == 2 for p in project_lists_used)
+
+
+@pytest.mark.asyncio
+async def test_run_respects_constrained_project(monkeypatch, tmp_path):
+    """WatchService with constrained_project only watches that project each cycle.
+
+    This is the fix for the race condition where N concurrent MCP processes each
+    started with --project <name> would still watch every project, producing N
+    overlapping watchers over the same files.
+    """
+    config = BasicMemoryConfig(
+        projects={
+            "project-a": {"path": str(tmp_path / "a"), "mode": "local"},
+            "project-b": {"path": str(tmp_path / "b"), "mode": "local"},
+        },
+    )
+    repo = _Repo(
+        projects_return=[
+            Project(id=1, name="project-a", path=str(tmp_path / "a"), permalink="project-a"),
+            Project(id=2, name="project-b", path=str(tmp_path / "b"), permalink="project-b"),
+        ]
+    )
+    watch_service = WatchService(
+        config, cast(Any, repo), quiet=True, constrained_project="project-a"
+    )
+
+    seen_project_names: list[list[str]] = []
+
+    async def watch_cycle_stub(projects, stop_event):
+        seen_project_names.append([p.name for p in projects])
+        watch_service.state.running = False
+        stop_event.set()
+
+    async def fake_write_status():
+        return None
+
+    monkeypatch.setattr(watch_service, "_watch_projects_cycle", watch_cycle_stub)
+    monkeypatch.setattr(watch_service, "write_status", fake_write_status)
+
+    await watch_service.run()
+
+    assert seen_project_names == [["project-a"]]
+
+
+@pytest.mark.asyncio
+async def test_run_constraint_applied_after_cloud_filter(monkeypatch, tmp_path):
+    """Constrained project filter is applied after the cloud-project filter.
+
+    Ensures cloud-project filtering and constrained_project filtering compose
+    correctly: both reductions apply in the same cycle.
+    """
+    config = BasicMemoryConfig(
+        projects={
+            "constrained": {"path": str(tmp_path / "c"), "mode": "local"},
+            "other-local": {"path": str(tmp_path / "o"), "mode": "local"},
+            "cloud-only": {"path": "cloud-slug", "mode": "cloud"},
+        },
+    )
+    repo = _Repo(
+        projects_return=[
+            Project(id=1, name="constrained", path=str(tmp_path / "c"), permalink="constrained"),
+            Project(id=2, name="other-local", path=str(tmp_path / "o"), permalink="other-local"),
+            Project(id=3, name="cloud-only", path="cloud-slug", permalink="cloud-only"),
+        ]
+    )
+    watch_service = WatchService(
+        config, cast(Any, repo), quiet=True, constrained_project="constrained"
+    )
+
+    seen_project_names: list[list[str]] = []
+
+    async def watch_cycle_stub(projects, stop_event):
+        seen_project_names.append([p.name for p in projects])
+        watch_service.state.running = False
+        stop_event.set()
+
+    async def fake_write_status():
+        return None
+
+    monkeypatch.setattr(watch_service, "_watch_projects_cycle", watch_cycle_stub)
+    monkeypatch.setattr(watch_service, "write_status", fake_write_status)
+
+    await watch_service.run()
+
+    assert seen_project_names == [["constrained"]]

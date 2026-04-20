@@ -99,18 +99,24 @@ async def initialize_file_sync(
     )
     project_repository = ProjectRepository(session_maker)
 
-    # Initialize watch service
+    # Filter to constrained project if MCP server was started with --project.
+    # Read once here so the same value drives both background sync and WatchService.
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+
+    # Initialize watch service — pass the constraint so per-cycle project reloads
+    # also respect the --project flag (prevents N concurrent MCP servers from
+    # spawning N overlapping watchers over the same files).
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
         quiet=quiet,
+        constrained_project=constrained_project,
     )
 
     # Get active projects
     active_projects = await project_repository.get_active_projects()
 
-    # Filter to constrained project if MCP server was started with --project
-    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    # Apply the same constraint to the one-shot background sync
     if constrained_project:
         active_projects = [p for p in active_projects if p.name == constrained_project]
         logger.info(f"Background sync constrained to project: {constrained_project}")

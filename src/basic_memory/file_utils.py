@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import os
 import shlex
 from dataclasses import dataclass
 from datetime import datetime
@@ -111,7 +112,10 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     # Convert string to Path if needed
     path_obj = Path(path) if isinstance(path, str) else path
-    temp_path = path_obj.with_suffix(".tmp")
+    # Trigger: concurrent processes (e.g. two MCP servers) can both write to the same file
+    # Why: a shared deterministic .tmp name causes rename collisions between processes
+    # Outcome: each process gets its own temp file; the second rename no longer races the first
+    temp_path = path_obj.parent / f"{path_obj.stem}.{os.getpid()}.tmp"
 
     try:
         # Trigger: callers hand us normalized Python text, but the final bytes are allowed

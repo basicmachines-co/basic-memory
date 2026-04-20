@@ -69,8 +69,8 @@ async def test_write_file_atomic(tmp_path: Path):
     assert test_file.exists()
     assert test_file.read_text(encoding="utf-8") == content
 
-    # Temp file should be cleaned up
-    assert not test_file.with_suffix(".tmp").exists()
+    # Temp file (now named <stem>.<pid>.tmp) should be cleaned up
+    assert not any(tmp_path.glob("*.tmp"))
 
 
 @pytest.mark.asyncio

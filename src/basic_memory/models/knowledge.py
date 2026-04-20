@@ -299,8 +299,13 @@ class Relation(Base):
         Format: source/relation_type/target
         Example: "specs/search/implements/features/search-ui"
         """
-        # Only create permalinks when both source and target have permalinks
-        from_permalink = self.from_entity.permalink or self.from_entity.file_path
+        # Trigger: concurrent watcher can cascade-delete from_entity while relation is resolved
+        # Why: from_entity is mandatory in the schema but lazy-loaded; a racing delete leaves None
+        # Outcome: fall back to from_id string so permalink generation never raises AttributeError
+        if self.from_entity:
+            from_permalink = self.from_entity.permalink or self.from_entity.file_path
+        else:
+            from_permalink = str(self.from_id)
 
         if self.to_entity:
             to_permalink = self.to_entity.permalink or self.to_entity.file_path

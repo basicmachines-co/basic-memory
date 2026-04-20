@@ -85,6 +85,7 @@ class WatchService:
         project_repository: ProjectRepository,
         quiet: bool = False,
         sync_service_factory: Optional[SyncServiceFactory] = None,
+        constrained_project: Optional[str] = None,
     ):
         self.app_config = app_config
         self.project_repository = project_repository
@@ -93,6 +94,10 @@ class WatchService:
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
         self._sync_service_factory = sync_service_factory
+        # Trigger: MCP server started with --project flag
+        # Why: N concurrent MCP processes must watch disjoint project sets to avoid races
+        # Outcome: watch cycles only observe this project; all others are ignored
+        self.constrained_project = constrained_project
 
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
@@ -191,6 +196,14 @@ class WatchService:
                 if cloud_skip:
                     projects = [p for p in projects if p.name not in cloud_skip]
                     logger.debug(f"Skipping cloud-mode projects in watch cycle: {cloud_skip}")
+
+                # Trigger: this MCP server process was started with --project <name>
+                # Why: without this filter every MCP process watches every project, causing
+                #      N processes to race on the same files and trigger duplicate syncs
+                # Outcome: only the constrained project is watched this cycle
+                if self.constrained_project:
+                    projects = [p for p in projects if p.name == self.constrained_project]
+                    logger.debug(f"Watch cycle constrained to project: {self.constrained_project}")
 
                 project_paths = [project.path for project in projects]
                 logger.debug(f"Starting watch cycle for directories: {project_paths}")
