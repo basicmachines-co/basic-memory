@@ -117,7 +117,16 @@ async def test_run_handles_no_projects(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path):
-    config = BasicMemoryConfig(watch_project_reload_interval=1)
+    # Projects must be registered in app_config.projects as local-mode, otherwise
+    # _select_projects_to_watch() treats unknown names as CLOUD and filters them
+    # out, which would short-circuit through the empty-projects guard in run().
+    config = BasicMemoryConfig(
+        watch_project_reload_interval=1,
+        projects={
+            "project1": {"path": str(tmp_path / "p1"), "mode": "local"},
+            "project2": {"path": str(tmp_path / "p2"), "mode": "local"},
+        },
+    )
     repo = _Repo(
         projects_side_effect=[
             [Project(id=1, name="project1", path=str(tmp_path / "p1"), permalink="project1")],
@@ -229,7 +238,9 @@ async def test_run_keeps_cloud_projects_with_local_bisync(monkeypatch, tmp_path)
 
 @pytest.mark.asyncio
 async def test_run_continues_after_cycle_error(monkeypatch, tmp_path):
-    config = BasicMemoryConfig()
+    config = BasicMemoryConfig(
+        projects={"test": {"path": str(tmp_path / "test"), "mode": "local"}},
+    )
     repo = _Repo(
         projects_return=[Project(id=1, name="test", path=str(tmp_path / "test"), permalink="test")]
     )
@@ -264,7 +275,9 @@ async def test_run_continues_after_cycle_error(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_timer_task_cancelled_properly(monkeypatch, tmp_path):
-    config = BasicMemoryConfig()
+    config = BasicMemoryConfig(
+        projects={"test": {"path": str(tmp_path / "test"), "mode": "local"}},
+    )
     repo = _Repo(
         projects_return=[Project(id=1, name="test", path=str(tmp_path / "test"), permalink="test")]
     )

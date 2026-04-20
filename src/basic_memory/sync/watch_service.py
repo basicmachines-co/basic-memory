@@ -216,14 +216,14 @@ class WatchService:
                 # Why: watchfiles.awatch() requires at least one path. Calling it
                 #      with an empty list raises ValueError, which the outer handler
                 #      catches with a 5s sleep — producing a tight error-log loop.
-                # Outcome: sleep longer and retry, giving the project list a chance
-                #          to populate (e.g. after a project is added).
+                # Outcome: sleep the configured reload interval before retrying, so
+                #          newly added projects get picked up on the next cycle.
                 if not projects:
                     logger.warning(
                         "No projects to watch; sleeping before retry "
                         f"(constrained_project={self.constrained_project!r})"
                     )
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(self.app_config.watch_project_reload_interval)
                     continue
 
                 project_paths = [project.path for project in projects]
