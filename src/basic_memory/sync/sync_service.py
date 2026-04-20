@@ -1530,8 +1530,9 @@ class SyncService:
                 count += 1
             return count
 
-        process = await asyncio.create_subprocess_shell(
-            f'find "{directory}" -type f | wc -l',
+        # Use exec (not shell) to avoid shell injection via directory paths with special chars
+        process = await asyncio.create_subprocess_exec(
+            "find", str(directory), "-type", "f",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1550,7 +1551,7 @@ class SyncService:
                 count += 1
             return count
 
-        return int(stdout.strip())
+        return len(stdout.splitlines())
 
     async def _scan_directory_modified_since(
         self, directory: Path, since_timestamp: float
@@ -1583,8 +1584,9 @@ class SyncService:
         # Convert timestamp to find-compatible format
         since_date = datetime.fromtimestamp(since_timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
-        process = await asyncio.create_subprocess_shell(
-            f'find "{directory}" -type f -newermt "{since_date}"',
+        # Use exec (not shell) to avoid shell injection via directory paths or timestamps with special chars
+        process = await asyncio.create_subprocess_exec(
+            "find", str(directory), "-type", "f", "-newermt", since_date,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
