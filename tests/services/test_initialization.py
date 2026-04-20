@@ -17,6 +17,7 @@ from basic_memory.services.initialization import (
     ensure_initialization,
     initialize_app,
     initialize_database,
+    initialize_file_sync,
     reconcile_projects_with_config,
 )
 
@@ -165,6 +166,60 @@ async def test_initialize_app_warns_on_frontmatter_permalink_precedence(
         "ensure_frontmatter_on_sync=True overrides disable_permalinks=True" in message
         for message in warnings
     )
+
+
+class _FakeWatchService:
+    """Captures init kwargs so tests can assert what the real service receives."""
+
+    last_kwargs: dict[str, object] = {}
+
+    def __init__(self, **kwargs):
+        _FakeWatchService.last_kwargs = kwargs
+
+    async def run(self):
+        return None
+
+
+def _disable_test_env_short_circuit(monkeypatch) -> None:
+    """Bypass ``is_test_env`` so ``initialize_file_sync`` actually runs.
+
+    ``is_test_env`` returns True whenever pytest is running, which would cause
+    ``initialize_file_sync`` to return before constructing a WatchService.
+    """
+    monkeypatch.setattr(BasicMemoryConfig, "is_test_env", property(lambda self: False))
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_sync_passes_constrained_project_to_watch_service(
+    app_config: BasicMemoryConfig, monkeypatch
+):
+    """``BASIC_MEMORY_MCP_PROJECT`` must reach the watch service, not just the
+    one-shot background sync. Otherwise multiple ``basic-memory mcp --project X``
+    processes each spawn a watcher over every project and race on file writes.
+    """
+    _disable_test_env_short_circuit(monkeypatch)
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "target-project")
+    monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+    _FakeWatchService.last_kwargs = {}
+
+    await initialize_file_sync(app_config, quiet=True)
+
+    assert _FakeWatchService.last_kwargs.get("constrained_project") == "target-project"
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_sync_no_constraint_when_env_unset(
+    app_config: BasicMemoryConfig, monkeypatch
+):
+    """With no env var set, the watch service is unconstrained."""
+    _disable_test_env_short_circuit(monkeypatch)
+    monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+    monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+    _FakeWatchService.last_kwargs = {}
+
+    await initialize_file_sync(app_config, quiet=True)
+
+    assert _FakeWatchService.last_kwargs.get("constrained_project") is None
 
 
 @pytest.mark.asyncio

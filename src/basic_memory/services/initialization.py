@@ -99,18 +99,23 @@ async def initialize_file_sync(
     )
     project_repository = ProjectRepository(session_maker)
 
+    # Filter to constrained project if MCP server was started with --project.
+    # Applied to both the initial background sync and the watch service so that
+    # running multiple `basic-memory mcp --project X` processes does not produce
+    # duplicate watchers fighting over the same files.
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+
     # Initialize watch service
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
         quiet=quiet,
+        constrained_project=constrained_project,
     )
 
     # Get active projects
     active_projects = await project_repository.get_active_projects()
 
-    # Filter to constrained project if MCP server was started with --project
-    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
         active_projects = [p for p in active_projects if p.name == constrained_project]
         logger.info(f"Background sync constrained to project: {constrained_project}")
@@ -154,7 +159,10 @@ async def initialize_file_sync(
     # Don't await the tasks - let them run in background while we continue
 
     # Then start the watch service in the background
-    logger.info("Starting watch service for all projects")
+    if constrained_project:
+        logger.info(f"Starting watch service constrained to project: {constrained_project}")
+    else:
+        logger.info("Starting watch service for all projects")
 
     # run the watch service
     await watch_service.run()

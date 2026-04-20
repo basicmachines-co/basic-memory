@@ -85,6 +85,7 @@ class WatchService:
         project_repository: ProjectRepository,
         quiet: bool = False,
         sync_service_factory: Optional[SyncServiceFactory] = None,
+        constrained_project: Optional[str] = None,
     ):
         self.app_config = app_config
         self.project_repository = project_repository
@@ -93,6 +94,11 @@ class WatchService:
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
         self._sync_service_factory = sync_service_factory
+        # When set (typically from BASIC_MEMORY_MCP_PROJECT), the watch cycle
+        # only observes this project. Without it, each `basic-memory mcp --project X`
+        # process spawns a watcher over every project and racing writers collide
+        # on the same files.
+        self.constrained_project = constrained_project
 
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
@@ -156,6 +162,35 @@ class WatchService:
             # process changes
             await asyncio.gather(*change_handlers)
 
+    async def _select_projects_to_watch(self) -> list[Project]:
+        """Return the set of projects this watch cycle should observe.
+
+        Applies two filters in order:
+          1. ``constrained_project`` — if the MCP server was started with
+             ``--project``, only that project is watched. This keeps concurrent
+             MCP processes from producing duplicate watchers that race on the
+             same files.
+          2. Cloud-only projects without a local bisync copy are skipped so we
+             don't watch a path that does not exist on disk.
+        """
+        projects = await self.project_repository.get_active_projects()
+
+        if self.constrained_project:
+            projects = [p for p in projects if p.name == self.constrained_project]
+
+        cloud_skip: list[str] = []
+        for p in projects:
+            if self.app_config.get_project_mode(p.name) == ProjectMode.CLOUD:
+                entry = self.app_config.projects.get(p.name)
+                if entry and Path(entry.path).is_absolute():
+                    continue  # Cloud project with local bisync copy — keep watching
+                cloud_skip.append(p.name)
+        if cloud_skip:
+            projects = [p for p in projects if p.name not in cloud_skip]
+            logger.debug(f"Skipping cloud-mode projects in watch cycle: {cloud_skip}")
+
+        return list(projects)
+
     async def run(self):  # pragma: no cover
         """Watch for file changes and sync them"""
 
@@ -174,23 +209,7 @@ class WatchService:
                 # Clear ignore patterns cache to pick up any .gitignore changes
                 self._ignore_patterns_cache.clear()
 
-                # Reload projects to catch any new/removed projects
-                projects = await self.project_repository.get_active_projects()
-
-                # Trigger: project is configured for cloud routing
-                # Why: cloud-only projects (no local directory) should not be watched;
-                #       cloud projects with a local bisync copy (absolute path) need watching
-                # Outcome: watch cycle skips cloud projects without a local directory
-                cloud_skip = []
-                for p in projects:
-                    if self.app_config.get_project_mode(p.name) == ProjectMode.CLOUD:
-                        entry = self.app_config.projects.get(p.name)
-                        if entry and Path(entry.path).is_absolute():
-                            continue  # Cloud project with local bisync copy — keep watching
-                        cloud_skip.append(p.name)
-                if cloud_skip:
-                    projects = [p for p in projects if p.name not in cloud_skip]
-                    logger.debug(f"Skipping cloud-mode projects in watch cycle: {cloud_skip}")
+                projects = await self._select_projects_to_watch()
 
                 project_paths = [project.path for project in projects]
                 logger.debug(f"Starting watch cycle for directories: {project_paths}")
