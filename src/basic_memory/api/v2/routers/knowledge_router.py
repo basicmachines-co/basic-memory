@@ -38,6 +38,7 @@ from basic_memory.schemas.v2 import (
     MoveEntityRequestV2,
     MoveDirectoryRequestV2,
     DeleteDirectoryRequestV2,
+    OrphanEntitiesResponse,
 )
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 
@@ -108,6 +109,43 @@ async def get_graph(
 
         logger.info(f"API v2 response: graph with {len(nodes)} nodes and {len(edges)} edges")
         return GraphResponse(nodes=nodes, edges=edges)
+
+
+## Orphan entities endpoint
+
+
+@router.get("/orphans", response_model=OrphanEntitiesResponse)
+async def get_orphan_entities(
+    project_id: ProjectExternalIdPathDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+) -> OrphanEntitiesResponse:
+    """Return entities that have no relations in the knowledge graph.
+
+    Orphan entities have no incoming or outgoing connections — they are isolated
+    nodes that may indicate newly created notes not yet linked to the graph,
+    or entities whose relations have been removed.
+    """
+    with logfire.span(
+        "api.request.knowledge.get_orphans",
+        entrypoint="api",
+        domain="knowledge",
+        action="get_orphans",
+    ):
+        logger.info("API v2 request: get_orphan_entities")
+
+        entities = await entity_repository.find_without_relations()
+        nodes = [
+            GraphNode(
+                external_id=entity.external_id,
+                title=entity.title,
+                note_type=entity.note_type,
+                file_path=entity.file_path,
+            )
+            for entity in entities
+        ]
+
+        logger.info(f"API v2 response: {len(nodes)} orphan entities")
+        return OrphanEntitiesResponse(entities=nodes, total=len(nodes))
 
 
 ## Resolution endpoint

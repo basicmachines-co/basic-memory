@@ -14,6 +14,7 @@ from basic_memory.schemas.v2.graph import (
     GraphEdge,
     GraphNode,
     GraphResponse,
+    OrphanEntitiesResponse,
 )
 from basic_memory.schemas.v2.resource import (
     CreateResourceRequest,
@@ -33,6 +34,7 @@ __all__ = [
     "GraphEdge",
     "GraphNode",
     "GraphResponse",
+    "OrphanEntitiesResponse",
     "CreateResourceRequest",
     "UpdateResourceRequest",
     "ResourceResponse",

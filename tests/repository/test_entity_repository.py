@@ -1114,3 +1114,108 @@ async def test_get_file_path_to_permalink_map(entity_repository: EntityRepositor
     assert len(mapping) == 2
     assert mapping["test/entity1.md"] == "test/entity1"
     assert mapping["test/entity2.md"] == "test/entity2"
+
+
+@pytest.mark.asyncio
+async def test_find_without_relations_returns_isolated_entities(
+    entity_repository: EntityRepository, session_maker, test_project: Project
+):
+    """Entities with no outgoing or incoming relations are returned as orphans."""
+    async with db.scoped_session(session_maker) as session:
+        orphan = Entity(
+            project_id=test_project.id,
+            title="Orphan",
+            note_type="test",
+            permalink="orphan/orphan",
+            file_path="orphan/orphan.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        source = Entity(
+            project_id=test_project.id,
+            title="Source",
+            note_type="test",
+            permalink="source/source",
+            file_path="source/source.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        target = Entity(
+            project_id=test_project.id,
+            title="Target",
+            note_type="test",
+            permalink="target/target",
+            file_path="target/target.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add_all([orphan, source, target])
+        await session.flush()
+
+        relation = Relation(
+            project_id=test_project.id,
+            from_id=source.id,
+            to_id=target.id,
+            to_name=target.title,
+            relation_type="links_to",
+        )
+        session.add(relation)
+
+    result = await entity_repository.find_without_relations()
+    titles = {e.title for e in result}
+
+    assert "Orphan" in titles
+    assert "Source" not in titles
+    assert "Target" not in titles
+
+
+@pytest.mark.asyncio
+async def test_find_without_relations_empty_project(entity_repository: EntityRepository):
+    """An empty project returns no orphans."""
+    result = await entity_repository.find_without_relations()
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_find_without_relations_all_connected(
+    entity_repository: EntityRepository, session_maker, test_project: Project
+):
+    """When all entities are connected, no orphans are returned."""
+    async with db.scoped_session(session_maker) as session:
+        a = Entity(
+            project_id=test_project.id,
+            title="A",
+            note_type="test",
+            permalink="conn/a",
+            file_path="conn/a.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        b = Entity(
+            project_id=test_project.id,
+            title="B",
+            note_type="test",
+            permalink="conn/b",
+            file_path="conn/b.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add_all([a, b])
+        await session.flush()
+        session.add(
+            Relation(
+                project_id=test_project.id,
+                from_id=a.id,
+                to_id=b.id,
+                to_name=b.title,
+                relation_type="connects",
+            )
+        )
+
+    result = await entity_repository.find_without_relations()
+    assert result == []
