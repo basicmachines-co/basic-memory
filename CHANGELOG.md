@@ -2125,12 +2125,12 @@ Signed-off-by: phernandez <paul@basicmachines.co>
 - Update CLAUDE.md ([#33](https://github.com/basicmachines-co/basic-memory/pull/33),
   [`dfaf0fe`](https://github.com/basicmachines-co/basic-memory/commit/dfaf0fea9cf5b97d169d51a6276ec70162c21a7e))
 
-fix spelling in CLAUDE.md: enviroment -> environment Signed-off-by: Ikko Eltociear Ashimine
+fix spelling in CLAUDE.md: environment typo Signed-off-by: Ikko Eltociear Ashimine
   <eltociear@gmail.com>
 
 ### Refactoring
 
-- Move project stats into projct subcommand
+- Move project stats into project subcommand
   ([`2a881b1`](https://github.com/basicmachines-co/basic-memory/commit/2a881b1425c73947f037fbe7ac5539c015b62526))
 
 Signed-off-by: phernandez <paul@basicmachines.co>
@@ -2559,7 +2559,7 @@ Co-authored-by: phernandez <phernandez@basicmachines.co>
 
 ### Bug Fixes
 
-- Refix vitual env in installer build
+- Refix virtual env in installer build
   ([`052f491`](https://github.com/basicmachines-co/basic-memory/commit/052f491fff629e8ead629c9259f8cb46c608d584))
 
 
@@ -2578,7 +2578,7 @@ Co-authored-by: phernandez <phernandez@basicmachines.co>
 
 ### Bug Fixes
 
-- Fix path to intaller app artifact
+- Fix path to installer app artifact
   ([`53d220d`](https://github.com/basicmachines-co/basic-memory/commit/53d220df585561f9edd0d49a9e88f1d4055059cf))
 
 
@@ -2586,7 +2586,7 @@ Co-authored-by: phernandez <phernandez@basicmachines.co>
 
 ### Bug Fixes
 
-- Activate vitualenv in installer build
+- Activate virtualenv in installer build
   ([`d4c8293`](https://github.com/basicmachines-co/basic-memory/commit/d4c8293687a52eaf3337fe02e2f7b80e4cc9a1bb))
 
 - Trigger installer build on release

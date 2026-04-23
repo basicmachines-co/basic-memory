@@ -109,7 +109,7 @@ export function getRowIdentifier(
  * Note: Single "B" is disambiguated - integers < 1024 are bytes, otherwise billions.
  *
  * @param input - String to parse
- * @returns Parsed number or null if unparseable
+ * @returns Parsed number or null if unparsable
  *
  * @example
  * parseNumericLike("$1,234.56") // 1234.56

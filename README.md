@@ -516,7 +516,7 @@ canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 "What have I been working on in the past week?"
 ```
 
-## Futher info
+## Further info
 
 See the [Documentation](https://docs.basicmemory.com?utm_source=github&utm_medium=referral&utm_campaign=readme) for more info, including:
 

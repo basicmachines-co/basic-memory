@@ -53,7 +53,7 @@ def test_format_timestamp():
     formatted = format_timestamp(unix_str)
     assert "2023" in formatted
 
-    # Test with unparseable string
+    # Test with unparsable string
     assert format_timestamp("not a timestamp") == "not a timestamp"
 
     # Test with non-timestamp object

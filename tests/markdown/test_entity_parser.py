@@ -200,7 +200,7 @@ def test_parse_date_formats(entity_parser):
     # Invalid formats
     assert entity_parser.parse_date(None) is None
     assert entity_parser.parse_date(123) is None  # Non-string/datetime
-    assert entity_parser.parse_date("not a date") is None  # Unparseable string
+    assert entity_parser.parse_date("not a date") is None  # Unparsable string
     assert entity_parser.parse_date("") is None  # Empty string
 
     # Test dateparser error handling
