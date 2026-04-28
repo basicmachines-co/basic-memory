@@ -148,9 +148,11 @@ async def build_context(
             validation_alias=AliasChoices("timeframe", "since", "time_range", "lookback"),
         ),
     ] = "7d",
+    # `offset` is intentionally NOT aliased: it has different semantics
+    # (item-indexed vs. 1-indexed page-number).
     page: Annotated[
         int,
-        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
     ] = 1,
     page_size: Annotated[
         int,
@@ -158,10 +160,7 @@ async def build_context(
     ] = 10,
     max_related: Annotated[
         int,
-        Field(
-            default=10,
-            validation_alias=AliasChoices("max_related", "max_results", "limit_related"),
-        ),
+        Field(default=10, validation_alias=AliasChoices("max_related", "max_results")),
     ] = 10,
     output_format: Literal["json", "text"] = "json",
     context: Context | None = None,

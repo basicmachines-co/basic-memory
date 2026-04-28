@@ -73,11 +73,14 @@ async def read_note(
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     # Accept common pagination aliases models reach for from training data
-    # (offset/limit/page_number/per_page). Schema still advertises only the
-    # canonical names; aliases are silently mapped at validation time.
+    # (page_number/limit/per_page). Schema still advertises only the canonical
+    # names; aliases are silently mapped at validation time.
+    # Why no `offset` alias: `offset` is item-indexed (skip N items) while `page`
+    # is 1-indexed page-number, so direct aliasing returns the wrong slice
+    # (e.g. offset=20,limit=10 should mean items 21-30, not page 20).
     page: Annotated[
         int,
-        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
     ] = 1,
     page_size: Annotated[
         int,

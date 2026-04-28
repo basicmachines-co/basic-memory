@@ -17,8 +17,12 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_read_note_accepts_offset_alias_for_page(mcp_server, app, test_project):
-    """`offset` should be accepted in place of `page` (universal pagination convention)."""
+async def test_read_note_accepts_limit_alias_for_page_size(mcp_server, app, test_project):
+    """`limit` should be accepted in place of `page_size` (true synonym — both mean
+    "max items per response"). Note: `offset` is intentionally NOT aliased to `page`
+    because offset is item-indexed while page is 1-indexed page-number — silently
+    aliasing would return the wrong slice. See test_offset_is_rejected below.
+    """
     async with Client(mcp_server) as client:
         await client.call_tool(
             "write_note",
@@ -35,13 +39,41 @@ async def test_read_note_accepts_offset_alias_for_page(mcp_server, app, test_pro
             {
                 "project": test_project.name,
                 "identifier": "Pagination Note",
-                "offset": 1,
                 "limit": 5,
             },
         )
 
         assert len(result.content) == 1
         assert "# Pagination Note" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_offset_is_not_aliased_to_page(mcp_server, app, test_project):
+    """`offset` must NOT be silently mapped to `page` — they have different
+    semantics (item-index vs. 1-indexed page number). Locks in the deliberate
+    omission so a future contributor doesn't add it back thinking it's harmless.
+    """
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Offset Reject Note",
+                "directory": "test",
+                "content": "# Offset Reject Note\n\nBody.",
+            },
+        )
+
+        # FastMCP wraps unknown kwargs in a ToolError; just assert it raises.
+        with pytest.raises(Exception):
+            await client.call_tool(
+                "read_note",
+                {
+                    "project": test_project.name,
+                    "identifier": "Offset Reject Note",
+                    "offset": 0,
+                },
+            )
 
 
 @pytest.mark.asyncio
@@ -502,6 +534,67 @@ async def test_build_context_accepts_url_aliases(mcp_server, app, test_project):
         assert result.content or result.structured_content
 
 
+# --- view_note aliases (mirrors read_note pagination) ---
+
+
+@pytest.mark.asyncio
+async def test_view_note_accepts_pagination_aliases(mcp_server, app, test_project):
+    """`page_number`/`limit`/`per_page` should map through view_note to read_note."""
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "View Alias Note",
+                "directory": "test",
+                "content": "# View Alias Note\n\nBody.",
+            },
+        )
+
+        result = await client.call_tool(
+            "view_note",
+            {
+                "project": test_project.name,
+                "identifier": "View Alias Note",
+                "page_number": 1,
+                "limit": 10,
+            },
+        )
+
+        assert len(result.content) == 1
+        assert "# View Alias Note" in result.content[0].text
+
+
+# --- delete_note aliases ---
+
+
+@pytest.mark.asyncio
+async def test_delete_note_accepts_is_dir_alias(mcp_server, app, test_project):
+    """`is_dir` should map to `is_directory` and route to single-note deletion."""
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Delete Alias Note",
+                "directory": "delete-alias-test",
+                "content": "# Delete Alias Note\n\nBody.",
+            },
+        )
+
+        result = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": "delete-alias-test/Delete Alias Note",
+                "is_dir": False,  # alias for is_directory
+            },
+        )
+
+        # delete_note returns a bool/dict on success; just assert no error
+        assert result.content or result.structured_content
+
+
 # --- Schema sanity check: aliases must not appear in the advertised schema ---
 
 
@@ -554,7 +647,7 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
             ),
             "build_context": (
                 ["url", "timeframe", "page", "page_size", "max_related"],
-                ["uri", "memory_url", "since", "offset", "limit", "max_results"],
+                ["uri", "memory_url", "since", "offset", "limit", "max_results", "limit_related"],
             ),
             "canvas": (["directory"], ["folder", "dir", "path"]),
         }

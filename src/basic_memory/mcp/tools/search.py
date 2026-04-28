@@ -309,9 +309,12 @@ async def search_notes(
     ] = None,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
+    # `offset` is intentionally NOT aliased to `page`: offset is item-indexed
+    # (skip N items) while page is 1-indexed page-number. Direct aliasing would
+    # silently return the wrong slice.
     page: Annotated[
         int,
-        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
     ] = 1,
     page_size: Annotated[
         int,
