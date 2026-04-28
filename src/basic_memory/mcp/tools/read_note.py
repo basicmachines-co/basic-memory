@@ -1,13 +1,14 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Optional, Literal, cast
+from typing import Annotated, Optional, Literal, cast
 
 import logfire
 import yaml
 
 from loguru import logger
 from fastmcp import Context
+from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
@@ -71,8 +72,17 @@ async def read_note(
     identifier: str,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 10,
+    # Accept common pagination aliases models reach for from training data
+    # (offset/limit/page_number/per_page). Schema still advertises only the
+    # canonical names; aliases are silently mapped at validation time.
+    page: Annotated[
+        int,
+        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
+    ] = 10,
     output_format: Literal["text", "json"] = "text",
     include_frontmatter: bool = False,
     context: Context | None = None,

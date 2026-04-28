@@ -1,10 +1,11 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import Optional, Literal
+from typing import Annotated, Optional, Literal
 
 import logfire
 from loguru import logger
 from fastmcp import Context
+from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
@@ -170,11 +171,37 @@ Error editing note '{identifier}': {error_message}
 async def edit_note(
     identifier: str,
     operation: str,
-    content: str,
+    # Accept common replacement-content aliases. Models trained on diff/patch
+    # APIs reach for new_content/replacement/replace_with on first try.
+    content: Annotated[
+        str,
+        Field(
+            validation_alias=AliasChoices(
+                "content", "new_content", "replacement", "replace_with"
+            )
+        ),
+    ],
     project: Optional[str] = None,
     workspace: Optional[str] = None,
-    section: Optional[str] = None,
-    find_text: Optional[str] = None,
+    # Section/heading naming varies across tools; accept the descriptive forms.
+    section: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("section", "section_heading", "heading"),
+        ),
+    ] = None,
+    # find_text is the highest-frequency miss per the issue: models reach for
+    # find/old_text/old_content/search before find_text every time.
+    find_text: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices(
+                "find_text", "find", "old_text", "old_content", "search"
+            ),
+        ),
+    ] = None,
     expected_replacements: Optional[int] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,

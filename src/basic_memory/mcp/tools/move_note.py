@@ -2,11 +2,12 @@
 
 from pathlib import Path, PureWindowsPath
 from textwrap import dedent
-from typing import Optional, Literal
+from typing import Annotated, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
+from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client
@@ -348,9 +349,27 @@ delete_note("{identifier}")
 )
 async def move_note(
     identifier: str,
-    destination_path: str = "",
-    destination_folder: Optional[str] = None,
-    is_directory: bool = False,
+    # Move/rename APIs across the ecosystem use `to`/`destination`/`new_path`.
+    destination_path: Annotated[
+        str,
+        Field(
+            default="",
+            validation_alias=AliasChoices(
+                "destination_path", "dest_path", "new_path", "to", "destination"
+            ),
+        ),
+    ] = "",
+    destination_folder: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("destination_folder", "dest_folder", "to_folder"),
+        ),
+    ] = None,
+    is_directory: Annotated[
+        bool,
+        Field(default=False, validation_alias=AliasChoices("is_directory", "is_dir")),
+    ] = False,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",

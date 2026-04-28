@@ -1,9 +1,10 @@
 """List directory tool for Basic Memory MCP server."""
 
-from typing import Optional
+from typing import Annotated, Optional
 
 from loguru import logger
 from fastmcp import Context
+from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
@@ -14,9 +15,22 @@ from basic_memory.mcp.server import mcp
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def list_directory(
-    dir_name: str = "/",
+    # `dir_name` is unusual; models reach for directory/folder/path/dir.
+    dir_name: Annotated[
+        str,
+        Field(
+            default="/",
+            validation_alias=AliasChoices("dir_name", "directory", "folder", "path", "dir"),
+        ),
+    ] = "/",
     depth: int = 1,
-    file_name_glob: Optional[str] = None,
+    file_name_glob: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("file_name_glob", "glob", "pattern", "filter"),
+        ),
+    ] = None,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     context: Context | None = None,

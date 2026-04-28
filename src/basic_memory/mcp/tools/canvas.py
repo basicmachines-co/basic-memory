@@ -8,7 +8,7 @@ from typing import Annotated, Dict, List, Any, Optional
 
 from loguru import logger
 from fastmcp import Context
-from pydantic import BeforeValidator
+from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.utils import coerce_list
@@ -24,7 +24,10 @@ async def canvas(
     nodes: Annotated[List[Dict[str, Any]], BeforeValidator(coerce_list)],
     edges: Annotated[List[Dict[str, Any]], BeforeValidator(coerce_list)],
     title: str,
-    directory: str,
+    directory: Annotated[
+        str,
+        Field(validation_alias=AliasChoices("directory", "folder", "dir", "path")),
+    ],
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     context: Context | None = None,

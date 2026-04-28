@@ -8,11 +8,12 @@ Files are read directly without any knowledge graph processing.
 import base64
 import io
 
-from typing import Optional
+from typing import Annotated, Optional
 
 from loguru import logger
 from PIL import Image as PILImage
 from fastmcp import Context
+from pydantic import AliasChoices, Field
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
@@ -158,7 +159,10 @@ def optimize_image(img, content_length, max_output_bytes=350000):
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def read_content(
-    path: str,
+    path: Annotated[
+        str,
+        Field(validation_alias=AliasChoices("path", "file_path", "filepath", "file")),
+    ],
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     context: Context | None = None,

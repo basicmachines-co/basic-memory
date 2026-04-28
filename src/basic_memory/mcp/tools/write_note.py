@@ -5,7 +5,7 @@ from typing import Annotated, List, Union, Optional, Literal
 
 import logfire
 from loguru import logger
-from pydantic import BeforeValidator
+from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
@@ -25,13 +25,21 @@ TagType = Union[List[str], str, None]
 async def write_note(
     title: str,
     content: str,
-    directory: str,
+    # Folder/dir/path are interchangeable in models' training data.
+    directory: Annotated[
+        str,
+        Field(validation_alias=AliasChoices("directory", "folder", "dir", "path")),
+    ],
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: Annotated[dict | None, BeforeValidator(coerce_dict)] = None,
-    overwrite: bool | None = None,
+    # Force/replace are the file-write idioms models default to.
+    overwrite: Annotated[
+        bool | None,
+        Field(default=None, validation_alias=AliasChoices("overwrite", "force", "replace")),
+    ] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:

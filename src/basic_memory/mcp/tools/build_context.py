@@ -1,10 +1,11 @@
 """Build context tool for Basic Memory MCP server."""
 
-from typing import Optional, Literal
+from typing import Annotated, Optional, Literal
 
 import logfire
 from loguru import logger
 from fastmcp import Context
+from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
@@ -133,14 +134,35 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def build_context(
-    url: MemoryUrl,
+    url: Annotated[
+        MemoryUrl,
+        Field(validation_alias=AliasChoices("url", "uri", "memory_url")),
+    ],
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     depth: str | int | None = 1,
-    timeframe: Optional[TimeFrame] = "7d",
-    page: int = 1,
-    page_size: int = 10,
-    max_related: int = 10,
+    timeframe: Annotated[
+        Optional[TimeFrame],
+        Field(
+            default="7d",
+            validation_alias=AliasChoices("timeframe", "since", "time_range", "lookback"),
+        ),
+    ] = "7d",
+    page: Annotated[
+        int,
+        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
+    ] = 10,
+    max_related: Annotated[
+        int,
+        Field(
+            default=10,
+            validation_alias=AliasChoices("max_related", "max_results", "limit_related"),
+        ),
+    ] = 10,
     output_format: Literal["json", "text"] = "json",
     context: Context | None = None,
 ) -> dict | str:

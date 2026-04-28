@@ -1,9 +1,10 @@
 from textwrap import dedent
-from typing import Optional, Literal
+from typing import Annotated, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
+from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import detect_project_from_url_prefix, get_project_client
@@ -153,7 +154,10 @@ If the note should be deleted but the operation keeps failing, send a message to
 )
 async def delete_note(
     identifier: str,
-    is_directory: bool = False,
+    is_directory: Annotated[
+        bool,
+        Field(default=False, validation_alias=AliasChoices("is_directory", "is_dir")),
+    ] = False,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",

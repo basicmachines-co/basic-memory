@@ -2,10 +2,11 @@
 
 from datetime import timezone
 from pathlib import PurePosixPath
-from typing import List, Union, Optional, Literal
+from typing import Annotated, List, Union, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
+from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import (
@@ -38,11 +39,26 @@ from basic_memory.schemas.search import SearchItemType
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def recent_activity(
-    type: Union[str, List[str]] = "",
+    type: Annotated[
+        Union[str, List[str]],
+        Field(default="", validation_alias=AliasChoices("type", "types", "kind")),
+    ] = "",
     depth: int = 1,
-    timeframe: TimeFrame = "7d",
-    page: int = 1,
-    page_size: int = 10,
+    timeframe: Annotated[
+        TimeFrame,
+        Field(
+            default="7d",
+            validation_alias=AliasChoices("timeframe", "since", "time_range", "lookback"),
+        ),
+    ] = "7d",
+    page: Annotated[
+        int,
+        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
+    ] = 10,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",

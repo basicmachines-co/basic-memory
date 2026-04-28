@@ -7,7 +7,7 @@ from typing import Annotated, List, Optional, Dict, Any, Literal
 import logfire
 from loguru import logger
 from fastmcp import Context
-from pydantic import BeforeValidator
+from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.utils import coerce_dict, coerce_list
@@ -301,27 +301,48 @@ def _format_search_markdown(result: SearchResponse, project: str, query: str | N
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def search_notes(
-    query: Optional[str] = None,
+    # Accept common search-query aliases models reach for from training data.
+    # `q` is the universal HTTP convention; `search`/`text` are common in NL APIs.
+    query: Annotated[
+        Optional[str],
+        Field(default=None, validation_alias=AliasChoices("query", "q", "search", "text")),
+    ] = None,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 10,
+    page: Annotated[
+        int,
+        Field(default=1, validation_alias=AliasChoices("page", "offset", "page_number")),
+    ] = 1,
+    page_size: Annotated[
+        int,
+        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
+    ] = 10,
     search_type: str | None = None,
     output_format: Literal["text", "json"] = "text",
+    # Plural-vs-singular trips models constantly. Accept the singular too.
     note_types: Annotated[
         List[str] | None,
         BeforeValidator(coerce_list),
+        Field(default=None, validation_alias=AliasChoices("note_types", "note_type", "types")),
         "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
         "Case-insensitive.",
     ] = None,
     entity_types: Annotated[
         List[str] | None,
         BeforeValidator(coerce_list),
+        Field(default=None, validation_alias=AliasChoices("entity_types", "entity_type")),
         "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
         "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
         "'Chapter' here — use note_types instead.",
     ] = None,
-    after_date: Optional[str] = None,
+    # Time-filter naming varies wildly across APIs.
+    after_date: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("after_date", "since", "after", "from_date"),
+        ),
+    ] = None,
     metadata_filters: Annotated[
         Dict[str, Any] | None,
         BeforeValidator(coerce_dict),
@@ -331,7 +352,15 @@ async def search_notes(
         BeforeValidator(coerce_list),
     ] = None,
     status: Optional[str] = None,
-    min_similarity: Optional[float] = None,
+    min_similarity: Annotated[
+        Optional[float],
+        Field(
+            default=None,
+            validation_alias=AliasChoices(
+                "min_similarity", "threshold", "similarity_threshold"
+            ),
+        ),
+    ] = None,
     context: Context | None = None,
 ) -> dict | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
