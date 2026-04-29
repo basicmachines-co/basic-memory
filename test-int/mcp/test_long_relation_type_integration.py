@@ -57,6 +57,7 @@ async def test_edit_note_handles_long_prose_around_wikilink(mcp_server, app, tes
                 "content": note_body,
             },
         )
+        assert len(write_result.content) == 1
         write_text = write_result.content[0].text
         assert "Created note" in write_text or "Updated note" in write_text
 
@@ -72,4 +73,5 @@ async def test_edit_note_handles_long_prose_around_wikilink(mcp_server, app, tes
                 "content": "\n\nappended line\n",
             },
         )
-        assert "Edited note" in edit_result.content[0].text
+        assert len(edit_result.content) == 1
+        assert "Edited note (append)" in edit_result.content[0].text
