@@ -169,10 +169,13 @@ class TestSetLocal:
         assert result.exit_code == 0
         assert "local mode" in result.stdout.lower()
 
-        # Verify config was updated — mode reset to local, path restored
+        # Verify config was updated — mode reset to local, path restored.
+        # set-local normalizes the path via Path.as_posix(), matching the
+        # convention used by `bm project add`. On Windows that means
+        # backslashes are converted to forward slashes.
         config_data = json.loads(mock_config.read_text())
         assert config_data["projects"]["research"]["mode"] == "local"
-        assert config_data["projects"]["research"]["path"] == str(new_path)
+        assert config_data["projects"]["research"]["path"] == new_path.as_posix()
 
     def test_set_local_nonexistent_project(self, runner, mock_config):
         """Test set-local with a project that doesn't exist in config."""
