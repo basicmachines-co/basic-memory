@@ -76,10 +76,22 @@ def login():
 
 @cloud_app.command()
 def logout():
-    """Remove stored OAuth tokens."""
-    config = ConfigManager().config
+    """Remove stored OAuth tokens and clear cached workspace selection."""
+    config_manager = ConfigManager()
+    config = config_manager.config
     auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
     auth.logout()
+
+    # Trigger: ending a session must invalidate the cached workspace.
+    # Why: a follow-up `bm cloud login` (often as a different user, or returning
+    #      from an org workspace to personal) inherits the previous selection
+    #      and silently routes everything through the wrong tenant. See #755.
+    # Outcome: re-login starts from a clean slate; the user picks again via
+    #      `bm cloud workspace set-default` or per-project --workspace.
+    if config.default_workspace is not None:
+        config.default_workspace = None
+        config_manager.save_config(config)
+
     console.print("[dim]API key (if configured) remains available for cloud project routing.[/dim]")
 
 

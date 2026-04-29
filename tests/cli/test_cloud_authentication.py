@@ -199,3 +199,68 @@ class TestLoginCommand:
         result = runner.invoke(app, ["cloud", "login"])
         assert result.exit_code == 1
         assert "Login failed" in result.stdout
+
+
+class TestLogoutCommand:
+    """Tests for `bm cloud logout`."""
+
+    @staticmethod
+    def _patch(monkeypatch, default_workspace):
+        class FakeConfig:
+            cloud_client_id = "cid"
+            cloud_domain = "https://auth.example.com"
+
+            def __init__(self):
+                self.default_workspace = default_workspace
+
+        saved: list[FakeConfig] = []
+        config_instance = FakeConfig()
+        logout_called = {"value": False}
+
+        class FakeConfigManager:
+            config = config_instance
+
+            def save_config(self, cfg):
+                saved.append(cfg)
+
+        class FakeAuth:
+            def __init__(self, **_kwargs):
+                pass
+
+            def logout(self):
+                logout_called["value"] = True
+
+        monkeypatch.setattr(
+            "basic_memory.cli.commands.cloud.core_commands.ConfigManager", FakeConfigManager
+        )
+        monkeypatch.setattr("basic_memory.cli.commands.cloud.core_commands.CLIAuth", FakeAuth)
+        return config_instance, saved, logout_called
+
+    def test_logout_clears_default_workspace(self, monkeypatch):
+        """Regression for #755: logout must invalidate the cached workspace."""
+        config_instance, saved, logout_called = self._patch(
+            monkeypatch, default_workspace="tenant-org-123"
+        )
+        runner = CliRunner()
+
+        result = runner.invoke(app, ["cloud", "logout"])
+
+        assert result.exit_code == 0
+        assert logout_called["value"] is True
+        assert config_instance.default_workspace is None
+        # Save was called once because a non-None value needed clearing.
+        assert len(saved) == 1
+        assert saved[0].default_workspace is None
+
+    def test_logout_skips_save_when_no_default_workspace(self, monkeypatch):
+        """If nothing was cached, logout shouldn't rewrite the config file."""
+        config_instance, saved, logout_called = self._patch(monkeypatch, default_workspace=None)
+        runner = CliRunner()
+
+        result = runner.invoke(app, ["cloud", "logout"])
+
+        assert result.exit_code == 0
+        assert logout_called["value"] is True
+        assert config_instance.default_workspace is None
+        # No save: avoid touching the file when there's nothing to clear.
+        assert saved == []
