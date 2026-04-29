@@ -605,6 +605,13 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
     Aliases are accepted at validation time but advertising them would defeat
     the purpose: we want the model to learn the canonical name, with aliases
     as a silent safety net for first-use mistakes.
+
+    The `must_not_have` lists below intentionally include both *accepted*
+    aliases (which must stay hidden from the schema) AND *rejected* aliases
+    that were considered but deliberately omitted (`offset` for `page`,
+    `limit_related` for `max_related`). Listing rejected aliases here acts
+    as a future-contributor guard — if anyone re-adds them, this test catches
+    it before the bad alias ships.
     """
     async with Client(mcp_server) as client:
         tools = {t.name: t for t in await client.list_tools()}
