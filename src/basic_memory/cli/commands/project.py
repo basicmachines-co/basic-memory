@@ -838,6 +838,72 @@ def move_project(
         raise typer.Exit(1)
 
 
+async def _detach_local_project_row(app_config, name: str) -> bool:
+    """Drop the project's row from the local index DB.
+
+    Trigger: `bm project set-cloud` is making a project cloud-only.
+    Why: the local row is what causes `_merge_projects` to report
+         `source: "local+cloud"` after the toggle (#680). Removing it
+         forces the merged listing to honor the user's chosen mode.
+    Outcome: returns True if a row was deleted, False if there was
+         nothing to clean up. On-disk note files are not touched.
+    """
+    from basic_memory import db
+    from basic_memory.repository import ProjectRepository
+
+    _, session_maker = await db.get_or_create_db(
+        db_path=app_config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+    )
+    try:
+        repo = ProjectRepository(session_maker)
+        existing = await repo.get_by_name(name)
+        if existing is None:
+            return False
+        await repo.delete(existing.id)
+        return True
+    finally:
+        await db.shutdown_db()
+
+
+async def _attach_local_project_row(app_config, name: str, path: str) -> None:
+    """Ensure the project has a row in the local index DB at the given path.
+
+    Trigger: `bm project set-local` is making a previously cloud-only
+        project local again.
+    Why: without a row in the local DB, every local-side tool (`list`,
+        `info`, sync, indexing) would skip this project.
+    Outcome: a row is created if missing, or its path is updated to match
+        the new local home if it already exists. On-disk files are not
+        touched — the caller is responsible for ensuring the directory
+        exists.
+    """
+    from basic_memory import db
+    from basic_memory.repository import ProjectRepository
+
+    _, session_maker = await db.get_or_create_db(
+        db_path=app_config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+    )
+    try:
+        repo = ProjectRepository(session_maker)
+        existing = await repo.get_by_name(name)
+        if existing is None:
+            await repo.create(
+                {
+                    "name": name,
+                    "path": path,
+                    "permalink": generate_permalink(name),
+                    "is_active": True,
+                }
+            )
+            return
+        if existing.path != path:
+            await repo.update_path(existing.id, path)
+    finally:
+        await db.shutdown_db()
+
+
 @project_app.command("set-cloud")
 def set_cloud(
     name: str = typer.Argument(..., help="Name of the project to route through cloud"),
@@ -854,6 +920,13 @@ def set_cloud(
     Use --workspace to associate a specific workspace with this project.
     If omitted, uses the default workspace (if set) or auto-selects when
     only one workspace is available.
+
+    This is a one-way cutover: the project's row in the local index DB is
+    removed and the local path in config is cleared so the project's
+    configured state is purely cloud. On-disk note files are preserved —
+    the caller can keep, archive, or delete them as they see fit. To
+    return to local mode use `bm project set-local <name> --local-path
+    <path>`.
 
     Examples:
       bm project set-cloud research --workspace Personal
@@ -883,27 +956,52 @@ def set_cloud(
 
     resolved_workspace_id = _resolve_workspace_id(config, workspace)
 
+    # Drop the local DB row first so the user-visible state stays consistent
+    # even if the config save below raises for some reason. Idempotent: a
+    # second `set-cloud` simply finds no row and returns False.
+    previous_path = config.projects[name].path
+    detached = run_with_cleanup(_detach_local_project_row(config, name))
+
     config.set_project_mode(name, ProjectMode.CLOUD)
     if resolved_workspace_id:
         config.projects[name].workspace_id = resolved_workspace_id
+    # Clear local path: source-of-truth for this project is now the cloud
+    config.projects[name].path = ""
     config_manager.save_config(config)
 
     console.print(f"[green]Project '{name}' set to cloud mode[/green]")
     if resolved_workspace_id:
         console.print(f"[dim]Workspace: {resolved_workspace_id}[/dim]")
+    if detached and previous_path:
+        console.print(
+            f"[dim]Local index entry removed. Files at {previous_path} are preserved on disk.[/dim]"
+        )
     console.print("[dim]MCP tools and CLI commands for this project will route through cloud[/dim]")
 
 
 @project_app.command("set-local")
 def set_local(
     name: str = typer.Argument(..., help="Name of the project to revert to local mode"),
+    local_path: str = typer.Option(
+        None,
+        "--local-path",
+        help=(
+            "Local filesystem path for this project. Required unless the project "
+            "was previously local and its prior path is still in config."
+        ),
+    ),
 ) -> None:
     """Revert a project to local mode (use in-process ASGI transport).
 
-    Clears any associated cloud workspace.
+    Recreates the project's row in the local index DB and clears any
+    associated cloud workspace. If the project was previously local and
+    its prior path is still in config (e.g. an older version that didn't
+    blank `path` on `set-cloud`), `--local-path` may be omitted and that
+    path will be reused.
 
-    Example:
-      bm project set-local research
+    Examples:
+      bm project set-local research --local-path ~/Documents/research
+      bm project set-local research                 # reuse prior path
     """
     config_manager = ConfigManager()
     config = config_manager.config
@@ -913,11 +1011,31 @@ def set_local(
         console.print(f"[red]Error: Project '{name}' not found in config[/red]")
         raise typer.Exit(1)
 
+    entry = config.projects[name]
+    candidate = local_path or entry.path
+    if not candidate:
+        console.print(
+            f"[red]Error: --local-path is required for '{name}' "
+            "(no previous local path is recorded)[/red]"
+        )
+        raise typer.Exit(1)
+
+    resolved_path = Path(os.path.abspath(os.path.expanduser(candidate))).as_posix()
+
+    # Recreate the local DB row. Idempotent: if the row exists with the
+    # same path it's a no-op; if it exists at a stale path the path is
+    # updated. The directory itself is not auto-created — the user is
+    # expected to know whether they want to start a fresh project tree
+    # or point at an existing one.
+    run_with_cleanup(_attach_local_project_row(config, name, resolved_path))
+
     config.set_project_mode(name, ProjectMode.LOCAL)
     config.projects[name].workspace_id = None
+    config.projects[name].path = resolved_path
     config_manager.save_config(config)
 
     console.print(f"[green]Project '{name}' set to local mode[/green]")
+    console.print(f"[dim]Path: {resolved_path}[/dim]")
     console.print("[dim]MCP tools and CLI commands for this project will use local transport[/dim]")
 
 

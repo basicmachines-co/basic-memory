@@ -154,21 +154,25 @@ class TestSetCloud:
 class TestSetLocal:
     """Tests for bm project set-local command."""
 
-    def test_set_local_success(self, runner, mock_config):
+    def test_set_local_success(self, runner, mock_config, tmp_path):
         """Test reverting a project to local mode."""
-        # First set to cloud
+        # First set to cloud (clears the local path as part of the cutover)
         runner.invoke(app, ["project", "set-cloud", "research"])
         config_data = json.loads(mock_config.read_text())
         assert config_data["projects"]["research"]["mode"] == "cloud"
 
-        # Now set back to local
-        result = runner.invoke(app, ["project", "set-local", "research"])
+        # Now set back to local — must supply a path since set-cloud blanked it
+        new_path = tmp_path / "research"
+        result = runner.invoke(
+            app, ["project", "set-local", "research", "--local-path", str(new_path)]
+        )
         assert result.exit_code == 0
         assert "local mode" in result.stdout.lower()
 
-        # Verify config was updated — mode reset to local
+        # Verify config was updated — mode reset to local, path restored
         config_data = json.loads(mock_config.read_text())
         assert config_data["projects"]["research"]["mode"] == "local"
+        assert config_data["projects"]["research"]["path"] == str(new_path)
 
     def test_set_local_nonexistent_project(self, runner, mock_config):
         """Test set-local with a project that doesn't exist in config."""
@@ -177,12 +181,23 @@ class TestSetLocal:
         assert "not found" in result.stdout.lower()
 
     def test_set_local_already_local(self, runner, mock_config):
-        """Test set-local on a project that's already local (no-op, should succeed)."""
+        """Test set-local on a project that's already local (reuses existing path)."""
         result = runner.invoke(app, ["project", "set-local", "main"])
         assert result.exit_code == 0
         assert "local mode" in result.stdout.lower()
 
-    def test_set_local_clears_workspace_id(self, runner, mock_config):
+    def test_set_local_requires_path_after_set_cloud(self, runner, mock_config):
+        """Regression for #680: after set-cloud blanks the path, set-local must
+        refuse to silently default — the user has to specify where the project
+        lives now."""
+        runner.invoke(app, ["project", "set-cloud", "research"])
+
+        # No --local-path; config no longer has a path either.
+        result = runner.invoke(app, ["project", "set-local", "research"])
+        assert result.exit_code == 1
+        assert "--local-path" in result.stdout
+
+    def test_set_local_clears_workspace_id(self, runner, mock_config, tmp_path):
         """Test that set-local clears workspace_id from the project entry."""
         from basic_memory import config as config_module
 
@@ -198,8 +213,12 @@ class TestSetLocal:
         config_module._CONFIG_MTIME = None
         config_module._CONFIG_SIZE = None
 
-        # Set back to local
-        result = runner.invoke(app, ["project", "set-local", "research"])
+        # Set back to local — supply --local-path; existing config path is preserved
+        # in this test setup, but new behavior recommends explicit path passing.
+        new_path = tmp_path / "research"
+        result = runner.invoke(
+            app, ["project", "set-local", "research", "--local-path", str(new_path)]
+        )
         assert result.exit_code == 0
 
         # Verify workspace_id was cleared
@@ -209,6 +228,18 @@ class TestSetLocal:
         updated_data = json.loads(mock_config.read_text())
         assert updated_data["projects"]["research"]["workspace_id"] is None
         assert updated_data["projects"]["research"]["mode"] == "local"
+
+
+class TestSetCloudCutover:
+    """Regression tests for #680 — set-cloud as a one-way cutover."""
+
+    def test_set_cloud_clears_path(self, runner, mock_config):
+        """After set-cloud, config.projects[name].path must be blanked so the
+        merged project list reports source: cloud (not local+cloud)."""
+        runner.invoke(app, ["project", "set-cloud", "research"])
+        updated = json.loads(mock_config.read_text())
+        assert updated["projects"]["research"]["mode"] == "cloud"
+        assert updated["projects"]["research"]["path"] == ""
 
 
 class TestSetCloudWithWorkspace:
