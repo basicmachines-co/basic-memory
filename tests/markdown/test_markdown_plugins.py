@@ -159,6 +159,78 @@ def test_observation_excludes_html_color_codes():
     assert is_observation(token), "Real hashtag with color code should still be observation"
 
 
+def test_observation_skips_obsidian_callouts():
+    """Test that Obsidian callout syntax is NOT parsed as observations (issue #738).
+
+    Callouts use `> [!type] title` which previously matched the bracket-content
+    regex and produced spurious observations with categories like `!info`,
+    `!warning`, `!quote`. The blockquote prefix (`>`) is the distinguishing
+    feature — Basic Memory observations are list items, not blockquote lines.
+    """
+    md = MarkdownIt().use(observation_plugin)
+
+    callout_doc = dedent("""
+        > [!info] Information title
+        > Body of the info callout.
+
+        > [!warning] Heads up
+        > Body of the warning.
+
+        > [!quote] Citation
+        > Quoted text here.
+
+        - [design] Real observation outside the callout
+        """)
+
+    tokens = md.parse(callout_doc)
+
+    # No callout content should produce an observation
+    callout_observations = [
+        t.meta.get("observation")
+        for t in tokens
+        if t.type == "inline" and t.meta and t.meta.get("observation")
+        if t.meta["observation"]["category"]
+        and t.meta["observation"]["category"].startswith("!")
+    ]
+    assert callout_observations == [], (
+        f"Obsidian callouts should not produce observations, got: {callout_observations}"
+    )
+
+    # Real observation outside the blockquote must still parse
+    real_observations = [
+        t.meta["observation"]
+        for t in tokens
+        if t.type == "inline" and t.meta and t.meta.get("observation")
+    ]
+    assert len(real_observations) == 1
+    assert real_observations[0]["category"] == "design"
+    assert real_observations[0]["content"] == "Real observation outside the callout"
+
+
+def test_observation_skipped_inside_any_blockquote():
+    """Even non-callout `[bracket]` content in a blockquote should not be
+    treated as an observation — blockquote contents are quoted/aside text,
+    not knowledge graph observations.
+    """
+    md = MarkdownIt().use(observation_plugin)
+
+    quoted_doc = dedent("""
+        > [design] This looks like an observation but lives in a blockquote.
+
+        - [design] Real observation
+        """)
+
+    tokens = md.parse(quoted_doc)
+    observations = [
+        t.meta["observation"]
+        for t in tokens
+        if t.type == "inline" and t.meta and t.meta.get("observation")
+    ]
+    # Only the bullet observation should be picked up.
+    assert len(observations) == 1
+    assert observations[0]["content"] == "Real observation"
+
+
 def test_relation_plugin():
     """Test relation plugin."""
     md = MarkdownIt().use(relation_plugin)
