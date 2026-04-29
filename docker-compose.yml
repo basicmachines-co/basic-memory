@@ -17,7 +17,9 @@ services:
     volumes:
 
       # Persistent storage for configuration and database
-      - basic-memory-config:/root/.basic-memory:rw
+      # Container runs as `appuser` (Dockerfile USER directive), so the CLI
+      # config dir lives under /home/appuser, not /root.
+      - basic-memory-config:/home/appuser/.basic-memory:rw
 
       # Mount your knowledge directory (required)
       # Change './knowledge' to your actual Obsidian vault or knowledge directory
