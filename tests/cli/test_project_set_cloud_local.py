@@ -232,6 +232,28 @@ class TestSetLocal:
         assert updated_data["projects"]["research"]["workspace_id"] is None
         assert updated_data["projects"]["research"]["mode"] == "local"
 
+    def test_set_local_update_path_when_row_exists(self, runner, mock_config, tmp_path):
+        """Re-running set-local with a different --local-path must update the
+        existing DB row (covers the repo.update_path() branch in
+        _attach_local_project_row)."""
+        path_a = tmp_path / "research_v1"
+        path_b = tmp_path / "research_v2"
+
+        # First call seeds the DB row at path_a.
+        result_a = runner.invoke(
+            app, ["project", "set-local", "research", "--local-path", str(path_a)]
+        )
+        assert result_a.exit_code == 0
+
+        # Second call must update the existing row's path to path_b.
+        result_b = runner.invoke(
+            app, ["project", "set-local", "research", "--local-path", str(path_b)]
+        )
+        assert result_b.exit_code == 0
+
+        updated = json.loads(mock_config.read_text())
+        assert updated["projects"]["research"]["path"] == path_b.as_posix()
+
 
 class TestSetCloudCutover:
     """Regression tests for #680 — set-cloud as a one-way cutover."""
@@ -243,6 +265,23 @@ class TestSetCloudCutover:
         updated = json.loads(mock_config.read_text())
         assert updated["projects"]["research"]["mode"] == "cloud"
         assert updated["projects"]["research"]["path"] == ""
+
+    def test_set_cloud_removes_existing_db_row(self, runner, mock_config, tmp_path):
+        """When set-cloud runs against a project with a DB row, the row must
+        be removed and the user-facing message must mention the cleanup
+        (covers the repo.delete() → return True branch in
+        _detach_local_project_row)."""
+        # Seed a DB row first by going through set-local.
+        research_path = tmp_path / "research"
+        seed = runner.invoke(
+            app, ["project", "set-local", "research", "--local-path", str(research_path)]
+        )
+        assert seed.exit_code == 0
+
+        # Now flip to cloud — _detach_local_project_row should find and drop the row.
+        result = runner.invoke(app, ["project", "set-cloud", "research"])
+        assert result.exit_code == 0
+        assert "local index entry removed" in result.stdout.lower()
 
 
 class TestSetCloudWithWorkspace:

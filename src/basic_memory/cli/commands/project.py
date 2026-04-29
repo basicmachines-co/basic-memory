@@ -26,7 +26,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
 )
 from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager, ProjectEntry, ProjectMode
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client, resolve_configured_workspace
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.schemas.cloud import (
@@ -838,7 +838,7 @@ def move_project(
         raise typer.Exit(1)
 
 
-async def _detach_local_project_row(app_config, name: str) -> bool:
+async def _detach_local_project_row(app_config: BasicMemoryConfig, name: str) -> bool:
     """Drop the project's row from the local index DB.
 
     Trigger: `bm project set-cloud` is making a project cloud-only.
@@ -863,10 +863,12 @@ async def _detach_local_project_row(app_config, name: str) -> bool:
         await repo.delete(existing.id)
         return True
     finally:
+        # CLI-only: safe to tear down the global DB singleton here since
+        # set-cloud/set-local never run inside a long-lived MCP/API server.
         await db.shutdown_db()
 
 
-async def _attach_local_project_row(app_config, name: str, path: str) -> None:
+async def _attach_local_project_row(app_config: BasicMemoryConfig, name: str, path: str) -> None:
     """Ensure the project has a row in the local index DB at the given path.
 
     Trigger: `bm project set-local` is making a previously cloud-only
@@ -901,6 +903,8 @@ async def _attach_local_project_row(app_config, name: str, path: str) -> None:
         if existing.path != path:
             await repo.update_path(existing.id, path)
     finally:
+        # CLI-only: safe to tear down the global DB singleton here since
+        # set-cloud/set-local never run inside a long-lived MCP/API server.
         await db.shutdown_db()
 
 
