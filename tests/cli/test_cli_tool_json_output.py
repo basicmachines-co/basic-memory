@@ -199,23 +199,6 @@ def test_read_note_include_frontmatter(mock_mcp_read):
     assert mock_mcp_read.call_args.kwargs["include_frontmatter"] is True
 
 
-@patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
-    new_callable=AsyncMock,
-    return_value=READ_NOTE_RESULT,
-)
-def test_read_note_pagination(mock_mcp_read):
-    """read-note --page and --page-size are passed through."""
-    result = runner.invoke(
-        cli_app,
-        ["tool", "read-note", "test-note", "--page", "2", "--page-size", "5"],
-    )
-
-    assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert mock_mcp_read.call_args.kwargs["page"] == 2
-    assert mock_mcp_read.call_args.kwargs["page_size"] == 5
-
-
 # --- edit-note ---
 
 

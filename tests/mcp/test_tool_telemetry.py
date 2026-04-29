@@ -110,8 +110,6 @@ async def test_read_note_emits_root_operation_and_project_context(
             "requested_project": test_project.name,
             "workspace_id": None,
             "output_format": "json",
-            "page": 1,
-            "page_size": 10,
             "include_frontmatter": True,
         },
     )

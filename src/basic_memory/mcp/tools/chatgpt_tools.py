@@ -181,8 +181,6 @@ async def fetch(
         content = str(
             await read_note(
                 identifier=id,
-                page=1,
-                page_size=10,
                 context=context,
             )
         )
