@@ -97,16 +97,12 @@ async def search_notes_ui(
 async def read_note_ui(
     identifier: str,
     project: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 10,
     context: Context | None = None,
 ) -> List[ContentBlock]:
     """Return a note preview UI as an embedded MCP-UI resource."""
     content = await read_note(
         identifier=identifier,
         project=project,
-        page=page,
-        page_size=page_size,
         output_format="text",
         context=context,
     )
@@ -114,8 +110,6 @@ async def read_note_ui(
     render_data = {
         "toolInput": {
             "identifier": identifier,
-            "page": page,
-            "page_size": page_size,
         },
         "toolOutput": content,
     }
