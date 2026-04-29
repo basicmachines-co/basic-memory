@@ -94,9 +94,23 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             raise e
 
         # Fail fast: create vector tables at startup so missing sqlite-vec
-        # or embedding provider errors surface immediately
+        # or embedding provider errors surface immediately.
+        # Trigger: the runtime semantic stack (sqlite-vec extension or embedding
+        #          provider) is unavailable at startup.
+        # Why: failing the whole MCP boot for a search-only feature blocks
+        #      Claude Desktop's handshake (#711). Keyword-only search is a
+        #      reasonable fallback while the user resolves the dependency.
+        # Outcome: log the cause, mark this repository as semantic-disabled so
+        #      downstream calls short-circuit cleanly, and let init complete.
         if self._semantic_enabled:
-            await self._ensure_vector_tables()
+            try:
+                await self._ensure_vector_tables()
+            except SemanticDependenciesMissingError as exc:
+                logger.warning(
+                    f"Semantic search disabled: {exc}. "
+                    "Falling back to keyword-only search."
+                )
+                self._semantic_enabled = False
 
     # ------------------------------------------------------------------
     # FTS5 query preparation (backend-specific)
@@ -374,6 +388,25 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             async_connection = await session.connection()
             raw_connection = await async_connection.get_raw_connection()
             driver_connection = raw_connection.driver_connection
+
+            # Trigger: the underlying CPython was built without sqlite extension support.
+            # Why: python.org's macOS installer ships a stripped sqlite3 module with no
+            #      enable_load_extension; when uvx happens to pick that interpreter (#711),
+            #      the AttributeError surfaces here and previously crashed startup before
+            #      Claude Desktop could complete its MCP handshake.
+            # Outcome: convert to SemanticDependenciesMissingError so the init-time
+            #      handler can degrade gracefully to keyword search instead of dying.
+            if not hasattr(driver_connection, "enable_load_extension"):
+                raise SemanticDependenciesMissingError(
+                    "This Python build does not support SQLite extension loading "
+                    "(no enable_load_extension on sqlite3.Connection). "
+                    "Common cause: python.org Python on macOS. "
+                    "Reinstall basic-memory under a Python that ships extension "
+                    "support (uv-managed CPython, Homebrew Python, or the official "
+                    "Docker image), or set semantic_search_enabled=false in config "
+                    "to silence this and use keyword-only search."
+                )
+
             await driver_connection.enable_load_extension(True)
             await driver_connection.load_extension(sqlite_vec.loadable_path())
             await driver_connection.enable_load_extension(False)

@@ -108,6 +108,78 @@ async def test_init_search_index(search_repository, app_config):
 
 
 @pytest.mark.asyncio
+async def test_init_search_index_degrades_when_extension_loading_unavailable(
+    search_repository, monkeypatch
+):
+    """Regression for #711: when sqlite-vec cannot be loaded (e.g. python.org Python
+    3.12 ships sqlite3 without enable_load_extension), init must NOT crash. It should
+    log a warning, mark the repository as semantic-disabled, and let the rest of the
+    process come up so Claude Desktop's MCP handshake completes."""
+    if is_postgres_backend(search_repository):
+        pytest.skip("python.org enable_load_extension issue is SQLite-specific")
+
+    from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+
+    # Force the codepath even if semantic_search wasn't enabled by default.
+    search_repository._semantic_enabled = True
+
+    async def _raise_missing():
+        raise SemanticDependenciesMissingError("simulated: enable_load_extension missing")
+
+    monkeypatch.setattr(search_repository, "_ensure_vector_tables", _raise_missing)
+
+    # Must not raise — startup needs to complete even when the semantic stack is dead.
+    await search_repository.init_search_index()
+
+    assert search_repository._semantic_enabled is False, (
+        "Repository should mark itself semantic-disabled after a missing-deps error "
+        "so downstream calls short-circuit cleanly instead of re-attempting load."
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_sqlite_vec_loaded_raises_typed_error_without_extension_support(
+    search_repository, monkeypatch
+):
+    """Regression for #711: AttributeError from a sqlite3.Connection that lacks
+    enable_load_extension must surface as SemanticDependenciesMissingError so the
+    init-time handler can degrade. Otherwise the AttributeError bubbles through and
+    crashes startup before Claude Desktop completes its handshake."""
+    if is_postgres_backend(search_repository):
+        pytest.skip("enable_load_extension is SQLite-specific")
+
+    from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+    from sqlalchemy.exc import OperationalError as SAOperationalError
+
+    # Stub session that always reports vec missing on probe, then yields a connection
+    # whose driver_connection has no enable_load_extension attribute (mirroring the
+    # python.org sqlite3 build).
+    class _StubDriverConnection:
+        # Deliberately omit enable_load_extension to mimic the python.org build.
+        pass
+
+    class _StubRawConnection:
+        driver_connection = _StubDriverConnection()
+
+    class _StubAsyncConnection:
+        async def get_raw_connection(self):
+            return _StubRawConnection()
+
+    class _StubSession:
+        async def execute(self, _stmt):
+            # First (and any) probe call reports vec missing.
+            raise SAOperationalError("SELECT vec_version()", {}, Exception("no vec"))
+
+        async def connection(self):
+            return _StubAsyncConnection()
+
+    with pytest.raises(SemanticDependenciesMissingError) as exc_info:
+        await search_repository._ensure_sqlite_vec_loaded(_StubSession())
+
+    assert "enable_load_extension" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_init_search_index_preserves_data(search_repository, search_entity):
     """Regression test: calling init_search_index() twice should preserve indexed data.
 
