@@ -259,6 +259,43 @@ async def test_delete_entity_without_permalink(search_service, sample_entity):
 
 
 @pytest.mark.asyncio
+async def test_handle_delete_clears_entity_vectors(
+    search_service, sample_entity, monkeypatch
+):
+    """Regression guard for #764: handle_delete must drive vector-row cleanup
+    so deleting an entity doesn't leave orphaned rows in `search_vector_chunks`
+    or `search_vector_embeddings`.
+
+    Verified by spying on the repository's `delete_entity_vector_rows`. The
+    short-circuit path inside `_clear_entity_vectors` (semantic disabled) is
+    bypassed by forcing `_semantic_enabled=True` so we exercise the real
+    delegation, not the no-op branch.
+    """
+    calls: list[int] = []
+
+    async def spy_delete_entity_vector_rows(entity_id: int) -> None:
+        calls.append(entity_id)
+
+    # Force the cleanup path even if the test repo is configured without
+    # semantic enabled — we're asserting the wiring, not embedding behavior.
+    monkeypatch.setattr(
+        search_service.repository, "_semantic_enabled", True, raising=False
+    )
+    monkeypatch.setattr(
+        search_service.repository,
+        "delete_entity_vector_rows",
+        spy_delete_entity_vector_rows,
+    )
+
+    await search_service.handle_delete(sample_entity)
+
+    assert calls == [sample_entity.id], (
+        f"handle_delete must call delete_entity_vector_rows({sample_entity.id}); "
+        f"got calls={calls}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_no_criteria(search_service, test_graph):
     """Test search with no criteria returns empty list."""
     results = await search_service.search(SearchQuery())
