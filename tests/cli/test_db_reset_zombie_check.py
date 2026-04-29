@@ -18,7 +18,12 @@ class _FakeProc:
         self.info = {"pid": pid, "cmdline": cmdline}
 
 
-def _patch_iter(monkeypatch: pytest.MonkeyPatch, procs: list[_FakeProc]) -> None:
+def _patch_iter(monkeypatch: pytest.MonkeyPatch, procs) -> None:
+    """Replace psutil.process_iter with a fixed iterator.
+
+    Procs is intentionally untyped: tests pass a mix of _FakeProc and
+    error-raising stand-ins to exercise the per-process exception path.
+    """
     monkeypatch.setattr(
         psutil,
         "process_iter",
