@@ -128,8 +128,6 @@ def read_note(
     include_frontmatter: bool = typer.Option(
         False, "--include-frontmatter", help="Include YAML frontmatter in output"
     ),
-    page: int = typer.Option(1, "--page", help="Page number for pagination"),
-    page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -149,7 +147,6 @@ def read_note(
 
     bm tool read-note my-note
     bm tool read-note my-note --include-frontmatter
-    bm tool read-note my-note --page 2 --page-size 5
     """
     try:
         validate_routing_flags(local, cloud)
@@ -160,8 +157,6 @@ def read_note(
                     identifier=identifier,
                     project=project,
                     workspace=workspace,
-                    page=page,
-                    page_size=page_size,
                     include_frontmatter=include_frontmatter,
                     output_format="json",
                 )

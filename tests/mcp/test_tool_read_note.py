@@ -201,9 +201,8 @@ async def test_multiple_notes(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_multiple_notes_pagination(app, test_project):
-    """Test reading individual notes (pagination applies to single note content)"""
-    # Create several notes
+async def test_read_multiple_notes_individually(app, test_project):
+    """Test reading several notes back individually after writing them."""
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
         ("test/note-2", "Note 2", "test", "Content 2", ["tag1", "tag2"]),
@@ -215,10 +214,8 @@ async def test_multiple_notes_pagination(app, test_project):
             project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
-    # Should be able to read each one individually with pagination
-    # Note: pagination now applies to single note content, not multiple notes
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note(permalink, page=1, page_size=10, project=test_project.name)
+        note = await read_note(permalink, project=test_project.name)
         assert content in note
 
     # Note: v2 API does not support glob patterns in read_note
@@ -517,8 +514,6 @@ class TestReadNoteSecurityValidation:
         result = await read_note(
             project=test_project.name,
             identifier="../../../etc/malicious",
-            page=1,
-            page_size=5,
         )
 
         assert isinstance(result, str)

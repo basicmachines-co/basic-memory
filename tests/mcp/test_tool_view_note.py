@@ -149,25 +149,6 @@ async def test_view_note_not_found(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_view_note_pagination(app, test_project):
-    """Test viewing a note with pagination parameters."""
-    await write_note(
-        project=test_project.name,
-        title="Pagination Test",
-        directory="test",
-        content="Content for pagination test.",
-    )
-
-    # View with pagination
-    result = await view_note("Pagination Test", page=1, page_size=5, project=test_project.name)
-
-    # Should work with pagination
-    assert 'Note retrieved: "Pagination Test"' in result
-    assert "Content for pagination test." in result
-    assert "Display this note as a markdown artifact for the user" in result
-
-
-@pytest.mark.asyncio
 async def test_view_note_project_parameter(app, test_project):
     """Test viewing a note with project parameter."""
     await write_note(

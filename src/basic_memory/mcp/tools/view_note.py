@@ -1,11 +1,10 @@
 """View note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Annotated, Optional
+from typing import Optional
 
 from loguru import logger
 from fastmcp import Context
-from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.read_note import read_note
@@ -19,16 +18,6 @@ async def view_note(
     identifier: str,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
-    # `offset` is intentionally NOT aliased: it has different semantics
-    # (item-indexed vs. 1-indexed page-number).
-    page: Annotated[
-        int,
-        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
-    ] = 1,
-    page_size: Annotated[
-        int,
-        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
-    ] = 10,
     context: Context | None = None,
 ) -> str:
     """View a markdown note as a formatted artifact.
@@ -41,8 +30,6 @@ async def view_note(
         identifier: The title or permalink of the note to view
         project: Project name to read from. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
-        page: Page number for paginated results (default: 1)
-        page_size: Number of items per page (default: 10)
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -54,9 +41,6 @@ async def view_note(
 
         # View a note by permalink
         view_note("meetings/weekly-standup")
-
-        # View with pagination
-        view_note("large-document", page=2, page_size=5)
 
         # Explicit project specification
         view_note("Meeting Notes", project="my-project")
@@ -73,8 +57,6 @@ async def view_note(
             identifier=identifier,
             project=project,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
             context=context,
         )
     )

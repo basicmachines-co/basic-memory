@@ -55,8 +55,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "identifier",
         "project",
         "workspace",
-        "page",
-        "page_size",
         "output_format",
         "include_frontmatter",
     ],
@@ -91,7 +89,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "status",
         "min_similarity",
     ],
-    "view_note": ["identifier", "project", "workspace", "page", "page_size"],
+    "view_note": ["identifier", "project", "workspace"],
     "write_note": [
         "title",
         "content",

@@ -13,123 +13,9 @@ import pytest
 from fastmcp import Client
 
 
-# --- read_note: page / page_size aliases ---
-
-
-@pytest.mark.asyncio
-async def test_read_note_accepts_limit_alias_for_page_size(mcp_server, app, test_project):
-    """`limit` should be accepted in place of `page_size` (true synonym — both mean
-    "max items per response"). Note: `offset` is intentionally NOT aliased to `page`
-    because offset is item-indexed while page is 1-indexed page-number — silently
-    aliasing would return the wrong slice. See test_offset_is_rejected below.
-    """
-    async with Client(mcp_server) as client:
-        await client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "Pagination Note",
-                "directory": "test",
-                "content": "# Pagination Note\n\nBody.",
-            },
-        )
-
-        result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": "Pagination Note",
-                "limit": 5,
-            },
-        )
-
-        assert len(result.content) == 1
-        assert "# Pagination Note" in result.content[0].text
-
-
-@pytest.mark.asyncio
-async def test_offset_is_not_aliased_to_page(mcp_server, app, test_project):
-    """`offset` must NOT be silently mapped to `page` — they have different
-    semantics (item-index vs. 1-indexed page number). Locks in the deliberate
-    omission so a future contributor doesn't add it back thinking it's harmless.
-    """
-    async with Client(mcp_server) as client:
-        await client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "Offset Reject Note",
-                "directory": "test",
-                "content": "# Offset Reject Note\n\nBody.",
-            },
-        )
-
-        # FastMCP wraps unknown kwargs in a ToolError; just assert it raises.
-        with pytest.raises(Exception):
-            await client.call_tool(
-                "read_note",
-                {
-                    "project": test_project.name,
-                    "identifier": "Offset Reject Note",
-                    "offset": 0,
-                },
-            )
-
-
-@pytest.mark.asyncio
-async def test_read_note_accepts_page_number_per_page_aliases(mcp_server, app, test_project):
-    """`page_number` and `per_page` should also map to `page` / `page_size`."""
-    async with Client(mcp_server) as client:
-        await client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "Per Page Note",
-                "directory": "test",
-                "content": "# Per Page Note\n\nBody.",
-            },
-        )
-
-        result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": "Per Page Note",
-                "page_number": 1,
-                "per_page": 10,
-            },
-        )
-
-        assert len(result.content) == 1
-        assert "# Per Page Note" in result.content[0].text
-
-
-@pytest.mark.asyncio
-async def test_read_note_canonical_names_still_work(mcp_server, app, test_project):
-    """Canonical names must keep working — aliases are additive, not a rename."""
-    async with Client(mcp_server) as client:
-        await client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "Canonical Note",
-                "directory": "test",
-                "content": "# Canonical Note\n\nBody.",
-            },
-        )
-
-        result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": "Canonical Note",
-                "page": 1,
-                "page_size": 10,
-            },
-        )
-
-        assert len(result.content) == 1
-        assert "# Canonical Note" in result.content[0].text
+# --- read_note: pagination params removed in #693 (were no-ops) ---
+# The `page` / `page_size` parameters were removed because the API endpoint
+# silently dropped them. Search-fallback pagination is unrelated to read_note.
 
 
 # --- edit_note: find_text / content / section aliases ---
@@ -534,35 +420,7 @@ async def test_build_context_accepts_url_aliases(mcp_server, app, test_project):
         assert result.content or result.structured_content
 
 
-# --- view_note aliases (mirrors read_note pagination) ---
-
-
-@pytest.mark.asyncio
-async def test_view_note_accepts_pagination_aliases(mcp_server, app, test_project):
-    """`page_number`/`limit`/`per_page` should map through view_note to read_note."""
-    async with Client(mcp_server) as client:
-        await client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "View Alias Note",
-                "directory": "test",
-                "content": "# View Alias Note\n\nBody.",
-            },
-        )
-
-        result = await client.call_tool(
-            "view_note",
-            {
-                "project": test_project.name,
-                "identifier": "View Alias Note",
-                "page_number": 1,
-                "limit": 10,
-            },
-        )
-
-        assert len(result.content) == 1
-        assert "# View Alias Note" in result.content[0].text
+# --- view_note: pagination params removed in #693 (delegates to read_note) ---
 
 
 # --- delete_note aliases ---
@@ -618,9 +476,12 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
 
         # tool_name -> (must_have_canonical, must_not_have_aliases)
         checks = {
+            # read_note has no pagination params (#693 — they were no-ops; removed).
+            # The must_not_have list still includes the rejected aliases so future
+            # contributors don't reintroduce them.
             "read_note": (
-                ["page", "page_size"],
-                ["offset", "limit", "page_number", "per_page"],
+                [],
+                ["page", "page_size", "offset", "limit", "page_number", "per_page"],
             ),
             "edit_note": (
                 ["find_text", "section", "content"],
@@ -648,9 +509,10 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
             ),
             "delete_note": (["is_directory"], ["is_dir"]),
             "read_content": (["path"], ["file_path", "filepath", "file"]),
+            # view_note pagination params removed in #693 (delegates to read_note).
             "view_note": (
-                ["page", "page_size"],
-                ["offset", "limit", "page_number", "per_page"],
+                [],
+                ["page", "page_size", "offset", "limit", "page_number", "per_page"],
             ),
             "build_context": (
                 ["url", "timeframe", "page", "page_size", "max_related"],

@@ -1,14 +1,13 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Annotated, Optional, Literal, cast
+from typing import Optional, Literal, cast
 
 import logfire
 import yaml
 
 from loguru import logger
 from fastmcp import Context
-from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
@@ -72,20 +71,6 @@ async def read_note(
     identifier: str,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
-    # Accept common pagination aliases models reach for from training data
-    # (page_number/limit/per_page). Schema still advertises only the canonical
-    # names; aliases are silently mapped at validation time.
-    # Why no `offset` alias: `offset` is item-indexed (skip N items) while `page`
-    # is 1-indexed page-number, so direct aliasing returns the wrong slice
-    # (e.g. offset=20,limit=10 should mean items 21-30, not page 20).
-    page: Annotated[
-        int,
-        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
-    ] = 1,
-    page_size: Annotated[
-        int,
-        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
-    ] = 10,
     output_format: Literal["text", "json"] = "text",
     include_frontmatter: bool = False,
     context: Context | None = None,
@@ -111,8 +96,6 @@ async def read_note(
                 available projects.
         identifier: The title or permalink of the note to read
                    Can be a full memory:// URL, a permalink, a title, or search text
-        page: Page number for paginated results (default: 1)
-        page_size: Number of items per page (default: 10)
         output_format: "text" returns markdown content or guidance text.
             "json" returns a structured object with title/permalink/file_path/content/frontmatter.
         include_frontmatter: When output_format="json", whether content should include the
@@ -132,9 +115,6 @@ async def read_note(
 
         # Read with memory URL
         read_note("my-research", "memory://specs/search-spec")
-
-        # Read with pagination
-        read_note("work-project", "Project Updates", page=2, page_size=5)
 
         # Read recent meeting notes
         read_note("team-docs", "Weekly Standup")
@@ -160,8 +140,6 @@ async def read_note(
         requested_project=project,
         workspace_id=workspace,
         output_format=output_format,
-        page=page,
-        page_size=page_size,
         include_frontmatter=include_frontmatter,
     ):
         async with get_project_client(project, workspace, context) as (client, active_project):
@@ -217,7 +195,7 @@ async def read_note(
                     phase="shape_response",
                 ):
                     entity = await knowledge_client.get_entity(entity_id)
-                    response = await resource_client.read(entity_id, page=page, page_size=page_size)
+                    response = await resource_client.read(entity_id)
                     content_text = response.text
                     body_content, parsed_frontmatter = _parse_opening_frontmatter(content_text)
                     return {
@@ -263,8 +241,6 @@ async def read_note(
                     workspace=workspace,
                     query=identifier_text,
                     search_type=search_type,
-                    page=page,
-                    page_size=page_size,
                     output_format="json",
                     context=context,
                 )
@@ -286,7 +262,7 @@ async def read_note(
                 entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
 
                 # Fetch content using entity ID
-                response = await resource_client.read(entity_id, page=page, page_size=page_size)
+                response = await resource_client.read(entity_id)
 
                 # If successful, return the content
                 if response.status_code == 200:
@@ -327,9 +303,7 @@ async def read_note(
                         )
 
                         # Fetch content using the entity ID
-                        response = await resource_client.read(
-                            entity_id, page=page, page_size=page_size
-                        )
+                        response = await resource_client.read(entity_id)
 
                         if response.status_code == 200:
                             logger.info(
