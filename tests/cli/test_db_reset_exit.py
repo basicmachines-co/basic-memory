@@ -26,9 +26,14 @@ def _isolated_env(tmp_path: Path) -> dict[str, str]:
 
 @skip_on_windows
 def test_bm_reset_exits_cleanly(tmp_path: Path):
-    """bm reset should finish and exit cleanly with non-interactive confirmation."""
+    """bm reset should finish and exit cleanly with non-interactive confirmation.
+
+    Uses --force to skip the live-MCP pre-flight (#765); we're verifying
+    process exit semantics here, not the pre-flight, which has dedicated
+    coverage in test_db_reset_zombie_check.py.
+    """
     result = subprocess.run(
-        ["uv", "run", "bm", "reset"],
+        ["uv", "run", "bm", "reset", "--force"],
         input="y\n",
         capture_output=True,
         text=True,
@@ -44,7 +49,7 @@ def test_bm_reset_exits_cleanly(tmp_path: Path):
 def test_bm_reset_reindex_exits_cleanly(tmp_path: Path):
     """bm reset --reindex should finish and exit cleanly with non-interactive confirmation."""
     result = subprocess.run(
-        ["uv", "run", "bm", "reset", "--reindex"],
+        ["uv", "run", "bm", "reset", "--reindex", "--force"],
         input="y\n",
         capture_output=True,
         text=True,

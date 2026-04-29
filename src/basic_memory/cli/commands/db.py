@@ -1,8 +1,10 @@
 """Database management commands."""
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import psutil
 import typer
 from loguru import logger
 from rich.console import Console
@@ -19,6 +21,80 @@ from basic_memory.services.initialization import reconcile_projects_with_config
 from basic_memory.sync.sync_service import get_sync_service
 
 console = Console()
+
+
+def _find_live_mcp_processes() -> list[tuple[int, str]]:
+    """Return (pid, joined_cmdline) for live `basic-memory mcp` processes.
+
+    Why this exists (issue #765):
+        On POSIX, `Path.unlink()` removes the directory entry but the inode
+        survives as long as any process holds the file open. A `bm reset`
+        run while Claude Desktop (or another MCP client) is alive will
+        therefore "succeed" — but the still-running MCP keeps reading the
+        old, now-invisible memory.db inode and returns phantom rows. On
+        Windows the OS naturally raises PermissionError on `unlink()`, so
+        the bug is POSIX-specific. We detect proactively to give the same
+        error experience on every platform before doing damage.
+
+    The current process is excluded so this can be called from inside a
+    `bm reset` invocation. NoSuchProcess / AccessDenied are swallowed
+    because process tables race with the scan and we don't want a
+    transient permission error to mask a real zombie.
+    """
+    me = os.getpid()
+    matches: list[tuple[int, str]] = []
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            pid = proc.info.get("pid")
+            if pid is None or pid == me:
+                continue
+            cmdline = proc.info.get("cmdline") or []
+            if not cmdline:
+                continue
+            # Match the full `basic-memory mcp` invocation, not just any
+            # process whose argv mentions either word individually.
+            joined = " ".join(cmdline)
+            if "basic-memory" in joined and "mcp" in cmdline:
+                matches.append((pid, joined))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return matches
+
+
+def _abort_if_mcp_processes_alive() -> None:
+    """Refuse `bm reset` while basic-memory MCP processes are still running.
+
+    See _find_live_mcp_processes for the underlying POSIX-vs-Windows
+    rationale. Prints a per-PID list and platform-appropriate cleanup
+    instructions, then exits non-zero so destructive work never starts.
+    """
+    zombies = _find_live_mcp_processes()
+    if not zombies:
+        return
+
+    console.print(
+        "[red]Refusing to reset:[/red] basic-memory MCP processes are still running."
+    )
+    console.print(
+        "[yellow]On macOS/Linux these would keep reading the deleted memory.db inode "
+        "and return phantom search results (see #765).[/yellow]"
+    )
+    for pid, cmd in zombies:
+        console.print(f"  PID {pid}: {cmd}")
+    console.print("\n[bold]How to clean up:[/bold]")
+    console.print("  1. Quit Claude Desktop and any other MCP clients.")
+    if os.name == "nt":
+        console.print(
+            "  2. Verify nothing remains: "
+            "[green]Get-CimInstance Win32_Process | "
+            "Where-Object {$_.CommandLine -like '*basic-memory*mcp*'}[/green]"
+        )
+    else:
+        console.print(
+            "  2. Verify nothing remains: [green]pgrep -fa 'basic-memory mcp'[/green]"
+        )
+    console.print("  3. Re-run [green]bm reset[/green].")
+    raise typer.Exit(1)
 
 
 @dataclass(slots=True)
@@ -86,6 +162,16 @@ async def _reindex_projects(app_config):
 @app.command()
 def reset(
     reindex: bool = typer.Option(False, "--reindex", help="Rebuild db index from filesystem"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help=(
+            "Skip the pre-flight check that refuses to reset while "
+            "basic-memory MCP processes are running. Use only in "
+            "automated workflows where you've already ensured no MCP "
+            "clients are attached to the database."
+        ),
+    ),
 ):  # pragma: no cover
     """Reset database (drop all tables and recreate)."""
     console.print(
@@ -94,6 +180,14 @@ def reset(
         "Use [green]bm reset --reindex[/green] to automatically rebuild the index afterward."
     )
     if typer.confirm("Reset the database index?"):
+        # Pre-flight: refuse to proceed if MCP processes still hold the DB
+        # file open. POSIX would silently let us unlink the inode while
+        # they keep reading it; Windows would error here anyway. See
+        # _find_live_mcp_processes for the full story. --force is the
+        # documented escape hatch for scripted/CI runs.
+        if not force:
+            _abort_if_mcp_processes_alive()
+
         logger.info("Resetting database...")
         config_manager = ConfigManager()
         app_config = config_manager.config

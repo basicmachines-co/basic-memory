@@ -48,6 +48,7 @@ dependencies = [
     "sqlite-vec>=0.1.6",
     "openai>=1.100.2",
     "logfire>=4.19.0",
+    "psutil>=5.9.0",
 ]
 
 [project.urls]
