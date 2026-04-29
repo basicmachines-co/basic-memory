@@ -46,19 +46,28 @@ class TestFindLiveMcpProcesses:
         _patch_iter(
             monkeypatch,
             [
+                # Direct `basic-memory mcp`.
                 _FakeProc(pid=101, cmdline=["/usr/bin/python", "basic-memory", "mcp"]),
-                _FakeProc(pid=202, cmdline=["bm", "mcp"]),  # alt entrypoint, no match
+                # `bm mcp` alias entrypoint — must also match (#765 P1).
+                _FakeProc(pid=202, cmdline=["bm", "mcp"]),
+                # Python module form, underscore name.
                 _FakeProc(
                     pid=303,
-                    cmdline=["python", "-m", "basic_memory.cli.main", "basic-memory", "mcp"],
+                    cmdline=["python", "-m", "basic_memory.cli.main", "mcp"],
                 ),
+                # Absolute path to the bm script.
+                _FakeProc(pid=404, cmdline=["/usr/local/bin/bm", "mcp"]),
+                # Windows-style bm.exe.
+                _FakeProc(pid=505, cmdline=["C:\\Users\\me\\.venv\\Scripts\\bm.exe", "mcp"]),
+                # Should NOT match — `mcp` is a substring of another arg, not a token.
+                _FakeProc(pid=606, cmdline=["python", "basic-memory", "mcp-helper"]),
+                # Should NOT match — has `mcp` but no basic-memory/bm signature.
+                _FakeProc(pid=707, cmdline=["python", "/some/other/server.py", "mcp"]),
             ],
         )
         result = db_cmd._find_live_mcp_processes()
-        # 101 and 303 match (cmdline contains both "basic-memory" and exact "mcp" arg).
-        # 202 is intentionally excluded because the joined cmdline has no "basic-memory".
         pids = sorted(pid for pid, _ in result)
-        assert pids == [101, 303]
+        assert pids == [101, 202, 303, 404, 505]
 
     def test_skips_current_process(self, monkeypatch):
         me = os.getpid()

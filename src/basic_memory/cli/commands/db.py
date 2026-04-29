@@ -2,7 +2,7 @@
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import psutil
 import typer
@@ -21,6 +21,36 @@ from basic_memory.services.initialization import reconcile_projects_with_config
 from basic_memory.sync.sync_service import get_sync_service
 
 console = Console()
+
+
+def _is_basic_memory_mcp(cmdline: list[str]) -> bool:
+    """Heuristic: does this argv represent a `basic-memory mcp` server?
+
+    The MCP server can be launched any of:
+      basic-memory mcp
+      bm mcp                                  # entrypoint alias from pyproject.toml
+      python -m basic_memory.cli.main mcp     # module form
+      uv run basic-memory mcp / uv run bm mcp # uv wrappers
+      /abs/path/to/{bm,basic-memory}[.exe] mcp
+
+    A reliable match needs both signals:
+      1. "mcp" appears as an exact argv token (not "mcp-foo").
+      2. Some argv token names the basic-memory entrypoint — either by
+         hyphen/underscore form, or as a `bm` script (covers `/usr/local/bin/bm`,
+         `bm.exe`, etc. via Path.stem).
+    """
+    if "mcp" not in cmdline:
+        return False
+    for arg in cmdline:
+        if "basic-memory" in arg or "basic_memory" in arg:
+            return True
+        # Try both POSIX and Windows path interpretations so a test on
+        # macOS still recognizes `C:\\...\\bm.exe`, and a real Windows
+        # run still recognizes `/usr/local/bin/bm`. Path() alone uses
+        # the host OS, which gives wrong stems for foreign separators.
+        if PurePosixPath(arg).stem == "bm" or PureWindowsPath(arg).stem == "bm":
+            return True
+    return False
 
 
 def _find_live_mcp_processes() -> list[tuple[int, str]]:
@@ -51,11 +81,8 @@ def _find_live_mcp_processes() -> list[tuple[int, str]]:
             cmdline = proc.info.get("cmdline") or []
             if not cmdline:
                 continue
-            # Match the full `basic-memory mcp` invocation, not just any
-            # process whose argv mentions either word individually.
-            joined = " ".join(cmdline)
-            if "basic-memory" in joined and "mcp" in cmdline:
-                matches.append((pid, joined))
+            if _is_basic_memory_mcp(cmdline):
+                matches.append((pid, " ".join(cmdline)))
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return matches
