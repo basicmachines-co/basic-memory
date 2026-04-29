@@ -3,8 +3,6 @@
 Encapsulates all /v2/projects/{project_id}/resource/* endpoints.
 """
 
-from typing import Optional
-
 from httpx import AsyncClient, Response
 
 import logfire
@@ -39,19 +37,11 @@ class ResourceClient:
         self.project_id = project_id
         self._base_path = f"/v2/projects/{project_id}/resource"
 
-    async def read(
-        self,
-        entity_id: str,
-        *,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
-    ) -> Response:
+    async def read(self, entity_id: str) -> Response:
         """Read a resource by entity ID.
 
         Args:
             entity_id: Entity external_id (UUID)
-            page: Optional page number for paginated content
-            page_size: Optional page size for paginated content
 
         Returns:
             Raw HTTP Response (caller handles text/binary content)
@@ -59,23 +49,14 @@ class ResourceClient:
         Raises:
             ToolError: If the resource is not found or request fails
         """
-        params: dict = {}
-        if page is not None:
-            params["page"] = page
-        if page_size is not None:
-            params["page_size"] = page_size
-
         with logfire.span(
             "mcp.client.resource.read",
             client_name="resource",
             operation="read",
-            page=page,
-            page_size=page_size,
         ):
             return await call_get(
                 self.http_client,
                 f"{self._base_path}/{entity_id}",
-                params=params if params else None,
                 client_name="resource",
                 operation="read",
                 path_template="/v2/projects/{project_id}/resource/{entity_id}",
