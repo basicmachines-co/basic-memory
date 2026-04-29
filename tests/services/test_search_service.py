@@ -278,9 +278,7 @@ async def test_handle_delete_clears_entity_vectors(
 
     # Force the cleanup path even if the test repo is configured without
     # semantic enabled — we're asserting the wiring, not embedding behavior.
-    monkeypatch.setattr(
-        search_service.repository, "_semantic_enabled", True, raising=False
-    )
+    monkeypatch.setattr(search_service.repository, "_semantic_enabled", True)
     monkeypatch.setattr(
         search_service.repository,
         "delete_entity_vector_rows",
