@@ -182,7 +182,6 @@ async def edit_note(
         ),
     ],
     project: Optional[str] = None,
-    workspace: Optional[str] = None,
     # Section/heading naming varies across tools; accept the descriptive forms.
     section: Annotated[
         Optional[str],
@@ -303,14 +302,13 @@ async def edit_note(
         entrypoint="mcp",
         tool_name="edit_note",
         requested_project=project,
-        workspace_id=workspace,
         edit_operation=operation,
         output_format=output_format,
         has_section=bool(section),
         has_find_text=bool(find_text),
         expected_replacements=effective_replacements,
     ):
-        async with get_project_client(project, workspace, context) as (client, active_project):
+        async with get_project_client(project, context=context) as (client, active_project):
             logger.info(
                 f"MCP tool call tool=edit_note project={active_project.name} "
                 f"identifier={identifier} operation={operation} output_format={output_format}"

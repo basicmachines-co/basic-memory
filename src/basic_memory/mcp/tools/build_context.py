@@ -139,7 +139,6 @@ async def build_context(
         Field(validation_alias=AliasChoices("url", "uri", "memory_url")),
     ],
     project: Optional[str] = None,
-    workspace: Optional[str] = None,
     depth: str | int | None = 1,
     timeframe: Annotated[
         Optional[TimeFrame],
@@ -228,7 +227,6 @@ async def build_context(
         entrypoint="mcp",
         tool_name="build_context",
         requested_project=project,
-        workspace_id=workspace,
         depth=depth or 1,
         timeframe=timeframe,
         page=page,
@@ -237,7 +235,7 @@ async def build_context(
         output_format=output_format,
         is_memory_url=str(url).startswith("memory://"),
     ):
-        async with get_project_client(project, workspace, context) as (client, active_project):
+        async with get_project_client(project, context=context) as (client, active_project):
             logger.info(
                 f"MCP tool call tool=build_context project={active_project.name} "
                 f"url={url} depth={depth} timeframe={timeframe} output_format={output_format}"

@@ -308,7 +308,6 @@ async def search_notes(
         Field(default=None, validation_alias=AliasChoices("query", "q", "search", "text")),
     ] = None,
     project: Optional[str] = None,
-    workspace: Optional[str] = None,
     # `offset` is intentionally NOT aliased to `page`: offset is item-indexed
     # (skip N items) while page is 1-indexed page-number. Direct aliasing would
     # silently return the wrong slice.
@@ -561,7 +560,6 @@ async def search_notes(
         entrypoint="mcp",
         tool_name="search_notes",
         requested_project=project,
-        workspace_id=workspace,
         search_type=search_type or "default",
         output_format=output_format,
         page=page,
@@ -575,7 +573,7 @@ async def search_notes(
         has_tags_filter=bool(tags),
         has_status_filter=bool(status),
     ):
-        async with get_project_client(project, workspace, context) as (client, active_project):
+        async with get_project_client(project, context=context) as (client, active_project):
             # Handle memory:// URLs by resolving to permalink search
             is_memory_url = False
             if query is not None:

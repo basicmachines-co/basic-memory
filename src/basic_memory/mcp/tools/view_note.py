@@ -17,7 +17,6 @@ from basic_memory.mcp.tools.read_note import read_note
 async def view_note(
     identifier: str,
     project: Optional[str] = None,
-    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """View a markdown note as a formatted artifact.
@@ -56,7 +55,6 @@ async def view_note(
         await read_note(
             identifier=identifier,
             project=project,
-            workspace=workspace,
             context=context,
         )
     )

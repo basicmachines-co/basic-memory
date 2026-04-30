@@ -63,7 +63,7 @@ async def test_write_note_emits_root_operation_and_project_context(
             "entrypoint": "mcp",
             "tool_name": "write_note",
             "requested_project": test_project.name,
-            "workspace_id": None,
+
             "note_type": "note",
             "overwrite": False,
             "output_format": "json",
@@ -108,7 +108,7 @@ async def test_read_note_emits_root_operation_and_project_context(
             "entrypoint": "mcp",
             "tool_name": "read_note",
             "requested_project": test_project.name,
-            "workspace_id": None,
+
             "output_format": "json",
             "include_frontmatter": True,
         },
@@ -156,7 +156,7 @@ async def test_search_notes_emits_root_operation_and_project_context(
             "entrypoint": "mcp",
             "tool_name": "search_notes",
             "requested_project": test_project.name,
-            "workspace_id": None,
+
             "search_type": "text",
             "output_format": "json",
             "page": 1,
@@ -209,7 +209,7 @@ async def test_edit_note_emits_root_operation_and_project_context(
             "entrypoint": "mcp",
             "tool_name": "edit_note",
             "requested_project": test_project.name,
-            "workspace_id": None,
+
             "edit_operation": "append",
             "output_format": "json",
             "has_section": False,
@@ -261,7 +261,7 @@ async def test_build_context_emits_root_operation_and_project_context(
             "entrypoint": "mcp",
             "tool_name": "build_context",
             "requested_project": test_project.name,
-            "workspace_id": None,
+
             "depth": 2,
             "timeframe": "7d",
             "page": 1,

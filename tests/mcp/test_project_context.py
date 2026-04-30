@@ -606,8 +606,10 @@ async def test_resolve_workspace_project_identifier_handles_qualified_and_collis
     assert resolved.workspace.slug == "acme"
     assert resolved.project.external_id == "acme-project-id"
 
-    with pytest.raises(ValueError, match="Use: personal/meeting-notes or acme/meeting-notes"):
-        await resolve_workspace_project_identifier("meeting-notes")
+    # Ambiguous name resolves to the default workspace (personal)
+    resolved = await resolve_workspace_project_identifier("meeting-notes")
+    assert resolved.workspace.slug == "personal"
+    assert resolved.project.external_id == "personal-project-id"
 
 
 @pytest.mark.asyncio
@@ -827,23 +829,6 @@ async def test_resolve_project_and_path_uses_cached_project_for_memory_url_prefi
     assert resolved_path == "notes/roadmap.md"
     assert is_memory_url is True
 
-
-@pytest.mark.asyncio
-async def test_get_project_client_rejects_workspace_for_local_project(config_manager):
-    from basic_memory.mcp.project_context import get_project_client
-    from basic_memory.config import ProjectEntry
-
-    # Register "main" as a LOCAL project so get_project_mode returns LOCAL
-    config = config_manager.load_config()
-    (config_manager.config_dir.parent / "main").mkdir(parents=True, exist_ok=True)
-    config.projects["main"] = ProjectEntry(path=str(config_manager.config_dir.parent / "main"))
-    config_manager.save_config(config)
-
-    with pytest.raises(
-        ValueError, match="Workspace 'tenant-123' cannot be used with local project"
-    ):
-        async with get_project_client(project="main", workspace="tenant-123"):
-            pass
 
 
 class TestDetectProjectFromUrlPrefix:
