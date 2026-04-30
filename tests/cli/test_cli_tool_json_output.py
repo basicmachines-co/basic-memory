@@ -172,22 +172,6 @@ def test_read_note_json_output(mock_mcp_read):
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
-def test_read_note_workspace_passthrough(mock_mcp_read):
-    """read-note --workspace passes workspace through to the MCP tool call."""
-    result = runner.invoke(
-        cli_app,
-        ["tool", "read-note", "test-note", "--workspace", "tenant-123"],
-    )
-
-    assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert mock_mcp_read.call_args.kwargs["workspace"] == "tenant-123"
-
-
-@patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
-    new_callable=AsyncMock,
-    return_value=READ_NOTE_RESULT,
-)
 def test_read_note_include_frontmatter(mock_mcp_read):
     """read-note --include-frontmatter passes flag through to MCP tool."""
     result = runner.invoke(

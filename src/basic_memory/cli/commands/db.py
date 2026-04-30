@@ -99,9 +99,7 @@ def _abort_if_mcp_processes_alive() -> None:
     if not zombies:
         return
 
-    console.print(
-        "[red]Refusing to reset:[/red] basic-memory MCP processes are still running."
-    )
+    console.print("[red]Refusing to reset:[/red] basic-memory MCP processes are still running.")
     console.print(
         "[yellow]On macOS/Linux these would keep reading the deleted memory.db inode "
         "and return phantom search results (see #765).[/yellow]"
@@ -117,9 +115,7 @@ def _abort_if_mcp_processes_alive() -> None:
             "Where-Object {$_.CommandLine -like '*basic-memory*mcp*'}[/green]"
         )
     else:
-        console.print(
-            "  2. Verify nothing remains: [green]pgrep -fa 'basic-memory mcp'[/green]"
-        )
+        console.print("  2. Verify nothing remains: [green]pgrep -fa 'basic-memory mcp'[/green]")
     console.print("  3. Re-run [green]bm reset[/green].")
     raise typer.Exit(1)
 

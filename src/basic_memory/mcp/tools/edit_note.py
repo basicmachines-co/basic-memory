@@ -176,9 +176,7 @@ async def edit_note(
     content: Annotated[
         str,
         Field(
-            validation_alias=AliasChoices(
-                "content", "new_content", "replacement", "replace_with"
-            )
+            validation_alias=AliasChoices("content", "new_content", "replacement", "replace_with")
         ),
     ],
     project: Optional[str] = None,
@@ -196,9 +194,7 @@ async def edit_note(
         Optional[str],
         Field(
             default=None,
-            validation_alias=AliasChoices(
-                "find_text", "find", "old_text", "old_content", "search"
-            ),
+            validation_alias=AliasChoices("find_text", "find", "old_text", "old_content", "search"),
         ),
     ] = None,
     expected_replacements: Optional[int] = None,

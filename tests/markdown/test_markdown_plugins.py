@@ -189,8 +189,7 @@ def test_observation_skips_obsidian_callouts():
         t.meta.get("observation")
         for t in tokens
         if t.type == "inline" and t.meta and t.meta.get("observation")
-        if t.meta["observation"]["category"]
-        and t.meta["observation"]["category"].startswith("!")
+        if t.meta["observation"]["category"] and t.meta["observation"]["category"].startswith("!")
     ]
     assert callout_observations == [], (
         f"Obsidian callouts should not produce observations, got: {callout_observations}"

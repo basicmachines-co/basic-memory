@@ -316,7 +316,6 @@ async def test_list_memory_projects_factory_mode_workspace_lookup_failure(app, t
     assert "- cloud-proj (cloud)" in result
 
 
-
 @pytest.mark.asyncio
 async def test_list_memory_projects_json_with_cloud(app, test_project):
     """JSON output includes local_path, cloud_path, and source fields."""
@@ -491,7 +490,6 @@ def _make_workspace_index(workspace_projects):
     return _build_workspace_project_index(workspaces, entries)
 
 
-
 @pytest.mark.asyncio
 async def test_list_memory_projects_aggregates_without_config_workspace(app, test_project):
     """When no explicit workspace is given, cloud discovery fans out across workspaces."""
@@ -522,6 +520,3 @@ async def test_list_memory_projects_aggregates_without_config_workspace(app, tes
 
     mock_index.assert_awaited_once()
     assert "- cloud-proj (cloud) [00000000-0000-0000-0000-000000000001]" in result
-
-
-

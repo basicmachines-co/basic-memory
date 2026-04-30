@@ -358,9 +358,7 @@ async def search_notes(
         Optional[float],
         Field(
             default=None,
-            validation_alias=AliasChoices(
-                "min_similarity", "threshold", "similarity_threshold"
-            ),
+            validation_alias=AliasChoices("min_similarity", "threshold", "similarity_threshold"),
         ),
     ] = None,
     context: Context | None = None,

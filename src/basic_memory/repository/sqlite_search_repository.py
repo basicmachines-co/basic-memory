@@ -107,8 +107,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 await self._ensure_vector_tables()
             except SemanticDependenciesMissingError as exc:
                 logger.warning(
-                    f"Semantic search disabled: {exc}. "
-                    "Falling back to keyword-only search."
+                    f"Semantic search disabled: {exc}. Falling back to keyword-only search."
                 )
                 self._semantic_enabled = False
 

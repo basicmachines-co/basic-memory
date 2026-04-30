@@ -830,7 +830,6 @@ async def test_resolve_project_and_path_uses_cached_project_for_memory_url_prefi
     assert is_memory_url is True
 
 
-
 class TestDetectProjectFromUrlPrefix:
     """Test detect_project_from_url_prefix for URL-based project detection."""
 

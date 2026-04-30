@@ -259,9 +259,7 @@ async def test_delete_entity_without_permalink(search_service, sample_entity):
 
 
 @pytest.mark.asyncio
-async def test_handle_delete_clears_entity_vectors(
-    search_service, sample_entity, monkeypatch
-):
+async def test_handle_delete_clears_entity_vectors(search_service, sample_entity, monkeypatch):
     """Regression guard for #764: handle_delete must drive vector-row cleanup
     so deleting an entity doesn't leave orphaned rows in `search_vector_chunks`
     or `search_vector_embeddings`.
@@ -288,8 +286,7 @@ async def test_handle_delete_clears_entity_vectors(
     await search_service.handle_delete(sample_entity)
 
     assert calls == [sample_entity.id], (
-        f"handle_delete must call delete_entity_vector_rows({sample_entity.id}); "
-        f"got calls={calls}"
+        f"handle_delete must call delete_entity_vector_rows({sample_entity.id}); got calls={calls}"
     )
 
 

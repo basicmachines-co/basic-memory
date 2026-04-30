@@ -24,7 +24,6 @@ from basic_memory.utils import generate_permalink
 # --- Helpers for dual-fetch + merge ---
 
 
-
 def _merge_projects(
     local_list: ProjectList | None,
     cloud_list: ProjectList | None,

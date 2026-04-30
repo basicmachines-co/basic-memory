@@ -489,7 +489,17 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
             ),
             "search_notes": (
                 ["query", "page", "page_size", "note_types", "after_date", "min_similarity"],
-                ["q", "search", "offset", "limit", "note_type", "types", "since", "after", "threshold"],
+                [
+                    "q",
+                    "search",
+                    "offset",
+                    "limit",
+                    "note_type",
+                    "types",
+                    "since",
+                    "after",
+                    "threshold",
+                ],
             ),
             "recent_activity": (
                 ["type", "timeframe", "page", "page_size"],

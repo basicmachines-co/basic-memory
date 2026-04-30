@@ -633,9 +633,7 @@ async def resolve_workspace_project_identifier(
 
     if len(matches) > 1:
         # Prefer the project in the default workspace when name is ambiguous
-        default_match = next(
-            (entry for entry in matches if entry.workspace.is_default), None
-        )
+        default_match = next((entry for entry in matches if entry.workspace.is_default), None)
         if default_match:
             return default_match
 
