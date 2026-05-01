@@ -164,6 +164,7 @@ async def read_content(
         Field(validation_alias=AliasChoices("path", "file_path", "filepath", "file")),
     ],
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     context: Context | None = None,
 ) -> dict:
     """Read a file's raw content by path or permalink.
@@ -184,6 +185,9 @@ async def read_content(
             - A permalink (docs/example)
         project: Project name to read from. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -221,9 +225,14 @@ async def read_content(
 
     logger.info(f"MCP tool call tool=read_content project={project} path={path}")
 
-    async with get_project_client(project, context=context) as (client, active_project):
-        # Resolve path with project-prefix awareness for memory:// URLs
-        _, url, _ = await resolve_project_and_path(client, path, project, context)
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
+        # Resolve path with project-prefix awareness for memory:// URLs.
+        # Use active_project.name so resolution stays consistent when project_id
+        # was used or `project` was wrong/ambiguous (matches the cached resolution).
+        _, url, _ = await resolve_project_and_path(client, path, active_project.name, context)
 
         # Validate path to prevent path traversal attacks
         # For memory:// URLs, validate the extracted path (not the raw URL which

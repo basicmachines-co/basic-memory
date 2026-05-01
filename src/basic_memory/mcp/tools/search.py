@@ -308,6 +308,7 @@ async def search_notes(
         Field(default=None, validation_alias=AliasChoices("query", "q", "search", "text")),
     ] = None,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     # `offset` is intentionally NOT aliased to `page`: offset is item-indexed
     # (skip N items) while page is 1-indexed page-number. Direct aliasing would
     # silently return the wrong slice.
@@ -444,6 +445,9 @@ async def search_notes(
               Omit or pass None for filter-only searches using metadata_filters, tags, or status.
         project: Project name to search in. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of:
@@ -558,6 +562,7 @@ async def search_notes(
         entrypoint="mcp",
         tool_name="search_notes",
         requested_project=project,
+        requested_project_id=project_id,
         search_type=search_type or "default",
         output_format=output_format,
         page=page,
@@ -571,12 +576,17 @@ async def search_notes(
         has_tags_filter=bool(tags),
         has_status_filter=bool(status),
     ):
-        async with get_project_client(project, context=context) as (client, active_project):
-            # Handle memory:// URLs by resolving to permalink search
+        async with get_project_client(project, context=context, project_id=project_id) as (
+            client,
+            active_project,
+        ):
+            # Handle memory:// URLs by resolving to permalink search.
+            # Use active_project.name so resolution hits the cached active project
+            # when project_id was used or `project` was wrong/ambiguous.
             is_memory_url = False
             if query is not None:
                 _, resolved_query, is_memory_url = await resolve_project_and_path(
-                    client, query, project, context
+                    client, query, active_project.name, context
                 )
                 if is_memory_url:
                     query = resolved_query

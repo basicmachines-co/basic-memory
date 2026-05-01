@@ -32,6 +32,7 @@ async def list_directory(
         ),
     ] = None,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
@@ -49,6 +50,9 @@ async def list_directory(
                        Examples: "*.md", "*meeting*", "project_*"
         project: Project name to list directory from. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -76,7 +80,10 @@ async def list_directory(
     Raises:
         ToolError: If project doesn't exist or directory path is invalid
     """
-    async with get_project_client(project, context=context) as (client, active_project):
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
         logger.debug(
             f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
         )

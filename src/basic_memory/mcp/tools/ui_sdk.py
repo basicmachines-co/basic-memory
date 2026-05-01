@@ -25,6 +25,7 @@ def _text_block(message: str) -> List[ContentBlock]:
 async def search_notes_ui(
     query: str,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
     search_type: Optional[str] = None,
@@ -49,6 +50,7 @@ async def search_notes_ui(
     result = await search_notes(
         query=query,
         project=project,
+        project_id=project_id,
         page=page,
         page_size=page_size,
         search_type=search_type,
@@ -97,12 +99,14 @@ async def search_notes_ui(
 async def read_note_ui(
     identifier: str,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     context: Context | None = None,
 ) -> List[ContentBlock]:
     """Return a note preview UI as an embedded MCP-UI resource."""
     content = await read_note(
         identifier=identifier,
         project=project,
+        project_id=project_id,
         output_format="text",
         context=context,
     )

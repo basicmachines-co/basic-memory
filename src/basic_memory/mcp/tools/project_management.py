@@ -264,6 +264,11 @@ async def list_memory_projects(
     Shows projects from both local and cloud sources when cloud credentials
     are available, merging by permalink to give a unified view.
 
+    Each project entry includes an `external_id` (UUID). Pass that value as the
+    `project_id` parameter on other tools to address a specific project
+    unambiguously across cloud workspaces — useful when the same project name
+    exists in more than one workspace.
+
     Args:
         output_format: "text" returns the existing human-readable project list.
             "json" returns structured project metadata.

@@ -31,6 +31,7 @@ async def write_note(
         Field(validation_alias=AliasChoices("directory", "folder", "dir", "path")),
     ],
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: Annotated[dict | None, BeforeValidator(coerce_dict)] = None,
@@ -81,6 +82,9 @@ async def write_note(
         project: Project name to write to. Optional - server will resolve using the
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         note_type: Type of note to create (stored in frontmatter). Defaults to "note".
@@ -161,11 +165,15 @@ async def write_note(
         entrypoint="mcp",
         tool_name="write_note",
         requested_project=project,
+        requested_project_id=project_id,
         note_type=note_type,
         overwrite=effective_overwrite,
         output_format=output_format,
     ):
-        async with get_project_client(project, context=context) as (client, active_project):
+        async with get_project_client(project, context=context, project_id=project_id) as (
+            client,
+            active_project,
+        ):
             logger.info(
                 f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
             )

@@ -666,6 +666,180 @@ async def test_resolve_workspace_project_identifier_uses_active_workspace_for_du
 
 
 @pytest.mark.asyncio
+async def test_resolve_workspace_project_identifier_resolves_by_external_id(monkeypatch):
+    """Direct lookup by external_id (UUID) bypasses name/permalink resolution."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_project_identifier,
+    )
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    acme = _workspace(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+    )
+    # Same project name in two workspaces — UUID lookup must pick the right one
+    # without falling back to default-workspace ambiguity handling.
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=personal,
+            project=_project(
+                "Meeting Notes", id=1, external_id="11111111-1111-1111-1111-111111111111"
+            ),
+        ),
+        WorkspaceProjectEntry(
+            workspace=acme,
+            project=_project(
+                "Meeting Notes", id=2, external_id="22222222-2222-2222-2222-222222222222"
+            ),
+        ),
+    )
+    index = _build_workspace_project_index((personal, acme), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    resolved = await resolve_workspace_project_identifier(
+        "22222222-2222-2222-2222-222222222222"
+    )
+    assert resolved.workspace.slug == "acme"
+    assert resolved.project.external_id == "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_project_identifier_normalizes_uuid_forms(monkeypatch):
+    """Uppercase, brace-wrapped, and urn:uuid forms canonicalize before lookup."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_project_identifier,
+    )
+
+    workspace = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    canonical_uuid = "33333333-3333-3333-3333-333333333333"
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=workspace,
+            project=_project("Meeting Notes", id=1, external_id=canonical_uuid),
+        ),
+    )
+    index = _build_workspace_project_index((workspace,), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    # Each variant should canonicalize to the same lowercase-hyphenated form
+    for variant in (
+        canonical_uuid.upper(),
+        f"{{{canonical_uuid}}}",
+        f"urn:uuid:{canonical_uuid}",
+        canonical_uuid.replace("-", ""),
+    ):
+        resolved = await resolve_workspace_project_identifier(variant)
+        assert resolved.project.external_id == canonical_uuid, (
+            f"variant {variant!r} did not resolve to canonical UUID"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_project_client_with_project_id_routes_locally_without_cloud(
+    config_manager, monkeypatch
+):
+    """A UUID project_id in pure local mode must not trigger cloud routing.
+
+    Regression: get_project_mode() defaults unknown identifiers to CLOUD because the
+    local config keys by name. UUIDs are never registered locally, so without the
+    fix below, passing project_id would falsely route through the cloud client and
+    error out for users with no cloud credentials.
+    """
+    import basic_memory.mcp.project_context as project_context
+
+    # Pure local mode: no cloud creds, no factory mode, no explicit cloud routing
+    config = config_manager.load_config()
+    config.cloud_api_key = None
+    config_manager.save_config(config)
+
+    monkeypatch.setattr(project_context, "has_cloud_credentials", lambda _config: False)
+
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def fake_get_client(**kwargs) -> AsyncIterator[object]:
+        captured["get_client_kwargs"] = kwargs
+        yield object()
+
+    async def fake_get_active_project(client, project, context, headers=None):
+        captured["validated_project"] = project
+        return _project("Local Project", id=99, external_id=project)
+
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+
+    canonical_uuid = "55555555-5555-5555-5555-555555555555"
+    async with project_context.get_project_client(project_id=canonical_uuid) as (_, active):
+        assert active.external_id == canonical_uuid
+
+    # When project_id is set, get_client must be called WITHOUT project_name so the
+    # ASGI fallback is selected (not the per-project cloud-by-default path).
+    assert captured["get_client_kwargs"] == {}
+    assert captured["validated_project"] == canonical_uuid
+
+
+@pytest.mark.asyncio
+async def test_get_project_client_prefers_project_id_over_project_name(monkeypatch):
+    """When both project and project_id are passed, the UUID takes precedence."""
+    import basic_memory.mcp.project_context as project_context
+
+    # Capture which identifier flows into resolution, then short-circuit before
+    # the rest of the routing chain runs (avoids real network calls).
+    captured: dict[str, str | None] = {}
+    sentinel = RuntimeError("stop after resolution")
+
+    async def fake_resolve(project=None, *, allow_discovery=True, context=None):
+        captured["project"] = project
+        raise sentinel
+
+    monkeypatch.setattr(project_context, "resolve_project_parameter", fake_resolve)
+
+    canonical_uuid = "44444444-4444-4444-4444-444444444444"
+    with pytest.raises(RuntimeError, match="stop after resolution"):
+        async with project_context.get_project_client(
+            project="ambiguous-name",
+            project_id=canonical_uuid,
+        ):
+            pass
+
+    assert captured["project"] == canonical_uuid
+
+
+@pytest.mark.asyncio
 async def test_resolve_project_parameter_uses_cached_active_project_before_api_default_lookup(
     config_manager, monkeypatch
 ):

@@ -371,6 +371,7 @@ async def move_note(
         Field(default=False, validation_alias=AliasChoices("is_directory", "is_dir")),
     ] = False,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -395,6 +396,9 @@ async def move_note(
                      (without file extensions). Defaults to False.
         project: Project name to move within. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         output_format: "text" returns existing markdown guidance/success text. "json"
             returns machine-readable move metadata.
         context: Optional FastMCP context for performance caching.
@@ -494,7 +498,10 @@ async def move_note(
                 "error": "DESTINATION_FOLDER_NOT_FOR_DIRECTORIES",
             }
         return f"# Move Failed - Invalid Parameters\n\n{error_msg}"
-    async with get_project_client(project, context=context) as (client, active_project):
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
         destination_target = destination_folder or destination_path
         logger.info(
             f"MCP tool call tool=move_note project={active_project.name} "

@@ -18,13 +18,15 @@ Basic Memory creates a semantic knowledge graph from markdown files. Focus on bu
 
 **Resolution priority:**
 1. CLI constraint: `BASIC_MEMORY_MCP_PROJECT` env var (highest priority)
-2. Explicit parameter: `project="name"` in tool calls
+2. Explicit parameter: `project_id="<uuid>"` (preferred when known) or `project="name"` in tool calls
 3. Default project: `default_project` in config (fallback)
+
+**`project` vs `project_id`:** Every project has a stable `external_id` (UUID) returned by `list_memory_projects()`. Pass it as `project_id=...` to address a project unambiguously — required when the same project name exists in multiple cloud workspaces. For local single-project setups, the `project` name is fine.
 
 ### Quick Setup Check
 
 ```python
-# Discover projects
+# Discover projects (each entry includes external_id you can pass as project_id)
 projects = await list_memory_projects()
 ```
 
@@ -168,6 +170,14 @@ await write_note(
 
 **Multi-project users:**
 - Always specify project explicitly in tool calls
+
+**Cloud multi-workspace users:** project names can collide across workspaces. After calling `list_memory_projects()`, prefer the project's `external_id` via `project_id=...` for any subsequent tool calls — it routes to the exact project regardless of name collisions. The `project` name parameter falls back to the default workspace on ambiguity, which may not be what you want.
+
+```python
+# Cloud / multi-workspace: prefer project_id (UUID) once you've discovered it
+projects = await list_memory_projects()
+results = await search_notes(query="auth", project_id=projects[0]["external_id"])
+```
 
 **Discovery:**
 ```python

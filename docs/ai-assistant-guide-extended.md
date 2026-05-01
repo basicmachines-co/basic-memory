@@ -91,10 +91,11 @@ SQLite Database (Index)
 # List all projects
 projects = await list_memory_projects()
 
-# Response structure:
+# Response structure (each entry includes external_id you can pass as project_id):
 # [
 #   {
 #     "name": "main",
+#     "external_id": "550e8400-e29b-41d4-a716-446655440000",
 #     "path": "/Users/name/notes",
 #     "is_default": True,
 #     "note_count": 156,
@@ -102,6 +103,7 @@ projects = await list_memory_projects()
 #   },
 #   {
 #     "name": "work",
+#     "external_id": "9f86d081-884c-42a3-b5e3-1c0c5b4c8e52",
 #     "path": "/Users/name/work-notes",
 #     "is_default": False,
 #     "note_count": 89,
@@ -163,6 +165,44 @@ active_project = "main"
 # 4. Use in all subsequent calls
 results = await search_notes(query="topic", project=active_project)
 ```
+
+### `project` vs `project_id`
+
+Every project has two identifiers:
+
+- **`project`** — human-readable name (e.g., `"main"`). Easy to use, but can collide across cloud workspaces.
+- **`project_id`** — stable `external_id` UUID. Always unambiguous; takes precedence over `project` when both are passed.
+
+**When to prefer `project_id`:**
+
+1. **Cloud multi-workspace setups.** If the user belongs to more than one workspace (personal + organization, or several organizations) and the same project name might exist in more than one of them, pass `project_id` to route to the exact project. Without it, name resolution falls back to the default workspace, which may not be the one the user means.
+2. **After `list_memory_projects()`.** Once you have the `external_id`, prefer using it — it's the same number of characters in JSON and saves a name-resolution round-trip.
+3. **When persisting a project choice across a long session.** UUIDs are stable; names can be renamed.
+
+**When `project` (name) is fine:**
+
+- Local single-workspace setups (no collision risk).
+- One-off operations where the name is clearly visible to the user (e.g., quick `search_notes(project="main", ...)`).
+- The user explicitly references a project by name in their message.
+
+**Example — cloud multi-workspace pattern:**
+
+```python
+# Discover and pick the right project for this user
+projects = await list_memory_projects()
+target = next(p for p in projects if p["name"] == "research" and p["workspace"]["slug"] == "acme")
+
+# Use the UUID for all subsequent operations — no ambiguity
+await write_note(
+    title="Meeting Notes",
+    content="...",
+    folder="meetings",
+    project_id=target["external_id"],
+)
+results = await search_notes(query="kickoff", project_id=target["external_id"])
+```
+
+**Precedence rule:** When both are passed, `project_id` wins. This lets you safely supply `project="main"` for backward compatibility while still routing precisely with `project_id`.
 
 ### Cross-Project Operations
 

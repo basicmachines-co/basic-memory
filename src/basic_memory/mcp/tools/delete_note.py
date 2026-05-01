@@ -159,6 +159,7 @@ async def delete_note(
         Field(default=False, validation_alias=AliasChoices("is_directory", "is_dir")),
     ] = False,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> bool | str | dict:
@@ -182,6 +183,9 @@ async def delete_note(
                      (without file extensions). Defaults to False.
         project: Project name to delete from. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         output_format: "text" preserves existing behavior (bool/string). "json"
             returns machine-readable deletion metadata.
         context: Optional FastMCP context for performance caching.
@@ -236,7 +240,10 @@ async def delete_note(
         if detected:
             project = detected
 
-    async with get_project_client(project, context=context) as (client, active_project):
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
         logger.debug(
             f"Deleting {'directory' if is_directory else 'note'}: {identifier} in project: {active_project.name}"
         )

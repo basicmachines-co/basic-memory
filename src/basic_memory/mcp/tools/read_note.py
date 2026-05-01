@@ -70,6 +70,7 @@ def _parse_opening_frontmatter(content: str) -> tuple[str, dict | None]:
 async def read_note(
     identifier: str,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     include_frontmatter: bool = False,
     context: Context | None = None,
@@ -93,6 +94,9 @@ async def read_note(
         project: Project name to read from. Optional - server will resolve using the
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         identifier: The title or permalink of the note to read
                    Can be a full memory:// URL, a permalink, a title, or search text
         output_format: "text" returns markdown content or guidance text.
@@ -137,12 +141,21 @@ async def read_note(
         entrypoint="mcp",
         tool_name="read_note",
         requested_project=project,
+        requested_project_id=project_id,
         output_format=output_format,
         include_frontmatter=include_frontmatter,
     ):
-        async with get_project_client(project, context=context) as (client, active_project):
-            # Resolve identifier with project-prefix awareness for memory:// URLs
-            _, entity_path, _ = await resolve_project_and_path(client, identifier, project, context)
+        async with get_project_client(project, context=context, project_id=project_id) as (
+            client,
+            active_project,
+        ):
+            # Resolve identifier with project-prefix awareness for memory:// URLs.
+            # Pass active_project.name (the canonical resolved name) rather than the
+            # original `project` arg so the inner get_active_project cache hits even
+            # when project_id was used or `project` was wrong/ambiguous.
+            _, entity_path, _ = await resolve_project_and_path(
+                client, identifier, active_project.name, context
+            )
 
             # Validate identifier to prevent path traversal attacks
             # For memory:// URLs, validate the extracted path (not the raw URL which
@@ -233,9 +246,14 @@ async def read_note(
                 # Why: search_notes applies the same memory:// normalization and tool-level
                 #      query handling as the rest of MCP routing, which raw client calls skip.
                 # Outcome: unresolved memory URLs still fall back through normalized search.
+                # Pass project_id (external_id UUID) so the workspace selection from the
+                # outer get_project_client() is preserved across the inner re-resolution.
+                # Without this, project names that collide across workspaces could re-resolve
+                # to a different tenant via the default-workspace fallback (CLI/context=None).
                 search_type = "title" if title_only else "text"
                 response = await search_notes(
                     project=active_project.name,
+                    project_id=active_project.external_id,
                     query=identifier_text,
                     search_type=search_type,
                     output_format="json",

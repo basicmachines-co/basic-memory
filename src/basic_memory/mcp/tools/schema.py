@@ -211,6 +211,7 @@ async def schema_validate(
     note_type: Optional[str] = None,
     identifier: Optional[str] = None,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> ValidationReport | str | dict:
@@ -235,6 +236,9 @@ async def schema_validate(
         identifier: Specific note to validate (permalink, title, or path).
             If provided, validates only this note.
         project: Project name. Optional -- server will resolve.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -250,7 +254,10 @@ async def schema_validate(
         # Validate in a specific project
         schema_validate(note_type="person", project="my-research")
     """
-    async with get_project_client(project, context=context) as (client, active_project):
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
         logger.info(
             f"MCP tool call tool=schema_validate project={active_project.name} "
             f"note_type={note_type} identifier={identifier}"
@@ -317,6 +324,7 @@ async def schema_infer(
     note_type: str,
     threshold: float = 0.25,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -340,6 +348,9 @@ async def schema_infer(
         threshold: Minimum frequency (0-1) for a field to be suggested as optional.
             Default 0.25 (25%). Fields above 95% become required.
         project: Project name. Optional -- server will resolve.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -355,7 +366,10 @@ async def schema_infer(
         # Infer in a specific project
         schema_infer("person", project="my-research")
     """
-    async with get_project_client(project, context=context) as (client, active_project):
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
         logger.info(
             f"MCP tool call tool=schema_infer project={active_project.name} "
             f"note_type={note_type} threshold={threshold}"
@@ -430,6 +444,7 @@ async def schema_infer(
 async def schema_diff(
     note_type: str,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -450,6 +465,9 @@ async def schema_diff(
     Args:
         note_type: The note type to check for drift (e.g., "person").
         project: Project name. Optional -- server will resolve.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -463,7 +481,10 @@ async def schema_diff(
         # Check drift in a specific project
         schema_diff("person", project="my-research")
     """
-    async with get_project_client(project, context=context) as (client, active_project):
+    async with get_project_client(project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
         logger.info(
             f"MCP tool call tool=schema_diff project={active_project.name} note_type={note_type}"
         )

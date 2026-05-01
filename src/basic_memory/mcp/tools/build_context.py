@@ -139,6 +139,7 @@ async def build_context(
         Field(validation_alias=AliasChoices("url", "uri", "memory_url")),
     ],
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     depth: str | int | None = 1,
     timeframe: Annotated[
         Optional[TimeFrame],
@@ -178,6 +179,9 @@ async def build_context(
     Args:
         project: Project name to build context from. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         url: memory:// URI pointing to discussion content (e.g. memory://specs/search)
         depth: How many relation hops to traverse (1-3 recommended for performance)
         timeframe: How far back to look. Supports natural language like "2 days ago", "last week"
@@ -227,6 +231,7 @@ async def build_context(
         entrypoint="mcp",
         tool_name="build_context",
         requested_project=project,
+        requested_project_id=project_id,
         depth=depth or 1,
         timeframe=timeframe,
         page=page,
@@ -235,7 +240,10 @@ async def build_context(
         output_format=output_format,
         is_memory_url=str(url).startswith("memory://"),
     ):
-        async with get_project_client(project, context=context) as (client, active_project):
+        async with get_project_client(project, context=context, project_id=project_id) as (
+            client,
+            active_project,
+        ):
             logger.info(
                 f"MCP tool call tool=build_context project={active_project.name} "
                 f"url={url} depth={depth} timeframe={timeframe} output_format={output_format}"

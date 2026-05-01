@@ -62,6 +62,7 @@ async def recent_activity(
         Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
     ] = 10,
     project: Optional[str] = None,
+    project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | list[dict]:
@@ -103,6 +104,9 @@ async def recent_activity(
         project: Project name to query. Optional - server will resolve using the
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
+        project_id: Project external_id (UUID). Prefer this over `project` when known —
+                it routes to the exact project regardless of name collisions across cloud
+                workspaces. Takes precedence over `project`. Get from list_memory_projects().
         output_format: "text" returns human-readable summary text. "json" returns
             a flat list of recent items.
         context: Optional FastMCP context for performance caching.
@@ -178,9 +182,14 @@ async def recent_activity(
     if "type" not in params:
         params["type"] = [SearchItemType.ENTITY.value]
 
-    # Resolve project parameter using the three-tier hierarchy
-    # allow_discovery=True enables Discovery Mode, so a project is not required
-    resolved_project = await resolve_project_parameter(project, allow_discovery=True)
+    # Resolve project parameter using the three-tier hierarchy.
+    # allow_discovery=True enables Discovery Mode, so a project is not required.
+    # project_id (UUID) takes precedence over project name — without this fallback,
+    # callers passing only project_id would fall into Discovery Mode.
+    effective_identifier = project_id if project_id else project
+    resolved_project = await resolve_project_parameter(
+        effective_identifier, allow_discovery=True
+    )
 
     if resolved_project is None:
         # Discovery Mode: Get activity across all projects
@@ -295,7 +304,9 @@ async def recent_activity(
             f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
         )
 
-        async with get_project_client(resolved_project, context=context) as (
+        async with get_project_client(
+            resolved_project, context=context, project_id=project_id
+        ) as (
             client,
             active_project,
         ):

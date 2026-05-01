@@ -100,3 +100,71 @@ async def test_read_note_underscored_folder_by_permalink(mcp_server, app, test_p
         assert "# Example Note" in result_text
         assert "This is a test note in an underscored folder." in result_text
         assert f"{test_project.name}/archive/articles/example-note" in result_text  # permalink
+
+
+@pytest.mark.asyncio
+async def test_read_note_by_project_id(mcp_server, app, test_project):
+    """Read a note by passing project_id (UUID) instead of project name.
+
+    Verifies the project_id parameter routes through get_project_client correctly
+    in pure local mode (no cloud creds), where get_project_mode() would otherwise
+    default unknown identifiers to CLOUD and break routing.
+    """
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "By ID Note",
+                "directory": "test",
+                "content": "# By ID Note\n\nLooked up by external_id.",
+            },
+        )
+
+        # Read by external_id (UUID) instead of project name
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project_id": test_project.external_id,
+                "identifier": "By ID Note",
+            },
+        )
+
+        assert len(read_result.content) == 1
+        assert read_result.content[0].type == "text"
+        result_text = read_result.content[0].text
+        assert "# By ID Note" in result_text
+        assert "Looked up by external_id." in result_text
+
+
+@pytest.mark.asyncio
+async def test_read_note_project_id_takes_precedence_over_name(mcp_server, app, test_project):
+    """When project_id is passed alongside a wrong project name, project_id wins."""
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Precedence Note",
+                "directory": "test",
+                "content": "# Precedence Note\n\nproject_id wins.",
+            },
+        )
+
+        # Pass an obviously-wrong project name alongside the correct project_id.
+        # If project_id takes precedence (as documented), the read still succeeds.
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": "this-project-does-not-exist",
+                "project_id": test_project.external_id,
+                "identifier": "Precedence Note",
+            },
+        )
+
+        assert len(read_result.content) == 1
+        result_text = read_result.content[0].text
+        assert "# Precedence Note" in result_text
+        assert "project_id wins." in result_text
