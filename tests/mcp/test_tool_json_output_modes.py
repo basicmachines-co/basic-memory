@@ -215,6 +215,9 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     )
     assert isinstance(create_text, str)
     assert "mode-create-project" in create_text
+    # external_id should appear in the human-readable output too, so users see
+    # the UUID without re-listing projects.
+    assert "External ID:" in create_text
 
     create_json_again = await create_memory_project(
         project_name=project_name,
@@ -227,6 +230,24 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     assert Path(create_json_again["path"]) == Path(project_path)
     assert create_json_again["created"] is False
     assert create_json_again["already_exists"] is True
+    # external_id (UUID) must be present so callers can immediately use it as
+    # project_id in subsequent tool calls without a list_memory_projects() round-trip.
+    assert isinstance(create_json_again["external_id"], str)
+    assert len(create_json_again["external_id"]) > 0
+
+    # Verify create-new JSON path also returns external_id (not just already-exists).
+    new_project_name = "mode-create-fresh"
+    new_project_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "mode-create-fresh")
+    create_json_new = await create_memory_project(
+        project_name=new_project_name,
+        project_path=new_project_path,
+        output_format="json",
+    )
+    assert isinstance(create_json_new, dict)
+    assert create_json_new["created"] is True
+    assert create_json_new["already_exists"] is False
+    assert isinstance(create_json_new["external_id"], str)
+    assert len(create_json_new["external_id"]) > 0
 
     default_project_name = "mode-default-project"
     default_project_path = str(

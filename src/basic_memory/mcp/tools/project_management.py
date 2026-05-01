@@ -463,6 +463,7 @@ async def create_memory_project(
             if output_format == "json":
                 return {
                     "name": existing_match.name,
+                    "external_id": existing_match.external_id,
                     "path": existing_match.path,
                     "is_default": is_default,
                     "created": False,
@@ -472,6 +473,7 @@ async def create_memory_project(
                 f"✓ Project already exists: {existing_match.name}\n\n"
                 f"Project Details:\n"
                 f"• Name: {existing_match.name}\n"
+                f"• External ID: {existing_match.external_id}\n"
                 f"• Path: {existing_match.path}\n"
                 f"{'• Set as default project\n' if is_default else ''}"
                 "\nProject is already available for use in tool calls.\n"
@@ -486,6 +488,7 @@ async def create_memory_project(
             new_project = status_response.new_project
             return {
                 "name": new_project.name if new_project else project_name,
+                "external_id": new_project.external_id if new_project else None,
                 "path": new_project.path if new_project else project_path,
                 "is_default": bool(
                     (new_project.is_default if new_project else False) or set_default
@@ -499,6 +502,7 @@ async def create_memory_project(
         if status_response.new_project:
             result += "Project Details:\n"
             result += f"• Name: {status_response.new_project.name}\n"
+            result += f"• External ID: {status_response.new_project.external_id}\n"
             result += f"• Path: {status_response.new_project.path}\n"
 
             if set_default:
