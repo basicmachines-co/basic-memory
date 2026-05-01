@@ -118,6 +118,38 @@ def test_write_note_json_output(mock_mcp_write):
     new_callable=AsyncMock,
     return_value=WRITE_NOTE_RESULT,
 )
+def test_write_note_project_id_passthrough(mock_mcp_write):
+    """--project-id forwards to the MCP tool's project_id parameter.
+
+    Regression: removing --workspace without exposing --project-id left CLI
+    callers unable to disambiguate same-named projects across cloud workspaces.
+    """
+    uuid = "11111111-1111-1111-1111-111111111111"
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Test Note",
+            "--folder",
+            "notes",
+            "--content",
+            "hello",
+            "--project-id",
+            uuid,
+        ],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert mock_mcp_write.call_args.kwargs["project_id"] == uuid
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_write_note",
+    new_callable=AsyncMock,
+    return_value=WRITE_NOTE_RESULT,
+)
 def test_write_note_with_tags(mock_mcp_write):
     """write-note passes tags through to MCP tool."""
     result = runner.invoke(

@@ -62,6 +62,13 @@ def write_note(
             help="The project to write to. If not provided, the default project will be used."
         ),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -102,6 +109,7 @@ def write_note(
                     content=content,
                     directory=folder,
                     project=project,
+                    project_id=project_id,
                     tags=tags,
                     output_format="json",
                 )
@@ -127,6 +135,13 @@ def read_note(
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -147,6 +162,7 @@ def read_note(
                 mcp_read_note(
                     identifier=identifier,
                     project=project,
+                    project_id=project_id,
                     include_frontmatter=include_frontmatter,
                     output_format="json",
                 )
@@ -185,6 +201,13 @@ def edit_note(
             help="The project to edit. If not provided, the default project will be used."
         ),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -208,6 +231,7 @@ def edit_note(
                     operation=operation,
                     content=content,
                     project=project,
+                    project_id=project_id,
                     section=section,
                     find_text=find_text,
                     expected_replacements=expected_replacements,
@@ -245,6 +269,13 @@ def build_context(
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -265,6 +296,7 @@ def build_context(
                 mcp_build_context(
                     url=url,
                     project=project,
+                    project_id=project_id,
                     depth=depth,
                     timeframe=timeframe,
                     page=page,
@@ -297,6 +329,13 @@ def recent_activity(
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -322,6 +361,7 @@ def recent_activity(
                     page=page,
                     page_size=page_size,
                     project=project,
+                    project_id=project_id,
                     output_format="json",
                 )
             )
@@ -382,6 +422,13 @@ def search_notes(
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
     ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -453,6 +500,7 @@ def search_notes(
                 mcp_search(
                     query=query or None,
                     project=project,
+                    project_id=project_id,
                     search_type=search_type,
                     output_format="json",
                     page=page,
@@ -562,6 +610,13 @@ def schema_validate(
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -595,6 +650,7 @@ def schema_validate(
                     note_type=note_type,
                     identifier=identifier,
                     project=project,
+                    project_id=project_id,
                     output_format="json",
                 )
             )
@@ -625,6 +681,13 @@ def schema_infer(
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -647,6 +710,7 @@ def schema_infer(
                     note_type=note_type,
                     threshold=threshold,
                     project=project,
+                    project_id=project_id,
                     output_format="json",
                 )
             )
@@ -674,6 +738,13 @@ def schema_diff(
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -694,6 +765,7 @@ def schema_diff(
                 mcp_schema_diff(
                     note_type=note_type,
                     project=project,
+                    project_id=project_id,
                     output_format="json",
                 )
             )
