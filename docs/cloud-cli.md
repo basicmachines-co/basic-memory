@@ -113,7 +113,7 @@ bm project add research --cloud
 bm project add research --cloud --local-path ~/Documents/research
 
 # Or configure sync for existing project
-bm project sync-setup research ~/Documents/research
+bm cloud sync-setup research ~/Documents/research
 ```
 
 **What happens under the covers:**
@@ -236,7 +236,7 @@ bm project add research --cloud --local-path ~/Documents/research
 
 ```bash
 # Project already exists on cloud
-bm project sync-setup research ~/Documents/research
+bm cloud sync-setup research ~/Documents/research
 ```
 
 **What this does:**
@@ -739,7 +739,7 @@ bm project sync --name research
 **Solution:**
 
 ```bash
-bm project sync-setup research ~/Documents/research
+bm cloud sync-setup research ~/Documents/research
 bm project bisync --name research --resync
 ```
 
@@ -795,7 +795,7 @@ bm project list --local                   # Local project list
 bm project list --cloud                   # Cloud project list
 bm project add <name> --cloud             # Create cloud project (no sync)
 bm project add <name> --cloud --local-path <path> # Create with local sync
-bm project sync-setup <name> <path>       # Add sync to existing project
+bm cloud sync-setup <name> <path>       # Add sync to existing project
 bm project rm <name>                      # Delete project
 ```
 

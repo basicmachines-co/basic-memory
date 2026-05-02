@@ -179,7 +179,7 @@ def setup() -> None:
         console.print("1. Add a project with local sync path:")
         console.print("   bm project add research --cloud --local-path ~/Documents/research")
         console.print("\n   Or configure sync for an existing project:")
-        console.print("   bm project sync-setup research ~/Documents/research")
+        console.print("   bm cloud sync-setup research ~/Documents/research")
         console.print("\n2. Preview the initial sync (recommended):")
         console.print("   bm project bisync --name research --resync --dry-run")
         console.print("\n3. If all looks good, run the actual sync:")
