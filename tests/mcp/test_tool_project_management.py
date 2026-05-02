@@ -220,11 +220,37 @@ async def test_list_memory_projects_cloud_failure_graceful(app, test_project):
 
 @pytest.mark.asyncio
 async def test_list_memory_projects_factory_mode(app, test_project):
-    """In factory mode (cloud app), projects are reported as cloud-sourced with workspace metadata."""
-    factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
-    factory_list = _make_list([factory_project], default="cloud-proj")
-
-    ws = _make_workspace("tenant-abc", "Personal", "personal")
+    """Factory mode lists projects from every accessible workspace."""
+    personal_project = _make_project(
+        "personal-main",
+        "/personal-main",
+        is_default=True,
+        external_id="personal-project-uuid",
+    )
+    team_project = _make_project(
+        "team-specs",
+        "/team-specs",
+        id=2,
+        external_id="team-project-uuid",
+    )
+    personal_ws = _make_workspace(
+        "personal-tenant",
+        "Personal",
+        slug="personal",
+        is_default=True,
+    )
+    team_ws = _make_workspace(
+        "team-tenant",
+        "Team Paul",
+        "organization",
+        slug="team-paul",
+    )
+    workspace_index = _make_workspace_index(
+        [
+            (personal_ws, [personal_project]),
+            (team_ws, [team_project]),
+        ]
+    )
 
     with (
         patch(
@@ -232,28 +258,48 @@ async def test_list_memory_projects_factory_mode(app, test_project):
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
-            return_value=factory_list,
-        ),
-        patch(
-            "basic_memory.mcp.project_context.get_available_workspaces",
-            new_callable=AsyncMock,
-            return_value=[ws],
-        ),
+            return_value=workspace_index,
+        ) as mock_index,
     ):
         result = await list_memory_projects()
 
-    assert "- cloud-proj (cloud)" in result
+    mock_index.assert_awaited_once()
+    assert "Workspace: Personal (personal default)" in result
+    assert "Workspace: Team Paul (team-paul)" in result
+    assert "- personal-main (cloud) [personal-project-uuid]" in result
+    assert "- team-specs (cloud) [team-project-uuid]" in result
 
 
 @pytest.mark.asyncio
 async def test_list_memory_projects_factory_mode_json_includes_workspace(app, test_project):
-    """In factory mode, JSON output includes workspace metadata for cloud projects."""
-    factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
-    factory_list = _make_list([factory_project], default="cloud-proj")
-
-    ws = _make_workspace("tenant-abc", "My Org", "organization")
+    """In factory mode, JSON output includes workspace metadata for all cloud projects."""
+    default_project = _make_project(
+        "personal-main",
+        "/personal-main",
+        is_default=True,
+        external_id="personal-project-uuid",
+    )
+    org_project = _make_project(
+        "cloud-proj",
+        "/cloud-proj",
+        id=2,
+        external_id="org-project-uuid",
+    )
+    personal_ws = _make_workspace(
+        "personal-tenant",
+        "Personal",
+        slug="personal",
+        is_default=True,
+    )
+    org_ws = _make_workspace("tenant-abc", "My Org", "organization")
+    workspace_index = _make_workspace_index(
+        [
+            (personal_ws, [default_project]),
+            (org_ws, [org_project]),
+        ]
+    )
 
     with (
         patch(
@@ -261,22 +307,18 @@ async def test_list_memory_projects_factory_mode_json_includes_workspace(app, te
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
-            return_value=factory_list,
-        ),
-        patch(
-            "basic_memory.mcp.project_context.get_available_workspaces",
-            new_callable=AsyncMock,
-            return_value=[ws],
+            return_value=workspace_index,
         ),
     ):
         result = await list_memory_projects(output_format="json")
 
     assert isinstance(result, dict)
+    assert result["default_project"] == "personal-main"
     projects = result["projects"]
-    assert len(projects) == 1
-    proj = projects[0]
+    assert len(projects) == 2
+    proj = {project["name"]: project for project in projects}["cloud-proj"]
     assert proj["source"] == "cloud"
     assert proj["cloud_path"] == "/cloud-proj"
     assert proj["local_path"] is None
@@ -290,30 +332,20 @@ async def test_list_memory_projects_factory_mode_json_includes_workspace(app, te
 
 @pytest.mark.asyncio
 async def test_list_memory_projects_factory_mode_workspace_lookup_failure(app, test_project):
-    """In factory mode, workspace lookup failure still returns projects as cloud-sourced."""
-    factory_project = _make_project("cloud-proj", "/cloud-proj", is_default=True)
-    factory_list = _make_list([factory_project], default="cloud-proj")
-
+    """In factory mode, workspace discovery failures are surfaced to the caller."""
     with (
         patch(
             "basic_memory.mcp.tools.project_management.is_factory_mode",
             return_value=True,
         ),
         patch(
-            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
-            new_callable=AsyncMock,
-            return_value=factory_list,
-        ),
-        patch(
-            "basic_memory.mcp.project_context.get_available_workspaces",
+            "basic_memory.mcp.tools.project_management.ensure_workspace_project_index",
             new_callable=AsyncMock,
             side_effect=RuntimeError("no user context"),
         ),
     ):
-        result = await list_memory_projects()
-
-    # Still reported as cloud even without workspace metadata
-    assert "- cloud-proj (cloud)" in result
+        with pytest.raises(RuntimeError, match="no user context"):
+            await list_memory_projects()
 
 
 @pytest.mark.asyncio

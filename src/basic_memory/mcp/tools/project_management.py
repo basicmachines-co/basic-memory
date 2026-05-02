@@ -284,45 +284,20 @@ async def list_memory_projects(
     # --- Factory mode (cloud app) ---
     # Trigger: set_client_factory() was called (e.g., basic-memory-cloud)
     # Why: there is no local ASGI server; the factory IS the cloud source
-    # Outcome: single fetch, projects reported as source="cloud" with workspace metadata
+    # Outcome: fetch every accessible workspace so callers can discover cross-workspace IDs
     if is_factory_mode():
-        async with get_client() as client:
-            project_client = ProjectClient(client)
-            project_list = await project_client.list_projects()
-
-        # Resolve workspace metadata so cloud projects carry their workspace info
-        cloud_ws_name: str | None = None
-        cloud_ws_type: str | None = None
-        cloud_ws_tenant_id: str | None = None
-        cloud_ws_slug: str | None = None
-        cloud_ws_is_default = False
-        try:
-            from basic_memory.mcp.project_context import get_available_workspaces
-
-            workspaces = await get_available_workspaces(context)
-            if workspaces:
-                matched = workspaces[0]
-                cloud_ws_name = matched.name
-                cloud_ws_type = matched.workspace_type
-                cloud_ws_tenant_id = matched.tenant_id
-                cloud_ws_slug = matched.slug
-                cloud_ws_is_default = matched.is_default
-        except Exception:
-            pass  # workspace lookup is best-effort
-
-        merged = _merge_projects(
+        workspace_index = await ensure_workspace_project_index(context=context)
+        merged = _merge_workspace_projects(None, workspace_index.entries)
+        default_project = next(
+            (
+                entry.project.name
+                for entry in workspace_index.entries
+                if entry.workspace.is_default and entry.project.is_default
+            ),
             None,
-            project_list,
-            cloud_workspace_name=cloud_ws_name,
-            cloud_workspace_type=cloud_ws_type,
-            cloud_workspace_tenant_id=cloud_ws_tenant_id,
-            cloud_workspace_slug=cloud_ws_slug,
-            cloud_workspace_is_default=cloud_ws_is_default,
         )
         if output_format == "json":
-            return _format_project_list_json(
-                merged, project_list.default_project, constrained_project
-            )
+            return _format_project_list_json(merged, default_project, constrained_project)
         if constrained_project:
             return _format_constrained_text(constrained_project)
         return _format_project_list_text(merged)
