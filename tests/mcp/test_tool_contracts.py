@@ -23,7 +23,13 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     ],
     "canvas": ["nodes", "edges", "title", "directory", "project", "project_id"],
     "cloud_info": [],
-    "create_memory_project": ["project_name", "project_path", "set_default", "output_format"],
+    "create_memory_project": [
+        "project_name",
+        "project_path",
+        "set_default",
+        "workspace_id",
+        "output_format",
+    ],
     "delete_note": ["identifier", "is_directory", "project", "project_id", "output_format"],
     "delete_project": ["project_name"],
     "edit_note": [
