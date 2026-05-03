@@ -433,10 +433,13 @@ def _cloud_workspace_discovery_available(config: BasicMemoryConfig) -> bool:
     if _explicit_routing() and _force_local_mode():
         return False
 
+    # Trigger: local project config is present even though cloud credentials are saved.
+    # Why: existing local `memory://...` URLs must not depend on workspace discovery.
+    # Outcome: only factory, explicit cloud, or cloud-only sessions attempt discovery here.
     return (
         is_factory_mode()
         or (_explicit_routing() and not _force_local_mode())
-        or has_cloud_credentials(config)
+        or (not config.projects and has_cloud_credentials(config))
     )
 
 
@@ -474,15 +477,14 @@ async def resolve_workspace_qualified_memory_url(
                 "could not be loaded. Retry after workspace discovery recovers."
             )
 
-        available = ", ".join(
-            entry.qualified_name
-            for entry in index.entries
-            if entry.workspace.tenant_id == workspace.tenant_id
-        )
-        raise ValueError(
-            f"Project '{project_identifier}' was not found in workspace "
-            f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
-        )
+        # Trigger: first segment matches a workspace slug but the second does not
+        #   match a project in that workspace.
+        # Why: workspace-qualified URLs require both route segments to match; otherwise
+        #   existing project-prefixed URLs like `memory://main/notes/foo` can collide
+        #   with a workspace slug named `main`.
+        # Outcome: treat this as not workspace-qualified and let the caller use
+        #   the existing project-prefix/default-project resolver.
+        return None
     if len(matches) > 1:
         details = ", ".join(
             f"{entry.qualified_name} ({entry.project.external_id})" for entry in matches
@@ -1121,6 +1123,10 @@ async def detect_project_from_memory_url_prefix(
     if not identifier.strip().startswith("memory://"):
         return None
 
+    local_project = detect_project_from_url_prefix(identifier, config)
+    if local_project is not None:
+        return local_project
+
     if _cloud_workspace_discovery_available(config):
         resolution = await resolve_workspace_qualified_memory_url(
             identifier,
@@ -1129,7 +1135,7 @@ async def detect_project_from_memory_url_prefix(
         if resolution is not None:
             return resolution.project_identifier
 
-    return detect_project_from_url_prefix(identifier, config)
+    return None
 
 
 @asynccontextmanager

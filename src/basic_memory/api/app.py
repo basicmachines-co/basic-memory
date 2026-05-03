@@ -33,7 +33,7 @@ from basic_memory.services.initialization import initialize_app
 from basic_memory.workspace_context import (
     WORKSPACE_SLUG_HEADER,
     WORKSPACE_TYPE_HEADER,
-    validate_workspace_permalink_context_values,
+    workspace_permalink_context_validation_error,
     workspace_permalink_context,
 )
 
@@ -101,12 +101,11 @@ async def workspace_permalink_context_middleware(request: Request, call_next):
     workspace_slug = request.headers.get(WORKSPACE_SLUG_HEADER)
     workspace_type = request.headers.get(WORKSPACE_TYPE_HEADER)
 
-    try:
-        validate_workspace_permalink_context_values(workspace_slug, workspace_type)
-    except ValueError as exc:
+    validation_error = workspace_permalink_context_validation_error(workspace_slug, workspace_type)
+    if validation_error is not None:
         return JSONResponse(
             status_code=400,
-            content={"detail": str(exc)},
+            content={"detail": validation_error},
         )
 
     if not workspace_slug:

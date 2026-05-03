@@ -40,18 +40,30 @@ def validate_workspace_permalink_context_values(
     workspace_type: str | None,
 ) -> None:
     """Validate workspace permalink metadata before it can affect stored permalinks."""
+    validation_error = workspace_permalink_context_validation_error(workspace_slug, workspace_type)
+    if validation_error is not None:
+        raise ValueError(validation_error)
+
+
+def workspace_permalink_context_validation_error(
+    workspace_slug: str | None,
+    workspace_type: str | None,
+) -> str | None:
+    """Return the validation error for workspace permalink metadata, if any."""
     if bool(workspace_slug) != bool(workspace_type):
-        raise ValueError("workspace_slug and workspace_type must be provided together")
+        return "workspace_slug and workspace_type must be provided together"
 
     if not workspace_slug or not workspace_type:
-        return
+        return None
 
     if _WORKSPACE_SLUG_PATTERN.fullmatch(workspace_slug) is None:
-        raise ValueError(f"{WORKSPACE_SLUG_HEADER} must match [a-z0-9_-]+")
+        return f"{WORKSPACE_SLUG_HEADER} must match [a-z0-9_-]+"
 
     if workspace_type not in _WORKSPACE_TYPES:
         allowed = ", ".join(sorted(_WORKSPACE_TYPES))
-        raise ValueError(f"{WORKSPACE_TYPE_HEADER} must be one of: {allowed}")
+        return f"{WORKSPACE_TYPE_HEADER} must be one of: {allowed}"
+
+    return None
 
 
 @contextmanager

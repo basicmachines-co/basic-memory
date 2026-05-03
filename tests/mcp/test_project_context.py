@@ -664,6 +664,90 @@ async def test_detect_project_from_memory_url_prefix_resolves_workspace_slug(mon
 
 
 @pytest.mark.asyncio
+async def test_detect_project_from_memory_url_prefix_prefers_local_project_prefix(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig, ProjectEntry
+    from basic_memory.mcp.project_context import detect_project_from_memory_url_prefix
+
+    async def fail_if_called(context=None):  # pragma: no cover
+        raise AssertionError("Local project-prefixed memory URLs must not discover workspaces")
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fail_if_called)
+
+    resolved = await detect_project_from_memory_url_prefix(
+        "memory://main/notes/foo",
+        BasicMemoryConfig(
+            projects={"main": ProjectEntry(path="/tmp/main")},
+            cloud_api_key="bmc_test123",
+        ),
+    )
+
+    assert resolved == "main"
+
+
+@pytest.mark.asyncio
+async def test_detect_project_from_memory_url_prefix_skips_workspace_discovery_for_local_config(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig, ProjectEntry
+    from basic_memory.mcp.project_context import detect_project_from_memory_url_prefix
+
+    async def fail_if_called(context=None):  # pragma: no cover
+        raise AssertionError("Saved cloud credentials must not force local workspace discovery")
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fail_if_called)
+
+    resolved = await detect_project_from_memory_url_prefix(
+        "memory://notes/foo/bar",
+        BasicMemoryConfig(
+            projects={"main": ProjectEntry(path="/tmp/main")},
+            cloud_api_key="bmc_test123",
+        ),
+    )
+
+    assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_qualified_memory_url_ignores_workspace_project_miss(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_qualified_memory_url,
+    )
+
+    workspace = _workspace(
+        tenant_id="main-tenant",
+        workspace_type="organization",
+        slug="main",
+        name="Main Workspace",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=workspace,
+            project=_project("research", id=1, external_id="research-project-id"),
+        ),
+    )
+    index = _build_workspace_project_index((workspace,), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    resolved = await resolve_workspace_qualified_memory_url("memory://main/notes/foo")
+
+    assert resolved is None
+
+
+@pytest.mark.asyncio
 async def test_resolve_workspace_qualified_memory_url_fails_on_duplicate_project_permalink(
     monkeypatch,
 ):
