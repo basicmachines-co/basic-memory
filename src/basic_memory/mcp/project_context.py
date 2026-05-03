@@ -422,6 +422,30 @@ def _split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str
     return workspace_slug, project_identifier, remainder
 
 
+def _canonical_memory_path_for_workspace(
+    *,
+    workspace_slug: str,
+    workspace_type: str,
+    project_permalink: str,
+    remainder: str,
+    include_project: bool,
+) -> str:
+    """Return the stored canonical path for a workspace-qualified memory URL."""
+    normalized_remainder = remainder.strip("/")
+    if workspace_type == "organization":
+        prefix = f"{generate_permalink(workspace_slug)}/{project_permalink}"
+    elif workspace_type == "personal":
+        prefix = project_permalink if include_project else ""
+    else:
+        raise ValueError(f"Unsupported workspace_type for memory URL routing: {workspace_type}")
+
+    if not prefix:
+        return normalized_remainder
+    if not normalized_remainder:
+        return prefix
+    return f"{prefix}/{normalized_remainder}"
+
+
 def _cloud_workspace_discovery_available(config: BasicMemoryConfig) -> bool:
     """Return True when workspace discovery can be used without forcing local routing."""
     from basic_memory.mcp.async_client import (
@@ -496,7 +520,13 @@ async def resolve_workspace_qualified_memory_url(
         )
 
     entry = matches[0]
-    canonical_path = f"{entry.workspace.slug}/{entry.project.permalink}/{remainder}"
+    canonical_path = _canonical_memory_path_for_workspace(
+        workspace_slug=entry.workspace.slug,
+        workspace_type=entry.workspace.workspace_type,
+        project_permalink=entry.project.permalink,
+        remainder=remainder,
+        include_project=ConfigManager().config.permalinks_include_project,
+    )
     return WorkspaceMemoryUrlResolution(entry=entry, canonical_path=canonical_path)
 
 
@@ -1005,7 +1035,19 @@ async def resolve_project_and_path(
             if normalized_path == qualified_prefix or normalized_path.startswith(
                 f"{qualified_prefix}/"
             ):
-                return cached_project, normalized_path, True
+                remainder = (
+                    ""
+                    if normalized_path == qualified_prefix
+                    else normalized_path.removeprefix(f"{qualified_prefix}/")
+                )
+                resolved_path = _canonical_memory_path_for_workspace(
+                    workspace_slug=cached_workspace.slug,
+                    workspace_type=cached_workspace.workspace_type,
+                    project_permalink=cached_project.permalink,
+                    remainder=remainder,
+                    include_project=bool(include_project),
+                )
+                return cached_project, resolved_path, True
 
         workspace_context = current_workspace_permalink_context()
         if workspace_context and project:
@@ -1016,7 +1058,19 @@ async def resolve_project_and_path(
                 f"{qualified_prefix}/"
             ):
                 active_project = await get_active_project(client, project, context, headers)
-                return active_project, normalized_path, True
+                remainder = (
+                    ""
+                    if normalized_path == qualified_prefix
+                    else normalized_path.removeprefix(f"{qualified_prefix}/")
+                )
+                resolved_path = _canonical_memory_path_for_workspace(
+                    workspace_slug=workspace_context.workspace_slug,
+                    workspace_type=workspace_context.workspace_type,
+                    project_permalink=project_permalink,
+                    remainder=remainder,
+                    include_project=bool(include_project),
+                )
+                return active_project, resolved_path, True
 
         project_prefix, remainder = _split_project_prefix(normalized_path)
         include_project = config.permalinks_include_project

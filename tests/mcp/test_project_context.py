@@ -787,6 +787,49 @@ async def test_resolve_workspace_qualified_memory_url_fails_on_duplicate_project
 
 
 @pytest.mark.asyncio
+async def test_resolve_workspace_qualified_memory_url_uses_personal_canonical_path(
+    config_manager,
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_qualified_memory_url,
+    )
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=personal,
+            project=_project("main", id=1, external_id="personal-main-id"),
+        ),
+    )
+    index = _build_workspace_project_index((personal,), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    resolved = await resolve_workspace_qualified_memory_url("memory://personal/main/notes/foo")
+
+    assert resolved is not None
+    assert resolved.canonical_path == "main/notes/foo"
+
+
+@pytest.mark.asyncio
 async def test_get_project_client_routes_duplicate_project_through_workspace_slug(
     config_manager,
     monkeypatch,
@@ -1284,6 +1327,55 @@ async def test_resolve_project_and_path_keeps_workspace_qualified_canonical_path
 
     assert active_project == cached_project
     assert resolved_path == "team-paul/main/notes/foo"
+    assert is_memory_url is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_strips_personal_workspace_prefix(
+    config_manager,
+    monkeypatch,
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = _ContextState()
+    cached_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    personal_workspace = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    await context.set_state("active_project", cached_project.model_dump())
+    await context.set_state("active_workspace", personal_workspace.model_dump())
+
+    async def fake_call_post(*args, **kwargs):
+        raise ToolError("project not found")
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://personal/main/notes/foo",
+        context=_ctx(context),
+    )
+
+    assert active_project == cached_project
+    assert resolved_path == "main/notes/foo"
     assert is_memory_url is True
 
 
