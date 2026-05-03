@@ -1558,7 +1558,7 @@ class TestGetProjectClientRoutingOrder:
 
     @pytest.mark.asyncio
     async def test_cloud_project_uses_per_project_workspace_id(self, config_manager, monkeypatch):
-        """Cloud project with workspace_id also supplies workspace permalink context."""
+        """Cloud project with workspace_id uses cached workspace permalink context."""
         from basic_memory.mcp.project_context import get_project_client
         from basic_memory.config import ProjectEntry, ProjectMode
         from basic_memory.workspace_context import (
@@ -1575,11 +1575,6 @@ class TestGetProjectClientRoutingOrder:
         config.cloud_api_key = "bmc_test123"
         config_manager.save_config(config)
 
-        from contextlib import asynccontextmanager
-        from basic_memory.mcp.project_context import (
-            WorkspaceProjectEntry,
-            _build_workspace_project_index,
-        )
         from basic_memory.schemas.project_info import ProjectItem
 
         seen: dict[str, object] = {}
@@ -1590,19 +1585,16 @@ class TestGetProjectClientRoutingOrder:
             name="Team Paul",
             role="editor",
         )
-        project = _project("Cloud Proj", id=42, external_id="cloud-project-id")
-        index = _build_workspace_project_index(
-            (workspace,),
-            (WorkspaceProjectEntry(workspace=workspace, project=project),),
-        )
+        context = _ContextState()
+        await context.set_state("active_workspace", workspace.model_dump())
 
         async def fail_resolve_workspace_parameter(workspace=None, context=None):
             raise AssertionError(
                 "Configured workspace_id should not prompt for workspace selection"
             )
 
-        async def fake_ensure_workspace_project_index(context=None):
-            return index
+        async def fail_ensure_workspace_project_index(context=None):  # pragma: no cover
+            raise AssertionError("Configured workspace_id should not require workspace discovery")
 
         monkeypatch.setattr(
             "basic_memory.mcp.project_context.resolve_workspace_parameter",
@@ -1610,7 +1602,7 @@ class TestGetProjectClientRoutingOrder:
         )
         monkeypatch.setattr(
             "basic_memory.mcp.project_context._ensure_workspace_project_index",
-            fake_ensure_workspace_project_index,
+            fail_ensure_workspace_project_index,
         )
 
         @asynccontextmanager
@@ -1635,7 +1627,10 @@ class TestGetProjectClientRoutingOrder:
             fake_get_active_project,
         )
 
-        async with get_project_client(project="cloud-proj") as (_client, active_project):
+        async with get_project_client(
+            project="cloud-proj",
+            context=_ctx(context),
+        ) as (_client, active_project):
             assert active_project.external_id == "cloud-project-id"
 
         assert seen["project_name"] == "cloud-proj"
@@ -1644,6 +1639,140 @@ class TestGetProjectClientRoutingOrder:
         assert permalink_context is not None
         assert permalink_context.workspace_slug == "team-paul"
         assert permalink_context.workspace_type == "organization"
+
+    @pytest.mark.asyncio
+    async def test_cloud_project_workspace_id_routes_without_discovery(
+        self, config_manager, monkeypatch
+    ):
+        """Configured workspace_id should route even when workspace metadata is unavailable."""
+        from contextlib import asynccontextmanager
+
+        import basic_memory.mcp.project_context as project_context
+        from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.config import ProjectEntry, ProjectMode
+        from basic_memory.schemas.project_info import ProjectItem
+        from basic_memory.workspace_context import current_workspace_permalink_context
+
+        config = config_manager.load_config()
+        config.projects["cloud-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "cloud-proj"),
+            mode=ProjectMode.CLOUD,
+            workspace_id="per-project-tenant-id",
+        )
+        config.cloud_api_key = "bmc_test123"
+        config_manager.save_config(config)
+
+        async def fail_ensure_workspace_project_index(context=None):  # pragma: no cover
+            raise AssertionError("Configured workspace_id should not require workspace discovery")
+
+        monkeypatch.setattr(
+            project_context,
+            "_ensure_workspace_project_index",
+            fail_ensure_workspace_project_index,
+        )
+
+        seen: dict[str, object] = {}
+
+        @asynccontextmanager
+        async def fake_get_client(project_name=None, workspace=None):
+            seen["project_name"] = project_name
+            seen["workspace"] = workspace
+            seen["permalink_context"] = current_workspace_permalink_context()
+            yield object()
+
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            return ProjectItem(
+                id=1,
+                external_id="cloud-project-id",
+                name=project_name,
+                path="/cloud-proj",
+                is_default=False,
+            )
+
+        monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+        monkeypatch.setattr(
+            project_context,
+            "get_active_project",
+            fake_get_active_project,
+        )
+
+        async with get_project_client(project="cloud-proj") as (_client, active_project):
+            assert active_project.external_id == "cloud-project-id"
+
+        assert seen["project_name"] == "cloud-proj"
+        assert seen["workspace"] == "per-project-tenant-id"
+        assert seen["permalink_context"] is None
+
+    @pytest.mark.asyncio
+    async def test_cloud_project_workspace_id_clears_stale_cached_workspace(
+        self, config_manager, monkeypatch
+    ):
+        """Configured workspace_id must not reuse slug/type from another tenant."""
+        from contextlib import asynccontextmanager
+
+        import basic_memory.mcp.project_context as project_context
+        from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.config import ProjectEntry, ProjectMode
+        from basic_memory.schemas.project_info import ProjectItem
+        from basic_memory.workspace_context import current_workspace_permalink_context
+
+        config = config_manager.load_config()
+        config.projects["cloud-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "cloud-proj"),
+            mode=ProjectMode.CLOUD,
+            workspace_id="per-project-tenant-id",
+        )
+        config.cloud_api_key = "bmc_test123"
+        config_manager.save_config(config)
+
+        context = _ContextState()
+        stale_workspace = _workspace(
+            tenant_id="other-tenant-id",
+            workspace_type="organization",
+            slug="other-team",
+            name="Other Team",
+            role="editor",
+        )
+        await context.set_state("active_workspace", stale_workspace.model_dump())
+
+        async def fail_ensure_workspace_project_index(context=None):  # pragma: no cover
+            raise AssertionError("Configured workspace_id should not require workspace discovery")
+
+        monkeypatch.setattr(
+            project_context,
+            "_ensure_workspace_project_index",
+            fail_ensure_workspace_project_index,
+        )
+
+        seen: dict[str, object] = {}
+
+        @asynccontextmanager
+        async def fake_get_client(project_name=None, workspace=None):
+            seen["workspace"] = workspace
+            seen["permalink_context"] = current_workspace_permalink_context()
+            yield object()
+
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            return ProjectItem(
+                id=1,
+                external_id="cloud-project-id",
+                name=project_name,
+                path="/cloud-proj",
+                is_default=False,
+            )
+
+        monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+        monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+
+        async with get_project_client(
+            project="cloud-proj",
+            context=_ctx(context),
+        ) as (_client, active_project):
+            assert active_project.external_id == "cloud-project-id"
+
+        assert seen["workspace"] == "per-project-tenant-id"
+        assert seen["permalink_context"] is None
+        assert await context.get_state("active_workspace") is None
 
     @pytest.mark.asyncio
     async def test_cloud_project_uses_workspace_project_index(self, config_manager, monkeypatch):

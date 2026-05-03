@@ -5,7 +5,18 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note
+from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from basic_memory.utils import normalize_newlines
+
+
+def test_parse_opening_frontmatter_handles_crlf():
+    """JSON read_note output should strip frontmatter from Windows-written markdown."""
+    body, frontmatter = _parse_opening_frontmatter(
+        "---\r\ntitle: Windows Note\r\ntype: note\r\n---\r\n\r\nBody text\r\n"
+    )
+
+    assert frontmatter == {"title": "Windows Note", "type": "note"}
+    assert body.strip() == "Body text"
 
 
 @pytest.mark.asyncio

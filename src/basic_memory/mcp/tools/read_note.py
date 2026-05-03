@@ -33,10 +33,10 @@ def _parse_opening_frontmatter(content: str) -> tuple[str, dict | None]:
     If parsing fails or frontmatter is not a mapping, returns body unchanged and None.
     """
     original_content = content
-    if not content.startswith("---\n"):
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
         return original_content, None
 
-    lines = content.splitlines(keepends=True)
     closing_index = None
     for i in range(1, len(lines)):
         if lines[i].strip() == "---":

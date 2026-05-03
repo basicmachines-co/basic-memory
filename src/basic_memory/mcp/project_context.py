@@ -832,23 +832,20 @@ async def _default_workspace_project_entry(
 async def _workspace_metadata_by_tenant_id(
     tenant_id: str,
     context: Optional[Context] = None,
-) -> WorkspaceInfo:
-    """Return workspace metadata for a configured tenant id."""
+) -> WorkspaceInfo | None:
+    """Return cached workspace metadata for a configured tenant id."""
     cached_workspace = await _get_cached_active_workspace(context)
     if cached_workspace and cached_workspace.tenant_id == tenant_id:
         return cached_workspace
 
-    index = await _ensure_workspace_project_index(context=context)
-    workspace = next(
-        (workspace for workspace in index.workspaces if workspace.tenant_id == tenant_id),
-        None,
-    )
-    if workspace is None:
-        raise ValueError(
-            f"Configured workspace_id '{tenant_id}' is not in accessible workspaces. "
-            "Retry after workspace discovery recovers or reconfigure the project workspace."
-        )
-    return workspace
+    if cached_workspace and context:
+        # Trigger: the configured workspace_id differs from cached workspace metadata.
+        # Why: tenant_id routes the request, but stale workspace slug/type would corrupt
+        #   memory URL normalization and canonical permalink headers.
+        # Outcome: drop stale metadata and route without permalink decoration.
+        await context.set_state("active_workspace", None)
+
+    return None
 
 
 async def resolve_workspace_parameter(
