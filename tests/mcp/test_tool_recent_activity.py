@@ -534,3 +534,54 @@ def test_format_project_output_no_more_pages():
     )
     assert "1 items found." in out
     assert "Use page=" not in out
+
+
+def test_format_project_output_shows_all_entities_beyond_five():
+    """Formatter must not cap entity or relation display at 5 regardless of page_size.
+
+    Regression test for: https://github.com/basicmachines-co/basic-memory/issues/784
+    The API already paginates by page_size; the formatter should not impose a lower cap.
+    """
+    import importlib
+    import uuid
+
+    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
+
+    now = datetime.now(timezone.utc)
+
+    def make_entity(idx: int) -> ContextResult:
+        return ContextResult(
+            primary_result=EntitySummary(
+                external_id=str(uuid.uuid4()),
+                entity_id=idx,
+                permalink=f"notes/note-{idx:02d}",
+                title=f"Note {idx:02d}",
+                content=None,
+                file_path=f"notes/note-{idx:02d}.md",
+                created_at=now,
+            ),
+            observations=[],
+            related_results=[],
+        )
+
+    # Build 9 entity results — more than the old hardcoded cap of 5
+    results = [make_entity(i) for i in range(1, 10)]
+    activity = GraphContext(
+        results=results,
+        metadata=MemoryMetadata(depth=1, generated_at=now),
+        has_more=False,
+    )
+
+    out = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=activity,
+        timeframe="today",
+        type_filter="entity",
+        page=1,
+    )
+
+    # All 9 titles must appear in the output
+    for i in range(1, 10):
+        assert f"Note {i:02d}" in out, f"Note {i:02d} missing from output"
+
+    assert "9 items found." in out

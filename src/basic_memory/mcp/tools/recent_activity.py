@@ -495,7 +495,7 @@ def _format_project_output(
     # Show entities (notes/documents)
     if entities:
         lines.append(f"\n**📄 Recent Notes & Documents ({len(entities)}):**")
-        for entity in entities[:5]:  # Show top 5
+        for entity in entities:
             title = entity.title or "Untitled"
             # Get folder from file_path
             folder = ""
@@ -510,7 +510,7 @@ def _format_project_output(
         lines.append(f"\n**🔍 Recent Observations ({len(observations)}):**")
         # Group by category
         by_category = {}
-        for obs in observations[:10]:  # Limit to recent ones
+        for obs in observations:
             category = obs.category
             if category not in by_category:
                 by_category[category] = []
@@ -528,7 +528,7 @@ def _format_project_output(
     # Show relations (connections)
     if relations:
         lines.append(f"\n**🔗 Recent Connections ({len(relations)}):**")
-        for rel in relations[:5]:  # Show top 5
+        for rel in relations:
             rel_type = rel.relation_type
             from_entity = rel.from_entity or "Unknown"
             to_entity = rel.to_entity
