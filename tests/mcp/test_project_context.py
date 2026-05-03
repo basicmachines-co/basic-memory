@@ -664,6 +664,45 @@ async def test_detect_project_from_memory_url_prefix_resolves_workspace_slug(mon
 
 
 @pytest.mark.asyncio
+async def test_resolve_workspace_qualified_memory_url_fails_on_duplicate_project_permalink(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_qualified_memory_url,
+    )
+
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=team,
+            project=_project("main", id=1, external_id="team-main-id-1"),
+        ),
+        WorkspaceProjectEntry(
+            workspace=team,
+            project=_project("Main", id=2, external_id="team-main-id-2"),
+        ),
+    )
+    index = _build_workspace_project_index((team,), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    with pytest.raises(ValueError, match="matched multiple projects"):
+        await resolve_workspace_qualified_memory_url("memory://team-paul/main/notes/foo")
+
+
+@pytest.mark.asyncio
 async def test_get_project_client_routes_duplicate_project_through_workspace_slug(
     config_manager,
     monkeypatch,

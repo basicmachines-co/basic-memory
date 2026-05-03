@@ -245,6 +245,14 @@ def build_canonical_permalink(
         return normalized_path
 
     normalized_project = generate_permalink(project_permalink)
+    normalized_workspace = generate_permalink(workspace_permalink) if workspace_permalink else None
+    if normalized_workspace:
+        workspace_project_prefix = f"{normalized_workspace}/{normalized_project}"
+        if normalized_path == workspace_project_prefix or normalized_path.startswith(
+            f"{workspace_project_prefix}/"
+        ):
+            return normalized_path
+
     if normalized_path == normalized_project or normalized_path.startswith(
         f"{normalized_project}/"
     ):
@@ -253,10 +261,6 @@ def build_canonical_permalink(
         project_path = f"{normalized_project}/{normalized_path}"
 
     if not workspace_permalink:
-        return project_path
-
-    normalized_workspace = generate_permalink(workspace_permalink)
-    if project_path == normalized_workspace or project_path.startswith(f"{normalized_workspace}/"):
         return project_path
 
     return f"{normalized_workspace}/{project_path}"

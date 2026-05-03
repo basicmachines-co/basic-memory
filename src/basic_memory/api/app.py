@@ -33,6 +33,7 @@ from basic_memory.services.initialization import initialize_app
 from basic_memory.workspace_context import (
     WORKSPACE_SLUG_HEADER,
     WORKSPACE_TYPE_HEADER,
+    validate_workspace_permalink_context_values,
     workspace_permalink_context,
 )
 
@@ -100,19 +101,19 @@ async def workspace_permalink_context_middleware(request: Request, call_next):
     workspace_slug = request.headers.get(WORKSPACE_SLUG_HEADER)
     workspace_type = request.headers.get(WORKSPACE_TYPE_HEADER)
 
-    if bool(workspace_slug) != bool(workspace_type):
+    try:
+        validate_workspace_permalink_context_values(workspace_slug, workspace_type)
+    except ValueError as exc:
         return JSONResponse(
             status_code=400,
-            content={
-                "detail": (
-                    f"{WORKSPACE_SLUG_HEADER} and {WORKSPACE_TYPE_HEADER} must be provided together"
-                )
-            },
+            content={"detail": str(exc)},
         )
 
     if not workspace_slug:
         return await call_next(request)
 
+    # ContextVar state remains active across the awaited downstream handler while
+    # this context manager is open, so entity creation can see request metadata.
     with workspace_permalink_context(
         workspace_slug=workspace_slug,
         workspace_type=workspace_type,

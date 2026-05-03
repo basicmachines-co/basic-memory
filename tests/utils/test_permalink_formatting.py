@@ -7,7 +7,7 @@ import pytest
 from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
 from basic_memory.sync.sync_service import SyncService
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import build_canonical_permalink, generate_permalink
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -124,3 +124,27 @@ def test_chinese_character_preservation(input_path, expected):
 def test_mixed_character_sets(input_path, expected):
     """Test handling of mixed character sets and edge cases."""
     assert generate_permalink(input_path) == expected
+
+
+def test_build_canonical_permalink_prefixes_same_workspace_and_project_slug():
+    """Workspace and project slugs may be equal but remain distinct permalink segments."""
+    assert (
+        build_canonical_permalink(
+            "acme",
+            "notes/foo.md",
+            workspace_permalink="acme",
+        )
+        == "acme/acme/notes/foo"
+    )
+
+
+def test_build_canonical_permalink_preserves_complete_workspace_prefix():
+    """Already workspace-qualified canonical paths should not gain duplicate prefixes."""
+    assert (
+        build_canonical_permalink(
+            "main",
+            "team-paul/main/notes/foo.md",
+            workspace_permalink="team-paul",
+        )
+        == "team-paul/main/notes/foo"
+    )

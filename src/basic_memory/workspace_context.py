@@ -1,5 +1,6 @@
 """Request-local workspace context for canonical permalink generation."""
 
+import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -7,6 +8,8 @@ from typing import Iterator
 
 WORKSPACE_SLUG_HEADER = "X-Basic-Memory-Workspace-Slug"
 WORKSPACE_TYPE_HEADER = "X-Basic-Memory-Workspace-Type"
+_WORKSPACE_SLUG_PATTERN = re.compile(r"^[a-z0-9_-]+$")
+_WORKSPACE_TYPES = {"personal", "organization"}
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,25 @@ def current_workspace_permalink_context() -> WorkspacePermalinkContext | None:
     return _workspace_permalink_context.get()
 
 
+def validate_workspace_permalink_context_values(
+    workspace_slug: str | None,
+    workspace_type: str | None,
+) -> None:
+    """Validate workspace permalink metadata before it can affect stored permalinks."""
+    if bool(workspace_slug) != bool(workspace_type):
+        raise ValueError("workspace_slug and workspace_type must be provided together")
+
+    if not workspace_slug or not workspace_type:
+        return
+
+    if _WORKSPACE_SLUG_PATTERN.fullmatch(workspace_slug) is None:
+        raise ValueError(f"{WORKSPACE_SLUG_HEADER} must match [a-z0-9_-]+")
+
+    if workspace_type not in _WORKSPACE_TYPES:
+        allowed = ", ".join(sorted(_WORKSPACE_TYPES))
+        raise ValueError(f"{WORKSPACE_TYPE_HEADER} must be one of: {allowed}")
+
+
 @contextmanager
 def workspace_permalink_context(
     workspace_slug: str | None,
@@ -42,8 +64,7 @@ def workspace_permalink_context(
     Cloud can populate this per request without storing workspace metadata in
     local project config. The slug/type pair is all permalink generation needs.
     """
-    if bool(workspace_slug) != bool(workspace_type):
-        raise ValueError("workspace_slug and workspace_type must be provided together")
+    validate_workspace_permalink_context_values(workspace_slug, workspace_type)
 
     if not workspace_slug or not workspace_type:
         yield

@@ -483,6 +483,15 @@ async def resolve_workspace_qualified_memory_url(
             f"Project '{project_identifier}' was not found in workspace "
             f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
         )
+    if len(matches) > 1:
+        details = ", ".join(
+            f"{entry.qualified_name} ({entry.project.external_id})" for entry in matches
+        )
+        raise ValueError(
+            f"Project '{project_identifier}' matched multiple projects in workspace "
+            f"'{workspace.name}' ({workspace.slug}). Project permalinks must be unique. "
+            f"Matches: {details}"
+        )
 
     entry = matches[0]
     canonical_path = f"{entry.workspace.slug}/{entry.project.permalink}/{remainder}"
@@ -706,6 +715,15 @@ async def resolve_workspace_project_identifier(
             raise ValueError(
                 f"Project '{project_identifier}' was not found in workspace "
                 f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
+            )
+        if len(matches) > 1:
+            details = ", ".join(
+                f"{entry.qualified_name} ({entry.project.external_id})" for entry in matches
+            )
+            raise ValueError(
+                f"Project '{project_identifier}' matched multiple projects in workspace "
+                f"'{workspace.name}' ({workspace.slug}). Project permalinks must be unique. "
+                f"Matches: {details}"
             )
         return matches[0]
 
