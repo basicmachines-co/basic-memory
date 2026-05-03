@@ -862,3 +862,37 @@ async def test_edit_note_skips_detection_when_project_provided(client, test_proj
         )
 
         mock_detect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_skips_detection_when_project_id_provided(
+    monkeypatch,
+    client,
+    test_project,
+):
+    """project_id is authoritative, so memory URL discovery must not run first."""
+    await write_note(
+        project=test_project.name,
+        title="Project ID Memory URL Edit",
+        directory="test",
+        content="# Project ID Memory URL Edit\nOriginal content.",
+    )
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("project_id routing should bypass URL discovery")
+
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+    monkeypatch.setattr(edit_note_module, "detect_project_from_memory_url_prefix", fail_if_called)
+
+    result = await edit_note(
+        identifier=f"memory://{test_project.name}/test/project-id-memory-url-edit",
+        project_id=test_project.external_id,
+        operation="append",
+        content="\nAppended via project_id.",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert f"project: {test_project.name}" in result

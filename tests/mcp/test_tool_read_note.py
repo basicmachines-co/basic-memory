@@ -262,6 +262,38 @@ async def test_read_note_memory_url_with_project_prefix(app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_read_note_skips_url_detection_when_project_id_provided(
+    monkeypatch,
+    app,
+    test_project,
+):
+    """project_id is authoritative, so memory URL discovery must not run first."""
+    await write_note(
+        project=test_project.name,
+        title="Project ID Memory URL Read",
+        directory="test",
+        content="Read by project id without discovery",
+    )
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("project_id routing should bypass URL discovery")
+
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    monkeypatch.setattr(read_note_module, "detect_project_from_memory_url_prefix", fail_if_called)
+
+    result = await read_note(
+        f"memory://{test_project.name}/test/project-id-memory-url-read",
+        project_id=test_project.external_id,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["content"].strip() == "Read by project id without discovery"
+
+
+@pytest.mark.asyncio
 async def test_team_workspace_write_stores_complete_canonical_permalink(
     app,
     test_project,

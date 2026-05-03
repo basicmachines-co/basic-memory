@@ -289,11 +289,11 @@ async def edit_note(
     effective_replacements = expected_replacements if expected_replacements is not None else 1
 
     # Detect project from memory URL prefix before routing
-    # Trigger: identifier starts with memory:// and no explicit project was provided
+    # Trigger: identifier starts with memory:// and no explicit project/project_id was provided
     # Why: only gate on memory:// to avoid misrouting plain paths like "research/note"
     #      where "research" is a directory, not a project name
     # Outcome: project is set from the URL prefix, routing goes to the correct project
-    if project is None and identifier.strip().startswith("memory://"):
+    if project is None and project_id is None and identifier.strip().startswith("memory://"):
         detected = await detect_project_from_memory_url_prefix(
             identifier,
             ConfigManager().config,

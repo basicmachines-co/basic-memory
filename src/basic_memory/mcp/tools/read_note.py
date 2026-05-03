@@ -130,8 +130,9 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
-    # Detect project from memory URL prefix before routing
-    if project is None:
+    # Detect project from memory URL prefix before routing.
+    # project_id routes by external UUID, so it bypasses URL discovery entirely.
+    if project is None and project_id is None:
         detected = await detect_project_from_memory_url_prefix(
             identifier,
             ConfigManager().config,

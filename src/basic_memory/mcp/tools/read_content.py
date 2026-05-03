@@ -217,8 +217,9 @@ async def read_content(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If path attempts path traversal
     """
-    # Detect project from memory URL prefix before routing
-    if project is None:
+    # Detect project from memory URL prefix before routing.
+    # project_id routes by external UUID, so it bypasses URL discovery entirely.
+    if project is None and project_id is None:
         detected = await detect_project_from_memory_url_prefix(
             path,
             ConfigManager().config,

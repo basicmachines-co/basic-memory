@@ -150,12 +150,14 @@ async def test_delete_note_detects_project_from_memory_url(client, test_project)
 
 @pytest.mark.asyncio
 async def test_delete_note_skips_detection_for_plain_path(client, test_project):
-    """delete_note should NOT call detect_project_from_url_prefix for plain path identifiers.
+    """delete_note should NOT call detect_project_from_memory_url_prefix for plain paths.
 
     A plain path like 'research/note' should not be misrouted to a project
     named 'research' — the 'research' segment is a directory, not a project.
     """
-    with patch("basic_memory.mcp.tools.delete_note.detect_project_from_url_prefix") as mock_detect:
+    with patch(
+        "basic_memory.mcp.tools.delete_note.detect_project_from_memory_url_prefix"
+    ) as mock_detect:
         # Use a plain path (no memory:// prefix) — detection should not be called
         await delete_note(
             identifier="test/nonexistent-note",
@@ -168,7 +170,9 @@ async def test_delete_note_skips_detection_for_plain_path(client, test_project):
 @pytest.mark.asyncio
 async def test_delete_note_skips_detection_when_project_provided(client, test_project):
     """delete_note should skip URL detection when project is explicitly provided."""
-    with patch("basic_memory.mcp.tools.delete_note.detect_project_from_url_prefix") as mock_detect:
+    with patch(
+        "basic_memory.mcp.tools.delete_note.detect_project_from_memory_url_prefix"
+    ) as mock_detect:
         await delete_note(
             identifier=f"memory://{test_project.name}/test/some-note",
             project=test_project.name,

@@ -551,8 +551,9 @@ async def search_notes(
             remainder = re.sub(r"\b(AND|OR|NOT)\b", "", remainder).strip()
             query = remainder or None
 
-    # Detect project from memory URL prefix before routing
-    if project is None and query is not None:
+    # Detect project from memory URL prefix before routing.
+    # project_id routes by external UUID, so it bypasses URL discovery entirely.
+    if project is None and project_id is None and query is not None:
         detected = await detect_project_from_memory_url_prefix(
             query,
             ConfigManager().config,
