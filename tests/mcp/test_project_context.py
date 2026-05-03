@@ -830,6 +830,48 @@ async def test_resolve_workspace_qualified_memory_url_uses_personal_canonical_pa
 
 
 @pytest.mark.asyncio
+async def test_resolve_workspace_qualified_memory_url_keeps_org_canonical_path_without_project_prefix(
+    config_manager,
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        resolve_workspace_qualified_memory_url,
+    )
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = False
+    config_manager.save_config(config)
+
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=team,
+            project=_project("main", id=1, external_id="team-main-id"),
+        ),
+    )
+    index = _build_workspace_project_index((team,), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+    resolved = await resolve_workspace_qualified_memory_url("memory://team-paul/main/notes/foo")
+
+    assert resolved is not None
+    assert resolved.canonical_path == "team-paul/main/notes/foo"
+
+
+@pytest.mark.asyncio
 async def test_get_project_client_routes_duplicate_project_through_workspace_slug(
     config_manager,
     monkeypatch,

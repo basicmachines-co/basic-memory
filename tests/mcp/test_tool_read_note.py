@@ -329,6 +329,46 @@ async def test_team_workspace_write_stores_complete_canonical_permalink(
 
 
 @pytest.mark.asyncio
+async def test_team_workspace_write_stores_complete_permalink_when_project_prefixes_disabled(
+    app,
+    test_project,
+    entity_repository,
+    config_manager,
+):
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = False
+    config_manager.save_config(config)
+
+    expected_permalink = f"team-paul/{test_project.name}/team/team-no-project-prefix-note"
+
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        write_result = await write_note(
+            project=test_project.name,
+            title="Team No Project Prefix Note",
+            directory="team",
+            content="Team canonical content without project-prefix config",
+        )
+
+    assert f"permalink: {expected_permalink}" in write_result
+
+    stored = await entity_repository.get_by_permalink(expected_permalink)
+    assert stored is not None
+    assert stored.permalink == expected_permalink
+
+    read_result = await read_note(
+        f"memory://{expected_permalink}",
+        project=test_project.name,
+        output_format="json",
+    )
+
+    assert isinstance(read_result, dict)
+    assert read_result["permalink"] == expected_permalink
+    assert read_result["content"].strip() == "Team canonical content without project-prefix config"
+
+
+@pytest.mark.asyncio
 async def test_personal_workspace_write_keeps_project_scoped_permalink(
     app,
     test_project,

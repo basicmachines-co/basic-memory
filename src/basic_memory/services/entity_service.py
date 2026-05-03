@@ -206,14 +206,15 @@ class EntityService(BaseService[EntityModel]):
             if self.app_config:
                 include_project = self.app_config.permalinks_include_project
 
+            workspace_permalink = workspace_slug_for_canonical_permalinks()
             project_permalink = None
-            # Trigger: project-prefixed permalinks are enabled
-            # Why: we need the project slug to build the canonical permalink
-            # Outcome: fetch and cache the project's permalink
-            if include_project:
+            # Trigger: project-prefixed permalinks are enabled, or organization workspace
+            #   context requires a complete workspace/project canonical permalink.
+            # Why: project slug is the stable middle segment for globally addressable links.
+            # Outcome: fetch and cache the project's permalink before building the canonical URL.
+            if include_project or workspace_permalink:
                 project_permalink = await self._get_project_permalink()
 
-            workspace_permalink = workspace_slug_for_canonical_permalinks()
             desired_permalink = build_canonical_permalink(
                 project_permalink,
                 file_path_str,

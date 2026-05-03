@@ -155,7 +155,12 @@ delete_note("{project}", "correct-identifier-from-search")
 If the note should be deleted but the operation keeps failing, send a message to support@basicmemory.com."""
 
 
-def _directory_path_for_delete(target_identifier: str, active_project: ProjectItem) -> str:
+def _directory_path_for_delete(
+    target_identifier: str,
+    active_project: ProjectItem,
+    *,
+    include_project_prefix: bool,
+) -> str:
     """Return the project-relative directory path expected by the delete API."""
     directory = normalize_project_reference(target_identifier).strip("/")
     project_permalink = active_project.permalink
@@ -166,7 +171,8 @@ def _directory_path_for_delete(target_identifier: str, active_project: ProjectIt
         route_prefixes.append(
             f"{generate_permalink(workspace_context.workspace_slug)}/{project_permalink}"
         )
-    route_prefixes.append(project_permalink)
+    if include_project_prefix:
+        route_prefixes.append(project_permalink)
 
     for route_prefix in route_prefixes:
         if directory.startswith(f"{route_prefix}/"):
@@ -299,7 +305,11 @@ async def delete_note(
                 #   delete_directory filters by project-relative file_path prefixes.
                 # Outcome: strip only the route prefix before calling the delete API.
                 directory_identifier = (
-                    _directory_path_for_delete(target_identifier, active_project)
+                    _directory_path_for_delete(
+                        target_identifier,
+                        active_project,
+                        include_project_prefix=ConfigManager().config.permalinks_include_project,
+                    )
                     if is_memory_url
                     else target_identifier
                 )

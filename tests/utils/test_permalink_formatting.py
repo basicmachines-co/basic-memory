@@ -8,6 +8,7 @@ from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
 from basic_memory.sync.sync_service import SyncService
 from basic_memory.utils import build_canonical_permalink, generate_permalink
+from basic_memory.workspace_context import workspace_permalink_context
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -148,3 +149,32 @@ def test_build_canonical_permalink_preserves_complete_workspace_prefix():
         )
         == "team-paul/main/notes/foo"
     )
+
+
+def test_build_canonical_permalink_workspace_prefix_ignores_project_prefix_flag():
+    """Organization workspace canonical permalinks always include workspace and project."""
+    assert (
+        build_canonical_permalink(
+            "main",
+            "notes/foo.md",
+            include_project=False,
+            workspace_permalink="team-paul",
+        )
+        == "team-paul/main/notes/foo"
+    )
+
+
+@pytest.mark.asyncio
+async def test_entity_service_workspace_permalink_uses_project_when_prefixes_disabled(
+    entity_service: EntityService,
+    project_config: ProjectConfig,
+):
+    """Workspace note creation uses complete canonical shape even without local project prefixes."""
+    assert entity_service.app_config is not None
+    entity_service.app_config.permalinks_include_project = False
+
+    with workspace_permalink_context("team-paul", "organization"):
+        permalink = await entity_service.resolve_permalink("team/no-project-prefix-service.md")
+
+    project_permalink = generate_permalink(project_config.name)
+    assert permalink == f"team-paul/{project_permalink}/team/no-project-prefix-service"

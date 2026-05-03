@@ -240,19 +240,32 @@ def build_canonical_permalink(
         Canonical permalink string.
     """
     normalized_path = generate_permalink(file_path)
-
-    if not include_project or not project_permalink:
-        return normalized_path
-
-    normalized_project = generate_permalink(project_permalink)
     normalized_workspace = generate_permalink(workspace_permalink) if workspace_permalink else None
+
     if normalized_workspace:
+        if not project_permalink:
+            raise ValueError("workspace_permalink requires project_permalink")
+
+        normalized_project = generate_permalink(project_permalink)
         workspace_project_prefix = f"{normalized_workspace}/{normalized_project}"
         if normalized_path == workspace_project_prefix or normalized_path.startswith(
             f"{workspace_project_prefix}/"
         ):
             return normalized_path
 
+        if normalized_path == normalized_project or normalized_path.startswith(
+            f"{normalized_project}/"
+        ):
+            project_path = normalized_path
+        else:
+            project_path = f"{normalized_project}/{normalized_path}"
+
+        return f"{normalized_workspace}/{project_path}"
+
+    if not include_project or not project_permalink:
+        return normalized_path
+
+    normalized_project = generate_permalink(project_permalink)
     if normalized_path == normalized_project or normalized_path.startswith(
         f"{normalized_project}/"
     ):
@@ -260,10 +273,7 @@ def build_canonical_permalink(
     else:
         project_path = f"{normalized_project}/{normalized_path}"
 
-    if not workspace_permalink:
-        return project_path
-
-    return f"{normalized_workspace}/{project_path}"
+    return project_path
 
 
 def setup_logging(
