@@ -133,6 +133,55 @@ async def test_create_and_delete_project_and_name_match_branch(
     assert delete_result.startswith("✓")
 
 
+@pytest.mark.asyncio
+async def test_create_memory_project_passes_workspace_id(app, tmp_path_factory):
+    """workspace_id is forwarded to get_client(workspace=...) for cloud workspace targeting."""
+    from contextlib import asynccontextmanager
+    import httpx
+
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.schemas.project_info import ProjectStatusResponse
+
+    project_root = tmp_path_factory.mktemp("ws-project-home")
+    captured_workspace = {}
+
+    fake_list = _make_list([], default=None)
+    fake_status = ProjectStatusResponse(
+        message="Project created",
+        status="success",
+        default=False,
+        new_project=_make_project("WS Project", str(project_root)),
+    )
+
+    @asynccontextmanager
+    async def fake_get_client(*, workspace=None, project_name=None):
+        captured_workspace["workspace"] = workspace
+        async with httpx.AsyncClient(base_url="http://testserver") as client:
+            yield client
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.get_client",
+            new=fake_get_client,
+        ),
+        patch.object(ProjectClient, "list_projects", new_callable=AsyncMock, return_value=fake_list),
+        patch.object(
+            ProjectClient, "create_project", new_callable=AsyncMock, return_value=fake_status
+        ),
+        patch(
+            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await create_memory_project(
+            project_name="WS Project",
+            project_path=str(project_root),
+            workspace_id="tenant-abc-123",
+        )
+
+    assert captured_workspace["workspace"] == "tenant-abc-123"
+
+
 # --- Cloud merge tests ---
 
 

@@ -371,6 +371,7 @@ async def create_memory_project(
     project_name: str,
     project_path: str,
     set_default: bool = False,
+    workspace_id: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -383,6 +384,9 @@ async def create_memory_project(
         project_name: Name for the new project (must be unique)
         project_path: File system path where the project will be stored
         set_default: Whether to set this project as the default (optional, defaults to False)
+        workspace_id: Target workspace tenant_id for cloud deployments. When omitted the
+            connection's default workspace is used. Discover available values via
+            list_workspaces() which returns tenant_id for each workspace.
         output_format: "text" returns the existing human-readable result text.
             "json" returns structured project creation metadata.
         context: Optional FastMCP context for progress/status logging.
@@ -393,8 +397,9 @@ async def create_memory_project(
     Example:
         create_memory_project("my-research", "~/Documents/research")
         create_memory_project("work-notes", "/home/user/work", set_default=True)
+        create_memory_project("team-notes", "/home/user/team", workspace_id="ws-uuid-here")
     """
-    async with get_client() as client:
+    async with get_client(workspace=workspace_id) as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         if constrained_project:
