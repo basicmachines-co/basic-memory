@@ -9,7 +9,7 @@ compatibility with existing MCP tools.
 """
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Awaitable, Callable, Optional, List, Tuple, cast
 from uuid import UUID
@@ -30,6 +30,10 @@ from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import generate_permalink, normalize_project_reference
+from basic_memory.workspace_context import (
+    current_workspace_permalink_context,
+    workspace_permalink_context,
+)
 
 # --- Workspace provider injection ---
 # Mirrors the set_client_factory() pattern in async_client.py.
@@ -60,6 +64,18 @@ class WorkspaceProjectIndex:
     entries_by_permalink: dict[str, tuple[WorkspaceProjectEntry, ...]]
     entries_by_external_id: dict[str, WorkspaceProjectEntry] = field(default_factory=dict)
     failed_workspaces: tuple[WorkspaceInfo, ...] = ()
+
+
+@dataclass(frozen=True)
+class WorkspaceMemoryUrlResolution:
+    """Resolved workspace/project route for a workspace-qualified memory URL."""
+
+    entry: WorkspaceProjectEntry
+    canonical_path: str
+
+    @property
+    def project_identifier(self) -> str:
+        return self.entry.qualified_name
 
 
 def set_workspace_provider(provider: Callable[[], Awaitable[list[WorkspaceInfo]]]) -> None:
@@ -388,6 +404,89 @@ def _unqualified_project_identifier(identifier: str) -> str:
     """Return the project segment from an optional qualified project identifier."""
     _, project_identifier = _split_qualified_project_identifier(identifier)
     return project_identifier
+
+
+def _split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str] | None:
+    """Split ``memory://<workspace>/<project>/<path>`` into route segments."""
+    if not identifier.strip().startswith("memory://"):
+        return None
+
+    normalized = normalize_project_reference(memory_url_path(identifier))
+    parts = normalized.split("/", 2)
+    if len(parts) != 3:
+        return None
+
+    workspace_slug, project_identifier, remainder = parts
+    if not workspace_slug or not project_identifier or not remainder:
+        return None
+    return workspace_slug, project_identifier, remainder
+
+
+def _cloud_workspace_discovery_available(config: BasicMemoryConfig) -> bool:
+    """Return True when workspace discovery can be used without forcing local routing."""
+    from basic_memory.mcp.async_client import (
+        _explicit_routing,
+        _force_local_mode,
+        is_factory_mode,
+    )
+
+    if _explicit_routing() and _force_local_mode():
+        return False
+
+    return (
+        is_factory_mode()
+        or (_explicit_routing() and not _force_local_mode())
+        or has_cloud_credentials(config)
+    )
+
+
+async def resolve_workspace_qualified_memory_url(
+    identifier: str,
+    context: Optional[Context] = None,
+) -> WorkspaceMemoryUrlResolution | None:
+    """Resolve a workspace-qualified memory URL against accessible workspaces."""
+    segments = _split_workspace_memory_url_segments(identifier)
+    if segments is None:
+        return None
+
+    workspace_slug, project_identifier, remainder = segments
+    index = await _ensure_workspace_project_index(context=context)
+    workspace = next(
+        (item for item in index.workspaces if item.slug.casefold() == workspace_slug.casefold()),
+        None,
+    )
+    if workspace is None:
+        return None
+
+    project_permalink = generate_permalink(project_identifier)
+    matches = [
+        entry
+        for entry in index.entries_by_permalink.get(project_permalink, ())
+        if entry.workspace.tenant_id == workspace.tenant_id
+    ]
+    if not matches:
+        if any(
+            failed_workspace.tenant_id == workspace.tenant_id
+            for failed_workspace in index.failed_workspaces
+        ):
+            raise ValueError(
+                f"Projects for workspace '{workspace.name}' ({workspace.slug}) "
+                "could not be loaded. Retry after workspace discovery recovers."
+            )
+
+        available = ", ".join(
+            entry.qualified_name
+            for entry in index.entries
+            if entry.workspace.tenant_id == workspace.tenant_id
+        )
+        raise ValueError(
+            f"Project '{project_identifier}' was not found in workspace "
+            f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
+        )
+
+    entry = matches[0]
+    canonical_path = f"{entry.workspace.slug}/{entry.project.permalink}/{remainder}"
+    return WorkspaceMemoryUrlResolution(entry=entry, canonical_path=canonical_path)
 
 
 def _format_qualified_choices(entries: tuple[WorkspaceProjectEntry, ...]) -> str:
@@ -856,13 +955,33 @@ async def resolve_project_and_path(
             return active_project, identifier, False
 
         normalized_path = normalize_project_reference(memory_url_path(identifier))
+        cached_project = await _get_cached_active_project(context)
+        cached_workspace = await _get_cached_active_workspace(context)
+        if cached_project and cached_workspace:
+            workspace_prefix = generate_permalink(cached_workspace.slug)
+            qualified_prefix = f"{workspace_prefix}/{cached_project.permalink}"
+            if normalized_path == qualified_prefix or normalized_path.startswith(
+                f"{qualified_prefix}/"
+            ):
+                return cached_project, normalized_path, True
+
+        workspace_context = current_workspace_permalink_context()
+        if workspace_context and project:
+            workspace_prefix = generate_permalink(workspace_context.workspace_slug)
+            project_permalink = generate_permalink(_unqualified_project_identifier(project))
+            qualified_prefix = f"{workspace_prefix}/{project_permalink}"
+            if normalized_path == qualified_prefix or normalized_path.startswith(
+                f"{qualified_prefix}/"
+            ):
+                active_project = await get_active_project(client, project, context, headers)
+                return active_project, normalized_path, True
+
         project_prefix, remainder = _split_project_prefix(normalized_path)
         include_project = config.permalinks_include_project
         # Trigger: memory URL begins with a potential project segment
         # Why: allow project-scoped memory URLs without requiring a separate project parameter
         # Outcome: attempt to resolve the prefix as a project and route to it
         if project_prefix:
-            cached_project = await _get_cached_active_project(context)
             if cached_project and _project_matches_identifier(cached_project, project_prefix):
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
                 if resolved_project and generate_permalink(resolved_project) != generate_permalink(
@@ -973,6 +1092,26 @@ def detect_project_from_url_prefix(identifier: str, config: BasicMemoryConfig) -
         if generate_permalink(project_name) == prefix_permalink:
             return project_name
     return None
+
+
+async def detect_project_from_memory_url_prefix(
+    identifier: str,
+    config: BasicMemoryConfig,
+    context: Optional[Context] = None,
+) -> Optional[str]:
+    """Resolve a project from a memory URL prefix, including workspace-qualified URLs."""
+    if not identifier.strip().startswith("memory://"):
+        return None
+
+    if _cloud_workspace_discovery_available(config):
+        resolution = await resolve_workspace_qualified_memory_url(
+            identifier,
+            context=context,
+        )
+        if resolution is not None:
+            return resolution.project_identifier
+
+    return detect_project_from_url_prefix(identifier, config)
 
 
 @asynccontextmanager
@@ -1113,12 +1252,18 @@ async def get_project_client(
             workspace_id=workspace_id,
         ):
             logger.debug("Using resolved workspace for cloud project routing")
-            async with get_client(
-                project_name=project_for_api,
-                workspace=workspace_id,
-            ) as client:
-                active_project = await get_active_project(client, project_for_api, context)
-                yield client, active_project
+            permalink_context = (
+                workspace_permalink_context(active_ws.slug, active_ws.workspace_type)
+                if active_ws is not None
+                else nullcontext()
+            )
+            with permalink_context:
+                async with get_client(
+                    project_name=project_for_api,
+                    workspace=workspace_id,
+                ) as client:
+                    active_project = await get_active_project(client, project_for_api, context)
+                    yield client, active_project
         return
 
     # Step 4: Local routing (default)

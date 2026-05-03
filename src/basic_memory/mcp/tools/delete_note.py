@@ -7,7 +7,11 @@ from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.project_context import detect_project_from_url_prefix, get_project_client
+from basic_memory.mcp.project_context import (
+    detect_project_from_memory_url_prefix,
+    get_project_client,
+    resolve_project_and_path,
+)
 from basic_memory.mcp.server import mcp
 
 
@@ -236,7 +240,11 @@ async def delete_note(
     #      where "research" is a directory, not a project name
     # Outcome: project is set from the URL prefix, routing goes to the correct project
     if project is None and identifier.strip().startswith("memory://"):
-        detected = detect_project_from_url_prefix(identifier, ConfigManager().config)
+        detected = await detect_project_from_memory_url_prefix(
+            identifier,
+            ConfigManager().config,
+            context=context,
+        )
         if detected:
             project = detected
 
@@ -253,11 +261,17 @@ async def delete_note(
 
         # Use typed KnowledgeClient for API calls
         knowledge_client = KnowledgeClient(client, active_project.external_id)
+        _, target_identifier, _ = await resolve_project_and_path(
+            client,
+            identifier,
+            active_project.name,
+            context,
+        )
 
         # Handle directory deletes
         if is_directory:
             try:
-                result = await knowledge_client.delete_directory(identifier)
+                result = await knowledge_client.delete_directory(target_identifier)
                 if output_format == "json":
                     return {
                         "deleted": result.failed_deletes == 0,
@@ -339,7 +353,7 @@ delete_note("path/to/file.md")
         note_file_path = None
         try:
             # Resolve identifier to entity ID
-            entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
+            entity_id = await knowledge_client.resolve_entity(target_identifier, strict=True)
             if output_format == "json":
                 entity = await knowledge_client.get_entity(entity_id)
                 note_title = entity.title

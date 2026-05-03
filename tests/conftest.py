@@ -217,6 +217,14 @@ def suppress_logfire_no_config_warning(monkeypatch) -> None:
     monkeypatch.setenv("LOGFIRE_IGNORE_NO_CONFIG", "1")
 
 
+@pytest.fixture(autouse=True)
+def isolate_routing_env(monkeypatch) -> None:
+    """Prevent command-routing env flags from leaking across tests."""
+    monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
+    monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
+    monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def cleanup_global_db_after_test() -> AsyncGenerator[None, None]:
     """Close any module-level DB engine created outside fixture ownership."""

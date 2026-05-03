@@ -48,6 +48,7 @@ from basic_memory.services.exceptions import (
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import build_canonical_permalink
+from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
 
 
 @dataclass(frozen=True)
@@ -212,8 +213,12 @@ class EntityService(BaseService[EntityModel]):
             if include_project:
                 project_permalink = await self._get_project_permalink()
 
+            workspace_permalink = workspace_slug_for_canonical_permalinks()
             desired_permalink = build_canonical_permalink(
-                project_permalink, file_path_str, include_project=include_project
+                project_permalink,
+                file_path_str,
+                include_project=include_project,
+                workspace_permalink=workspace_permalink,
             )
 
         # Make unique if needed - enhanced to handle character conflicts

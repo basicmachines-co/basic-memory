@@ -224,13 +224,17 @@ def build_canonical_permalink(
     project_permalink: Optional[str],
     file_path: Union[Path, str, PathLike],
     include_project: bool = True,
+    *,
+    workspace_permalink: Optional[str] = None,
 ) -> str:
-    """Build a canonical permalink, optionally prefixed with project slug.
+    """Build a canonical permalink, optionally prefixed with workspace/project slugs.
 
     Args:
         project_permalink: URL-friendly project identifier (slug). If None, no prefix is added.
         file_path: Original file path or permalink-like string.
         include_project: When True, prefix with project slug.
+        workspace_permalink: Optional URL-friendly workspace identifier. When provided,
+            prefix the project-qualified permalink with this workspace slug.
 
     Returns:
         Canonical permalink string.
@@ -244,9 +248,18 @@ def build_canonical_permalink(
     if normalized_path == normalized_project or normalized_path.startswith(
         f"{normalized_project}/"
     ):
-        return normalized_path
+        project_path = normalized_path
+    else:
+        project_path = f"{normalized_project}/{normalized_path}"
 
-    return f"{normalized_project}/{normalized_path}"
+    if not workspace_permalink:
+        return project_path
+
+    normalized_workspace = generate_permalink(workspace_permalink)
+    if project_path == normalized_workspace or project_path.startswith(f"{normalized_workspace}/"):
+        return project_path
+
+    return f"{normalized_workspace}/{project_path}"
 
 
 def setup_logging(

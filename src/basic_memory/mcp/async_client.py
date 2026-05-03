@@ -94,9 +94,12 @@ async def _cloud_client(
     workspace: Optional[str] = None,
 ) -> AsyncIterator[AsyncClient]:
     """Create a cloud proxy client with resolved credentials."""
+    from basic_memory.workspace_context import workspace_permalink_headers
+
     token = await _resolve_cloud_token(config)
     proxy_base_url = f"{config.cloud_host}/proxy"
     headers = {"Authorization": f"Bearer {token}"}
+    headers.update(workspace_permalink_headers())
     if workspace:
         headers["X-Workspace-ID"] = workspace
     logger.info(f"Creating HTTP client for cloud proxy at: {proxy_base_url}")

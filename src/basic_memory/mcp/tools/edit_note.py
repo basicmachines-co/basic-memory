@@ -9,9 +9,10 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
-    detect_project_from_url_prefix,
+    detect_project_from_memory_url_prefix,
     get_project_client,
     add_project_metadata,
+    resolve_project_and_path,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import Entity
@@ -293,7 +294,11 @@ async def edit_note(
     #      where "research" is a directory, not a project name
     # Outcome: project is set from the URL prefix, routing goes to the correct project
     if project is None and identifier.strip().startswith("memory://"):
-        detected = detect_project_from_url_prefix(identifier, ConfigManager().config)
+        detected = await detect_project_from_memory_url_prefix(
+            identifier,
+            ConfigManager().config,
+            context=context,
+        )
         if detected:
             project = detected
 
@@ -346,6 +351,12 @@ async def edit_note(
 
                 # Use typed KnowledgeClient for API calls
                 knowledge_client = KnowledgeClient(client, active_project.external_id)
+                _, entity_identifier, _ = await resolve_project_and_path(
+                    client,
+                    identifier,
+                    active_project.name,
+                    context,
+                )
 
                 file_created = False
                 entity_id = ""
@@ -353,7 +364,10 @@ async def edit_note(
 
                 # Try to resolve the entity; for append/prepend, create it if not found
                 try:
-                    entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
+                    entity_id = await knowledge_client.resolve_entity(
+                        entity_identifier,
+                        strict=True,
+                    )
                 except Exception as resolve_error:
                     # Trigger: entity does not exist yet
                     # Why: append/prepend can meaningfully create a new note from the content,

@@ -613,6 +613,120 @@ async def test_resolve_workspace_project_identifier_handles_qualified_and_collis
 
 
 @pytest.mark.asyncio
+async def test_detect_project_from_memory_url_prefix_resolves_workspace_slug(monkeypatch):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        detect_project_from_memory_url_prefix,
+    )
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=personal,
+            project=_project("main", id=1, external_id="personal-main-id"),
+        ),
+        WorkspaceProjectEntry(
+            workspace=team,
+            project=_project("main", id=2, external_id="team-main-id"),
+        ),
+    )
+    index = _build_workspace_project_index((personal, team), entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
+
+    resolved = await detect_project_from_memory_url_prefix(
+        "memory://team-paul/main/notes/foo",
+        BasicMemoryConfig(projects={}),
+    )
+
+    assert resolved == "team-paul/main"
+
+
+@pytest.mark.asyncio
+async def test_get_project_client_routes_duplicate_project_through_workspace_slug(
+    config_manager,
+    monkeypatch,
+):
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        get_project_client,
+    )
+
+    config = config_manager.load_config()
+    config.projects = {}
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    team_project = _project("main", id=2, external_id="team-main-id")
+    seen: dict[str, object] = {}
+
+    async def fake_resolve_workspace_project_identifier(project_name, context=None):
+        assert project_name == "team-paul/main"
+        return WorkspaceProjectEntry(workspace=team, project=team_project)
+
+    @asynccontextmanager
+    async def fake_get_client(project_name=None, workspace=None):
+        seen["project_name"] = project_name
+        seen["workspace"] = workspace
+        yield object()
+
+    async def fake_get_active_project(client, project_name, context=None, headers=None):
+        return _project(project_name, id=team_project.id, external_id=team_project.external_id)
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.resolve_workspace_project_identifier",
+        fake_resolve_workspace_project_identifier,
+    )
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_active_project",
+        fake_get_active_project,
+    )
+
+    async with get_project_client(project="team-paul/main") as (_client, active_project):
+        assert active_project.external_id == "team-main-id"
+
+    assert seen == {"project_name": "main", "workspace": "team-tenant"}
+
+
+@pytest.mark.asyncio
 async def test_resolve_workspace_project_identifier_uses_active_workspace_for_duplicate(
     monkeypatch,
 ):
@@ -713,9 +827,7 @@ async def test_resolve_workspace_project_identifier_resolves_by_external_id(monk
 
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
 
-    resolved = await resolve_workspace_project_identifier(
-        "22222222-2222-2222-2222-222222222222"
-    )
+    resolved = await resolve_workspace_project_identifier("22222222-2222-2222-2222-222222222222")
     assert resolved.workspace.slug == "acme"
     assert resolved.project.external_id == "22222222-2222-2222-2222-222222222222"
 
@@ -1004,6 +1116,86 @@ async def test_resolve_project_and_path_uses_cached_project_for_memory_url_prefi
     assert is_memory_url is True
 
 
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_keeps_workspace_qualified_canonical_path(
+    config_manager,
+    monkeypatch,
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = _ContextState()
+    cached_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    team_workspace = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    await context.set_state("active_project", cached_project.model_dump())
+    await context.set_state("active_workspace", team_workspace.model_dump())
+
+    async def fake_call_post(*args, **kwargs):
+        raise ToolError("project not found")
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://team-paul/main/notes/foo",
+        context=_ctx(context),
+    )
+
+    assert active_project == cached_project
+    assert resolved_path == "team-paul/main/notes/foo"
+    assert is_memory_url is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_preserves_existing_project_prefixed_memory_url(
+    config_manager,
+):
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = _ContextState()
+    cached_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    await context.set_state("active_project", cached_project.model_dump())
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://main/notes/foo",
+        context=_ctx(context),
+    )
+
+    assert active_project == cached_project
+    assert resolved_path == "main/notes/foo"
+    assert is_memory_url is True
+
+
 class TestDetectProjectFromUrlPrefix:
     """Test detect_project_from_url_prefix for URL-based project detection."""
 
@@ -1056,6 +1248,25 @@ class TestDetectProjectFromUrlPrefix:
 
         result = detect_project_from_url_prefix("memory://my-research/notes", config)
         assert result == "My Research"
+
+
+@pytest.mark.asyncio
+async def test_detect_project_from_memory_url_prefix_ignores_plain_paths(monkeypatch):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig
+    from basic_memory.mcp.project_context import detect_project_from_memory_url_prefix
+
+    async def fail_if_called(context=None):  # pragma: no cover
+        raise AssertionError("Plain paths must not trigger workspace discovery")
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fail_if_called)
+
+    resolved = await detect_project_from_memory_url_prefix(
+        "team-paul/main/notes/foo",
+        BasicMemoryConfig(projects={}),
+    )
+
+    assert resolved is None
 
 
 class TestGetProjectClientRoutingOrder:
