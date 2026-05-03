@@ -179,4 +179,7 @@ async def exception_handler(request, exc):  # pragma: no cover
         error_type=type(exc).__name__,
         error=str(exc),
     )
-    return await http_exception_handler(request, HTTPException(status_code=500, detail=str(exc)))
+    return await http_exception_handler(
+        request,
+        HTTPException(status_code=500, detail="Internal server error"),
+    )

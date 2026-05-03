@@ -799,6 +799,28 @@ async def _default_workspace_project_entry(
     return default_entries[0] if default_entries else None
 
 
+async def _workspace_metadata_by_tenant_id(
+    tenant_id: str,
+    context: Optional[Context] = None,
+) -> WorkspaceInfo:
+    """Return workspace metadata for a configured tenant id."""
+    cached_workspace = await _get_cached_active_workspace(context)
+    if cached_workspace and cached_workspace.tenant_id == tenant_id:
+        return cached_workspace
+
+    index = await _ensure_workspace_project_index(context=context)
+    workspace = next(
+        (workspace for workspace in index.workspaces if workspace.tenant_id == tenant_id),
+        None,
+    )
+    if workspace is None:
+        raise ValueError(
+            f"Configured workspace_id '{tenant_id}' is not in accessible workspaces. "
+            "Retry after workspace discovery recovers or reconfigure the project workspace."
+        )
+    return workspace
+
+
 async def resolve_workspace_parameter(
     workspace: Optional[str] = None,
     context: Optional[Context] = None,
@@ -1254,6 +1276,7 @@ async def get_project_client(
         if project_entry and project_entry.workspace_id:
             # Per-project config stores the cloud tenant id directly
             workspace_id = project_entry.workspace_id
+            active_ws = await _workspace_metadata_by_tenant_id(workspace_id, context=context)
         else:
             resolved_entry = cloud_default_entry
             if resolved_entry is None or not _project_matches_identifier(
