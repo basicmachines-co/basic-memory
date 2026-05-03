@@ -833,7 +833,7 @@ async def _workspace_metadata_by_tenant_id(
     tenant_id: str,
     context: Optional[Context] = None,
 ) -> WorkspaceInfo | None:
-    """Return cached workspace metadata for a configured tenant id."""
+    """Return non-index workspace metadata for a configured tenant id."""
     cached_workspace = await _get_cached_active_workspace(context)
     if cached_workspace and cached_workspace.tenant_id == tenant_id:
         return cached_workspace
@@ -844,6 +844,37 @@ async def _workspace_metadata_by_tenant_id(
         #   memory URL normalization and canonical permalink headers.
         # Outcome: drop stale metadata and route without permalink decoration.
         await context.set_state("active_workspace", None)
+
+    if context:
+        cached_raw = await context.get_state("available_workspaces")
+        if isinstance(cached_raw, list):
+            for item in cached_raw:
+                if not isinstance(item, dict):
+                    continue
+                workspace = WorkspaceInfo.model_validate(item)
+                if workspace.tenant_id == tenant_id:
+                    return workspace
+
+    if _workspace_provider is not None:
+        # Trigger: the hosting runtime can provide workspace metadata directly.
+        # Why: configured workspace_id is already sufficient for tenant routing, but
+        #   canonical organization permalinks also need slug/type context.
+        # Outcome: use the injected runtime seam without loading the workspace project index.
+        workspace = next(
+            (
+                workspace
+                for workspace in await get_available_workspaces(context=context)
+                if workspace.tenant_id == tenant_id
+            ),
+            None,
+        )
+        if workspace is None:
+            raise ValueError(
+                f"Configured workspace_id '{tenant_id}' was not returned by the workspace "
+                "metadata provider. Reconfigure the project workspace or retry after "
+                "workspace metadata recovers."
+            )
+        return workspace
 
     return None
 
