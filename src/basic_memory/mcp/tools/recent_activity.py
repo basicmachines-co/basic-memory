@@ -25,14 +25,6 @@ from basic_memory.schemas.project_info import ProjectList, ProjectItem
 from basic_memory.schemas.search import SearchItemType
 
 
-# Display cap for project-mode entity and relation rows in the formatted output.
-# The API has already paginated to `page_size`; this is a separate readability
-# guardrail that keeps the LLM-facing text compact when callers ask for large
-# pages. When exceeded, `_format_project_output` appends an explicit
-# "…and N more" line so the truncation is visible rather than silent.
-_PROJECT_OUTPUT_DISPLAY_CAP = 10
-
-
 @mcp.tool(
     description="""Get recent activity for a project or across all projects.
 
@@ -496,16 +488,12 @@ def _format_project_output(
         elif result.primary_result.type == "observation":
             observations.append(result.primary_result)
 
-    # Show entities (notes/documents).
-    # Trigger: more entities returned than the display cap.
-    # Why: keep formatted output compact for LLM context while still surfacing the
-    # true total in the heading. Previously the cap was silent — the heading said
-    # N items and the body listed only 5, with no signal the body was truncated.
-    # Outcome: render up to `_PROJECT_OUTPUT_DISPLAY_CAP` rows; if any were dropped,
-    # append an explicit "…and N more" line directing the caller to raise page_size.
+    # Show entities (notes/documents). Render every row the API returned —
+    # `page_size` is the single knob for how much comes back, so heading count
+    # and body row count always agree (regression: #784 silent truncation).
     if entities:
         lines.append(f"\n**📄 Recent Notes & Documents ({len(entities)}):**")
-        for entity in entities[:_PROJECT_OUTPUT_DISPLAY_CAP]:
+        for entity in entities:
             title = entity.title or "Untitled"
             # Get folder from file_path
             folder = ""
@@ -514,9 +502,6 @@ def _format_project_output(
                 if folder_path and folder_path != ".":
                     folder = f" ({folder_path})"
             lines.append(f"  • {title}{folder}")
-        if len(entities) > _PROJECT_OUTPUT_DISPLAY_CAP:
-            hidden = len(entities) - _PROJECT_OUTPUT_DISPLAY_CAP
-            lines.append(f"  …and {hidden} more on this page (raise page_size to display all)")
 
     # Show observations (categorized insights)
     if observations:
@@ -538,10 +523,10 @@ def _format_project_output(
                     content = _truncate_at_word(content, 80)
                 lines.append(f"    - {content}")
 
-    # Show relations (connections). Same cap-with-explicit-truncation pattern as entities.
+    # Show relations (connections)
     if relations:
         lines.append(f"\n**🔗 Recent Connections ({len(relations)}):**")
-        for rel in relations[:_PROJECT_OUTPUT_DISPLAY_CAP]:
+        for rel in relations:
             rel_type = rel.relation_type
             from_entity = rel.from_entity or "Unknown"
             to_entity = rel.to_entity
@@ -551,9 +536,6 @@ def _format_project_output(
             to_link = f"[[{to_entity}]]" if to_entity else "[Missing Link]"
 
             lines.append(f"  • {from_link} → {rel_type} → {to_link}")
-        if len(relations) > _PROJECT_OUTPUT_DISPLAY_CAP:
-            hidden = len(relations) - _PROJECT_OUTPUT_DISPLAY_CAP
-            lines.append(f"  …and {hidden} more on this page (raise page_size to display all)")
 
     # Activity summary with pagination guidance
     total = len(activity_data.results)

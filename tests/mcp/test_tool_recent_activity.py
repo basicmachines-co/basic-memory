@@ -260,9 +260,11 @@ def test_recent_activity_format_project_output_no_results():
 
 
 def test_recent_activity_format_project_output_renders_all_entities_and_relations():
-    """Regression for #784, part 1: when the result count is below the display cap
-    the formatter must render every row. Previously the cap was hardcoded at 5,
-    so a result set of 7 entities would show 5 rows under a heading that claimed 7.
+    """Regression for #784: the formatter must render every row the API returned.
+    Previously the body was hardcoded to `[:5]` while the heading reported the
+    true total — a result set of N>5 entities would show 5 rows under a heading
+    that claimed N, with no signal the body was truncated. `page_size` is now
+    the only knob; heading count and body row count must always agree.
     """
     import importlib
 
@@ -271,8 +273,10 @@ def test_recent_activity_format_project_output_renders_all_entities_and_relation
     recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
     now = datetime.now(timezone.utc)
 
-    entity_titles = [f"Entity {i}" for i in range(7)]
-    relation_titles = [f"Relation {i}" for i in range(6)]
+    # Counts chosen to comfortably exceed the old hardcoded `[:5]` slice and any
+    # plausible reintroduced default cap.
+    entity_titles = [f"Entity {i}" for i in range(15)]
+    relation_titles = [f"Relation {i}" for i in range(12)]
 
     results = [
         ContextResult(
@@ -327,89 +331,9 @@ def test_recent_activity_format_project_output_renders_all_entities_and_relation
         assert f"[[Entity {i}]] → references → [[Entity {i + 1}]]" in out, (
             f"Relation {i} missing from formatter output"
         )
-    # Below-cap path: no truncation footer should appear.
-    assert "more on this page" not in out
-
-
-def test_recent_activity_format_project_output_caps_with_explicit_truncation():
-    """Regression for #784, part 2: above the display cap the formatter must
-    truncate to the cap AND emit an explicit "…and N more" footer so the caller
-    can see that the body is a preview of a longer page (and knows to raise
-    page_size).
-    """
-    import importlib
-
-    from basic_memory.schemas.memory import RelationSummary
-
-    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
-    cap = recent_activity_module._PROJECT_OUTPUT_DISPLAY_CAP
-    now = datetime.now(timezone.utc)
-
-    entity_count = cap + 2
-    relation_count = cap + 3
-
-    # Use prefixes that don't collide between entities and relation endpoints,
-    # so substring assertions don't accidentally match across rows.
-    results = [
-        ContextResult(
-            primary_result=EntitySummary(
-                external_id=f"550e8400-e29b-41d4-a716-44665544{i:04d}",
-                entity_id=i,
-                permalink=f"notes/entity-{i}",
-                title=f"NoteFile {i}",
-                content=None,
-                file_path=f"notes/entity-{i}.md",
-                created_at=now,
-            ),
-            observations=[],
-            related_results=[],
-        )
-        for i in range(entity_count)
-    ] + [
-        ContextResult(
-            primary_result=RelationSummary(
-                relation_id=1000 + i,
-                entity_id=i,
-                title=f"Relation {i}",
-                file_path=f"notes/entity-{i}.md",
-                permalink=f"notes/entity-{i}",
-                relation_type="references",
-                from_entity=f"FromNode {i}",
-                to_entity=f"ToNode {i}",
-                created_at=now,
-            ),
-            observations=[],
-            related_results=[],
-        )
-        for i in range(relation_count)
-    ]
-
-    activity = GraphContext(
-        results=results,
-        metadata=MemoryMetadata(depth=1, generated_at=now),
-    )
-
-    out = recent_activity_module._format_project_output(
-        project_name="proj",
-        activity_data=activity,
-        timeframe="7d",
-        type_filter=["entity", "relation"],
-        page=1,
-    )
-
-    # Heading reports the true total (independent of truncation).
-    assert f"Recent Notes & Documents ({entity_count})" in out
-    assert f"Recent Connections ({relation_count})" in out
-
-    # Body shows exactly `cap` rows of each.
-    assert f"NoteFile {cap - 1}" in out, "expected last in-cap entity to appear"
-    assert f"NoteFile {cap}" not in out, "entity beyond cap should be truncated"
-    assert f"[[FromNode {cap - 1}]] → references → [[ToNode {cap - 1}]]" in out
-    assert f"[[FromNode {cap}]]" not in out, "relation beyond cap should be truncated"
-
-    # Truncation footer is present and reports the correct hidden count.
-    assert f"…and {entity_count - cap} more on this page" in out
-    assert f"…and {relation_count - cap} more on this page" in out
+    # Heading total matches the body — no silent truncation.
+    assert f"Recent Notes & Documents ({len(entity_titles)})" in out
+    assert f"Recent Connections ({len(relation_titles)})" in out
 
 
 def test_recent_activity_format_project_output_includes_observation_truncation():
