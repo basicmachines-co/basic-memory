@@ -396,6 +396,7 @@ async def create_memory_project(
     project_name: str,
     project_path: str,
     set_default: bool = False,
+    workspace_id: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -408,6 +409,10 @@ async def create_memory_project(
         project_name: Name for the new project (must be unique)
         project_path: File system path where the project will be stored
         set_default: Whether to set this project as the default (optional, defaults to False)
+        workspace_id: Optional cloud workspace tenant_id to create the project in. When
+            omitted, the connection's default workspace is used. Discover available
+            values via `list_workspaces` (use the `tenant_id` field). Only meaningful
+            in cloud mode; ignored for local projects.
         output_format: "text" returns the existing human-readable result text.
             "json" returns structured project creation metadata.
         context: Optional FastMCP context for progress/status logging.
@@ -418,8 +423,13 @@ async def create_memory_project(
     Example:
         create_memory_project("my-research", "~/Documents/research")
         create_memory_project("work-notes", "/home/user/work", set_default=True)
+        create_memory_project("team-notes", "/team/notes", workspace_id="tenant-abc-123")
     """
-    async with get_client() as client:
+    # workspace_id targets a non-default cloud workspace at create time.
+    # Trigger: caller passed workspace_id (e.g. discovered via list_workspaces).
+    # Why: there is no project_id yet for per-project routing — the project doesn't exist.
+    # Outcome: cloud factory routes the create request to the named workspace.
+    async with get_client(workspace=workspace_id) as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         if constrained_project:

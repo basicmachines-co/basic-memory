@@ -588,3 +588,99 @@ async def test_nested_project_paths_rejected(mcp_server, app, test_project, tmp_
 
         # Clean up parent project
         await client.call_tool("delete_project", {"project_name": parent_name})
+
+
+@pytest.mark.asyncio
+async def test_create_project_accepts_workspace_id_in_local_mode(
+    mcp_server, app, test_project, tmp_path
+):
+    """Passing workspace_id via the MCP wire is accepted by the tool schema and
+    does not break the local create path.
+
+    In local mode there is no cloud factory installed, so workspace_id is a no-op:
+    the request lands on the ASGI transport which has no workspace concept. This
+    test guards the schema so a future change can't accidentally drop the parameter.
+    """
+
+    async with Client(mcp_server) as client:
+        create_result = await client.call_tool(
+            "create_memory_project",
+            {
+                "project_name": "ws-local-test",
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-ws-local-test"
+                ),
+                "workspace_id": "tenant-ignored-locally",
+            },
+        )
+
+        assert len(create_result.content) == 1
+        create_text = create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "✓" in create_text
+        assert "ws-local-test" in create_text
+
+        list_result = await client.call_tool("list_memory_projects", {})
+        assert "ws-local-test" in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+
+
+@pytest.mark.asyncio
+async def test_create_project_workspace_id_forwarded_to_factory(
+    mcp_server, app, test_project, tmp_path
+):
+    """workspace_id flows through to the cloud factory at create time.
+
+    Simulates the cloud MCP server pattern (set_client_factory) and verifies the
+    factory receives the workspace argument. This is the chicken-and-egg case:
+    no project_id exists yet, so workspace_id is the only way to target a
+    non-default workspace at create time.
+    """
+    from contextlib import asynccontextmanager
+
+    from httpx import ASGITransport, AsyncClient as HttpxAsyncClient
+
+    from basic_memory.mcp import async_client
+
+    captured_workspaces: list[str | None] = []
+
+    @asynccontextmanager
+    async def fake_factory(workspace=None):
+        captured_workspaces.append(workspace)
+        # Yield an ASGI-backed httpx client so the create_project HTTP call
+        # actually reaches the FastAPI app and the project is created in the DB.
+        async with HttpxAsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as inner:
+            yield inner
+
+    original_factory = async_client._client_factory
+    async_client.set_client_factory(fake_factory)
+    try:
+        async with Client(mcp_server) as mcp_client:
+            create_result = await mcp_client.call_tool(
+                "create_memory_project",
+                {
+                    "project_name": "ws-routed-project",
+                    "project_path": str(
+                        tmp_path.parent
+                        / (tmp_path.name + "-projects")
+                        / "project-ws-routed-project"
+                    ),
+                    "workspace_id": "tenant-cloud-test",
+                },
+            )
+
+        create_text = create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "✓" in create_text
+        assert "ws-routed-project" in create_text
+
+        # The factory must have been invoked with the workspace_id we passed in.
+        # create_memory_project opens one get_client() context, so the factory is
+        # called once per tool invocation; both list_projects and create_project
+        # share that single client.
+        assert captured_workspaces, "Factory was never invoked"
+        assert all(ws == "tenant-cloud-test" for ws in captured_workspaces), (
+            "Expected workspace='tenant-cloud-test' on every factory call, "
+            f"got {captured_workspaces}"
+        )
+    finally:
+        async_client._client_factory = original_factory
