@@ -46,6 +46,8 @@ class SearchQuery(BaseModel):
     - metadata_filters: Structured frontmatter filters (field -> value)
     - tags: Convenience frontmatter tag filter
     - status: Convenience frontmatter status filter
+    - observation_categories: Limit observation results to categories
+    - relation_types: Limit relation results to relationship types
 
     Boolean search examples:
     - "python AND flask" - Find items with both terms
@@ -67,6 +69,8 @@ class SearchQuery(BaseModel):
     metadata_filters: Optional[dict[str, Any]] = None  # Structured frontmatter filters
     tags: Optional[List[str]] = None  # Convenience tag filter
     status: Optional[str] = None  # Convenience status filter
+    observation_categories: Optional[List[str]] = None  # Filter observations by category
+    relation_types: Optional[List[str]] = None  # Filter relations by relation_type
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
     min_similarity: Optional[float] = None  # Per-query override for semantic_min_similarity
 
@@ -85,6 +89,8 @@ class SearchQuery(BaseModel):
         status_is_empty = self.status is None or (isinstance(self.status, str) and not self.status)
         note_types_is_empty = not self.note_types
         entity_types_is_empty = not self.entity_types
+        observation_categories_is_empty = not self.observation_categories
+        relation_types_is_empty = not self.relation_types
         return (
             self.permalink is None
             and self.permalink_match is None
@@ -96,6 +102,8 @@ class SearchQuery(BaseModel):
             and metadata_is_empty
             and tags_is_empty
             and status_is_empty
+            and observation_categories_is_empty
+            and relation_types_is_empty
         )
 
     def has_boolean_operators(self) -> bool:

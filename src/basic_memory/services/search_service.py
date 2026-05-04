@@ -75,6 +75,8 @@ class _PreparedSearchQuery:
     title: str | None
     note_types: list[str] | None
     search_item_types: list[SearchItemType] | None
+    observation_categories: list[str] | None
+    relation_types: list[str] | None
     after_date: datetime | None
     metadata_filters: dict[str, Any] | None
     retrieval_mode: SearchRetrievalMode
@@ -190,6 +192,8 @@ class SearchService:
             title=query.title,
             note_types=query.note_types,
             search_item_types=query.entity_types,
+            observation_categories=query.observation_categories,
+            relation_types=query.relation_types,
             after_date=after_date,
             metadata_filters=metadata_filters,
             retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
@@ -203,6 +207,8 @@ class SearchService:
             or prepared.title
             or prepared.note_types
             or prepared.search_item_types
+            or prepared.observation_categories
+            or prepared.relation_types
             or prepared.after_date
             or prepared.metadata_filters
         )
@@ -217,6 +223,8 @@ class SearchService:
             prepared.metadata_filters
             or prepared.note_types
             or prepared.search_item_types
+            or prepared.observation_categories
+            or prepared.relation_types
             or prepared.after_date
         )
 
@@ -235,6 +243,8 @@ class SearchService:
             title=prepared.title,
             note_types=prepared.note_types,
             search_item_types=prepared.search_item_types,
+            observation_categories=prepared.observation_categories,
+            relation_types=prepared.relation_types,
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
             retrieval_mode=prepared.retrieval_mode,
@@ -256,6 +266,8 @@ class SearchService:
             title=prepared.title,
             note_types=prepared.note_types,
             search_item_types=prepared.search_item_types,
+            observation_categories=prepared.observation_categories,
+            relation_types=prepared.relation_types,
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
             retrieval_mode=prepared.retrieval_mode,

@@ -1044,3 +1044,111 @@ async def test_search_item_types_parameterized(search_repository):
     results = await search_repository.search(search_item_types=[SearchItemType.ENTITY])
     # Should not raise — parameterized query handles enum values safely
     assert isinstance(results, list)
+
+
+@pytest.mark.asyncio
+async def test_search_filters_observation_categories(search_repository, search_entity):
+    """Observation category facets should filter observation search rows directly."""
+    now = datetime.now(timezone.utc)
+    await search_repository.bulk_index_items(
+        [
+            SearchIndexRow(
+                id=search_entity.id + 100,
+                type=SearchItemType.OBSERVATION.value,
+                title="appearance: Broad shoulders",
+                content_stems="shared observation content",
+                content_snippet="Broad shoulders",
+                permalink=f"{search_entity.permalink}/observations/appearance",
+                file_path=search_entity.file_path,
+                entity_id=search_entity.id,
+                category="appearance",
+                metadata={"facet_test": True},
+                created_at=now,
+                updated_at=now,
+                project_id=search_repository.project_id,
+            ),
+            SearchIndexRow(
+                id=search_entity.id + 101,
+                type=SearchItemType.OBSERVATION.value,
+                title="trait: Stoic resolve",
+                content_stems="shared observation content",
+                content_snippet="Stoic resolve",
+                permalink=f"{search_entity.permalink}/observations/trait",
+                file_path=search_entity.file_path,
+                entity_id=search_entity.id,
+                category="trait",
+                metadata={"facet_test": True},
+                created_at=now,
+                updated_at=now,
+                project_id=search_repository.project_id,
+            ),
+        ]
+    )
+
+    results = await search_repository.search(
+        search_item_types=[SearchItemType.OBSERVATION],
+        observation_categories=["appearance"],
+    )
+    total = await search_repository.count(
+        search_item_types=[SearchItemType.OBSERVATION],
+        observation_categories=["appearance"],
+    )
+
+    assert total == 1
+    assert [(result.category, result.title) for result in results] == [
+        ("appearance", "appearance: Broad shoulders")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_filters_relation_types(search_repository, search_entity):
+    """Relationship type facets should filter relation search rows directly."""
+    now = datetime.now(timezone.utc)
+    await search_repository.bulk_index_items(
+        [
+            SearchIndexRow(
+                id=search_entity.id + 200,
+                type=SearchItemType.RELATION.value,
+                title="Starbuck -> The Pequod",
+                content_stems="shared relation content",
+                content_snippet="Starbuck serves on The Pequod",
+                permalink=f"{search_entity.permalink}/relations/serves-on",
+                file_path=search_entity.file_path,
+                entity_id=search_entity.id,
+                relation_type="serves_on",
+                metadata={"facet_test": True},
+                created_at=now,
+                updated_at=now,
+                project_id=search_repository.project_id,
+            ),
+            SearchIndexRow(
+                id=search_entity.id + 201,
+                type=SearchItemType.RELATION.value,
+                title="Starbuck -> Ahab",
+                content_stems="shared relation content",
+                content_snippet="Starbuck contrasts with Ahab",
+                permalink=f"{search_entity.permalink}/relations/contrasts-with",
+                file_path=search_entity.file_path,
+                entity_id=search_entity.id,
+                relation_type="contrasts_with",
+                metadata={"facet_test": True},
+                created_at=now,
+                updated_at=now,
+                project_id=search_repository.project_id,
+            ),
+        ]
+    )
+
+    results = await search_repository.search(
+        search_item_types=[SearchItemType.RELATION],
+        relation_types=["contrasts_with"],
+    )
+    total = await search_repository.count(
+        search_item_types=[SearchItemType.RELATION],
+        relation_types=["contrasts_with"],
+    )
+
+    assert total == 1
+    assert [(result.relation_type, result.title) for result in results] == [
+        ("contrasts_with", "Starbuck -> Ahab")
+    ]

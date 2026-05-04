@@ -714,6 +714,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        observation_categories: Optional[List[str]] = None,
+        relation_types: Optional[List[str]] = None,
         metadata_filters: Optional[dict] = None,
     ) -> tuple[str, str, dict, str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
@@ -766,14 +768,28 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     params["permalink"] = permalink_text
                     match_conditions.append("search_index.permalink MATCH :permalink")
 
-        # Handle entity type filter (parameterized for defense-in-depth)
-        if search_item_types:
-            type_placeholders = []
-            for idx, t in enumerate(search_item_types):
-                param_name = f"search_type_{idx}"
-                params[param_name] = t.value
-                type_placeholders.append(f":{param_name}")
-            conditions.append(f"search_index.type IN ({', '.join(type_placeholders)})")
+        # Handle typed search row filters (parameterized for defense-in-depth)
+        self._append_in_filter(
+            conditions,
+            params,
+            column="search_index.type",
+            values=search_item_types,
+            param_prefix="search_type",
+        )
+        self._append_in_filter(
+            conditions,
+            params,
+            column="search_index.category",
+            values=observation_categories,
+            param_prefix="observation_category",
+        )
+        self._append_in_filter(
+            conditions,
+            params,
+            column="search_index.relation_type",
+            values=relation_types,
+            param_prefix="relation_type",
+        )
 
         # Handle note type filter (frontmatter type field, parameterized)
         if note_types:
@@ -905,6 +921,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        observation_categories: Optional[List[str]] = None,
+        relation_types: Optional[List[str]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -921,6 +939,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            observation_categories=observation_categories,
+            relation_types=relation_types,
             metadata_filters=metadata_filters,
             retrieval_mode=retrieval_mode,
             min_similarity=min_similarity,
@@ -939,6 +959,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            observation_categories=observation_categories,
+            relation_types=relation_types,
             metadata_filters=metadata_filters,
         )
 
@@ -1026,6 +1048,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        observation_categories: Optional[List[str]] = None,
+        relation_types: Optional[List[str]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -1040,6 +1064,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                observation_categories=observation_categories,
+                relation_types=relation_types,
                 metadata_filters=metadata_filters,
                 retrieval_mode=retrieval_mode,
                 min_similarity=min_similarity,
@@ -1053,6 +1079,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            observation_categories=observation_categories,
+            relation_types=relation_types,
             metadata_filters=metadata_filters,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"

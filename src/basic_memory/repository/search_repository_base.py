@@ -218,6 +218,8 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        observation_categories: Optional[List[str]] = None,
+        relation_types: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -234,6 +236,8 @@ class SearchRepositoryBase(ABC):
             note_types: Filter by note types (from metadata.note_type)
             after_date: Filter by created_at > after_date
             search_item_types: Filter by SearchItemType (ENTITY, OBSERVATION, RELATION)
+            observation_categories: Filter observation rows by category
+            relation_types: Filter relation rows by relation_type
             metadata_filters: Structured frontmatter metadata filters
             limit: Maximum results to return
             offset: Number of results to skip
@@ -256,6 +260,8 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        observation_categories: Optional[List[str]] = None,
+        relation_types: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -472,6 +478,26 @@ class SearchRepositoryBase(ABC):
             elapsed_time = end_time - start_time
             logger.debug(f"Query executed successfully in {elapsed_time:.2f}s.")
             return result
+
+    @staticmethod
+    def _append_in_filter(
+        conditions: list[str],
+        params: dict[str, Any],
+        *,
+        column: str,
+        values: list[Any] | None,
+        param_prefix: str,
+    ) -> None:
+        """Append a parameterized SQL IN clause for controlled column names."""
+        if not values:
+            return
+
+        placeholders: list[str] = []
+        for idx, value in enumerate(values):
+            param_name = f"{param_prefix}_{idx}"
+            params[param_name] = value.value if isinstance(value, SearchItemType) else value
+            placeholders.append(f":{param_name}")
+        conditions.append(f"{column} IN ({', '.join(placeholders)})")
 
     async def delete_entity_vector_rows(self, entity_id: int) -> None:
         """Delete one entity's derived vector rows using the backend's cleanup path."""
@@ -1777,6 +1803,8 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
+        observation_categories: Optional[List[str]],
+        relation_types: Optional[List[str]],
         metadata_filters: Optional[dict],
         retrieval_mode: SearchRetrievalMode,
         min_similarity: Optional[float] = None,
@@ -1810,6 +1838,8 @@ class SearchRepositoryBase(ABC):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                observation_categories=observation_categories,
+                relation_types=relation_types,
                 metadata_filters=metadata_filters,
                 min_similarity=min_similarity,
                 limit=limit,
@@ -1829,6 +1859,8 @@ class SearchRepositoryBase(ABC):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                observation_categories=observation_categories,
+                relation_types=relation_types,
                 metadata_filters=metadata_filters,
                 min_similarity=min_similarity,
                 limit=limit,
@@ -1858,6 +1890,8 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
+        observation_categories: Optional[List[str]],
+        relation_types: Optional[List[str]],
         metadata_filters: Optional[dict],
         min_similarity: Optional[float] = None,
         limit: int,
@@ -1968,6 +2002,8 @@ class SearchRepositoryBase(ABC):
                 note_types,
                 after_date,
                 search_item_types,
+                observation_categories,
+                relation_types,
                 metadata_filters,
             ]
         )
@@ -1981,6 +2017,8 @@ class SearchRepositoryBase(ABC):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                observation_categories=observation_categories,
+                relation_types=relation_types,
                 metadata_filters=metadata_filters,
                 retrieval_mode=SearchRetrievalMode.FTS,
                 limit=VECTOR_FILTER_SCAN_LIMIT,
@@ -2131,6 +2169,8 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
+        observation_categories: Optional[List[str]],
+        relation_types: Optional[List[str]],
         metadata_filters: Optional[dict],
         min_similarity: Optional[float] = None,
         limit: int,
@@ -2155,6 +2195,8 @@ class SearchRepositoryBase(ABC):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            observation_categories=observation_categories,
+            relation_types=relation_types,
             metadata_filters=metadata_filters,
             retrieval_mode=SearchRetrievalMode.FTS,
             limit=candidate_limit,
@@ -2170,6 +2212,8 @@ class SearchRepositoryBase(ABC):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            observation_categories=observation_categories,
+            relation_types=relation_types,
             metadata_filters=metadata_filters,
             min_similarity=min_similarity,
             limit=candidate_limit,

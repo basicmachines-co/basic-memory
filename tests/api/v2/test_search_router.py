@@ -156,6 +156,43 @@ async def test_search_with_item_type_filter_returns_total(
 
 
 @pytest.mark.asyncio
+async def test_search_accepts_typed_facet_filters(
+    client: AsyncClient,
+    app,
+    v2_project_url: str,
+):
+    """The v2 API contract should preserve observation and relation typed filters."""
+    captured_queries = []
+
+    class CapturingSearchService:
+        async def search(self, query, *, limit, offset):
+            captured_queries.append(("search", query, limit, offset))
+            return []
+
+        async def count(self, query):
+            captured_queries.append(("count", query))
+            return 0
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: CapturingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={
+                "entity_types": ["observation"],
+                "observation_categories": ["appearance"],
+                "relation_types": ["associated_with"],
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 200
+    _, query, _, _ = captured_queries[0]
+    assert query.observation_categories == ["appearance"]
+    assert query.relation_types == ["associated_with"]
+
+
+@pytest.mark.asyncio
 async def test_search_by_permalink(
     client: AsyncClient,
     test_project: Project,
