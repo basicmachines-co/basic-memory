@@ -686,7 +686,17 @@ class PostgresSearchRepository(SearchRepositoryBase):
     # FTS search (Postgres-specific)
     # ------------------------------------------------------------------
 
-    async def search(
+    @staticmethod
+    def _is_tsquery_syntax_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return (
+            "syntax error in tsquery" in msg
+            or "invalid input syntax for type tsquery" in msg
+            or "no operand in tsquery" in msg
+            or "no operator in tsquery" in msg
+        )
+
+    async def _build_fts_query_parts(
         self,
         search_text: Optional[str] = None,
         permalink: Optional[str] = None,
@@ -696,31 +706,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        limit: int = 10,
-        offset: int = 0,
-    ) -> List[SearchIndexRow]:
-        """Search across all indexed content using PostgreSQL tsvector."""
-        # --- Dispatch vector / hybrid modes (shared logic) ---
-        dispatched = await self._dispatch_retrieval_mode(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            metadata_filters=metadata_filters,
-            retrieval_mode=retrieval_mode,
-            min_similarity=min_similarity,
-            limit=limit,
-            offset=offset,
-        )
-        if dispatched is not None:
-            return dispatched
-
-        # --- FTS mode (Postgres-specific) ---
+    ) -> tuple[str, str, dict, str, str]:
+        """Build Postgres FTS FROM/WHERE params shared by search and count."""
         conditions = []
         params = {}
         order_by_clause = ""
@@ -868,10 +855,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
         params["project_id"] = self.project_id
         conditions.append("search_index.project_id = :project_id")
 
-        # set limit and offset
-        params["limit"] = limit
-        params["offset"] = offset
-
         # Build WHERE clause
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -883,6 +866,64 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
         else:
             score_expr = "0"
+
+        return from_clause, where_clause, params, order_by_clause, score_expr
+
+    async def search(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[List[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> List[SearchIndexRow]:
+        """Search across all indexed content using PostgreSQL tsvector."""
+        # --- Dispatch vector / hybrid modes (shared logic) ---
+        dispatched = await self._dispatch_retrieval_mode(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+            retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
+            limit=limit,
+            offset=offset,
+        )
+        if dispatched is not None:
+            return dispatched
+
+        # --- FTS mode (Postgres-specific) ---
+        (
+            from_clause,
+            where_clause,
+            params,
+            order_by_clause,
+            score_expr,
+        ) = await self._build_fts_query_parts(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+        )
+
+        # set limit and offset
+        params["limit"] = limit
+        params["offset"] = offset
 
         sql = f"""
             SELECT
@@ -915,17 +956,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 result = await session.execute(text(sql), params)
                 rows = result.fetchall()
         except Exception as e:
-            # Handle tsquery syntax errors (and only those).
-            #
-            # Important: Postgres errors for other failures (e.g. missing table) will still mention
-            # `to_tsquery(...)` in the SQL text, so checking for the substring "tsquery" is too broad.
-            msg = str(e).lower()
-            if (
-                "syntax error in tsquery" in msg
-                or "invalid input syntax for type tsquery" in msg
-                or "no operand in tsquery" in msg
-                or "no operator in tsquery" in msg
-            ):
+            if self._is_tsquery_syntax_error(e):
                 logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
                 return []
 
@@ -966,3 +997,65 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
 
         return results
+
+    async def count(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[List[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+    ) -> int:
+        """Count indexed content matching the Postgres FTS query."""
+        mode = (
+            retrieval_mode.value
+            if isinstance(retrieval_mode, SearchRetrievalMode)
+            else str(retrieval_mode)
+        )
+        if mode != SearchRetrievalMode.FTS.value:
+            return await super().count(
+                search_text=search_text,
+                permalink=permalink,
+                permalink_match=permalink_match,
+                title=title,
+                note_types=note_types,
+                after_date=after_date,
+                search_item_types=search_item_types,
+                metadata_filters=metadata_filters,
+                retrieval_mode=retrieval_mode,
+                min_similarity=min_similarity,
+            )
+
+        (
+            from_clause,
+            where_clause,
+            params,
+            _order_by_clause,
+            _score_expr,
+        ) = await self._build_fts_query_parts(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+        )
+        sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
+        logger.trace(f"Count {sql} params: {params}")
+        try:
+            async with db.scoped_session(self.session_maker) as session:
+                result = await session.execute(text(sql), params)
+                return int(result.scalar_one())
+        except Exception as e:
+            if self._is_tsquery_syntax_error(e):
+                logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
+                return 0
+            logger.error(f"Database error during search count: {e}")
+            raise

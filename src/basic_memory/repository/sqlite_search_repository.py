@@ -701,7 +701,11 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     # FTS search (backend-specific)
     # ------------------------------------------------------------------
 
-    async def search(
+    @staticmethod
+    def _is_fts5_syntax_error(exc: Exception) -> bool:
+        return "fts5: syntax error" in str(exc).lower()
+
+    async def _build_fts_query_parts(
         self,
         search_text: Optional[str] = None,
         permalink: Optional[str] = None,
@@ -711,31 +715,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        limit: int = 10,
-        offset: int = 0,
-    ) -> List[SearchIndexRow]:
-        """Search across all indexed content using SQLite FTS5."""
-        # --- Dispatch vector / hybrid modes (shared logic) ---
-        dispatched = await self._dispatch_retrieval_mode(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            metadata_filters=metadata_filters,
-            retrieval_mode=retrieval_mode,
-            min_similarity=min_similarity,
-            limit=limit,
-            offset=offset,
-        )
-        if dispatched is not None:
-            return dispatched
-
-        # --- FTS mode (SQLite-specific) ---
+    ) -> tuple[str, str, dict, str]:
+        """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
         match_conditions = []
         params = {}
@@ -911,12 +892,59 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         params["project_id"] = self.project_id
         conditions.append("search_index.project_id = :project_id")
 
+        # Build WHERE clause
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        return from_clause, where_clause, params, order_by_clause
+
+    async def search(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[List[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> List[SearchIndexRow]:
+        """Search across all indexed content using SQLite FTS5."""
+        # --- Dispatch vector / hybrid modes (shared logic) ---
+        dispatched = await self._dispatch_retrieval_mode(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+            retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
+            limit=limit,
+            offset=offset,
+        )
+        if dispatched is not None:
+            return dispatched
+
+        # --- FTS mode (SQLite-specific) ---
+        from_clause, where_clause, params, order_by_clause = await self._build_fts_query_parts(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+        )
+
         # set limit on search query
         params["limit"] = limit
         params["offset"] = offset
-
-        # Build WHERE clause
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         sql = f"""
             SELECT
@@ -950,7 +978,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 rows = result.fetchall()
         except Exception as e:
             # Handle FTS5 syntax errors and provide user-friendly feedback
-            if "fts5: syntax error" in str(e).lower():  # pragma: no cover
+            if self._is_fts5_syntax_error(e):  # pragma: no cover
                 logger.warning(f"FTS5 syntax error for search term: {search_text}, error: {e}")
                 # Return empty results rather than crashing
                 return []
@@ -988,3 +1016,59 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             )
 
         return results
+
+    async def count(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[List[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+    ) -> int:
+        """Count indexed content matching the SQLite FTS query."""
+        mode = (
+            retrieval_mode.value
+            if isinstance(retrieval_mode, SearchRetrievalMode)
+            else str(retrieval_mode)
+        )
+        if mode != SearchRetrievalMode.FTS.value:
+            return await super().count(
+                search_text=search_text,
+                permalink=permalink,
+                permalink_match=permalink_match,
+                title=title,
+                note_types=note_types,
+                after_date=after_date,
+                search_item_types=search_item_types,
+                metadata_filters=metadata_filters,
+                retrieval_mode=retrieval_mode,
+                min_similarity=min_similarity,
+            )
+
+        from_clause, where_clause, params, _order_by_clause = await self._build_fts_query_parts(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+        )
+        sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
+        logger.trace(f"Count {sql} params: {params}")
+        try:
+            async with db.scoped_session(self.session_maker) as session:
+                result = await session.execute(text(sql), params)
+                return int(result.scalar_one())
+        except Exception as e:
+            if self._is_fts5_syntax_error(e):  # pragma: no cover
+                logger.warning(f"FTS5 syntax error for search term: {search_text}, error: {e}")
+                return 0
+            logger.error(f"Database error during search count: {e}")
+            raise

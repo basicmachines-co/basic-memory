@@ -50,6 +50,22 @@ class SearchRepository(Protocol):
         """Search across indexed content."""
         ...
 
+    async def count(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[List[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+    ) -> int:
+        """Count indexed content matching the same filters as search."""
+        ...
+
     async def index_item(self, search_index_row: SearchIndexRow) -> None:
         """Index a single item."""
         ...

@@ -3,6 +3,7 @@
 import asyncio
 import ast
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Set, Dict, Any
 
@@ -62,6 +63,22 @@ FTS_RELAXED_STOPWORDS = {
     "you",
     "your",
 }
+
+
+@dataclass(frozen=True)
+class _PreparedSearchQuery:
+    """Normalized query inputs shared by search and count."""
+
+    search_text: str | None
+    permalink: str | None
+    permalink_match: str | None
+    title: str | None
+    note_types: list[str] | None
+    search_item_types: list[SearchItemType] | None
+    after_date: datetime | None
+    metadata_filters: dict[str, Any] | None
+    retrieval_mode: SearchRetrievalMode
+    min_similarity: float | None
 
 
 def _strip_nul(value: str) -> str:
@@ -132,27 +149,20 @@ class SearchService:
 
         logger.info("Reindex complete")
 
-    async def search(self, query: SearchQuery, limit=10, offset=0) -> List[SearchIndexRow]:
-        """Search across all indexed content.
+    def _prepare_query(self, query: SearchQuery) -> _PreparedSearchQuery | None:
+        """Normalize a SearchQuery into repository arguments."""
+        search_text = query.text
+        tags = query.tags
 
-        Supports three modes:
-        1. Exact permalink: finds direct matches for a specific path
-        2. Pattern match: handles * wildcards in paths
-        3. Text search: full-text search across title/content
-        """
-        # Support tag:<tag> shorthand by mapping to tags filter
-        if query.text:
-            text = query.text.strip()
+        # Support tag:<tag> shorthand by mapping to tags filter.
+        if search_text:
+            text = search_text.strip()
             if text.lower().startswith("tag:"):
                 tag_values = re.split(r"[,\s]+", text[4:].strip())
-                tags = [t for t in tag_values if t]
-                if tags:
-                    query.tags = tags
-                    query.text = None
-
-        if query.no_criteria():
-            logger.debug("no criteria passed to query")
-            return []
+                parsed_tags = [t for t in tag_values if t]
+                if parsed_tags:
+                    tags = parsed_tags
+                    search_text = None
 
         after_date = (
             (
@@ -164,50 +174,124 @@ class SearchService:
             else None
         )
 
-        # Merge structured metadata filters (explicit + convenience fields)
+        # Merge structured metadata filters (explicit + convenience fields).
         metadata_filters: Optional[Dict[str, Any]] = None
-        if query.metadata_filters or query.tags or query.status:
+        if query.metadata_filters or tags or query.status:
             metadata_filters = dict(query.metadata_filters or {})
-            if query.tags:
-                metadata_filters.setdefault("tags", query.tags)
+            if tags:
+                metadata_filters.setdefault("tags", tags)
             if query.status:
                 metadata_filters.setdefault("status", query.status)
 
-        retrieval_mode = query.retrieval_mode or SearchRetrievalMode.FTS
-        strict_search_text = query.text
+        prepared = _PreparedSearchQuery(
+            search_text=search_text,
+            permalink=query.permalink,
+            permalink_match=query.permalink_match,
+            title=query.title,
+            note_types=query.note_types,
+            search_item_types=query.entity_types,
+            after_date=after_date,
+            metadata_filters=metadata_filters,
+            retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
+            min_similarity=query.min_similarity,
+        )
+
+        has_criteria = bool(
+            prepared.search_text
+            or prepared.permalink
+            or prepared.permalink_match
+            or prepared.title
+            or prepared.note_types
+            or prepared.search_item_types
+            or prepared.after_date
+            or prepared.metadata_filters
+        )
+        if not has_criteria:
+            logger.debug("no criteria passed to query")
+            return None
+        return prepared
+
+    @staticmethod
+    def _prepared_has_filters(prepared: _PreparedSearchQuery) -> bool:
+        return bool(
+            prepared.metadata_filters
+            or prepared.note_types
+            or prepared.search_item_types
+            or prepared.after_date
+        )
+
+    async def _search_repository(
+        self,
+        prepared: _PreparedSearchQuery,
+        *,
+        search_text: str | None,
+        limit: int,
+        offset: int,
+    ) -> List[SearchIndexRow]:
+        return await self.repository.search(
+            search_text=search_text,
+            permalink=prepared.permalink,
+            permalink_match=prepared.permalink_match,
+            title=prepared.title,
+            note_types=prepared.note_types,
+            search_item_types=prepared.search_item_types,
+            after_date=prepared.after_date,
+            metadata_filters=prepared.metadata_filters,
+            retrieval_mode=prepared.retrieval_mode,
+            min_similarity=prepared.min_similarity,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def _count_repository(
+        self,
+        prepared: _PreparedSearchQuery,
+        *,
+        search_text: str | None,
+    ) -> int:
+        return await self.repository.count(
+            search_text=search_text,
+            permalink=prepared.permalink,
+            permalink_match=prepared.permalink_match,
+            title=prepared.title,
+            note_types=prepared.note_types,
+            search_item_types=prepared.search_item_types,
+            after_date=prepared.after_date,
+            metadata_filters=prepared.metadata_filters,
+            retrieval_mode=prepared.retrieval_mode,
+            min_similarity=prepared.min_similarity,
+        )
+
+    async def search(self, query: SearchQuery, limit=10, offset=0) -> List[SearchIndexRow]:
+        """Search across all indexed content.
+
+        Supports three modes:
+        1. Exact permalink: finds direct matches for a specific path
+        2. Pattern match: handles * wildcards in paths
+        3. Text search: full-text search across title/content
+        """
+        prepared = self._prepare_query(query)
+        if prepared is None:
+            return []
+
+        strict_search_text = prepared.search_text
         has_query = bool(
-            strict_search_text or query.title or query.permalink or query.permalink_match
+            strict_search_text or prepared.title or prepared.permalink or prepared.permalink_match
         )
-        has_filters = bool(
-            metadata_filters
-            or query.note_types
-            or query.entity_types
-            or after_date
-            or query.tags
-            or query.status
-        )
+        has_filters = self._prepared_has_filters(prepared)
 
         with logfire.span(
             "search.execute",
-            retrieval_mode=retrieval_mode.value,
+            retrieval_mode=prepared.retrieval_mode.value,
             has_query=has_query,
             has_filters=has_filters,
             limit=limit,
             offset=offset,
         ):
             logger.trace(f"Searching with query: {query}")
-            # First pass: preserve existing strict search behavior.
-            results = await self.repository.search(
+            results = await self._search_repository(
+                prepared,
                 search_text=strict_search_text,
-                permalink=query.permalink,
-                permalink_match=query.permalink_match,
-                title=query.title,
-                note_types=query.note_types,
-                search_item_types=query.entity_types,
-                after_date=after_date,
-                metadata_filters=metadata_filters,
-                retrieval_mode=retrieval_mode,
-                min_similarity=query.min_similarity,
                 limit=limit,
                 offset=offset,
             )
@@ -217,7 +301,9 @@ class SearchService:
         # Outcome: retry once with relaxed OR terms while preserving explicit boolean intent.
         if results:
             return results
-        if not self._is_relaxed_fts_fallback_eligible(query, strict_search_text, retrieval_mode):
+        if not self._is_relaxed_fts_fallback_eligible(
+            query, strict_search_text, prepared.retrieval_mode
+        ):
             return results
 
         assert strict_search_text is not None
@@ -231,25 +317,56 @@ class SearchService:
         )
         with logfire.span(
             "search.relaxed_fts_retry",
-            retrieval_mode=retrieval_mode.value,
+            retrieval_mode=prepared.retrieval_mode.value,
             token_count=len(self._tokenize_fts_text(strict_search_text)),
             limit=limit,
             offset=offset,
         ):
-            return await self.repository.search(
+            return await self._search_repository(
+                prepared,
                 search_text=relaxed_search_text,
-                permalink=query.permalink,
-                permalink_match=query.permalink_match,
-                title=query.title,
-                note_types=query.note_types,
-                search_item_types=query.entity_types,
-                after_date=after_date,
-                metadata_filters=metadata_filters,
-                retrieval_mode=retrieval_mode,
-                min_similarity=query.min_similarity,
                 limit=limit,
                 offset=offset,
             )
+
+    async def count(self, query: SearchQuery) -> int:
+        """Count all indexed rows matching a query."""
+        prepared = self._prepare_query(query)
+        if prepared is None:
+            return 0
+
+        strict_search_text = prepared.search_text
+        has_query = bool(
+            strict_search_text or prepared.title or prepared.permalink or prepared.permalink_match
+        )
+        has_filters = self._prepared_has_filters(prepared)
+
+        with logfire.span(
+            "search.count",
+            retrieval_mode=prepared.retrieval_mode.value,
+            has_query=has_query,
+            has_filters=has_filters,
+        ):
+            total = await self._count_repository(prepared, search_text=strict_search_text)
+
+        if total > 0:
+            return total
+        if not self._is_relaxed_fts_fallback_eligible(
+            query, strict_search_text, prepared.retrieval_mode
+        ):
+            return total
+
+        assert strict_search_text is not None
+        relaxed_search_text = self._build_relaxed_fts_query(strict_search_text)
+        if relaxed_search_text == strict_search_text:
+            return total
+
+        with logfire.span(
+            "search.count.relaxed_fts_retry",
+            retrieval_mode=prepared.retrieval_mode.value,
+            token_count=len(self._tokenize_fts_text(strict_search_text)),
+        ):
+            return await self._count_repository(prepared, search_text=relaxed_search_text)
 
     @staticmethod
     def _tokenize_fts_text(search_text: str) -> list[str]:

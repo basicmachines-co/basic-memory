@@ -127,6 +127,7 @@ def test_search_response():
             metadata={},
         ),
     ]
-    response = SearchResponse(results=results, current_page=1, page_size=1)
+    response = SearchResponse(results=results, current_page=1, page_size=1, total=2)
     assert len(response.results) == 2
     assert response.results[0].score > response.results[1].score
+    assert response.total == 2

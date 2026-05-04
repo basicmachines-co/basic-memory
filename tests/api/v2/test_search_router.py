@@ -94,7 +94,7 @@ async def test_search_with_pagination(
     # Search with pagination
     response = await client.post(
         f"{v2_project_url}/search/",
-        json={"search_text": "Search Entity"},
+        json={"text": "Search Entity"},
         params={"page": 1, "page_size": 3},
     )
 
@@ -102,6 +102,57 @@ async def test_search_with_pagination(
     data = response.json()
     assert data["current_page"] == 1
     assert data["page_size"] == 3
+    assert data["total"] == 5
+    assert data["has_more"] is True
+
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"text": "Search Entity"},
+        params={"page": 2, "page_size": 3},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current_page"] == 2
+    assert data["page_size"] == 3
+    assert data["total"] == 5
+    assert data["has_more"] is False
+    assert len(data["results"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_with_item_type_filter_returns_total(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_repository,
+    search_service,
+    file_service,
+):
+    """Metadata-only graph searches should include exact totals for pagination."""
+    for i in range(5):
+        entity_data = {
+            "title": f"Structured Entity {i}",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "file_path": f"structured_{i}.md",
+            "checksum": f"structuredsum{i}",
+        }
+        await create_test_entity(
+            test_project, entity_data, entity_repository, search_service, file_service
+        )
+
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"entity_types": ["entity"]},
+        params={"page": 1, "page_size": 3},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 5
+    assert data["has_more"] is True
+    assert len(data["results"]) == 3
 
 
 @pytest.mark.asyncio
@@ -459,6 +510,9 @@ async def test_search_result_includes_matched_chunk(
         async def search(self, *args, **kwargs):
             return [fake_row]
 
+        async def count(self, *args, **kwargs):
+            return 1
+
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
         response = await client.post(
@@ -499,6 +553,9 @@ async def test_search_result_omits_matched_chunk_when_none(
     class FakeSearchService:
         async def search(self, *args, **kwargs):
             return [fake_row]
+
+        async def count(self, *args, **kwargs):
+            return 1
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:

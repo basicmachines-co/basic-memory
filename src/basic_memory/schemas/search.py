@@ -142,4 +142,5 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
     current_page: int
     page_size: int
+    total: int = 0
     has_more: bool = False

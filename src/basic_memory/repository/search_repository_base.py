@@ -247,6 +247,36 @@ class SearchRepositoryBase(ABC):
         """
         pass
 
+    async def count(
+        self,
+        search_text: Optional[str] = None,
+        permalink: Optional[str] = None,
+        permalink_match: Optional[str] = None,
+        title: Optional[str] = None,
+        note_types: Optional[List[str]] = None,
+        after_date: Optional[datetime] = None,
+        search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
+    ) -> int:
+        """Count results for retrieval modes that cannot use a backend COUNT query."""
+        results = await self.search(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+            retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
+            limit=VECTOR_FILTER_SCAN_LIMIT,
+            offset=0,
+        )
+        return len(results)
+
     # ------------------------------------------------------------------
     # Abstract methods — semantic search (backend-specific DB operations)
     # ------------------------------------------------------------------

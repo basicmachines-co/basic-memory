@@ -65,7 +65,6 @@ async def search(
         has_filters=bool(query.note_types or query.entity_types or query.metadata_filters),
     ):
         offset = (page - 1) * page_size
-        fetch_limit = page_size + 1
         try:
             with logfire.span(
                 "api.search.search.execute_query",
@@ -75,7 +74,8 @@ async def search(
                 page=page,
                 page_size=page_size,
             ):
-                results = await search_service.search(query, limit=fetch_limit, offset=offset)
+                results = await search_service.search(query, limit=page_size, offset=offset)
+                total = await search_service.count(query)
         except SemanticSearchDisabledError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SemanticDependenciesMissingError as exc:
@@ -90,9 +90,7 @@ async def search(
             phase="paginate_results",
             result_count=len(results),
         ):
-            has_more = len(results) > page_size
-            if has_more:
-                results = results[:page_size]
+            has_more = offset + len(results) < total
 
         with logfire.span(
             "api.search.search.hydrate_results",
@@ -113,6 +111,7 @@ async def search(
                 results=search_results,
                 current_page=page,
                 page_size=page_size,
+                total=total,
                 has_more=has_more,
             )
 
