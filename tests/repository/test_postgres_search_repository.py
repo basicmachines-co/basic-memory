@@ -235,6 +235,7 @@ async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(
     # Trailing boolean operator creates an invalid tsquery; repository should return []
     results = await repo.search(search_text="coffee AND")
     assert results == []
+    assert await repo.count(search_text="coffee AND") == 0
 
 
 @pytest.mark.asyncio
