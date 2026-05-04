@@ -261,6 +261,9 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
     ) -> int:
         """Count results for retrieval modes that cannot use a backend COUNT query."""
+        # Trigger: vector and hybrid modes rank after embedding lookup, filtering, and fusion.
+        # Why: that scoring pipeline is not expressible as a portable database COUNT query.
+        # Outcome: fetch the bounded candidate set and count the final in-memory results.
         results = await self.search(
             search_text=search_text,
             permalink=permalink,

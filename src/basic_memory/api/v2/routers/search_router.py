@@ -4,6 +4,8 @@ This router uses external_id UUIDs for stable, API-friendly routing.
 V1 uses string-based project names which are less efficient and less stable.
 """
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Path
 
 import logfire
@@ -74,8 +76,10 @@ async def search(
                 page=page,
                 page_size=page_size,
             ):
-                results = await search_service.search(query, limit=page_size, offset=offset)
-                total = await search_service.count(query)
+                results, total = await asyncio.gather(
+                    search_service.search(query, limit=page_size, offset=offset),
+                    search_service.count(query),
+                )
         except SemanticSearchDisabledError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SemanticDependenciesMissingError as exc:

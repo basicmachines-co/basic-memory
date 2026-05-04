@@ -57,7 +57,7 @@ async def test_search_entities(
     )
 
     # Search for the entity
-    response = await client.post(f"{v2_project_url}/search/", json={"search_text": "Searchable"})
+    response = await client.post(f"{v2_project_url}/search/", json={"text": "Searchable"})
 
     assert response.status_code == 200
     data = response.json()
@@ -243,7 +243,7 @@ async def test_search_with_type_filter(
 
     # Search with type filter
     response = await client.post(
-        f"{v2_project_url}/search/", json={"search_text": "Type", "note_types": ["note"]}
+        f"{v2_project_url}/search/", json={"text": "Type", "note_types": ["note"]}
     )
 
     assert response.status_code == 200
@@ -276,7 +276,7 @@ async def test_search_with_date_filter(
     # Search with date filter
     response = await client.post(
         f"{v2_project_url}/search/",
-        json={"search_text": "Date Filtered", "after_date": "2024-01-01T00:00:00Z"},
+        json={"text": "Date Filtered", "after_date": "2024-01-01T00:00:00Z"},
     )
 
     assert response.status_code == 200
@@ -298,11 +298,41 @@ async def test_search_empty_query(
 
 
 @pytest.mark.asyncio
+async def test_search_whitespace_text_is_treated_as_empty(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_repository,
+    search_service,
+    file_service,
+):
+    """Whitespace-only text should not become an unfiltered project-wide search."""
+    entity_data = {
+        "title": "Whitespace Regression Entity",
+        "note_type": "note",
+        "content_type": "text/markdown",
+        "file_path": "whitespace_regression.md",
+        "checksum": "whitespace123",
+    }
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
+
+    response = await client.post(f"{v2_project_url}/search/", json={"text": "   "})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 0
+    assert data["has_more"] is False
+    assert data["results"] == []
+
+
+@pytest.mark.asyncio
 async def test_search_invalid_project_id(
     client: AsyncClient,
 ):
     """Test searching with invalid project ID returns 404."""
-    response = await client.post("/v2/projects/999999/search/", json={"search_text": "test"})
+    response = await client.post("/v2/projects/999999/search/", json={"text": "test"})
 
     assert response.status_code == 404
 
@@ -342,7 +372,7 @@ async def test_v2_search_endpoints_use_project_id_not_name(
 ):
     """Test that v2 search endpoints reject string project names."""
     # Try to use project name instead of ID - should fail
-    response = await client.post(f"/v2/{test_project.name}/search/", json={"search_text": "test"})
+    response = await client.post(f"/v2/{test_project.name}/search/", json={"text": "test"})
 
     # FastAPI path validation should reject non-integer project_id
     assert response.status_code in [404, 422]
@@ -358,11 +388,14 @@ async def test_search_router_returns_400_for_semantic_disabled(
         async def search(self, *args, **kwargs):
             raise SemanticSearchDisabledError("Semantic search is disabled for this project.")
 
+        async def count(self, *args, **kwargs):
+            raise SemanticSearchDisabledError("Semantic search is disabled for this project.")
+
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
         response = await client.post(
             f"{v2_project_url}/search/",
-            json={"search_text": "semantic query", "retrieval_mode": "vector"},
+            json={"text": "semantic query", "retrieval_mode": "vector"},
         )
     finally:
         app.dependency_overrides.pop(get_search_service_v2_external, None)
@@ -381,11 +414,14 @@ async def test_search_router_returns_400_for_semantic_missing_deps(
         async def search(self, *args, **kwargs):
             raise SemanticDependenciesMissingError("Semantic dependencies are missing.")
 
+        async def count(self, *args, **kwargs):
+            raise SemanticDependenciesMissingError("Semantic dependencies are missing.")
+
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
         response = await client.post(
             f"{v2_project_url}/search/",
-            json={"search_text": "semantic query", "retrieval_mode": "hybrid"},
+            json={"text": "semantic query", "retrieval_mode": "hybrid"},
         )
     finally:
         app.dependency_overrides.pop(get_search_service_v2_external, None)
@@ -402,6 +438,9 @@ async def test_search_router_returns_400_for_invalid_vector_query(
 
     class RaisingSearchService:
         async def search(self, *args, **kwargs):
+            raise ValueError("Vector retrieval requires a text query.")
+
+        async def count(self, *args, **kwargs):
             raise ValueError("Vector retrieval requires a text query.")
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
@@ -517,7 +556,7 @@ async def test_search_result_includes_matched_chunk(
     try:
         response = await client.post(
             f"{v2_project_url}/search/",
-            json={"search_text": "pricing"},
+            json={"text": "pricing"},
         )
     finally:
         app.dependency_overrides.pop(get_search_service_v2_external, None)
@@ -561,7 +600,7 @@ async def test_search_result_omits_matched_chunk_when_none(
     try:
         response = await client.post(
             f"{v2_project_url}/search/",
-            json={"search_text": "general"},
+            json={"text": "general"},
         )
     finally:
         app.dependency_overrides.pop(get_search_service_v2_external, None)

@@ -1031,12 +1031,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         min_similarity: Optional[float] = None,
     ) -> int:
         """Count indexed content matching the SQLite FTS query."""
-        mode = (
-            retrieval_mode.value
-            if isinstance(retrieval_mode, SearchRetrievalMode)
-            else str(retrieval_mode)
-        )
-        if mode != SearchRetrievalMode.FTS.value:
+        if retrieval_mode != SearchRetrievalMode.FTS:
             return await super().count(
                 search_text=search_text,
                 permalink=permalink,

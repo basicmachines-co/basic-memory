@@ -155,10 +155,10 @@ class SearchService:
         tags = query.tags
 
         # Support tag:<tag> shorthand by mapping to tags filter.
-        if search_text:
-            text = search_text.strip()
-            if text.lower().startswith("tag:"):
-                tag_values = re.split(r"[,\s]+", text[4:].strip())
+        if search_text is not None:
+            search_text = search_text.strip() or None
+            if search_text and search_text.lower().startswith("tag:"):
+                tag_values = re.split(r"[,\s]+", search_text[4:].strip())
                 parsed_tags = [t for t in tag_values if t]
                 if parsed_tags:
                     tags = parsed_tags
