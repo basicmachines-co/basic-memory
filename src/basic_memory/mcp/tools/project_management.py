@@ -11,10 +11,16 @@ from fastmcp import Context
 from loguru import logger
 
 from basic_memory.config import ConfigManager, has_cloud_credentials
-from basic_memory.mcp.async_client import get_client, is_factory_mode
+from basic_memory.mcp.async_client import (
+    _explicit_routing,
+    _force_local_mode,
+    get_client,
+    is_factory_mode,
+)
 from basic_memory.mcp.project_context import (
     WorkspaceProjectEntry,
     ensure_workspace_project_index,
+    resolve_workspace_parameter,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.project_info import ProjectInfoRequest, ProjectItem, ProjectList
@@ -388,6 +394,31 @@ def _format_constrained_text(constrained_project: str) -> str:
     return result
 
 
+async def _resolve_create_project_workspace(
+    workspace: str | None,
+    context: Context | None,
+) -> str | None:
+    """Resolve the create-project workspace selector to the routing tenant id."""
+    if workspace is None:
+        return None
+
+    explicit_cloud_routing = _explicit_routing() and not _force_local_mode()
+    config = ConfigManager().config
+    should_resolve_workspace = is_factory_mode() or (
+        explicit_cloud_routing and has_cloud_credentials(config)
+    )
+    if not should_resolve_workspace:
+        return workspace
+
+    # Trigger: cloud routing can use workspace discovery and the caller supplied
+    #   a friendly selector such as a slug, name, or tenant id.
+    # Why: MCP callers should not need to paste UUIDs, but the transport still
+    #   uses X-Workspace-ID with the tenant id as its routing authority.
+    # Outcome: resolve once at create time and pass only the tenant id downstream.
+    resolved_workspace = await resolve_workspace_parameter(workspace=workspace, context=context)
+    return resolved_workspace.tenant_id
+
+
 @mcp.tool(
     "create_memory_project",
     annotations={"destructiveHint": False, "openWorldHint": False},
@@ -396,7 +427,7 @@ async def create_memory_project(
     project_name: str,
     project_path: str,
     set_default: bool = False,
-    workspace_id: str | None = None,
+    workspace: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -409,10 +440,11 @@ async def create_memory_project(
         project_name: Name for the new project (must be unique)
         project_path: File system path where the project will be stored
         set_default: Whether to set this project as the default (optional, defaults to False)
-        workspace_id: Optional cloud workspace tenant_id to create the project in. When
-            omitted, the connection's default workspace is used. Discover available
-            values via `list_workspaces` (use the `tenant_id` field). Only meaningful
-            in cloud mode; ignored for local projects.
+        workspace: Optional cloud workspace selector to create the project in. Slug is
+            preferred for AI callers, but tenant_id and unique name are also accepted.
+            When omitted, the connection's default workspace is used. Discover values
+            via `list_workspaces`. Only meaningful in cloud mode; ignored for local
+            projects.
         output_format: "text" returns the existing human-readable result text.
             "json" returns structured project creation metadata.
         context: Optional FastMCP context for progress/status logging.
@@ -423,12 +455,14 @@ async def create_memory_project(
     Example:
         create_memory_project("my-research", "~/Documents/research")
         create_memory_project("work-notes", "/home/user/work", set_default=True)
-        create_memory_project("team-notes", "/team/notes", workspace_id="tenant-abc-123")
+        create_memory_project("team-notes", "/team/notes", workspace="team-paul")
     """
-    # workspace_id targets a non-default cloud workspace at create time.
-    # Trigger: caller passed workspace_id (e.g. discovered via list_workspaces).
+    workspace_id = await _resolve_create_project_workspace(workspace, context)
+
+    # workspace targets a non-default cloud workspace at create time.
+    # Trigger: caller passed workspace (e.g. a slug discovered via list_workspaces).
     # Why: there is no project_id yet for per-project routing — the project doesn't exist.
-    # Outcome: cloud factory routes the create request to the named workspace.
+    # Outcome: cloud factory routes the create request to the resolved workspace tenant id.
     async with get_client(workspace=workspace_id) as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")

@@ -713,9 +713,7 @@ async def test_resolve_workspace_project_identifier_resolves_by_external_id(monk
 
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
 
-    resolved = await resolve_workspace_project_identifier(
-        "22222222-2222-2222-2222-222222222222"
-    )
+    resolved = await resolve_workspace_project_identifier("22222222-2222-2222-2222-222222222222")
     assert resolved.workspace.slug == "acme"
     assert resolved.project.external_id == "22222222-2222-2222-2222-222222222222"
 

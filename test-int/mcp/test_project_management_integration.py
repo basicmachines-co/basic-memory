@@ -591,13 +591,13 @@ async def test_nested_project_paths_rejected(mcp_server, app, test_project, tmp_
 
 
 @pytest.mark.asyncio
-async def test_create_project_accepts_workspace_id_in_local_mode(
+async def test_create_project_accepts_workspace_in_local_mode(
     mcp_server, app, test_project, tmp_path
 ):
-    """Passing workspace_id via the MCP wire is accepted by the tool schema and
+    """Passing workspace via the MCP wire is accepted by the tool schema and
     does not break the local create path.
 
-    In local mode there is no cloud factory installed, so workspace_id is a no-op:
+    In local mode there is no cloud factory installed, so workspace is a no-op:
     the request lands on the ASGI transport which has no workspace concept. This
     test guards the schema so a future change can't accidentally drop the parameter.
     """
@@ -610,7 +610,7 @@ async def test_create_project_accepts_workspace_id_in_local_mode(
                 "project_path": str(
                     tmp_path.parent / (tmp_path.name + "-projects") / "project-ws-local-test"
                 ),
-                "workspace_id": "tenant-ignored-locally",
+                "workspace": "team-paul",
             },
         )
 
@@ -624,23 +624,36 @@ async def test_create_project_accepts_workspace_id_in_local_mode(
 
 
 @pytest.mark.asyncio
-async def test_create_project_workspace_id_forwarded_to_factory(
+async def test_create_project_workspace_slug_forwarded_to_factory_as_tenant_id(
     mcp_server, app, test_project, tmp_path
 ):
-    """workspace_id flows through to the cloud factory at create time.
+    """workspace slug resolves before the tenant id flows to the cloud factory.
 
     Simulates the cloud MCP server pattern (set_client_factory) and verifies the
     factory receives the workspace argument. This is the chicken-and-egg case:
-    no project_id exists yet, so workspace_id is the only way to target a
+    no project_id exists yet, so workspace is the only way to target a
     non-default workspace at create time.
     """
     from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, patch
 
     from httpx import ASGITransport, AsyncClient as HttpxAsyncClient
 
     from basic_memory.mcp import async_client
+    from basic_memory.mcp.tools import project_management
+    from basic_memory.schemas.cloud import WorkspaceInfo
 
     captured_workspaces: list[str | None] = []
+    resolved_workspace = WorkspaceInfo(
+        tenant_id="tenant-cloud-test",
+        name="Team Paul",
+        workspace_type="organization",
+        slug="team-paul",
+        role="owner",
+        organization_id="org-team-paul",
+        is_default=False,
+        has_active_subscription=True,
+    )
 
     @asynccontextmanager
     async def fake_factory(workspace=None):
@@ -655,25 +668,35 @@ async def test_create_project_workspace_id_forwarded_to_factory(
     original_factory = async_client._client_factory
     async_client.set_client_factory(fake_factory)
     try:
-        async with Client(mcp_server) as mcp_client:
-            create_result = await mcp_client.call_tool(
-                "create_memory_project",
-                {
-                    "project_name": "ws-routed-project",
-                    "project_path": str(
-                        tmp_path.parent
-                        / (tmp_path.name + "-projects")
-                        / "project-ws-routed-project"
-                    ),
-                    "workspace_id": "tenant-cloud-test",
-                },
-            )
+        with patch.object(
+            project_management,
+            "resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            return_value=resolved_workspace,
+        ) as mock_resolve_workspace:
+            async with Client(mcp_server) as mcp_client:
+                create_result = await mcp_client.call_tool(
+                    "create_memory_project",
+                    {
+                        "project_name": "ws-routed-project",
+                        "project_path": str(
+                            tmp_path.parent
+                            / (tmp_path.name + "-projects")
+                            / "project-ws-routed-project"
+                        ),
+                        "workspace": "team-paul",
+                    },
+                )
 
         create_text = create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "✓" in create_text
         assert "ws-routed-project" in create_text
 
-        # The factory must have been invoked with the workspace_id we passed in.
+        mock_resolve_workspace.assert_awaited_once()
+        await_args = mock_resolve_workspace.await_args
+        assert await_args is not None
+        assert await_args.kwargs["workspace"] == "team-paul"
+        # The factory must have been invoked with the tenant id resolved from the slug.
         # create_memory_project opens one get_client() context, so the factory is
         # called once per tool invocation; both list_projects and create_project
         # share that single client.

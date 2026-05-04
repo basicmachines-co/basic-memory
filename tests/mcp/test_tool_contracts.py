@@ -27,7 +27,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "project_name",
         "project_path",
         "set_default",
-        "workspace_id",
+        "workspace",
         "output_format",
     ],
     "delete_note": ["identifier", "is_directory", "project", "project_id", "output_format"],
