@@ -457,6 +457,56 @@ async def test_search_router_returns_400_for_invalid_vector_query(
 
 
 @pytest.mark.asyncio
+async def test_semantic_search_uses_probe_pagination_without_count(
+    client: AsyncClient,
+    app,
+    v2_project_url: str,
+):
+    """Semantic searches should not run an extra count query."""
+    now = datetime.now(timezone.utc)
+    fake_rows = [
+        SearchIndexRow(
+            project_id=1,
+            id=row_id,
+            type="entity",
+            file_path=f"notes/semantic-{row_id}.md",
+            created_at=now,
+            updated_at=now,
+            title=f"Semantic Result {row_id}",
+            permalink=f"notes/semantic-{row_id}",
+            score=1.0 - (row_id / 10),
+        )
+        for row_id in range(1, 4)
+    ]
+
+    class FakeSearchService:
+        async def search(self, query, *, limit, offset):
+            assert query.retrieval_mode.value == "vector"
+            assert limit == 3
+            assert offset == 0
+            return fake_rows
+
+        async def count(self, *args, **kwargs):
+            raise AssertionError("semantic search must not run count")
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"text": "semantic query", "retrieval_mode": "vector"},
+            params={"page": 1, "page_size": 2},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 0
+    assert data["has_more"] is True
+    assert len(data["results"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_search_has_more_when_more_results_exist(
     client: AsyncClient,
     test_project: Project,

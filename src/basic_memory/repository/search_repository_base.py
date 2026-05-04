@@ -260,25 +260,10 @@ class SearchRepositoryBase(ABC):
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
     ) -> int:
-        """Count results for retrieval modes that cannot use a backend COUNT query."""
-        # Trigger: vector and hybrid modes rank after embedding lookup, filtering, and fusion.
-        # Why: that scoring pipeline is not expressible as a portable database COUNT query.
-        # Outcome: fetch the bounded candidate set and count the final in-memory results.
-        results = await self.search(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            metadata_filters=metadata_filters,
-            retrieval_mode=retrieval_mode,
-            min_similarity=min_similarity,
-            limit=VECTOR_FILTER_SCAN_LIMIT,
-            offset=0,
-        )
-        return len(results)
+        """Count results when a backend-specific COUNT query is available."""
+        if retrieval_mode != SearchRetrievalMode.FTS:
+            raise ValueError("Exact counts are only supported for full-text search retrieval.")
+        raise NotImplementedError("Backend search repositories must implement full-text counts.")
 
     # ------------------------------------------------------------------
     # Abstract methods — semantic search (backend-specific DB operations)

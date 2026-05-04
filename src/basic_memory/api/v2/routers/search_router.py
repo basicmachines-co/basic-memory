@@ -14,7 +14,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
-from basic_memory.schemas.search import SearchQuery, SearchResponse
+from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
 from basic_memory.deps import (
     SearchServiceV2ExternalDep,
     EntityServiceV2ExternalDep,
@@ -67,6 +67,7 @@ async def search(
         has_filters=bool(query.note_types or query.entity_types or query.metadata_filters),
     ):
         offset = (page - 1) * page_size
+        exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
         try:
             with logfire.span(
                 "api.search.search.execute_query",
@@ -76,10 +77,14 @@ async def search(
                 page=page,
                 page_size=page_size,
             ):
-                results, total = await asyncio.gather(
-                    search_service.search(query, limit=page_size, offset=offset),
-                    search_service.count(query),
-                )
+                if exact_count_available:
+                    results, total = await asyncio.gather(
+                        search_service.search(query, limit=page_size, offset=offset),
+                        search_service.count(query),
+                    )
+                else:
+                    results = await search_service.search(query, limit=page_size + 1, offset=offset)
+                    total = 0
         except SemanticSearchDisabledError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SemanticDependenciesMissingError as exc:
@@ -94,7 +99,15 @@ async def search(
             phase="paginate_results",
             result_count=len(results),
         ):
-            has_more = offset + len(results) < total
+            if exact_count_available:
+                has_more = offset + len(results) < total
+            else:
+                # Trigger: semantic modes would need another vector/hybrid retrieval to count.
+                # Why: search requests should not pay for a second semantic pass.
+                # Outcome: preserve probe pagination for semantic search and leave total at 0.
+                has_more = len(results) > page_size
+                if has_more:
+                    results = results[:page_size]
 
         with logfire.span(
             "api.search.search.hydrate_results",
