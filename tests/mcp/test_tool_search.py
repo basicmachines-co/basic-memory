@@ -28,7 +28,10 @@ async def test_search_text(client, test_project):
 
     # Search for it (use json format to inspect structured results)
     response = await search_notes(
-        project=test_project.name, query="searchable", output_format="json"
+        project=test_project.name,
+        query="searchable",
+        search_type="text",
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
@@ -183,7 +186,12 @@ async def test_search_pagination(client, test_project):
 
     # Search for it (use json format to inspect structured results)
     response = await search_notes(
-        project=test_project.name, query="searchable", page=1, page_size=1, output_format="json"
+        project=test_project.name,
+        query="searchable",
+        search_type="text",
+        page=1,
+        page_size=1,
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
@@ -212,7 +220,11 @@ async def test_search_with_type_filter(client, test_project):
 
     # Search with note type filter (use json format to inspect structured results)
     response = await search_notes(
-        project=test_project.name, query="type", note_types=["note"], output_format="json"
+        project=test_project.name,
+        query="type",
+        search_type="text",
+        note_types=["note"],
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
@@ -237,7 +249,11 @@ async def test_search_with_entity_type_filter(client, test_project):
 
     # Search with entity_types (SearchItemType) filter (use json format)
     response = await search_notes(
-        project=test_project.name, query="type", entity_types=["entity"], output_format="json"
+        project=test_project.name,
+        query="type",
+        search_type="text",
+        entity_types=["entity"],
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
@@ -265,6 +281,7 @@ async def test_search_with_date_filter(client, test_project):
     response = await search_notes(
         project=test_project.name,
         query="recent",
+        search_type="text",
         after_date=one_hour_ago.isoformat(),
         output_format="json",
     )

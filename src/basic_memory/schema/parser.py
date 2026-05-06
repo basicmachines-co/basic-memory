@@ -8,7 +8,9 @@ Syntax reference:
   field: type, description          # required field
   field?: type, description         # optional field
   field(array): type                # array of values
+  field(array, description): type   # array with description
   field?(enum): [val1, val2]        # enumeration
+  field?(enum, description): [val1, val2]  # enum with description
   field?(object):                   # nested object
     sub_field: type
   EntityName as type (capitalized)  # entity reference
@@ -58,46 +60,74 @@ class SchemaDefinition:
 # with an uppercase letter is treated as an entity reference.
 
 SCALAR_TYPES = frozenset({"string", "integer", "number", "boolean", "any"})
+MODIFIER_TYPES = frozenset({"array", "enum", "object"})
 
 
 # --- Field Name Parsing ---
 
 
-def _parse_field_key(key: str) -> tuple[str, bool, bool, bool, bool]:
+def _parse_field_key_parts(key: str) -> tuple[str, bool, bool, bool, bool, str | None]:
     """Parse a Picoschema field key into its components.
 
-    Returns (name, required, is_array, is_enum, is_object).
-    The key format is: name[?][(array|enum|object)]
+    Returns (name, required, is_array, is_enum, is_object, description).
+    The key format is: name[?][(array|enum|object[, description])]
 
     Examples:
-        "name"           -> ("name", True, False, False)
-        "role?"          -> ("role", False, False, False)
-        "tags?(array)"   -> ("tags", False, True, False)
-        "status?(enum)"  -> ("status", False, False, True)
-        "metadata?(object)" -> ("metadata", False, False, False) + children
+        "name"           -> ("name", True, False, False, False, None)
+        "role?"          -> ("role", False, False, False, False, None)
+        "tags?(array)"   -> ("tags", False, True, False, False, None)
+        "tags?(array, labels)" -> ("tags", False, True, False, False, "labels")
+        "status?(enum)"  -> ("status", False, False, True, False, None)
+        "metadata?(object)" -> ("metadata", False, False, False, True, None)
     """
     required = True
     is_array = False
     is_enum = False
     is_object = False
+    description = None
 
-    # Check for modifier suffix: (array), (enum), (object)
-    if key.endswith("(array)"):
+    key, modifier, description = _split_modifier_suffix(key)
+
+    if modifier == "array":
         is_array = True
-        key = key[: -len("(array)")]
-    elif key.endswith("(enum)"):
+    elif modifier == "enum":
         is_enum = True
-        key = key[: -len("(enum)")]
-    elif key.endswith("(object)"):
+    elif modifier == "object":
         is_object = True
-        key = key[: -len("(object)")]
 
     # Check for optional marker
     if key.endswith("?"):
         required = False
         key = key[:-1]
 
-    return key, required, is_array, is_enum, is_object
+    return key.strip(), required, is_array, is_enum, is_object, description
+
+
+def _parse_field_key(key: str) -> tuple[str, bool, bool, bool, bool]:
+    """Parse a Picoschema field key, discarding any modifier description."""
+    name, required, is_array, is_enum, is_object, _description = _parse_field_key_parts(key)
+    return name, required, is_array, is_enum, is_object
+
+
+def _split_modifier_suffix(key: str) -> tuple[str, str | None, str | None]:
+    """Split a trailing picoschema modifier from a field key."""
+    stripped_key = key.rstrip()
+    if not stripped_key.endswith(")"):
+        return key, None, None
+
+    open_paren_index = stripped_key.find("(")
+    if open_paren_index == -1:
+        return key, None, None
+
+    modifier_text = stripped_key[open_paren_index + 1 : -1].strip()
+    modifier, separator, description = modifier_text.partition(",")
+    modifier = modifier.strip()
+    if modifier not in MODIFIER_TYPES:
+        return key, None, None
+
+    key_without_modifier = stripped_key[:open_paren_index].rstrip()
+    parsed_description = description.strip() if separator else None
+    return key_without_modifier, modifier, parsed_description or None
 
 
 def _parse_type_and_description(value: str) -> tuple[str, str | None]:
@@ -170,7 +200,9 @@ def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
     fields: list[SchemaField] = []
 
     for key, value in yaml_dict.items():
-        name, required, is_array, is_enum, is_object = _parse_field_key(key)
+        name, required, is_array, is_enum, is_object, key_description = _parse_field_key_parts(
+            key
+        )
 
         # --- Enum fields ---
         # Trigger: value is a list or a string containing bracketed enum values
@@ -179,11 +211,12 @@ def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
         #   in YAML to avoid parse errors)
         # Outcome: SchemaField with is_enum=True and enum_values populated
         if is_enum:
-            description = None
+            description = key_description
             if isinstance(value, list):
                 enum_values = [str(v) for v in value]
             else:
-                enum_values, description = _parse_enum_string(str(value))
+                enum_values, value_description = _parse_enum_string(str(value))
+                description = description or value_description
             fields.append(
                 SchemaField(
                     name=name,
@@ -207,13 +240,15 @@ def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
                     name=name,
                     type="object",
                     required=required,
+                    description=key_description,
                     children=children,
                 )
             )
             continue
 
         # --- Scalar and entity ref fields ---
-        type_str, description = _parse_type_and_description(str(value))
+        type_str, value_description = _parse_type_and_description(str(value))
+        description = key_description or value_description
         is_entity_ref = _is_entity_ref_type(type_str)
 
         fields.append(

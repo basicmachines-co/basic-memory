@@ -117,6 +117,73 @@ async def test_schema_validate_json_output(app, test_project, sync_service):
 
 
 @pytest.mark.asyncio
+async def test_schema_validate_picoschema_modifier_descriptions(
+    app, test_project, sync_service
+):
+    """Modifier descriptions should not become literal field names."""
+    project_path = Path(test_project.path)
+
+    _write_schema_file(
+        project_path,
+        "schemas/PicoTest.md",
+        """\
+---
+title: PicoTest
+type: schema
+entity: pico_test
+schema:
+  name: string
+  status(enum, current state): [active, inactive]
+  tags(array, list of tags): string
+settings:
+  validation: warn
+---
+
+# PicoTest
+""",
+    )
+    _write_schema_file(
+        project_path,
+        "pico/PicoTest1.md",
+        """\
+---
+title: PicoTest1
+type: pico_test
+permalink: pico/pico-test-1
+---
+
+# PicoTest1
+
+## Observations
+- [name] PicoTest1
+- [status] active
+- [tags] foo
+- [tags] bar
+""",
+    )
+
+    await sync_service.sync(project_path)
+
+    result = await schema_validate(
+        note_type="pico_test",
+        project=test_project.name,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    note_result = result["results"][0]
+    field_statuses = {fr["field_name"]: fr["status"] for fr in note_result["field_results"]}
+    assert result["valid_count"] == 1
+    assert note_result["warnings"] == []
+    assert note_result["unmatched_observations"] == {}
+    assert field_statuses == {
+        "name": "present",
+        "status": "present",
+        "tags": "present",
+    }
+
+
+@pytest.mark.asyncio
 async def test_schema_validate_by_identifier(app, test_project, sync_service):
     """Validate a specific note by identifier."""
     project_path = Path(test_project.path)

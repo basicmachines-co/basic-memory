@@ -7,6 +7,7 @@ from basic_memory.schema.parser import (
     parse_picoschema,
     parse_schema_note,
     _parse_field_key,
+    _parse_field_key_parts,
     _parse_type_and_description,
     _parse_enum_string,
     _is_entity_ref_type,
@@ -43,14 +44,48 @@ class TestParseFieldKey:
         assert required is False
         assert is_array is True
 
+    def test_array_with_description_in_modifier(self):
+        name, required, is_array, is_enum, is_object = _parse_field_key(
+            "tags(array, list of tags)"
+        )
+        assert name == "tags"
+        assert required is True
+        assert is_array is True
+        assert is_enum is False
+        assert is_object is False
+
+    def test_optional_array_with_description_in_modifier(self):
+        name, required, is_array, is_enum, is_object = _parse_field_key(
+            "tags?(array, list of tags)"
+        )
+        assert name == "tags"
+        assert required is False
+        assert is_array is True
+
     def test_enum(self):
         name, required, is_array, is_enum, is_object = _parse_field_key("status?(enum)")
         assert name == "status"
         assert required is False
         assert is_enum is True
 
+    def test_enum_with_description_in_modifier(self):
+        name, required, is_array, is_enum, is_object = _parse_field_key(
+            "status(enum, current state)"
+        )
+        assert name == "status"
+        assert required is True
+        assert is_enum is True
+
     def test_object(self):
         name, required, is_array, is_enum, is_object = _parse_field_key("metadata?(object)")
+        assert name == "metadata"
+        assert required is False
+        assert is_object is True
+
+    def test_object_with_description_in_modifier(self):
+        name, required, is_array, is_enum, is_object = _parse_field_key(
+            "metadata?(object, nested metadata)"
+        )
         assert name == "metadata"
         assert required is False
         assert is_object is True
@@ -60,6 +95,48 @@ class TestParseFieldKey:
         assert name == "status"
         assert required is True
         assert is_enum is True
+
+
+class TestParseFieldKeyParts:
+    def test_modifier_description_returned(self):
+        assert _parse_field_key_parts("tags(array, list of tags)") == (
+            "tags",
+            True,
+            True,
+            False,
+            False,
+            "list of tags",
+        )
+
+    def test_optional_enum_description_returned(self):
+        assert _parse_field_key_parts("status?(enum, current state)") == (
+            "status",
+            False,
+            False,
+            True,
+            False,
+            "current state",
+        )
+
+    def test_no_modifier_description_is_none(self):
+        assert _parse_field_key_parts("name") == (
+            "name",
+            True,
+            False,
+            False,
+            False,
+            None,
+        )
+
+    def test_description_can_contain_parentheses(self):
+        assert _parse_field_key_parts("tags(array, labels (freeform))") == (
+            "tags",
+            True,
+            True,
+            False,
+            False,
+            "labels (freeform)",
+        )
 
 
 # --- _parse_type_and_description ---
@@ -152,6 +229,13 @@ class TestParsePicoschema:
         assert fields[0].is_array is True
         assert fields[0].required is False
 
+    def test_array_field_with_description_in_modifier(self):
+        fields = parse_picoschema({"tags(array, list of tags)": "string"})
+        assert fields[0].name == "tags"
+        assert fields[0].type == "string"
+        assert fields[0].is_array is True
+        assert fields[0].description == "list of tags"
+
     def test_entity_ref_field(self):
         fields = parse_picoschema({"works_at?": "Organization, employer"})
         assert fields[0].name == "works_at"
@@ -164,6 +248,15 @@ class TestParsePicoschema:
         assert fields[0].name == "status"
         assert fields[0].is_enum is True
         assert fields[0].enum_values == ["active", "inactive"]
+
+    def test_enum_field_with_description_in_modifier(self):
+        fields = parse_picoschema({"status(enum, current state)": ["active", "inactive"]})
+        assert fields[0].name == "status"
+        assert fields[0].type == "enum"
+        assert fields[0].required is True
+        assert fields[0].is_enum is True
+        assert fields[0].enum_values == ["active", "inactive"]
+        assert fields[0].description == "current state"
 
     def test_enum_field_with_string(self):
         fields = parse_picoschema({"status?(enum)": "active"})
@@ -203,6 +296,20 @@ class TestParsePicoschema:
         assert len(fields[0].children) == 2
         assert fields[0].children[0].name == "street"
         assert fields[0].children[1].name == "city"
+
+    def test_object_field_with_description_in_modifier(self):
+        fields = parse_picoschema(
+            {
+                "address?(object, mailing address)": {
+                    "street": "string",
+                }
+            }
+        )
+        assert fields[0].name == "address"
+        assert fields[0].type == "object"
+        assert fields[0].required is False
+        assert fields[0].description == "mailing address"
+        assert fields[0].children[0].name == "street"
 
     def test_dict_value_treated_as_object(self):
         """A dict value without explicit (object) is still treated as an object."""
@@ -314,6 +421,31 @@ class TestParseSchemaNote:
         status_field = next(f for f in result.frontmatter_fields if f.name == "status")
         assert status_field.is_enum is True
         assert status_field.enum_values == ["draft", "published"]
+
+    def test_settings_frontmatter_parses_modifier_descriptions(self):
+        frontmatter = {
+            "entity": "Person",
+            "schema": {"name": "string"},
+            "settings": {
+                "validation": "warn",
+                "frontmatter": {
+                    "tags?(array, note tags)": "string",
+                    "status?(enum, publication state)": ["draft", "published"],
+                },
+            },
+        }
+        result = parse_schema_note(frontmatter)
+
+        tags_field = next(f for f in result.frontmatter_fields if f.name == "tags")
+        assert tags_field.required is False
+        assert tags_field.is_array is True
+        assert tags_field.description == "note tags"
+
+        status_field = next(f for f in result.frontmatter_fields if f.name == "status")
+        assert status_field.required is False
+        assert status_field.is_enum is True
+        assert status_field.enum_values == ["draft", "published"]
+        assert status_field.description == "publication state"
 
     def test_no_settings_frontmatter_defaults_to_empty(self):
         frontmatter = {
