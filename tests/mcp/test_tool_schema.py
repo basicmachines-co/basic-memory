@@ -117,9 +117,7 @@ async def test_schema_validate_json_output(app, test_project, sync_service):
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_picoschema_modifier_descriptions(
-    app, test_project, sync_service
-):
+async def test_schema_validate_picoschema_modifier_descriptions(app, test_project, sync_service):
     """Modifier descriptions should not become literal field names."""
     project_path = Path(test_project.path)
 

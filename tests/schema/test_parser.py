@@ -45,9 +45,7 @@ class TestParseFieldKey:
         assert is_array is True
 
     def test_array_with_description_in_modifier(self):
-        name, required, is_array, is_enum, is_object = _parse_field_key(
-            "tags(array, list of tags)"
-        )
+        name, required, is_array, is_enum, is_object = _parse_field_key("tags(array, list of tags)")
         assert name == "tags"
         assert required is True
         assert is_array is True
@@ -136,6 +134,26 @@ class TestParseFieldKeyParts:
             False,
             False,
             "labels (freeform)",
+        )
+
+    def test_field_name_can_contain_parentheses_before_modifier(self):
+        assert _parse_field_key_parts("risk(score)(array)") == (
+            "risk(score)",
+            True,
+            True,
+            False,
+            False,
+            None,
+        )
+
+    def test_optional_field_name_can_contain_parentheses_before_modifier(self):
+        assert _parse_field_key_parts("risk(score)?(array, score buckets)") == (
+            "risk(score)",
+            False,
+            True,
+            False,
+            False,
+            "score buckets",
         )
 
 
@@ -235,6 +253,12 @@ class TestParsePicoschema:
         assert fields[0].type == "string"
         assert fields[0].is_array is True
         assert fields[0].description == "list of tags"
+
+    def test_parenthesized_field_name_with_array_modifier(self):
+        fields = parse_picoschema({"risk(score)(array)": "string"})
+        assert fields[0].name == "risk(score)"
+        assert fields[0].type == "string"
+        assert fields[0].is_array is True
 
     def test_entity_ref_field(self):
         fields = parse_picoschema({"works_at?": "Organization, employer"})

@@ -115,7 +115,21 @@ def _split_modifier_suffix(key: str) -> tuple[str, str | None, str | None]:
     if not stripped_key.endswith(")"):
         return key, None, None
 
-    open_paren_index = stripped_key.find("(")
+    # Trigger: field names and modifier descriptions may both contain parentheses
+    # Why: only the parenthesis paired with the final suffix can introduce a modifier
+    # Outcome: preserves names like "risk(score)" and descriptions like "labels (freeform)"
+    open_paren_index = -1
+    depth = 0
+    for index in range(len(stripped_key) - 1, -1, -1):
+        char = stripped_key[index]
+        if char == ")":
+            depth += 1
+        elif char == "(":
+            depth -= 1
+            if depth == 0:
+                open_paren_index = index
+                break
+
     if open_paren_index == -1:
         return key, None, None
 
@@ -200,9 +214,7 @@ def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
     fields: list[SchemaField] = []
 
     for key, value in yaml_dict.items():
-        name, required, is_array, is_enum, is_object, key_description = _parse_field_key_parts(
-            key
-        )
+        name, required, is_array, is_enum, is_object, key_description = _parse_field_key_parts(key)
 
         # --- Enum fields ---
         # Trigger: value is a list or a string containing bracketed enum values
