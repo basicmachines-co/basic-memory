@@ -322,6 +322,21 @@ async def test_resolve_project_by_permalink(
 
 
 @pytest.mark.asyncio
+async def test_resolve_project_by_workspace_qualified_permalink(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """Resolve the workspace/project form shown by MCP disambiguation errors."""
+    resolve_data = {"identifier": f"personal/{test_project.name}"}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 200
+    resolved = ProjectResolveResponse.model_validate(response.json())
+    assert resolved.external_id == test_project.external_id
+    assert resolved.name == test_project.name
+    assert resolved.resolution_method == "permalink"
+
+
+@pytest.mark.asyncio
 async def test_resolve_project_by_id(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test resolving a project by external_id string returns correct project external_id."""
     resolve_data = {"identifier": test_project.external_id}

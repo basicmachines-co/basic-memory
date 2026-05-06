@@ -11,7 +11,7 @@ Key improvements:
 """
 
 import os
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Body, Query, Path
 from loguru import logger
@@ -25,6 +25,8 @@ from basic_memory.deps import (
     ProjectExternalIdPathDep,
 )
 from basic_memory.schemas import SyncReportResponse
+from basic_memory.models import Project
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.project_info import (
     ProjectItem,
     ProjectList,
@@ -36,6 +38,71 @@ from basic_memory.schemas.v2 import ProjectResolveRequest, ProjectResolveRespons
 from basic_memory.utils import normalize_project_path, generate_permalink
 
 router = APIRouter(prefix="/projects", tags=["project_management-v2"])
+ProjectResolveMethod = Literal["external_id", "name", "permalink"]
+
+
+def _split_qualified_project_identifier(identifier: str) -> tuple[str | None, str]:
+    """Split ``<workspace>/<project>`` identifiers while preserving plain project names."""
+    cleaned = identifier.strip()
+    if "/" not in cleaned:
+        return None, cleaned
+
+    workspace_identifier, project_identifier = cleaned.split("/", 1)
+    if not workspace_identifier or not project_identifier:
+        return None, cleaned
+    return workspace_identifier, project_identifier
+
+
+async def _resolve_project_identifier_candidate(
+    project_repository: ProjectRepository,
+    identifier: str,
+) -> tuple[Project | None, ProjectResolveMethod]:
+    """Resolve one project identifier candidate and report the matching method."""
+    identifier_permalink = generate_permalink(identifier)
+
+    project = await project_repository.get_by_external_id(identifier)
+    if project:
+        return project, "external_id"
+
+    project = await project_repository.get_by_permalink(identifier_permalink)
+    if project:
+        return project, "permalink"
+
+    project = await project_repository.get_by_name_case_insensitive(identifier)
+    if project:
+        return project, "name"  # pragma: no cover
+
+    return None, "name"
+
+
+async def _resolve_project_identifier(
+    project_repository: ProjectRepository,
+    identifier: str,
+) -> tuple[Project | None, ProjectResolveMethod]:
+    """Resolve exact identifiers first, then accepted workspace-qualified forms."""
+    project, resolution_method = await _resolve_project_identifier_candidate(
+        project_repository,
+        identifier,
+    )
+    if project:
+        return project, resolution_method
+
+    workspace_identifier, project_identifier = _split_qualified_project_identifier(identifier)
+    if workspace_identifier is None:
+        return None, resolution_method
+
+    # Trigger: an MCP disambiguation error suggested ``workspace/project``.
+    # Why: request routing already selected the workspace/tenant; this endpoint
+    #   only needs the project segment to validate the active project.
+    # Outcome: models can follow the hint verbatim instead of looping on a 404.
+    project, resolution_method = await _resolve_project_identifier_candidate(
+        project_repository,
+        project_identifier,
+    )
+    if project:
+        return project, resolution_method
+
+    return None, resolution_method
 
 
 @router.get("/", response_model=ProjectList)
@@ -247,28 +314,10 @@ async def resolve_project_identifier(
     """
     logger.info(f"API v2 request: resolve_project_identifier for '{data.identifier}'")
 
-    # Generate permalink for comparison
-    identifier_permalink = generate_permalink(data.identifier)
-
-    resolution_method = "name"
-    project = None
-
-    # Try external_id first (UUID format)
-    project = await project_repository.get_by_external_id(data.identifier)
-    if project:
-        resolution_method = "external_id"
-
-    # If not found by external_id, try by permalink (exact match)
-    if not project:
-        project = await project_repository.get_by_permalink(identifier_permalink)
-        if project:
-            resolution_method = "permalink"
-
-    # If not found by permalink, try case-insensitive name search
-    if not project:
-        project = await project_repository.get_by_name_case_insensitive(data.identifier)
-        if project:
-            resolution_method = "name"  # pragma: no cover
+    project, resolution_method = await _resolve_project_identifier(
+        project_repository,
+        data.identifier,
+    )
 
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: '{data.identifier}'")
