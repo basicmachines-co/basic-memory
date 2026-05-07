@@ -187,7 +187,9 @@ async def recent_activity(
     # project_id (UUID) takes precedence over project name — without this fallback,
     # callers passing only project_id would fall into Discovery Mode.
     effective_identifier = project_id if project_id else project
-    resolved_project = await resolve_project_parameter(effective_identifier, allow_discovery=True)
+    resolved_project = await resolve_project_parameter(
+        effective_identifier, allow_discovery=True, context=context
+    )
 
     if resolved_project is None:
         # Discovery Mode: Get activity across all projects
