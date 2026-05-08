@@ -138,6 +138,17 @@ async def cleanup_global_db_after_test() -> AsyncGenerator[None, None]:
     await db.shutdown_db()
 
 
+@pytest.fixture(autouse=True)
+def clean_routing_env(monkeypatch) -> None:
+    """Keep CLI routing env mutations from leaking between integration tests."""
+    # Trigger: CLI integration tests exercise long-running MCP entrypoints that set routing env.
+    # Why: those commands normally own the process lifetime, but pytest keeps reusing it.
+    # Outcome: every integration test starts from neutral routing unless it opts in explicitly.
+    monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
+    monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
+    monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
+
+
 POSTGRES_EPHEMERAL_TABLES = [
     "search_vector_embeddings",
     "search_vector_chunks",
