@@ -747,3 +747,193 @@ async def test_list_memory_projects_aggregates_without_config_workspace(app, tes
 
     mock_index.assert_awaited_once()
     assert "- cloud-proj (cloud) [00000000-0000-0000-0000-000000000001]" in result
+
+
+# --- delete_project workspace parameter tests ---
+
+
+@pytest.mark.asyncio
+async def test_delete_project_resolves_workspace_slug(app):
+    """A friendly workspace slug resolves to the tenant id used for cloud routing on delete."""
+    from contextlib import asynccontextmanager
+
+    import httpx
+
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.schemas.project_info import ProjectStatusResponse
+
+    captured: dict[str, str | None] = {}
+    target = _make_project("ws-project", "/ws-project")
+
+    @asynccontextmanager
+    async def fake_get_client(*, workspace=None, project_name=None):
+        captured["workspace"] = workspace
+        async with httpx.AsyncClient(base_url="http://testserver") as client:
+            yield client
+
+    fake_status = ProjectStatusResponse(
+        message="Project deleted",
+        status="success",
+        default=False,
+        old_project=target,
+    )
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.get_client",
+            new=fake_get_client,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            return_value=_make_workspace(
+                "tenant-abc-123",
+                "Big Team",
+                workspace_type="organization",
+                slug="big-team",
+            ),
+        ) as mock_resolve_workspace,
+        patch.object(
+            ProjectClient,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=_make_list([target], default=None),
+        ),
+        patch.object(
+            ProjectClient,
+            "delete_project",
+            new_callable=AsyncMock,
+            return_value=fake_status,
+        ),
+        patch(
+            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await delete_project("ws-project", workspace="big-team")
+
+    mock_resolve_workspace.assert_awaited_once_with(workspace="big-team", context=None)
+    assert captured["workspace"] == "tenant-abc-123"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_workspace_is_local_noop(app):
+    """Local delete passes workspace through unchanged without cloud workspace discovery."""
+    from contextlib import asynccontextmanager
+
+    import httpx
+
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.schemas.project_info import ProjectStatusResponse
+
+    captured: dict[str, str | None] = {}
+    target = _make_project("local-ws-project", "/local-ws-project")
+
+    @asynccontextmanager
+    async def fake_get_client(*, workspace=None, project_name=None):
+        captured["workspace"] = workspace
+        async with httpx.AsyncClient(base_url="http://testserver") as client:
+            yield client
+
+    fake_status = ProjectStatusResponse(
+        message="Project deleted",
+        status="success",
+        default=False,
+        old_project=target,
+    )
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.get_client",
+            new=fake_get_client,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=False,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.has_cloud_credentials",
+            return_value=False,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+        ) as mock_resolve_workspace,
+        patch.object(
+            ProjectClient,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=_make_list([target], default=None),
+        ),
+        patch.object(
+            ProjectClient,
+            "delete_project",
+            new_callable=AsyncMock,
+            return_value=fake_status,
+        ),
+        patch(
+            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await delete_project("local-ws-project", workspace="big-team")
+
+    mock_resolve_workspace.assert_not_awaited()
+    assert captured["workspace"] == "big-team"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_default_workspace_is_none(app):
+    """When workspace is omitted, get_client receives workspace=None (default workspace)."""
+    from contextlib import asynccontextmanager
+
+    import httpx
+
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.schemas.project_info import ProjectStatusResponse
+
+    captured: dict[str, str | None] = {"workspace": "sentinel"}
+    target = _make_project("default-ws-project", "/default-ws-project")
+
+    @asynccontextmanager
+    async def fake_get_client(*, workspace=None, project_name=None):
+        captured["workspace"] = workspace
+        async with httpx.AsyncClient(base_url="http://testserver") as client:
+            yield client
+
+    fake_status = ProjectStatusResponse(
+        message="Project deleted",
+        status="success",
+        default=False,
+        old_project=target,
+    )
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.get_client",
+            new=fake_get_client,
+        ),
+        patch.object(
+            ProjectClient,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=_make_list([target], default=None),
+        ),
+        patch.object(
+            ProjectClient,
+            "delete_project",
+            new_callable=AsyncMock,
+            return_value=fake_status,
+        ),
+        patch(
+            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await delete_project("default-ws-project")
+
+    assert captured["workspace"] is None
