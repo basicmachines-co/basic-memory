@@ -131,3 +131,37 @@ async def test_search_notes_multi_project_search_is_opt_in(monkeypatch):
     assert isinstance(result, dict)
     assert result["results"] == []
     assert searched_projects == [(None, None)]
+
+
+@pytest.mark.asyncio
+async def test_search_notes_search_all_projects_with_no_refs_returns_empty_all_projects(
+    monkeypatch,
+):
+    """Explicit all-project search must not silently fall back to one project."""
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+
+    async def fake_load_search_project_refs(context=None):
+        return []
+
+    @asynccontextmanager
+    async def fail_get_project_client(*args, **kwargs):
+        raise AssertionError("search_all_projects=True should not fall back to scoped search")
+        yield
+
+    monkeypatch.setattr(search_mod, "_load_search_project_refs", fake_load_search_project_refs)
+    monkeypatch.setattr(search_mod, "get_project_client", fail_get_project_client)
+
+    result = await search_mod.search_notes(
+        query="MCP Test Note",
+        search_all_projects=True,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result == {
+        "results": [],
+        "current_page": 1,
+        "page_size": 10,
+        "total": 0,
+        "has_more": False,
+    }

@@ -451,14 +451,23 @@ async def _search_all_projects(
     status: str | None,
     min_similarity: float | None,
     context: Context | None,
-) -> dict | str | None:
+) -> dict | str:
     """Search every accessible project when the caller explicitly opts in."""
-    project_refs = await _load_search_project_refs(context=context)
-    if not project_refs:
-        return None
-
     requested_page = max(page, 1)
     requested_page_size = max(page_size, 1)
+    project_refs = await _load_search_project_refs(context=context)
+    if not project_refs:
+        response = SearchResponse(
+            results=[],
+            current_page=requested_page,
+            page_size=requested_page_size,
+            total=0,
+            has_more=False,
+        )
+        if output_format == "json":
+            return response.model_dump(mode="json", exclude_none=True)
+        return _format_search_markdown(response, "all projects", query)
+
     per_project_page_size = requested_page * requested_page_size
     merged_results: list[dict[str, Any]] = []
     total = 0
@@ -810,8 +819,7 @@ async def search_notes(
             min_similarity=min_similarity,
             context=context,
         )
-        if all_projects_result is not None:
-            return all_projects_result
+        return all_projects_result
 
     with logfire.span(
         "mcp.tool.search_notes",
