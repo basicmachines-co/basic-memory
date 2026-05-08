@@ -86,56 +86,32 @@ async def test_search_uses_dynamic_default_search_type(monkeypatch, client, test
 
 
 @pytest.mark.asyncio
-async def test_search_queries_all_discovered_projects(monkeypatch, client, test_project):
-    """ChatGPT search should use every project id the account can access."""
+async def test_search_delegates_to_search_notes_without_project_iteration(
+    monkeypatch, client, test_project
+):
+    """ChatGPT search is only a compatibility wrapper around search_notes."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
-    captured_kwargs: list[dict] = []
-
-    async def fake_list_memory_projects(*args, **kwargs):
-        return {
-            "projects": [
-                {
-                    "name": "main",
-                    "qualified_name": "personal/main",
-                    "external_id": "11111111-1111-1111-1111-111111111111",
-                },
-                {
-                    "name": "main",
-                    "qualified_name": "team-paul/main",
-                    "external_id": "22222222-2222-2222-2222-222222222222",
-                },
-            ]
-        }
+    captured_kwargs: dict = {}
 
     async def fake_search_notes_fn(*args, **kwargs):
-        captured_kwargs.append(kwargs)
-        return {
-            "results": [
-                {
-                    "title": f"{kwargs['project']} MCP Test Note",
-                    "permalink": "main/tests/mcp-test-note",
-                    "type": "entity",
-                    "score": 1.0,
-                    "file_path": f"/{kwargs['project']}/tests/mcp-test-note.md",
-                }
-            ]
-        }
+        captured_kwargs.update(kwargs)
+        return {"results": []}
 
-    monkeypatch.setattr(chatgpt_tools, "list_memory_projects", fake_list_memory_projects)
     monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
 
     result = await chatgpt_tools.search("MCP Test Note")
 
     content = json.loads(result[0]["text"])
-    assert {item["id"] for item in content["results"]} == {
-        "personal/main/tests/mcp-test-note",
-        "team-paul/main/tests/mcp-test-note",
+    assert content["results"] == []
+    assert content["query"] == "MCP Test Note"
+    assert captured_kwargs == {
+        "query": "MCP Test Note",
+        "page": 1,
+        "page_size": 10,
+        "output_format": "json",
+        "context": None,
     }
-    assert [kwargs["project_id"] for kwargs in captured_kwargs] == [
-        "11111111-1111-1111-1111-111111111111",
-        "22222222-2222-2222-2222-222222222222",
-    ]
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "query",
         "project",
         "project_id",
+        "search_all_projects",
         "page",
         "page_size",
         "search_type",

@@ -2,7 +2,8 @@
 
 import re
 from textwrap import dedent
-from typing import Annotated, List, Optional, Dict, Any, Literal
+from typing import Annotated, List, Optional, Dict, Any, Literal, cast
+from uuid import UUID
 
 import logfire
 from loguru import logger
@@ -22,6 +23,7 @@ from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
     SearchResponse,
+    SearchResult,
     SearchRetrievalMode,
 )
 
@@ -294,6 +296,221 @@ def _format_search_markdown(result: SearchResponse, project: str, query: str | N
     return "\n".join(parts)
 
 
+def _valid_project_id(value: object) -> str | None:
+    """Return a UUID project id string when one is present."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return None
+
+
+def _matches_constrained_project(project: dict[str, Any], constrained_project: object) -> bool:
+    """Return True when a project list row satisfies BASIC_MEMORY_MCP_PROJECT."""
+    if not isinstance(constrained_project, str) or not constrained_project.strip():
+        return True
+
+    candidates = {
+        value
+        for value in (
+            project.get("name"),
+            project.get("qualified_name"),
+            project.get("external_id"),
+        )
+        if isinstance(value, str)
+    }
+    return constrained_project in candidates
+
+
+def _search_project_refs(projects_payload: object) -> list[dict[str, str | None]]:
+    """Extract project routing refs for optional account-scoped search."""
+    if not isinstance(projects_payload, dict):
+        return []
+
+    payload = cast(dict[str, Any], projects_payload)
+    projects = payload.get("projects")
+    if not isinstance(projects, list):
+        return []
+
+    refs: list[dict[str, str | None]] = []
+    seen: set[tuple[str | None, str | None]] = set()
+    constrained_project = payload.get("constrained_project")
+    for item in projects:
+        if not isinstance(item, dict) or not _matches_constrained_project(
+            item, constrained_project
+        ):
+            continue
+
+        project = item.get("qualified_name") or item.get("name")
+        project_name = project if isinstance(project, str) and project.strip() else None
+        project_id = _valid_project_id(item.get("external_id"))
+        if project_name is None and project_id is None:
+            continue
+
+        key = (project_name, project_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append({"project": project_name, "project_id": project_id})
+    return refs
+
+
+async def _load_search_project_refs(context: Context | None = None) -> list[dict[str, str | None]]:
+    """Load accessible projects for search_all_projects without coupling the wrapper tool."""
+    from basic_memory.mcp.tools.project_management import list_memory_projects
+
+    return _search_project_refs(await list_memory_projects(output_format="json", context=context))
+
+
+def _raw_results_from_search_payload(
+    results: SearchResponse | list[SearchResult | dict[str, Any]] | dict[str, Any],
+) -> list[SearchResult | dict[str, Any]]:
+    """Return the result list from any search_notes JSON-compatible payload."""
+    if isinstance(results, SearchResponse):
+        return list(results.results)
+    if isinstance(results, dict):
+        nested_results = results.get("results")
+        return (
+            cast(list[SearchResult | dict[str, Any]], nested_results)
+            if isinstance(nested_results, list)
+            else []
+        )
+    return list(results)
+
+
+def _result_score(result: SearchResult | dict[str, Any]) -> float:
+    """Return a comparable search score for merged project results."""
+    if isinstance(result, SearchResult):
+        return result.score
+    score = result.get("score")
+    return float(score) if isinstance(score, int | float) else 0.0
+
+
+def _qualify_permalink_for_project(permalink: object, project: str | None) -> object:
+    """Return a workspace-qualified permalink when the project ref supplies one."""
+    if not isinstance(permalink, str) or not permalink.strip():
+        return permalink
+    if not isinstance(project, str) or "/" not in project.strip("/"):
+        return permalink
+
+    normalized_permalink = permalink.strip("/")
+    qualified_project = project.strip("/")
+    if normalized_permalink == qualified_project or normalized_permalink.startswith(
+        f"{qualified_project}/"
+    ):
+        return normalized_permalink
+
+    workspace_slug, project_permalink = qualified_project.split("/", 1)
+    if normalized_permalink == project_permalink or normalized_permalink.startswith(
+        f"{project_permalink}/"
+    ):
+        return f"{workspace_slug}/{normalized_permalink}"
+    return f"{qualified_project}/{normalized_permalink}"
+
+
+def _qualify_results_for_project(
+    results: list[SearchResult | dict[str, Any]],
+    project_ref: dict[str, str | None],
+) -> list[dict[str, Any]]:
+    """Attach the searched workspace/project prefix to each result permalink."""
+    qualified: list[dict[str, Any]] = []
+    for result in results:
+        if isinstance(result, SearchResult):
+            result_data = result.model_dump()
+        else:
+            result_data = dict(result)
+        result_data["permalink"] = _qualify_permalink_for_project(
+            result_data.get("permalink"),
+            project_ref.get("project"),
+        )
+        qualified.append(result_data)
+    return qualified
+
+
+def _result_total(results: dict[str, Any], raw_results: list[SearchResult | dict[str, Any]]) -> int:
+    """Return the best available total for a per-project search payload."""
+    total = results.get("total")
+    if isinstance(total, int) and total > 0:
+        return total
+    return len(raw_results) + (1 if results.get("has_more") is True else 0)
+
+
+async def _search_all_projects(
+    *,
+    query: str | None,
+    page: int,
+    page_size: int,
+    search_type: str | None,
+    output_format: Literal["text", "json"],
+    note_types: list[str],
+    entity_types: list[str],
+    after_date: str | None,
+    metadata_filters: dict[str, Any] | None,
+    tags: list[str] | None,
+    status: str | None,
+    min_similarity: float | None,
+    context: Context | None,
+) -> dict | str | None:
+    """Search every accessible project when the caller explicitly opts in."""
+    project_refs = await _load_search_project_refs(context=context)
+    if not project_refs:
+        return None
+
+    requested_page = max(page, 1)
+    requested_page_size = max(page_size, 1)
+    per_project_page_size = requested_page * requested_page_size
+    merged_results: list[dict[str, Any]] = []
+    total = 0
+    any_project_has_more = False
+
+    for project_ref in project_refs:
+        results = await search_notes(
+            query=query,
+            project=project_ref["project"],
+            project_id=project_ref["project_id"],
+            page=1,
+            page_size=per_project_page_size,
+            search_type=search_type,
+            output_format="json",
+            note_types=note_types or None,
+            entity_types=entity_types or None,
+            after_date=after_date,
+            metadata_filters=metadata_filters,
+            tags=tags,
+            status=status,
+            min_similarity=min_similarity,
+            search_all_projects=False,
+            context=context,
+        )
+
+        if isinstance(results, str):
+            return results
+
+        raw_results = _raw_results_from_search_payload(results)
+        total += _result_total(results, raw_results)
+        any_project_has_more = any_project_has_more or results.get("has_more") is True
+        merged_results.extend(_qualify_results_for_project(raw_results, project_ref))
+
+    sorted_results = sorted(merged_results, key=_result_score, reverse=True)
+    start = (requested_page - 1) * requested_page_size
+    end = start + requested_page_size
+    paged_results = sorted_results[start:end]
+    response = SearchResponse.model_validate(
+        {
+            "results": paged_results,
+            "current_page": requested_page,
+            "page_size": requested_page_size,
+            "total": total,
+            "has_more": any_project_has_more or total > end or len(sorted_results) > end,
+        }
+    )
+
+    if output_format == "json":
+        return response.model_dump(mode="json", exclude_none=True)
+    return _format_search_markdown(response, "all projects", query)
+
+
 @mcp.tool(
     description="Search across all content in the knowledge base with advanced syntax support.",
     # TODO: re-enable once MCP client rendering is working
@@ -309,6 +526,13 @@ async def search_notes(
     ] = None,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
+    search_all_projects: Annotated[
+        bool,
+        Field(
+            default=False,
+            validation_alias=AliasChoices("search_all_projects", "all_projects"),
+        ),
+    ] = False,
     # `offset` is intentionally NOT aliased to `page`: offset is item-indexed
     # (skip N items) while page is 1-indexed page-number. Direct aliasing would
     # silently return the wrong slice.
@@ -373,6 +597,8 @@ async def search_notes(
     Project Resolution:
     Server resolves projects in this order: Single Project Mode → project parameter → default project.
     If project unknown, use list_memory_projects() or recent_activity() first.
+    Set search_all_projects=True to search every accessible project; this is opt-in because it
+    performs one search per project.
 
     ## Search Syntax Examples
 
@@ -448,6 +674,8 @@ async def search_notes(
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
+        search_all_projects: Optional opt-in to search every accessible project. Ignored when
+                `project` or `project_id` is supplied.
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of:
@@ -562,12 +790,36 @@ async def search_notes(
         if detected:
             project = detected
 
+    # Trigger: caller explicitly requests account/workspace-wide search and did not
+    # already provide a concrete project route.
+    # Why: multi-project fan-out can be slow, so default search remains project-scoped.
+    # Outcome: run one normal search per accessible project and merge ranked results.
+    if search_all_projects and project is None and project_id is None:
+        all_projects_result = await _search_all_projects(
+            query=query,
+            page=page,
+            page_size=page_size,
+            search_type=search_type,
+            output_format=output_format,
+            note_types=note_types,
+            entity_types=entity_types,
+            after_date=after_date,
+            metadata_filters=metadata_filters,
+            tags=tags,
+            status=status,
+            min_similarity=min_similarity,
+            context=context,
+        )
+        if all_projects_result is not None:
+            return all_projects_result
+
     with logfire.span(
         "mcp.tool.search_notes",
         entrypoint="mcp",
         tool_name="search_notes",
         requested_project=project,
         requested_project_id=project_id,
+        search_all_projects=search_all_projects,
         search_type=search_type or "default",
         output_format=output_format,
         page=page,
