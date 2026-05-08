@@ -20,6 +20,19 @@ def test_workspace_qualified_permalink_candidates_include_legacy_without_rewrapp
     ]
 
 
+def test_project_prefixed_candidate_includes_short_legacy_when_project_prefix_disabled():
+    candidates = build_permalink_resolution_candidates(
+        "main/notes/example",
+        "main",
+        include_project=False,
+    )
+
+    assert candidates == [
+        "main/notes/example",
+        "notes/example",
+    ]
+
+
 def test_short_permalink_candidates_include_workspace_and_project_forms():
     candidates = build_permalink_resolution_candidates(
         "notes/example",

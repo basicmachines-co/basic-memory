@@ -432,6 +432,9 @@ def _split_workspace_identifier_segments(identifier: str) -> tuple[str, str, str
     normalized = normalize_project_reference(_identifier_path(identifier)).strip("/")
     parts = normalized.split("/", 2)
     if len(parts) != 3:
+        # Trigger: two-segment identifiers such as `workspace/project` or `project/path`.
+        # Why: without a remainder, the shape is ambiguous with existing project-prefix routing.
+        # Outcome: fall through so the normal project-prefix/default-project resolver decides.
         return None
 
     workspace_slug, project_identifier, remainder = parts
@@ -1331,6 +1334,14 @@ async def detect_project_from_identifier_prefix(
     if local_project is not None:
         return local_project
 
+    normalized_identifier = normalize_project_reference(_identifier_path(identifier)).strip("/")
+    if "/" not in normalized_identifier:
+        # Trigger: plain text search query or single-segment title/permalink.
+        # Why: cloud project discovery can build a workspace index; only path-shaped
+        #   identifiers carry enough structure to justify that cost.
+        # Outcome: keep unqualified search/title input on the active/default project route.
+        return None
+
     if _cloud_workspace_discovery_available(config):
         workspace_resolution = await resolve_workspace_qualified_identifier(
             identifier,
@@ -1339,8 +1350,7 @@ async def detect_project_from_identifier_prefix(
         if workspace_resolution is not None:
             return workspace_resolution.project_identifier
 
-        normalized = normalize_project_reference(_identifier_path(identifier))
-        project_prefix, _ = _split_project_prefix(normalized)
+        project_prefix, _ = _split_project_prefix(normalized_identifier)
         if project_prefix is None:
             return None
 

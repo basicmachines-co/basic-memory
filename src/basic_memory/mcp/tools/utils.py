@@ -8,7 +8,7 @@ import typing
 from typing import Any, Optional
 
 import logfire
-from httpx import Response, URL, AsyncClient, HTTPStatusError
+from httpx import Response, URL, AsyncClient, HTTPStatusError, Headers
 from httpx._client import UseClientDefault, USE_CLIENT_DEFAULT
 from httpx._types import (
     RequestContent,
@@ -56,6 +56,22 @@ def _transport_error_span_attrs(exc: Exception) -> dict[str, Any]:
         "outcome": "transport_error",
         "error_type": type(exc).__name__,
     }
+
+
+def _request_headers(headers: HeaderTypes | None) -> HeaderTypes | None:
+    """Merge request-local workspace permalink headers into outbound API calls."""
+    from basic_memory.workspace_context import workspace_permalink_headers
+
+    workspace_headers = workspace_permalink_headers()
+    if not workspace_headers:
+        return headers
+
+    if headers is None:
+        return workspace_headers
+
+    merged_headers = Headers(headers)
+    merged_headers.update(workspace_headers)
+    return merged_headers
 
 
 def get_error_message(
@@ -224,7 +240,7 @@ async def call_get(
             response = await client.get(
                 url,
                 params=params,
-                headers=headers,
+                headers=_request_headers(headers),
                 cookies=cookies,
                 auth=auth,
                 follow_redirects=follow_redirects,
@@ -328,7 +344,7 @@ async def call_put(
                 files=files,
                 json=json,
                 params=params,
-                headers=headers,
+                headers=_request_headers(headers),
                 cookies=cookies,
                 auth=auth,
                 follow_redirects=follow_redirects,
@@ -432,7 +448,7 @@ async def call_patch(
                 files=files,
                 json=json,
                 params=params,
-                headers=headers,
+                headers=_request_headers(headers),
                 cookies=cookies,
                 auth=auth,
                 follow_redirects=follow_redirects,
@@ -542,7 +558,7 @@ async def call_post(
                 files=files,
                 json=json,
                 params=params,
-                headers=headers,
+                headers=_request_headers(headers),
                 cookies=cookies,
                 auth=auth,
                 follow_redirects=follow_redirects,
@@ -667,7 +683,7 @@ async def call_delete(
             response = await client.delete(
                 url=url,
                 params=params,
-                headers=headers,
+                headers=_request_headers(headers),
                 cookies=cookies,
                 auth=auth,
                 follow_redirects=follow_redirects,

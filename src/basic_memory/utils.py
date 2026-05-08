@@ -386,6 +386,12 @@ def build_permalink_resolution_candidates(
             remainder = normalized_path.removeprefix(f"{normalized_project}/")
             add_candidate(remainder)
 
+    if not include_project and normalized_path.startswith(f"{normalized_project}/"):
+        # Trigger: caller supplied `project/path` while legacy short permalinks are stored.
+        # Why: routing uses the project prefix, but strict lookup still needs the short row.
+        # Outcome: try `path` after the exact project-qualified candidate.
+        add_candidate(normalized_path.removeprefix(f"{normalized_project}/"))
+
     return candidates
 
 
