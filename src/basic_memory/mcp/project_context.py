@@ -439,7 +439,6 @@ def _canonical_memory_path_for_workspace(
     workspace_type: str,
     project_permalink: str,
     remainder: str,
-    include_project: bool,
 ) -> str:
     """Return the stored canonical path for a workspace-qualified memory URL."""
     normalized_remainder = remainder.strip("/")
@@ -580,7 +579,6 @@ async def resolve_workspace_qualified_memory_url(
         workspace_type=entry.workspace.workspace_type,
         project_permalink=entry.project.permalink,
         remainder=remainder,
-        include_project=ConfigManager().config.permalinks_include_project,
     )
     return WorkspaceMemoryUrlResolution(entry=entry, canonical_path=canonical_path)
 
@@ -1128,7 +1126,6 @@ async def resolve_project_and_path(
                     workspace_type=cached_workspace.workspace_type,
                     project_permalink=cached_project.permalink,
                     remainder=remainder,
-                    include_project=bool(include_project),
                 )
                 return cached_project, resolved_path, True
 
@@ -1151,7 +1148,6 @@ async def resolve_project_and_path(
                     workspace_type=workspace_context.workspace_type,
                     project_permalink=project_permalink,
                     remainder=remainder,
-                    include_project=bool(include_project),
                 )
                 return active_project, resolved_path, True
 

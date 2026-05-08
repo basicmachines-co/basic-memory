@@ -436,6 +436,11 @@ def _result_total(results: dict[str, Any], raw_results: list[SearchResult | dict
     return len(raw_results) + (1 if results.get("has_more") is True else 0)
 
 
+def _project_ref_label(project_ref: dict[str, str | None]) -> str:
+    """Return a stable log label for a project search ref."""
+    return project_ref.get("project") or project_ref.get("project_id") or "<unknown project>"
+
+
 async def _search_all_projects(
     *,
     query: str | None,
@@ -474,27 +479,39 @@ async def _search_all_projects(
     any_project_has_more = False
 
     for project_ref in project_refs:
-        results = await search_notes(
-            query=query,
-            project=project_ref["project"],
-            project_id=project_ref["project_id"],
-            page=1,
-            page_size=per_project_page_size,
-            search_type=search_type,
-            output_format="json",
-            note_types=note_types or None,
-            entity_types=entity_types or None,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            tags=tags,
-            status=status,
-            min_similarity=min_similarity,
-            search_all_projects=False,
-            context=context,
-        )
+        try:
+            results = await search_notes(
+                query=query,
+                project=project_ref["project"],
+                project_id=project_ref["project_id"],
+                page=1,
+                page_size=per_project_page_size,
+                search_type=search_type,
+                output_format="json",
+                note_types=note_types or None,
+                entity_types=entity_types or None,
+                after_date=after_date,
+                metadata_filters=metadata_filters,
+                tags=tags,
+                status=status,
+                min_similarity=min_similarity,
+                search_all_projects=False,
+                context=context,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Multi-project search failed for project {_project_ref_label(project_ref)}: {exc}"
+            )
+            continue
 
         if isinstance(results, str):
-            return results
+            if not results.startswith("# Search Failed"):
+                return results
+            logger.warning(
+                "Multi-project search failed for project "
+                f"{_project_ref_label(project_ref)}: {results}"
+            )
+            continue
 
         raw_results = _raw_results_from_search_payload(results)
         total += _result_total(results, raw_results)
