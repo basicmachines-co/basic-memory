@@ -446,6 +446,42 @@ def _canonical_memory_path_for_workspace(
     return f"{prefix}/{normalized_remainder}"
 
 
+def _canonical_memory_path_for_active_route(
+    active_project: ProjectItem,
+    path: str,
+    *,
+    include_project: bool,
+    cached_workspace: WorkspaceInfo | None = None,
+) -> str:
+    """Return the canonical permalink path for the currently routed project/workspace."""
+    workspace_context = current_workspace_permalink_context()
+    if workspace_context is not None:
+        return _canonical_memory_path_for_workspace(
+            workspace_slug=workspace_context.workspace_slug,
+            workspace_type=workspace_context.workspace_type,
+            project_permalink=active_project.permalink,
+            remainder=path,
+            include_project=include_project,
+        )
+
+    if cached_workspace is not None:
+        return _canonical_memory_path_for_workspace(
+            workspace_slug=cached_workspace.slug,
+            workspace_type=cached_workspace.workspace_type,
+            project_permalink=active_project.permalink,
+            remainder=path,
+            include_project=include_project,
+        )
+
+    if not include_project:
+        return path
+
+    project_prefix = active_project.permalink
+    if path == project_prefix or path.startswith(f"{project_prefix}/"):
+        return path
+    return f"{project_prefix}/{path}"
+
+
 def _cloud_workspace_discovery_available(config: BasicMemoryConfig) -> bool:
     """Return True when workspace discovery can be used without forcing local routing."""
     from basic_memory.mcp.async_client import (
@@ -1115,8 +1151,11 @@ async def resolve_project_and_path(
                         f"Project is constrained to '{resolved_project}', cannot use '{project_prefix}'."
                     )
 
-                resolved_path = (
-                    f"{cached_project.permalink}/{remainder}" if include_project else remainder
+                resolved_path = _canonical_memory_path_for_active_route(
+                    cached_project,
+                    remainder,
+                    include_project=include_project,
+                    cached_workspace=cached_workspace,
                 )
                 return cached_project, resolved_path, True
 
@@ -1151,8 +1190,11 @@ async def resolve_project_and_path(
                 )
                 await _set_cached_active_project(context, active_project)
 
-                resolved_path = (
-                    f"{resolved.permalink}/{remainder}" if include_project else remainder
+                resolved_path = _canonical_memory_path_for_active_route(
+                    active_project,
+                    remainder,
+                    include_project=include_project,
+                    cached_workspace=cached_workspace,
                 )
                 return active_project, resolved_path, True
 
@@ -1160,16 +1202,18 @@ async def resolve_project_and_path(
         # Why: preserve existing memory URL behavior within the active project
         # Outcome: use the active project and normalize the path for lookup
         active_project = await get_active_project(client, project, context, headers)
-        resolved_path = normalized_path
-        if include_project:
-            # Trigger: project-prefixed permalinks are enabled and the path lacks a prefix
-            # Why: ensure memory URL lookups align with canonical permalinks
-            # Outcome: prefix the path with the active project's permalink
-            project_prefix = active_project.permalink
-            if resolved_path != project_prefix and not resolved_path.startswith(
-                f"{project_prefix}/"
-            ):
-                resolved_path = f"{project_prefix}/{resolved_path}"
+        # Trigger: memory URL has no explicit project route segment
+        # Why: active cloud workspaces store canonical organization paths as
+        #   <workspace>/<project>/<path>, while personal/local projects may use
+        #   only <project>/<path> depending on config.
+        # Outcome: normalize against the already-selected route instead of
+        #   prepending only the project slug and losing workspace context.
+        resolved_path = _canonical_memory_path_for_active_route(
+            active_project,
+            normalized_path,
+            include_project=include_project,
+            cached_workspace=cached_workspace,
+        )
         return active_project, resolved_path, True
 
 

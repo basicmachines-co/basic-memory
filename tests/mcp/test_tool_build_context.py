@@ -4,7 +4,7 @@ import pytest
 
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import build_context
+from basic_memory.mcp.tools import build_context, write_note
 
 
 @pytest.mark.asyncio
@@ -73,6 +73,34 @@ async def test_get_discussion_context_pattern(client, test_graph, test_project):
         for item in result["results"]
     )
     assert result["metadata"]["depth"] == 1
+
+
+@pytest.mark.asyncio
+async def test_build_context_project_id_preserves_workspace_canonical_path(app, test_project):
+    """project_id routing keeps organization workspace prefixes in memory URL lookups."""
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        await write_note(
+            project_id=test_project.external_id,
+            title="Workspace Build Context Note",
+            directory="tests",
+            content="Build context should find this workspace note",
+        )
+
+        result = await build_context(
+            project_id=test_project.external_id,
+            url="memory://tests/*",
+            timeframe="30d",
+        )
+
+    assert isinstance(result, dict)
+    assert len(result["results"]) == 1
+    primary = result["results"][0]["primary_result"]
+    assert primary["permalink"] == (
+        f"team-paul/{test_project.name}/tests/workspace-build-context-note"
+    )
+    assert primary["content"] == "Build context should find this workspace note"
 
 
 @pytest.mark.asyncio
