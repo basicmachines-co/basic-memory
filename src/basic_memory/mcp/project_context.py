@@ -29,7 +29,11 @@ from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.schemas.memory import memory_url_path
-from basic_memory.utils import generate_permalink, normalize_project_reference
+from basic_memory.utils import (
+    build_qualified_permalink_reference,
+    generate_permalink,
+    normalize_project_reference,
+)
 from basic_memory.workspace_context import (
     current_workspace_permalink_context,
     workspace_permalink_context,
@@ -417,12 +421,15 @@ def _unqualified_project_identifier(identifier: str) -> str:
     return project_identifier
 
 
-def _split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str] | None:
-    """Split ``memory://<workspace>/<project>/<path>`` into route segments."""
-    if not identifier.strip().startswith("memory://"):
-        return None
+def _identifier_path(identifier: str) -> str:
+    """Return the routable path portion of a raw identifier or memory URL."""
+    stripped = identifier.strip()
+    return memory_url_path(stripped) if stripped.startswith("memory://") else stripped
 
-    normalized = normalize_project_reference(memory_url_path(identifier))
+
+def _split_workspace_identifier_segments(identifier: str) -> tuple[str, str, str] | None:
+    """Split ``<workspace>/<project>/<path>`` identifiers into route segments."""
+    normalized = normalize_project_reference(_identifier_path(identifier)).strip("/")
     parts = normalized.split("/", 2)
     if len(parts) != 3:
         return None
@@ -431,6 +438,14 @@ def _split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str
     if not workspace_slug or not project_identifier or not remainder:
         return None
     return workspace_slug, project_identifier, remainder
+
+
+def _split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str] | None:
+    """Split ``memory://<workspace>/<project>/<path>`` into route segments."""
+    if not identifier.strip().startswith("memory://"):
+        return None
+
+    return _split_workspace_identifier_segments(identifier)
 
 
 def _canonical_memory_path_for_workspace(
@@ -448,10 +463,14 @@ def _canonical_memory_path_for_workspace(
     # Trigger: a caller supplied a workspace-qualified memory URL.
     # Why: the first two path segments are the global route, even for Personal.
     # Outcome: lookups preserve the complete workspace/project canonical permalink.
-    prefix = f"{generate_permalink(workspace_slug)}/{project_permalink}"
     if not normalized_remainder:
-        return prefix
-    return f"{prefix}/{normalized_remainder}"
+        normalized_remainder = project_permalink
+    return build_qualified_permalink_reference(
+        project_permalink,
+        normalized_remainder,
+        include_project=True,
+        workspace_permalink=workspace_slug,
+    )
 
 
 def _canonical_memory_path_for_active_route(
@@ -528,6 +547,27 @@ async def resolve_workspace_qualified_memory_url(
     if segments is None:
         return None
 
+    return await _resolve_workspace_segments(identifier, segments, context=context)
+
+
+async def resolve_workspace_qualified_identifier(
+    identifier: str,
+    context: Optional[Context] = None,
+) -> WorkspaceMemoryUrlResolution | None:
+    """Resolve a workspace-qualified permalink or memory URL against accessible workspaces."""
+    segments = _split_workspace_identifier_segments(identifier)
+    if segments is None:
+        return None
+
+    return await _resolve_workspace_segments(identifier, segments, context=context)
+
+
+async def _resolve_workspace_segments(
+    identifier: str,
+    segments: tuple[str, str, str],
+    context: Optional[Context] = None,
+) -> WorkspaceMemoryUrlResolution | None:
+    """Resolve parsed workspace/project/path segments against accessible workspaces."""
     workspace_slug, project_identifier, remainder = segments
     index = await _ensure_workspace_project_index(context=context)
     workspace = next(
@@ -1278,17 +1318,44 @@ async def detect_project_from_memory_url_prefix(
     if not identifier.strip().startswith("memory://"):
         return None
 
+    return await detect_project_from_identifier_prefix(identifier, config, context=context)
+
+
+async def detect_project_from_identifier_prefix(
+    identifier: str,
+    config: BasicMemoryConfig,
+    context: Optional[Context] = None,
+) -> Optional[str]:
+    """Resolve a project from a plain permalink, memory URL, or workspace route prefix."""
     local_project = detect_project_from_url_prefix(identifier, config)
     if local_project is not None:
         return local_project
 
     if _cloud_workspace_discovery_available(config):
-        resolution = await resolve_workspace_qualified_memory_url(
+        workspace_resolution = await resolve_workspace_qualified_identifier(
             identifier,
             context=context,
         )
-        if resolution is not None:
-            return resolution.project_identifier
+        if workspace_resolution is not None:
+            return workspace_resolution.project_identifier
+
+        normalized = normalize_project_reference(_identifier_path(identifier))
+        project_prefix, _ = _split_project_prefix(normalized)
+        if project_prefix is None:
+            return None
+
+        try:
+            project_resolution = await resolve_workspace_project_identifier(
+                project_prefix,
+                context=context,
+            )
+        except ValueError as exc:
+            message = str(exc).lower()
+            if "not found" in message or "no accessible workspaces" in message:
+                return None
+            raise
+
+        return project_resolution.qualified_name
 
     return None
 

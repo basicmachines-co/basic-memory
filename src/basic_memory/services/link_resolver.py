@@ -13,10 +13,11 @@ from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import (
-    build_canonical_permalink,
+    build_permalink_resolution_candidates,
     generate_permalink,
     normalize_project_reference,
 )
+from basic_memory.workspace_context import current_workspace_permalink_context
 
 
 class LinkResolver:
@@ -189,25 +190,25 @@ class LinkResolver:
         """Resolve a link within a specific project scope."""
         clean_text = link_text
         include_project = self._include_project_permalinks()
+        workspace_context = current_workspace_permalink_context()
+        workspace_permalink = (
+            workspace_context.workspace_slug
+            if workspace_context and workspace_context.should_prefix_permalinks
+            else None
+        )
 
-        canonical_permalink: Optional[str] = None
-        legacy_permalink: Optional[str] = None
-        # Trigger: permalinks include project slug and project permalink is known
-        # Why: support globally addressable permalinks while keeping legacy links resolvable
-        # Outcome: include canonical and legacy candidates for resolution
-        if include_project and project_permalink:
-            canonical_permalink = build_canonical_permalink(
-                project_permalink, clean_text, include_project=True
-            )
-            if clean_text.startswith(f"{project_permalink}/"):
-                legacy_candidate = clean_text.removeprefix(f"{project_permalink}/")
-                if legacy_candidate:
-                    legacy_permalink = legacy_candidate
-
-        permalink_candidates = []
-        for candidate in (clean_text, canonical_permalink, legacy_permalink):
-            if candidate and candidate not in permalink_candidates:
-                permalink_candidates.append(candidate)
+        # Trigger: callers can pass title, short permalink, project/path, or
+        #   workspace/project/path identifiers to the same resolver.
+        # Why: search results and memory:// URLs should stay usable across read,
+        #   edit, delete, move, and API-level entity resolution.
+        # Outcome: resolve canonical workspace IDs and legacy project-prefixed rows
+        #   through one shared candidate builder.
+        permalink_candidates = build_permalink_resolution_candidates(
+            clean_text,
+            project_permalink,
+            include_project=include_project,
+            workspace_permalink=workspace_permalink,
+        )
 
         # --- Path Resolution ---
         # Note: All paths in Basic Memory are stored as POSIX strings (forward slashes)

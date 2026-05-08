@@ -276,6 +276,119 @@ def build_canonical_permalink(
     return project_path
 
 
+def build_qualified_permalink_reference(
+    project_permalink: Optional[str],
+    identifier: Union[Path, str, PathLike],
+    include_project: bool = True,
+    *,
+    workspace_permalink: Optional[str] = None,
+) -> str:
+    """Add workspace/project route prefixes while preserving lookup syntax.
+
+    Unlike ``build_canonical_permalink()``, this helper does not run the identifier
+    through permalink generation. It is for inbound references that may contain
+    lookup-only syntax such as ``.md`` extensions or ``*`` glob patterns.
+    """
+    normalized_path = normalize_project_reference(str(identifier)).strip("/")
+    normalized_workspace = generate_permalink(workspace_permalink) if workspace_permalink else None
+    normalized_project = generate_permalink(project_permalink) if project_permalink else None
+
+    if normalized_workspace:
+        if not normalized_project:
+            raise ValueError("workspace_permalink requires project_permalink")
+
+        workspace_project_prefix = f"{normalized_workspace}/{normalized_project}"
+        if not normalized_path:
+            return workspace_project_prefix
+        if normalized_path == workspace_project_prefix or normalized_path.startswith(
+            f"{workspace_project_prefix}/"
+        ):
+            return normalized_path
+        if normalized_path == normalized_project or normalized_path.startswith(
+            f"{normalized_project}/"
+        ):
+            return f"{normalized_workspace}/{normalized_path}"
+        return f"{workspace_project_prefix}/{normalized_path}"
+
+    if not include_project or not normalized_project:
+        return normalized_path
+
+    if not normalized_path:
+        return normalized_project
+    if normalized_path == normalized_project or normalized_path.startswith(
+        f"{normalized_project}/"
+    ):
+        return normalized_path
+    return f"{normalized_project}/{normalized_path}"
+
+
+def build_permalink_resolution_candidates(
+    identifier: Union[Path, str, PathLike],
+    project_permalink: Optional[str],
+    include_project: bool = True,
+    *,
+    workspace_permalink: Optional[str] = None,
+) -> list[str]:
+    """Return permalink candidates from most caller-specific to broadest legacy form.
+
+    The first candidate preserves the normalized identifier the caller supplied. Follow-up
+    candidates add the active workspace/project route and legacy project/path forms so
+    all resolver callers share the same compatibility behavior.
+    """
+    exact_path = normalize_project_reference(str(identifier)).strip("/")
+    normalized_path = generate_permalink(exact_path).strip("/")
+    normalized_project = generate_permalink(project_permalink) if project_permalink else None
+    normalized_workspace = generate_permalink(workspace_permalink) if workspace_permalink else None
+    candidates: list[str] = []
+
+    def add_candidate(value: str | None) -> None:
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add_candidate(exact_path)
+    add_candidate(normalized_path)
+    if not normalized_project:
+        return candidates
+
+    workspace_project_prefix = (
+        f"{normalized_workspace}/{normalized_project}" if normalized_workspace else None
+    )
+    workspace_qualified = False
+    if workspace_project_prefix:
+        add_candidate(
+            build_canonical_permalink(
+                normalized_project,
+                normalized_path,
+                include_project=include_project,
+                workspace_permalink=normalized_workspace,
+            )
+        )
+        if normalized_path == workspace_project_prefix:
+            workspace_qualified = True
+            add_candidate(normalized_project)
+        elif normalized_path.startswith(f"{workspace_project_prefix}/"):
+            workspace_qualified = True
+            remainder = normalized_path.removeprefix(f"{workspace_project_prefix}/")
+            add_candidate(f"{normalized_project}/{remainder}")
+            add_candidate(remainder)
+
+    if include_project and not workspace_qualified:
+        add_candidate(
+            build_canonical_permalink(
+                normalized_project,
+                normalized_path,
+                include_project=True,
+            )
+        )
+        if normalized_path == normalized_project:
+            return candidates
+        if normalized_path.startswith(f"{normalized_project}/"):
+            remainder = normalized_path.removeprefix(f"{normalized_project}/")
+            add_candidate(remainder)
+
+    return candidates
+
+
 def setup_logging(
     log_level: str = "INFO",
     log_to_file: bool = False,

@@ -11,15 +11,14 @@ from fastmcp import Context
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
-    detect_project_from_memory_url_prefix,
+    detect_project_from_identifier_prefix,
     get_project_client,
     resolve_project_and_path,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
-from basic_memory.utils import generate_permalink, validate_project_path
-from basic_memory.workspace_context import current_workspace_permalink_context
+from basic_memory.utils import validate_project_path
 
 
 def _is_exact_title_match(identifier: str, title: str) -> bool:
@@ -131,10 +130,10 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
-    # Detect project from memory URL prefix before routing.
+    # Detect project from a memory URL or permalink prefix before routing.
     # project_id routes by external UUID, so it bypasses URL discovery entirely.
     if project is None and project_id is None:
-        detected = await detect_project_from_memory_url_prefix(
+        detected = await detect_project_from_identifier_prefix(
             identifier,
             ConfigManager().config,
             context=context,
@@ -278,51 +277,25 @@ async def read_note(
                 value = item.get("file_path")
                 return str(value) if value else None
 
-            def _legacy_workspace_unqualified_path(path: str) -> str | None:
-                workspace_context = current_workspace_permalink_context()
-                if workspace_context is None:
-                    return None
+            try:
+                # Try to resolve identifier to entity ID
+                entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
 
-                workspace_prefix = generate_permalink(workspace_context.workspace_slug)
-                project_prefix = active_project.permalink
-                qualified_prefix = f"{workspace_prefix}/{project_prefix}"
-                normalized_path = path.strip("/")
-                if normalized_path == qualified_prefix:
-                    return project_prefix
-                if normalized_path.startswith(f"{qualified_prefix}/"):
-                    return f"{project_prefix}/{normalized_path.removeprefix(f'{qualified_prefix}/')}"
-                return None
+                # Fetch content using entity ID
+                response = await resource_client.read(entity_id)
 
-            direct_lookup_paths = [entity_path]
-            legacy_path = _legacy_workspace_unqualified_path(entity_path)
-            if legacy_path and legacy_path not in direct_lookup_paths:
-                # Trigger: existing cloud rows may still use project-prefixed permalinks.
-                # Why: new workspace-qualified IDs should read old notes without a re-sync.
-                # Outcome: try the legacy path after the canonical workspace path misses.
-                direct_lookup_paths.append(legacy_path)
-
-            for direct_lookup_path in direct_lookup_paths:
-                try:
-                    # Try to resolve identifier to entity ID
-                    entity_id = await knowledge_client.resolve_entity(
-                        direct_lookup_path, strict=True
+                # If successful, return the content
+                if response.status_code == 200:
+                    logger.info(
+                        "Returning read_note result from resource: {path}",
+                        path=entity_path,
                     )
-
-                    # Fetch content using entity ID
-                    response = await resource_client.read(entity_id)
-
-                    # If successful, return the content
-                    if response.status_code == 200:
-                        logger.info(
-                            "Returning read_note result from resource: {path}",
-                            path=direct_lookup_path,
-                        )
-                        if output_format == "json":
-                            return await _read_json_payload(entity_id)
-                        return response.text
-                except Exception as e:  # pragma: no cover
-                    logger.info(f"Direct lookup failed for '{direct_lookup_path}': {e}")
-                    # Continue to alternate direct lookup paths, then fallback methods
+                    if output_format == "json":
+                        return await _read_json_payload(entity_id)
+                    return response.text
+            except Exception as e:  # pragma: no cover
+                logger.info(f"Direct lookup failed for '{entity_path}': {e}")
+                # Continue to fallback methods
 
             # Fallback 1: Try title search via API
             logger.info(f"Search title for: {identifier}")

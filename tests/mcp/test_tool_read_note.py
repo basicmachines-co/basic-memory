@@ -292,7 +292,7 @@ async def test_read_note_skips_url_detection_when_project_id_provided(
     import importlib
 
     read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
-    monkeypatch.setattr(read_note_module, "detect_project_from_memory_url_prefix", fail_if_called)
+    monkeypatch.setattr(read_note_module, "detect_project_from_identifier_prefix", fail_if_called)
 
     result = await read_note(
         f"memory://{test_project.name}/test/project-id-memory-url-read",

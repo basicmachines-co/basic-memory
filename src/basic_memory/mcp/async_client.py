@@ -37,8 +37,13 @@ def _build_timeout() -> Timeout:
 
 def _asgi_client(timeout: Timeout) -> AsyncClient:
     """Create a local ASGI client."""
+    from basic_memory.workspace_context import workspace_permalink_headers
+
     return AsyncClient(
-        transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
+        transport=ASGITransport(app=fastapi_app),
+        base_url="http://test",
+        timeout=timeout,
+        headers=workspace_permalink_headers(),
     )
 
 

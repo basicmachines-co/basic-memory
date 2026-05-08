@@ -11,10 +11,10 @@ from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
-from basic_memory.utils import coerce_dict, coerce_list
+from basic_memory.utils import build_canonical_permalink, coerce_dict, coerce_list
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import (
-    detect_project_from_memory_url_prefix,
+    detect_project_from_identifier_prefix,
     get_project_client,
     resolve_project_and_path,
 )
@@ -402,11 +402,12 @@ def _qualify_permalink_for_project(permalink: object, project: str | None) -> ob
         return normalized_permalink
 
     workspace_slug, project_permalink = qualified_project.split("/", 1)
-    if normalized_permalink == project_permalink or normalized_permalink.startswith(
-        f"{project_permalink}/"
-    ):
-        return f"{workspace_slug}/{normalized_permalink}"
-    return f"{qualified_project}/{normalized_permalink}"
+    return build_canonical_permalink(
+        project_permalink,
+        normalized_permalink,
+        include_project=True,
+        workspace_permalink=workspace_slug,
+    )
 
 
 def _qualify_results_for_project(
@@ -805,10 +806,10 @@ async def search_notes(
             remainder = re.sub(r"\b(AND|OR|NOT)\b", "", remainder).strip()
             query = remainder or None
 
-    # Detect project from memory URL prefix before routing.
+    # Detect project from a memory URL or permalink prefix before routing.
     # project_id routes by external UUID, so it bypasses URL discovery entirely.
     if project is None and project_id is None and query is not None:
-        detected = await detect_project_from_memory_url_prefix(
+        detected = await detect_project_from_identifier_prefix(
             query,
             ConfigManager().config,
             context=context,
