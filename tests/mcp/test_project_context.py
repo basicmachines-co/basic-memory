@@ -1453,6 +1453,60 @@ async def test_resolve_project_and_path_preserves_existing_project_prefixed_memo
     assert is_memory_url is True
 
 
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_uses_cached_workspace_for_active_route(
+    config_manager,
+    monkeypatch,
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = _ContextState()
+    cached_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    team_workspace = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    await context.set_state("active_project", cached_project.model_dump())
+    await context.set_state("active_workspace", team_workspace.model_dump())
+
+    async def fake_call_post(*args, **kwargs):
+        raise ToolError("project not found")
+
+    async def fake_get_active_project(*args, **kwargs):
+        return cached_project
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://notes/foo",
+        project="main",
+        context=_ctx(context),
+    )
+
+    assert active_project == cached_project
+    assert resolved_path == "team-paul/main/notes/foo"
+    assert is_memory_url is True
+
+
 class TestDetectProjectFromUrlPrefix:
     """Test detect_project_from_url_prefix for URL-based project detection."""
 
@@ -1555,6 +1609,92 @@ class TestGetProjectClientRoutingOrder:
 
         # The error should NOT be about workspaces
         assert "workspace" not in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_local_route_clears_stale_cached_workspace(self, config_manager, monkeypatch):
+        """A previous cloud workspace must not decorate later local memory URLs."""
+        from contextlib import asynccontextmanager
+
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        import basic_memory.mcp.project_context as project_context
+        from basic_memory.config import ProjectEntry
+        from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+        from basic_memory.schemas.project_info import ProjectItem
+        from basic_memory.workspace_context import current_workspace_permalink_context
+
+        config = config_manager.load_config()
+        config.permalinks_include_project = True
+        config.projects["local-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "local-proj")
+        )
+        config_manager.save_config(config)
+
+        context = _ContextState()
+        stale_workspace = _workspace(
+            tenant_id="team-tenant",
+            workspace_type="organization",
+            slug="team-paul",
+            name="Team Paul",
+            role="editor",
+        )
+        await context.set_state("active_workspace", stale_workspace.model_dump())
+
+        seen: dict[str, object] = {}
+        active = ProjectItem(
+            id=1,
+            external_id="local-project-id",
+            name="local-proj",
+            path="/local-proj",
+            is_default=False,
+        )
+
+        async def fail_ensure_workspace_project_index(context=None):  # pragma: no cover
+            raise AssertionError("Local routing must not discover cloud workspaces")
+
+        @asynccontextmanager
+        async def fake_get_client(project_name=None, workspace=None):
+            seen["project_name"] = project_name
+            seen["workspace"] = workspace
+            seen["permalink_context"] = current_workspace_permalink_context()
+            yield object()
+
+        async def fake_get_active_project(client, project_name, context=None, headers=None):
+            assert project_name == "local-proj"
+            return active
+
+        async def fake_call_post(*args, **kwargs):
+            raise ToolError("project not found")
+
+        monkeypatch.setattr(
+            project_context,
+            "_ensure_workspace_project_index",
+            fail_ensure_workspace_project_index,
+        )
+        monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+        monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+
+        async with get_project_client(
+            project="local-proj",
+            context=_ctx(context),
+        ) as (client, active_project):
+            _, resolved_path, is_memory_url = await resolve_project_and_path(
+                client=cast(Any, client),
+                identifier="memory://notes/foo",
+                project="local-proj",
+                context=_ctx(context),
+            )
+
+        assert active_project == active
+        assert seen == {
+            "project_name": "local-proj",
+            "workspace": None,
+            "permalink_context": None,
+        }
+        assert resolved_path == "local-proj/notes/foo"
+        assert is_memory_url is True
+        assert await context.get_state("active_workspace") is None
 
     @pytest.mark.asyncio
     async def test_cloud_project_uses_per_project_workspace_id(self, config_manager, monkeypatch):

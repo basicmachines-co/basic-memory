@@ -162,6 +162,17 @@ async def _set_cached_active_workspace(
     await context.set_state("active_workspace", active_workspace.model_dump())
 
 
+async def _clear_cached_active_workspace_for_local_route(context: Optional[Context]) -> None:
+    """Drop tenant workspace metadata before routing through a local project."""
+    if not context:
+        return
+
+    # Trigger: local routing follows a cloud route in the same MCP session
+    # Why: active_workspace is tenant metadata, not part of local project identity
+    # Outcome: memory:// resolution uses project-only local permalinks
+    await context.set_state("active_workspace", None)
+
+
 async def _get_cached_default_project(context: Optional[Context]) -> Optional[str]:
     """Return the cached default project name from context when available."""
     if not context:
@@ -1369,6 +1380,7 @@ async def get_project_client(
     # Outcome: route strictly based on explicit flag, no workspace network calls
     if _explicit_routing() and _force_local_mode():
         route_mode = "explicit_local"
+        await _clear_cached_active_workspace_for_local_route(context)
         with logfire.span(
             "routing.client_session",
             project_name=resolved_project,
@@ -1441,6 +1453,7 @@ async def get_project_client(
 
     # Step 4: Local routing (default)
     route_mode = "local_asgi"
+    await _clear_cached_active_workspace_for_local_route(context)
     with logfire.span(
         "routing.client_session",
         project_name=resolved_project,
