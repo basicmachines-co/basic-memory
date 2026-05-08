@@ -465,13 +465,24 @@ def _canonical_memory_path_for_active_route(
     cached_workspace: WorkspaceInfo | None = None,
 ) -> str:
     """Return the canonical permalink path for the currently routed project/workspace."""
+    project_prefix = active_project.permalink
+    workspace_remainder = path
+    if include_project and (path == project_prefix or path.startswith(f"{project_prefix}/")):
+        # Trigger: the memory URL already names the active project root/prefix
+        # Why: workspace canonicalization adds the project prefix itself, so
+        #   keeping it in the remainder would produce <workspace>/<project>/<project>
+        # Outcome: keep project-root and project-prefixed URLs canonical once
+        workspace_remainder = (
+            "" if path == project_prefix else path.removeprefix(f"{project_prefix}/")
+        )
+
     workspace_context = current_workspace_permalink_context()
     if workspace_context is not None:
         return _canonical_memory_path_for_workspace(
             workspace_slug=workspace_context.workspace_slug,
             workspace_type=workspace_context.workspace_type,
             project_permalink=active_project.permalink,
-            remainder=path,
+            remainder=workspace_remainder,
             include_project=include_project,
         )
 
@@ -480,14 +491,13 @@ def _canonical_memory_path_for_active_route(
             workspace_slug=cached_workspace.slug,
             workspace_type=cached_workspace.workspace_type,
             project_permalink=active_project.permalink,
-            remainder=path,
+            remainder=workspace_remainder,
             include_project=include_project,
         )
 
     if not include_project:
         return path
 
-    project_prefix = active_project.permalink
     if path == project_prefix or path.startswith(f"{project_prefix}/"):
         return path
     return f"{project_prefix}/{path}"
@@ -1209,16 +1219,10 @@ async def resolve_project_and_path(
                 )
                 return active_project, resolved_path, True
 
-        # Trigger: no resolvable project prefix in the memory URL
-        # Why: preserve existing memory URL behavior within the active project
-        # Outcome: use the active project and normalize the path for lookup
+        # Trigger: memory URL has no resolvable project route segment
+        # Why: preserve active-project behavior while honoring workspace paths
+        # Outcome: normalize against the already-selected local/cloud route
         active_project = await get_active_project(client, project, context, headers)
-        # Trigger: memory URL has no explicit project route segment
-        # Why: active cloud workspaces store canonical organization paths as
-        #   <workspace>/<project>/<path>, while personal/local projects may use
-        #   only <project>/<path> depending on config.
-        # Outcome: normalize against the already-selected route instead of
-        #   prepending only the project slug and losing workspace context.
         resolved_path = _canonical_memory_path_for_active_route(
             active_project,
             normalized_path,

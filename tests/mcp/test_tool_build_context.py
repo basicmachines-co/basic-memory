@@ -76,8 +76,10 @@ async def test_get_discussion_context_pattern(client, test_graph, test_project):
 
 
 @pytest.mark.asyncio
-async def test_build_context_project_id_preserves_workspace_canonical_path(app, test_project):
-    """project_id routing keeps organization workspace prefixes in memory URL lookups."""
+async def test_build_context_project_id_preserves_workspace_contextvar_canonical_path(
+    app, test_project
+):
+    """project_id routing keeps ContextVar workspace prefixes in memory URL lookups."""
     from basic_memory.workspace_context import workspace_permalink_context
 
     with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):

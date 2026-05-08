@@ -1506,6 +1506,171 @@ async def test_resolve_project_and_path_uses_cached_workspace_for_active_route(
     assert resolved_path == "team-paul/main/notes/foo"
     assert is_memory_url is True
 
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://main",
+        project="main",
+        context=_ctx(context),
+    )
+
+    assert active_project == cached_project
+    assert resolved_path == "team-paul/main"
+    assert is_memory_url is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_uses_workspace_context_for_project_root(
+    config_manager,
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    active = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+
+    async def fake_get_active_project(*args, **kwargs):
+        return active
+
+    monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+            client=cast(Any, None),
+            identifier="memory://main",
+            project="main",
+            context=_ctx(_ContextState()),
+        )
+
+    assert active_project == active
+    assert resolved_path == "team-paul/main"
+    assert is_memory_url is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_uses_cached_workspace_for_cached_project_prefix(
+    config_manager,
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = _ContextState()
+    cached_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    team_workspace = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    await context.set_state("active_project", cached_project.model_dump())
+    await context.set_state("active_workspace", team_workspace.model_dump())
+
+    async def fail_call_post(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("Cached project prefix should not call project resolve API")
+
+    async def fake_resolve_project_parameter(project=None, **kwargs):
+        return cached_project.name if project else cached_project.name
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fail_call_post)
+    monkeypatch.setattr(
+        project_context,
+        "resolve_project_parameter",
+        fake_resolve_project_parameter,
+    )
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://main/notes/foo",
+        context=_ctx(context),
+    )
+
+    assert active_project == cached_project
+    assert resolved_path == "team-paul/main/notes/foo"
+    assert is_memory_url is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_uses_cached_workspace_for_resolved_project_prefix(
+    config_manager,
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import resolve_project_and_path
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = _ContextState()
+    team_workspace = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    await context.set_state("active_workspace", team_workspace.model_dump())
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "external_id": "22222222-2222-2222-2222-222222222222",
+                "project_id": 2,
+                "name": "Research",
+                "permalink": "research",
+                "path": "/tmp/research",
+                "is_active": True,
+                "is_default": False,
+                "resolution_method": "permalink",
+            }
+
+    async def fake_call_post(*args, **kwargs):
+        return FakeResponse()
+
+    async def fake_resolve_project_parameter(project=None, **kwargs):
+        return "Research" if project else "Research"
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr(
+        project_context,
+        "resolve_project_parameter",
+        fake_resolve_project_parameter,
+    )
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://research/notes/foo",
+        context=_ctx(context),
+    )
+
+    assert active_project.name == "Research"
+    assert resolved_path == "team-paul/research/notes/foo"
+    assert is_memory_url is True
+
 
 class TestDetectProjectFromUrlPrefix:
     """Test detect_project_from_url_prefix for URL-based project detection."""
