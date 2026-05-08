@@ -380,14 +380,14 @@ async def test_team_workspace_write_stores_complete_permalink_when_project_prefi
 
 
 @pytest.mark.asyncio
-async def test_personal_workspace_write_keeps_project_scoped_permalink(
+async def test_personal_workspace_write_stores_complete_canonical_permalink(
     app,
     test_project,
     entity_repository,
 ):
     from basic_memory.workspace_context import workspace_permalink_context
 
-    expected_permalink = f"{test_project.name}/personal/personal-workspace-note"
+    expected_permalink = f"personal/{test_project.name}/personal/personal-workspace-note"
 
     with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
         write_result = await write_note(

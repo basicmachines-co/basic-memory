@@ -14,14 +14,14 @@ _WORKSPACE_TYPES = {"personal", "organization"}
 
 @dataclass(frozen=True)
 class WorkspacePermalinkContext:
-    """Workspace metadata needed to build canonical organization permalinks."""
+    """Workspace metadata needed to build canonical workspace permalinks."""
 
     workspace_slug: str
     workspace_type: str
 
     @property
     def should_prefix_permalinks(self) -> bool:
-        return self.workspace_type == "organization" and bool(self.workspace_slug)
+        return bool(self.workspace_slug)
 
 
 _workspace_permalink_context: ContextVar[WorkspacePermalinkContext | None] = ContextVar(

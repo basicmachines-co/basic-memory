@@ -86,6 +86,59 @@ async def test_search_uses_dynamic_default_search_type(monkeypatch, client, test
 
 
 @pytest.mark.asyncio
+async def test_search_queries_all_discovered_projects(monkeypatch, client, test_project):
+    """ChatGPT search should use every project id the account can access."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    captured_kwargs: list[dict] = []
+
+    async def fake_list_memory_projects(*args, **kwargs):
+        return {
+            "projects": [
+                {
+                    "name": "main",
+                    "qualified_name": "personal/main",
+                    "external_id": "11111111-1111-1111-1111-111111111111",
+                },
+                {
+                    "name": "main",
+                    "qualified_name": "team-paul/main",
+                    "external_id": "22222222-2222-2222-2222-222222222222",
+                },
+            ]
+        }
+
+    async def fake_search_notes_fn(*args, **kwargs):
+        captured_kwargs.append(kwargs)
+        return {
+            "results": [
+                {
+                    "title": f"{kwargs['project']} MCP Test Note",
+                    "permalink": "main/tests/mcp-test-note",
+                    "type": "entity",
+                    "score": 1.0,
+                    "file_path": f"/{kwargs['project']}/tests/mcp-test-note.md",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(chatgpt_tools, "list_memory_projects", fake_list_memory_projects)
+    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+
+    result = await chatgpt_tools.search("MCP Test Note")
+
+    content = json.loads(result[0]["text"])
+    assert {item["id"] for item in content["results"]} == {
+        "personal/main/tests/mcp-test-note",
+        "team-paul/main/tests/mcp-test-note",
+    }
+    assert [kwargs["project_id"] for kwargs in captured_kwargs] == [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_fetch_successful_document(client, test_project):
     """Test fetch with successful document retrieval."""
     await write_note(
@@ -125,6 +178,27 @@ async def test_fetch_document_not_found(client, test_project):
     content = json.loads(result[0]["text"])
     assert content["id"] == "nonexistent-doc"
     assert content["metadata"]["error"] == "Document not found"
+
+
+@pytest.mark.asyncio
+async def test_fetch_routes_path_ids_as_memory_urls(monkeypatch, client, test_project):
+    """Workspace-qualified search ids need memory URL routing during fetch."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    captured: dict[str, str] = {}
+
+    async def fake_read_note(*, identifier: str, context=None):
+        captured["identifier"] = identifier
+        return "# MCP Test Note\n\nFetched from the requested workspace."
+
+    monkeypatch.setattr(chatgpt_tools, "read_note", fake_read_note)
+
+    result = await chatgpt_tools.fetch("team-paul/main/tests/mcp-test-note")
+
+    content = json.loads(result[0]["text"])
+    assert captured["identifier"] == "memory://team-paul/main/tests/mcp-test-note"
+    assert content["id"] == "team-paul/main/tests/mcp-test-note"
+    assert content["title"] == "MCP Test Note"
 
 
 def test_format_search_results_for_chatgpt():

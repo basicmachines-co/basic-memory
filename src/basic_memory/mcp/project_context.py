@@ -443,15 +443,13 @@ def _canonical_memory_path_for_workspace(
 ) -> str:
     """Return the stored canonical path for a workspace-qualified memory URL."""
     normalized_remainder = remainder.strip("/")
-    if workspace_type == "organization":
-        prefix = f"{generate_permalink(workspace_slug)}/{project_permalink}"
-    elif workspace_type == "personal":
-        prefix = project_permalink if include_project else ""
-    else:
+    if workspace_type not in {"organization", "personal"}:
         raise ValueError(f"Unsupported workspace_type for memory URL routing: {workspace_type}")
 
-    if not prefix:
-        return normalized_remainder
+    # Trigger: a caller supplied a workspace-qualified memory URL.
+    # Why: the first two path segments are the global route, even for Personal.
+    # Outcome: lookups preserve the complete workspace/project canonical permalink.
+    prefix = f"{generate_permalink(workspace_slug)}/{project_permalink}"
     if not normalized_remainder:
         return prefix
     return f"{prefix}/{normalized_remainder}"

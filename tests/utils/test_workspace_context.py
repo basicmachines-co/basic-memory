@@ -8,6 +8,7 @@ from basic_memory.workspace_context import (
     current_workspace_permalink_context,
     workspace_permalink_context,
     workspace_permalink_headers,
+    workspace_slug_for_canonical_permalinks,
 )
 
 
@@ -42,3 +43,8 @@ def test_workspace_permalink_headers_reflect_active_context():
         }
 
     assert current_workspace_permalink_context() is None
+
+
+def test_personal_workspace_slug_is_canonical_permalink_prefix():
+    with workspace_permalink_context("personal", "personal"):
+        assert workspace_slug_for_canonical_permalinks() == "personal"

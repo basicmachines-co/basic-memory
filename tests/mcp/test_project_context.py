@@ -826,7 +826,7 @@ async def test_resolve_workspace_qualified_memory_url_uses_personal_canonical_pa
     resolved = await resolve_workspace_qualified_memory_url("memory://personal/main/notes/foo")
 
     assert resolved is not None
-    assert resolved.canonical_path == "main/notes/foo"
+    assert resolved.canonical_path == "personal/main/notes/foo"
 
 
 @pytest.mark.asyncio
@@ -1373,7 +1373,7 @@ async def test_resolve_project_and_path_keeps_workspace_qualified_canonical_path
 
 
 @pytest.mark.asyncio
-async def test_resolve_project_and_path_strips_personal_workspace_prefix(
+async def test_resolve_project_and_path_preserves_personal_workspace_prefix(
     config_manager,
     monkeypatch,
 ):
@@ -1417,7 +1417,7 @@ async def test_resolve_project_and_path_strips_personal_workspace_prefix(
     )
 
     assert active_project == cached_project
-    assert resolved_path == "main/notes/foo"
+    assert resolved_path == "personal/main/notes/foo"
     assert is_memory_url is True
 
 
