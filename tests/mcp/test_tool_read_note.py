@@ -405,6 +405,68 @@ async def test_personal_workspace_write_stores_complete_canonical_permalink(
 
 
 @pytest.mark.asyncio
+async def test_read_note_personal_workspace_keeps_short_project_permalink_working(
+    app,
+    test_project,
+):
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    legacy_permalink = f"{test_project.name}/personal/short-personal-note"
+
+    await write_note(
+        project=test_project.name,
+        title="Short Personal Note",
+        directory="personal",
+        content="Short personal workspace content",
+    )
+
+    with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
+        read_result = await read_note(
+            f"memory://{legacy_permalink}",
+            project=test_project.name,
+            output_format="json",
+        )
+
+    assert isinstance(read_result, dict)
+    assert read_result["permalink"] == legacy_permalink
+    assert read_result["content"].strip() == "Short personal workspace content"
+
+
+@pytest.mark.asyncio
+async def test_read_note_workspace_qualified_personal_url_finds_legacy_short_permalink(
+    app,
+    test_project,
+    entity_repository,
+):
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    legacy_permalink = f"{test_project.name}/personal/legacy-personal-note"
+    qualified_permalink = f"personal/{legacy_permalink}"
+
+    await write_note(
+        project=test_project.name,
+        title="Legacy Personal Note",
+        directory="personal",
+        content="Legacy personal workspace content",
+    )
+
+    stored = await entity_repository.get_by_permalink(legacy_permalink)
+    assert stored is not None
+    assert stored.permalink == legacy_permalink
+
+    with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
+        read_result = await read_note(
+            f"memory://{qualified_permalink}",
+            project=test_project.name,
+            output_format="json",
+        )
+
+    assert isinstance(read_result, dict)
+    assert read_result["permalink"] == legacy_permalink
+    assert read_result["content"].strip() == "Legacy personal workspace content"
+
+
+@pytest.mark.asyncio
 async def test_read_note_workspace_qualified_memory_url_uses_complete_permalink(
     app,
     test_project,
