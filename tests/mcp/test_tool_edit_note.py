@@ -829,15 +829,15 @@ async def test_edit_note_workspace_qualified_memory_url_keeps_complete_permalink
 
 @pytest.mark.asyncio
 async def test_edit_note_skips_detection_for_plain_path(client, test_project):
-    """edit_note should NOT call detect_project_from_url_prefix for plain path identifiers.
+    """A plain path like 'research/note' should not be misrouted to a project named 'research'.
 
-    A plain path like 'research/note' should not be misrouted to a project
-    named 'research' — the 'research' segment is a directory, not a project.
+    detect_project_from_identifier_prefix is called, but returns None for a plain
+    non-workspace-qualified path so the default project is used.
     """
     with patch(
-        "basic_memory.mcp.tools.edit_note.detect_project_from_memory_url_prefix"
+        "basic_memory.mcp.tools.edit_note.detect_project_from_identifier_prefix",
+        return_value=None,
     ) as mock_detect:
-        # Use a plain path (no memory:// prefix) — detection should not be called
         await edit_note(
             identifier="test/some-note",
             operation="append",
@@ -845,14 +845,14 @@ async def test_edit_note_skips_detection_for_plain_path(client, test_project):
             project=None,
         )
 
-        mock_detect.assert_not_called()
+        mock_detect.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_edit_note_skips_detection_when_project_provided(client, test_project):
     """edit_note should skip URL detection when project is explicitly provided."""
     with patch(
-        "basic_memory.mcp.tools.edit_note.detect_project_from_memory_url_prefix"
+        "basic_memory.mcp.tools.edit_note.detect_project_from_identifier_prefix"
     ) as mock_detect:
         await edit_note(
             identifier=f"memory://{test_project.name}/test/some-note",
@@ -884,7 +884,7 @@ async def test_edit_note_skips_detection_when_project_id_provided(
     import importlib
 
     edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
-    monkeypatch.setattr(edit_note_module, "detect_project_from_memory_url_prefix", fail_if_called)
+    monkeypatch.setattr(edit_note_module, "detect_project_from_identifier_prefix", fail_if_called)
 
     result = await edit_note(
         identifier=f"memory://{test_project.name}/test/project-id-memory-url-edit",
@@ -892,6 +892,48 @@ async def test_edit_note_skips_detection_when_project_id_provided(
         operation="append",
         content="\nAppended via project_id.",
     )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_workspace_qualified_plain_permalink_routes_correctly(
+    client,
+    test_project,
+):
+    """edit_note must route workspace-qualified plain permalinks to the right project.
+
+    This is the bug from issue #810: passing a workspace-qualified identifier like
+    'team-slug/project-name/path/note' (no memory:// prefix) would bypass project
+    detection and create a stray note in the default project instead of editing
+    the existing note in the target workspace project.
+    """
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    workspace_slug = "team-acme"
+    qualified_identifier = f"{workspace_slug}/{test_project.name}/docs/ws-plain-note"
+
+    with workspace_permalink_context(workspace_slug=workspace_slug, workspace_type="organization"):
+        await write_note(
+            project=test_project.name,
+            title="Ws Plain Note",
+            directory="docs",
+            content="# Ws Plain Note\nOriginal content.",
+        )
+
+    # Simulate cloud detection: detect_project_from_identifier_prefix resolves the
+    # workspace slug to the correct project name so routing goes to test_project.
+    with patch(
+        "basic_memory.mcp.tools.edit_note.detect_project_from_identifier_prefix",
+        return_value=test_project.name,
+    ):
+        result = await edit_note(
+            identifier=qualified_identifier,
+            operation="append",
+            content="\nAppended via plain workspace-qualified permalink.",
+        )
 
     assert isinstance(result, str)
     assert "Edited note (append)" in result

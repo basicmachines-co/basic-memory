@@ -9,7 +9,7 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
-    detect_project_from_memory_url_prefix,
+    detect_project_from_identifier_prefix,
     get_project_client,
     add_project_metadata,
     resolve_project_and_path,
@@ -288,13 +288,14 @@ async def edit_note(
     # Resolve effective default: allow MCP clients to send null for optional int field
     effective_replacements = expected_replacements if expected_replacements is not None else 1
 
-    # Detect project from memory URL prefix before routing
-    # Trigger: identifier starts with memory:// and no explicit project/project_id was provided
-    # Why: only gate on memory:// to avoid misrouting plain paths like "research/note"
-    #      where "research" is a directory, not a project name
-    # Outcome: project is set from the URL prefix, routing goes to the correct project
-    if project is None and project_id is None and identifier.strip().startswith("memory://"):
-        detected = await detect_project_from_memory_url_prefix(
+    # Detect project from identifier prefix before routing.
+    # Trigger: no explicit project/project_id was provided
+    # Why: handles both memory:// URLs and workspace-qualified plain permalinks
+    #      (e.g. "basic-memory-xxx/project/path/note") so edits route to the right
+    #      workspace instead of the default project
+    # Outcome: project is set from the identifier prefix, routing goes to the correct project
+    if project is None and project_id is None:
+        detected = await detect_project_from_identifier_prefix(
             identifier,
             ConfigManager().config,
             context=context,
@@ -377,7 +378,12 @@ async def edit_note(
                     is_not_found = "entity not found" in error_msg or "not found" in error_msg
 
                     if is_not_found and operation in ("append", "prepend"):
-                        title, directory = _parse_identifier_to_title_and_directory(identifier)
+                        # Use the resolved path (workspace prefix already stripped) so the
+                        # note is created at the clean project-relative path, not the
+                        # workspace-qualified form that was passed as the raw identifier.
+                        title, directory = _parse_identifier_to_title_and_directory(
+                            entity_identifier
+                        )
 
                         # Validate directory path (same security check as write_note)
                         project_path = active_project.home
