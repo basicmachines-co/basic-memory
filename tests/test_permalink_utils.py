@@ -47,6 +47,21 @@ def test_short_permalink_candidates_include_workspace_and_project_forms():
     ]
 
 
+def test_short_workspace_candidate_keeps_project_legacy_when_project_prefix_disabled():
+    candidates = build_permalink_resolution_candidates(
+        "notes/example",
+        "main",
+        include_project=False,
+        workspace_permalink="personal",
+    )
+
+    assert candidates == [
+        "notes/example",
+        "personal/main/notes/example",
+        "main/notes/example",
+    ]
+
+
 def test_qualified_permalink_reference_preserves_lookup_syntax():
     assert (
         build_qualified_permalink_reference(

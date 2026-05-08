@@ -372,6 +372,18 @@ def build_permalink_resolution_candidates(
             add_candidate(f"{normalized_project}/{remainder}")
             add_candidate(remainder)
 
+    if workspace_project_prefix and not include_project and not workspace_qualified:
+        # Trigger: short lookup in a workspace where new canonical links omit project prefixes.
+        # Why: older rows in that same workspace may still be stored as `project/path`.
+        # Outcome: try the project-prefixed legacy form after the workspace-qualified form.
+        add_candidate(
+            build_canonical_permalink(
+                normalized_project,
+                normalized_path,
+                include_project=True,
+            )
+        )
+
     if include_project and not workspace_qualified:
         add_candidate(
             build_canonical_permalink(
