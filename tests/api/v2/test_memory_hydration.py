@@ -55,6 +55,25 @@ class SpyEntityRepository:
         self.calls.append(ids)
         return [self.entities_by_id[i] for i in ids if i in self.entities_by_id]
 
+    async def find_by_ids_for_hydration(self, ids: list[int]):
+        self.calls.append(ids)
+        return [self.entities_by_id[i] for i in ids if i in self.entities_by_id]
+
+
+class LightweightOnlyEntityRepository:
+    """Raises if graph hydration uses the eager-loading repository method."""
+
+    def __init__(self, entities_by_id: dict[int, SimpleNamespace]):
+        self.entities_by_id = entities_by_id
+        self.hydration_calls: list[list[int]] = []
+
+    async def find_by_ids(self, ids: list[int]):
+        raise AssertionError("graph hydration must use the lightweight hydration lookup")
+
+    async def find_by_ids_for_hydration(self, ids: list[int]):
+        self.hydration_calls.append(ids)
+        return [self.entities_by_id[i] for i in ids if i in self.entities_by_id]
+
 
 # --- Single batch fetch (N+1 elimination) ---
 
@@ -198,3 +217,63 @@ async def test_to_graph_context_empty_results_skip_entity_lookup():
 
     assert repo.calls == []
     assert list(graph.results) == []
+
+
+@pytest.mark.asyncio
+async def test_to_graph_context_uses_lightweight_hydration_lookup():
+    """Hydration should not load observations/relations when only entity fields are needed."""
+    repo = LightweightOnlyEntityRepository(
+        {
+            1: _make_entity(1, "Root", "ext-root"),
+            2: _make_entity(2, "Child", "ext-child"),
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    context = ServiceContextResult(
+        results=[
+            ContextResultItem(
+                primary_result=_make_row(
+                    type="entity",
+                    id=1,
+                    root_id=1,
+                    title="Root",
+                    permalink="notes/root",
+                    file_path="notes/root.md",
+                    created_at=now,
+                ),
+                observations=[],
+                related_results=[
+                    _make_row(
+                        type="relation",
+                        id=20,
+                        root_id=1,
+                        title="links_to: Child",
+                        permalink="notes/root",
+                        file_path="notes/root.md",
+                        relation_type="links_to",
+                        from_id=1,
+                        to_id=2,
+                        depth=1,
+                        created_at=now,
+                    )
+                ],
+            )
+        ],
+        metadata=ContextMetadata(
+            types=[SearchItemType.ENTITY, SearchItemType.RELATION],
+            depth=1,
+            primary_count=1,
+            related_count=1,
+            total_relations=1,
+        ),
+    )
+
+    graph = await to_graph_context(context, entity_repository=repo)
+
+    assert len(repo.hydration_calls) == 1
+    assert set(repo.hydration_calls[0]) == {1, 2}
+    relation = graph.results[0].related_results[0]
+    assert isinstance(relation, RelationSummary)
+    assert relation.from_entity_external_id == "ext-root"
+    assert relation.to_entity_external_id == "ext-child"

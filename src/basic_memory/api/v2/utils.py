@@ -18,7 +18,7 @@ from basic_memory.services.context_service import (
 
 
 class EntityBatchLookup(Protocol):
-    async def find_by_ids(self, ids: List[int]) -> Sequence[Any]: ...
+    async def find_by_ids_for_hydration(self, ids: List[int]) -> Sequence[Any]: ...
 
 
 class EntityServiceBatchLookup(Protocol):
@@ -76,7 +76,7 @@ async def to_graph_context(
                     if item.to_id:
                         entity_ids_needed.add(item.to_id)
 
-        # Batch fetch all entities at once - get both title and external_id
+        # Batch fetch just the entity fields needed to shape the response.
         entity_title_lookup: dict[int, str] = {}
         entity_external_id_lookup: dict[int, str] = {}
         if entity_ids_needed:
@@ -87,7 +87,9 @@ async def to_graph_context(
                 phase="lookup_entities",
                 result_count=len(entity_ids_needed),
             ):
-                entities = await entity_repository.find_by_ids(list(entity_ids_needed))
+                entities = await entity_repository.find_by_ids_for_hydration(
+                    list(entity_ids_needed)
+                )
             for e in entities:
                 entity_title_lookup[e.id] = e.title
                 entity_external_id_lookup[e.id] = e.external_id

@@ -1051,6 +1051,25 @@ async def test_get_all_permalinks(entity_repository: EntityRepository, session_m
 
 
 @pytest.mark.asyncio
+async def test_find_by_ids_for_hydration_skips_eager_load_options(
+    entity_repository: EntityRepository, sample_entity: Entity, monkeypatch: pytest.MonkeyPatch
+):
+    """Context hydration should bypass relationship loader options."""
+
+    def fail_get_load_options():
+        raise AssertionError("hydration lookup must not eager load entity relationships")
+
+    monkeypatch.setattr(entity_repository, "get_load_options", fail_get_load_options)
+
+    found = await entity_repository.find_by_ids_for_hydration([sample_entity.id])
+
+    assert len(found) == 1
+    assert found[0].id == sample_entity.id
+    assert found[0].title == sample_entity.title
+    assert found[0].external_id == sample_entity.external_id
+
+
+@pytest.mark.asyncio
 async def test_get_permalink_to_file_path_map(entity_repository: EntityRepository, session_maker):
     """Test getting permalink -> file_path mapping for bulk operations."""
     async with db.scoped_session(session_maker) as session:
