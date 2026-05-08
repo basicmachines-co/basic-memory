@@ -1,7 +1,9 @@
 """Tests for MCP project management tools."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from sqlalchemy import select
 
@@ -136,9 +138,6 @@ async def test_create_and_delete_project_and_name_match_branch(
 @pytest.mark.asyncio
 async def test_create_memory_project_resolves_workspace_slug(app, tmp_path_factory):
     """A friendly workspace slug resolves to the tenant id used for cloud routing."""
-    from contextlib import asynccontextmanager
-    import httpx
-
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -207,9 +206,6 @@ async def test_create_memory_project_resolves_workspace_slug(app, tmp_path_facto
 @pytest.mark.asyncio
 async def test_create_memory_project_workspace_is_local_noop(app, tmp_path_factory):
     """Local create accepts workspace without requiring cloud workspace discovery."""
-    from contextlib import asynccontextmanager
-    import httpx
-
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -276,9 +272,6 @@ async def test_create_memory_project_workspace_is_local_noop(app, tmp_path_facto
 @pytest.mark.asyncio
 async def test_create_memory_project_default_workspace_is_none(app, tmp_path_factory):
     """When workspace is omitted, get_client receives workspace=None (default workspace)."""
-    from contextlib import asynccontextmanager
-    import httpx
-
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -331,9 +324,6 @@ async def test_create_memory_project_default_workspace_is_none(app, tmp_path_fac
 @pytest.mark.asyncio
 async def test_delete_project_resolves_workspace_slug(app):
     """A friendly workspace slug resolves to the tenant id used for delete routing."""
-    from contextlib import asynccontextmanager
-    import httpx
-
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -404,9 +394,6 @@ async def test_delete_project_resolves_workspace_slug(app):
 @pytest.mark.asyncio
 async def test_delete_project_workspace_is_local_noop(app):
     """Local delete accepts workspace without requiring cloud workspace discovery."""
-    from contextlib import asynccontextmanager
-    import httpx
-
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -473,9 +460,6 @@ async def test_delete_project_workspace_is_local_noop(app):
 @pytest.mark.asyncio
 async def test_delete_project_default_workspace_is_none(app):
     """When workspace is omitted, delete_project routes through the default workspace."""
-    from contextlib import asynccontextmanager
-    import httpx
-
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -524,6 +508,29 @@ async def test_delete_project_default_workspace_is_none(app):
         await delete_project("Default WS Project")
 
     assert captured["workspace"] is None
+
+
+@pytest.mark.asyncio
+async def test_delete_project_constrained_with_workspace_returns_disabled_message(monkeypatch):
+    """A constrained MCP session rejects deletion before resolving a workspace selector."""
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "locked-project")
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("bad workspace"),
+        ) as mock_resolve_workspace,
+    ):
+        result = await delete_project("Any Project", workspace="missing-team")
+
+    mock_resolve_workspace.assert_not_awaited()
+    assert "Project deletion disabled" in result
+    assert "locked-project" in result
 
 
 # --- Cloud merge tests ---

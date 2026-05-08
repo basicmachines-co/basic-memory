@@ -553,7 +553,8 @@ async def delete_project(
         workspace: Optional cloud workspace selector to delete the project from.
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
-            used. Only meaningful in cloud mode; ignored for local projects.
+            used. In local mode the selector is passed through without slug
+            resolution, matching create_memory_project behavior.
 
     Returns:
         Confirmation message about project deletion
@@ -566,14 +567,16 @@ async def delete_project(
         This action cannot be undone. The project will need to be re-added
         to access its content through Basic Memory again.
     """
+    # Trigger: MCP server is constrained to a single project.
+    # Why: constrained sessions cannot delete projects, and workspace selectors
+    # may be invalid or unavailable in that locked context.
+    # Outcome: return the existing disabled message before opening a routed client.
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        return f"# Error\n\nProject deletion disabled - MCP server is constrained to project '{constrained_project}'.\nUse the CLI to delete projects: `basic-memory project remove \"{project_name}\"`"
+
     workspace_id = await _resolve_workspace_routing(workspace, context)
-
     async with get_client(workspace=workspace_id) as client:
-        # Check if server is constrained to a specific project
-        constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
-        if constrained_project:
-            return f"# Error\n\nProject deletion disabled - MCP server is constrained to project '{constrained_project}'.\nUse the CLI to delete projects: `basic-memory project remove \"{project_name}\"`"
-
         if context:  # pragma: no cover
             await context.info(f"Deleting project: {project_name}")
 
