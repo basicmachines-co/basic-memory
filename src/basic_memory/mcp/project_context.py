@@ -1163,13 +1163,27 @@ async def resolve_project_and_path(
         resolved_path = normalized_path
         if include_project:
             # Trigger: project-prefixed permalinks are enabled and the path lacks a prefix
-            # Why: ensure memory URL lookups align with canonical permalinks
-            # Outcome: prefix the path with the active project's permalink
-            project_prefix = active_project.permalink
-            if resolved_path != project_prefix and not resolved_path.startswith(
-                f"{project_prefix}/"
-            ):
-                resolved_path = f"{project_prefix}/{resolved_path}"
+            # Why: ensure memory URL lookups align with canonical permalinks for both
+            #   local and workspace-routed projects; organization workspaces use a
+            #   workspace-slug prefix (e.g. "big-team/main/tests/*") while personal
+            #   workspaces and pure-local projects use just the project permalink
+            # Outcome: prefix the path using the workspace-canonical form when a
+            #   workspace context is active; fall back to project-only prefix otherwise
+            fallback_workspace_ctx = current_workspace_permalink_context()
+            if fallback_workspace_ctx:
+                resolved_path = _canonical_memory_path_for_workspace(
+                    workspace_slug=fallback_workspace_ctx.workspace_slug,
+                    workspace_type=fallback_workspace_ctx.workspace_type,
+                    project_permalink=active_project.permalink,
+                    remainder=normalized_path,
+                    include_project=True,
+                )
+            else:
+                project_prefix = active_project.permalink
+                if resolved_path != project_prefix and not resolved_path.startswith(
+                    f"{project_prefix}/"
+                ):
+                    resolved_path = f"{project_prefix}/{resolved_path}"
         return active_project, resolved_path, True
 
 

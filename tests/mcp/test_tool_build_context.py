@@ -5,6 +5,7 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import build_context
+from basic_memory.mcp.tools.write_note import write_note
 
 
 @pytest.mark.asyncio
@@ -224,3 +225,65 @@ async def test_build_context_markdown_not_found(client, test_project):
     assert isinstance(result, str)
     assert "No results found" in result
     assert test_project.name in result
+
+
+@pytest.mark.asyncio
+async def test_build_context_skips_url_detection_when_project_id_provided(
+    monkeypatch, app, test_project, test_graph
+):
+    """project_id is authoritative, so memory URL discovery must not run first."""
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("project_id routing should bypass URL discovery")
+
+    import importlib
+
+    bc_module = importlib.import_module("basic_memory.mcp.tools.build_context")
+    monkeypatch.setattr(bc_module, "detect_project_from_memory_url_prefix", fail_if_called)
+
+    result = await build_context(
+        url=f"memory://{test_project.name}/test/root",
+        project_id=test_project.external_id,
+    )
+
+    assert isinstance(result, dict)
+
+
+@pytest.mark.asyncio
+async def test_build_context_project_id_org_workspace_routing(app, test_project):
+    """build_context must resolve the correct workspace-prefixed path when project_id is used
+    inside an organization workspace context.
+
+    Before the fix, the fallback in resolve_project_and_path only prepended the project
+    permalink (e.g. "test-project/tests/*") and ignored the workspace slug, so notes stored
+    as "team-paul/test-project/tests/<slug>" were never found.
+    """
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    workspace_slug = "team-paul"
+
+    # Write a note inside the org workspace context so its permalink is
+    # "team-paul/test-project/workspace-tests/team-note".
+    with workspace_permalink_context(workspace_slug, "organization"):
+        await write_note(
+            project=test_project.name,
+            title="Team Note",
+            directory="workspace-tests",
+            content="# Team Note\n\nContent written in org workspace context.",
+        )
+
+    # build_context with project_id inside the same workspace context should find the note.
+    with workspace_permalink_context(workspace_slug, "organization"):
+        result = await build_context(
+            url="memory://workspace-tests/*",
+            project_id=test_project.external_id,
+        )
+
+    assert isinstance(result, dict)
+    assert result["metadata"]["primary_count"] >= 1, (
+        "build_context should find the note written under the org workspace context"
+    )
+    permalinks = [r["primary_result"]["permalink"] for r in result["results"]]
+    assert any("team-paul" in p for p in permalinks), (
+        f"Expected workspace-prefixed permalink; got {permalinks}"
+    )
