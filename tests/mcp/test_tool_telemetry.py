@@ -157,6 +157,7 @@ async def test_search_notes_emits_root_operation_and_project_context(
             "tool_name": "search_notes",
             "requested_project": test_project.name,
             "requested_project_id": None,
+            "search_all_projects": False,
             "search_type": "text",
             "output_format": "json",
             "page": 1,
