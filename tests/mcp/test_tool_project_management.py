@@ -322,6 +322,36 @@ async def test_create_memory_project_default_workspace_is_none(app, tmp_path_fac
 
 
 @pytest.mark.asyncio
+async def test_create_memory_project_constrained_with_workspace_returns_disabled_message(
+    monkeypatch, tmp_path_factory
+):
+    """A constrained MCP session rejects creation before resolving a workspace selector."""
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "locked-project")
+    project_root = tmp_path_factory.mktemp("constrained-create-project-home")
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("bad workspace"),
+        ) as mock_resolve_workspace,
+    ):
+        result = await create_memory_project(
+            project_name="Any Project",
+            project_path=str(project_root),
+            workspace="missing-team",
+        )
+
+    mock_resolve_workspace.assert_not_awaited()
+    assert "Project creation disabled" in result
+    assert "locked-project" in result
+
+
+@pytest.mark.asyncio
 async def test_delete_project_resolves_workspace_slug(app):
     """A friendly workspace slug resolves to the tenant id used for delete routing."""
     from basic_memory.mcp.clients import ProjectClient
