@@ -480,7 +480,6 @@ def _canonical_memory_path_for_active_route(
             workspace_type=workspace_context.workspace_type,
             project_permalink=active_project.permalink,
             remainder=workspace_remainder,
-            include_project=include_project,
         )
 
     if cached_workspace is not None:
@@ -489,7 +488,6 @@ def _canonical_memory_path_for_active_route(
             workspace_type=cached_workspace.workspace_type,
             project_permalink=active_project.permalink,
             remainder=workspace_remainder,
-            include_project=include_project,
         )
 
     if not include_project:
