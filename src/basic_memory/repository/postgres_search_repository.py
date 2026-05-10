@@ -774,7 +774,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Handle date filter
         if after_date:
             params["after_date"] = after_date
-            conditions.append("search_index.created_at > :after_date")
+            # Filter on updated_at so recently-edited notes are included even when created_at is old
+            conditions.append("search_index.updated_at > :after_date")
             # order by most recent first
             order_by_clause = ", search_index.updated_at DESC"
 
@@ -945,7 +946,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 {score_expr} as score
             FROM {from_clause}
             WHERE {where_clause}
-            ORDER BY score DESC, search_index.id ASC {order_by_clause}
+            ORDER BY score DESC {order_by_clause}, search_index.id ASC
             LIMIT :limit
             OFFSET :offset
         """

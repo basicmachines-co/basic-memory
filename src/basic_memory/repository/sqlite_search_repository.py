@@ -789,7 +789,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         # Handle date filter using datetime() for proper comparison
         if after_date:
             params["after_date"] = after_date
-            conditions.append("datetime(search_index.created_at) > datetime(:after_date)")
+            # Filter on updated_at so recently-edited notes are included even when created_at is old
+            conditions.append("datetime(search_index.updated_at) > datetime(:after_date)")
 
             # order by most recent first
             order_by_clause = ", search_index.updated_at DESC"

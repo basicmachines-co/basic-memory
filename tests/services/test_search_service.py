@@ -174,12 +174,12 @@ async def test_after_date(search_service, test_graph):
     )
     for r in results:
         # Handle both string (SQLite) and datetime (Postgres) formats
-        created_at = (
-            r.created_at
-            if isinstance(r.created_at, datetime)
-            else datetime.fromisoformat(r.created_at)
+        updated_at = (
+            r.updated_at
+            if isinstance(r.updated_at, datetime)
+            else datetime.fromisoformat(r.updated_at)
         )
-        assert created_at > past_date
+        assert updated_at > past_date
 
     # Should not find with future date
     future_date = datetime(2030, 1, 1).astimezone()
@@ -190,6 +190,68 @@ async def test_after_date(search_service, test_graph):
         )
     )
     assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_after_date_uses_updated_at(search_service):
+    """Regression: after_date should filter on updated_at, not created_at.
+
+    An entity created before the timeframe but updated within it must appear
+    in recent-activity results. A stale entity (updated_at also old) must not.
+    """
+    from datetime import timezone
+
+    cutoff = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    old_created = datetime(2015, 6, 1, tzinfo=timezone.utc)
+    recently_updated = datetime(2023, 3, 15, tzinfo=timezone.utc)
+    stale_updated = datetime(2018, 6, 1, tzinfo=timezone.utc)
+
+    project_id = search_service.repository.project_id
+
+    recently_updated_row = SearchIndexRow(
+        project_id=project_id,
+        id=99001,
+        type="entity",
+        file_path="test/recently_updated.md",
+        title="Recently Updated Entity",
+        content_snippet="recently updated content",
+        permalink="test/recently-updated-entity",
+        created_at=old_created,
+        updated_at=recently_updated,
+        metadata={},
+    )
+    stale_row = SearchIndexRow(
+        project_id=project_id,
+        id=99002,
+        type="entity",
+        file_path="test/stale.md",
+        title="Stale Entity",
+        content_snippet="stale content",
+        permalink="test/stale-entity",
+        created_at=old_created,
+        updated_at=stale_updated,
+        metadata={},
+    )
+
+    await search_service.repository.index_item(recently_updated_row)
+    await search_service.repository.index_item(stale_row)
+
+    results = await search_service.search(
+        SearchQuery(after_date=cutoff.isoformat())
+    )
+
+    permalinks = {r.permalink for r in results}
+    # recently-updated entity must appear despite old created_at
+    assert "test/recently-updated-entity" in permalinks
+    # stale entity must not appear (updated_at is before cutoff)
+    assert "test/stale-entity" not in permalinks
+
+    # results should be ordered newest updated_at first
+    updated_ats = []
+    for r in results:
+        ua = r.updated_at if isinstance(r.updated_at, datetime) else datetime.fromisoformat(r.updated_at)
+        updated_ats.append(ua.replace(tzinfo=timezone.utc) if ua.tzinfo is None else ua)
+    assert updated_ats == sorted(updated_ats, reverse=True)
 
 
 @pytest.mark.asyncio
