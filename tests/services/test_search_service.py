@@ -208,6 +208,9 @@ async def test_after_date_uses_updated_at(search_service):
 
     project_id = search_service.repository.project_id
 
+    # Leave metadata at its None default — SearchIndexRow.to_insert only
+    # JSON-serializes truthy metadata, so passing {} would slip an
+    # un-serialized dict into the SQLite bind and raise ProgrammingError.
     recently_updated_row = SearchIndexRow(
         project_id=project_id,
         id=99001,
@@ -218,7 +221,6 @@ async def test_after_date_uses_updated_at(search_service):
         permalink="test/recently-updated-entity",
         created_at=old_created,
         updated_at=recently_updated,
-        metadata={},
     )
     stale_row = SearchIndexRow(
         project_id=project_id,
@@ -230,7 +232,6 @@ async def test_after_date_uses_updated_at(search_service):
         permalink="test/stale-entity",
         created_at=old_created,
         updated_at=stale_updated,
-        metadata={},
     )
 
     await search_service.repository.index_item(recently_updated_row)
