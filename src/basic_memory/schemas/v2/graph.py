@@ -29,3 +29,12 @@ class GraphResponse(BaseModel):
     edges: list[GraphEdge] = Field(
         default_factory=list, description="All resolved relations as edges"
     )
+
+
+class OrphanEntitiesResponse(BaseModel):
+    """Entities that have no incoming or outgoing relations in the knowledge graph."""
+
+    entities: list[GraphNode] = Field(
+        default_factory=list, description="Entities with no relations"
+    )
+    total: int = Field(..., description="Total count of orphan entities")

@@ -275,6 +275,24 @@ class KnowledgeClient:
             )
         return DirectoryDeleteResult.model_validate(response.json())
 
+    # --- Orphan detection ---
+
+    async def get_orphans(self) -> list[dict]:
+        """Get entities that have no incoming or outgoing relations."""
+        with logfire.span(
+            "mcp.client.knowledge.get_orphans",
+            client_name="knowledge",
+            operation="get_orphans",
+        ):
+            response = await call_get(
+                self.http_client,
+                f"{self._base_path}/orphans",
+                client_name="knowledge",
+                operation="get_orphans",
+                path_template="/v2/projects/{project_id}/knowledge/orphans",
+            )
+        return response.json()["entities"]
+
     # --- Resolution ---
 
     async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:

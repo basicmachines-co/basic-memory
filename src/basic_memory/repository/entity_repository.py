@@ -5,7 +5,7 @@ from typing import List, Optional, Sequence, Union, Any
 
 
 from loguru import logger
-from sqlalchemy import select, func
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import load_only, selectinload
@@ -451,6 +451,25 @@ class EntityRepository(Repository[Entity]):
         query = select(Entity.file_path)
         query = self._add_project_filter(query)
 
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
+
+    async def find_without_relations(self) -> Sequence[Entity]:
+        """Find entities that have no incoming or outgoing relations."""
+        # Trigger: entity appears as a source in any relation.
+        # Why: even unresolved outgoing links mean the entity references another node.
+        # Outcome: entities with outgoing relations are excluded from the orphan list.
+        has_outgoing = exists().where(Relation.from_id == Entity.id)
+
+        # Trigger: entity appears as the resolved target in any relation.
+        # Why: only resolved relation targets are graph nodes with an incoming edge.
+        # Outcome: entities referenced by resolved links are excluded from orphans.
+        has_incoming = exists().where(
+            Relation.to_id == Entity.id,
+            Relation.to_id.is_not(None),
+        )
+
+        query = self.select().where(~has_outgoing).where(~has_incoming).order_by(Entity.file_path)
         result = await self.execute_query(query, use_query_options=False)
         return list(result.scalars().all())
 
