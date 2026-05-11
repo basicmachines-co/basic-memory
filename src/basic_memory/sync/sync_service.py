@@ -1530,8 +1530,14 @@ class SyncService:
                 count += 1
             return count
 
-        process = await asyncio.create_subprocess_shell(
-            f'find "{directory}" -type f | wc -l',
+        # Trigger: large-project scan optimization needs the OS `find` command.
+        # Why: passing argv directly avoids shell interpretation of configured project paths.
+        # Outcome: quotes and shell metacharacters in paths are treated as data.
+        process = await asyncio.create_subprocess_exec(
+            "find",
+            str(directory),
+            "-type",
+            "f",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1550,7 +1556,7 @@ class SyncService:
                 count += 1
             return count
 
-        return int(stdout.strip())
+        return len(stdout.splitlines())
 
     async def _scan_directory_modified_since(
         self, directory: Path, since_timestamp: float
@@ -1583,8 +1589,16 @@ class SyncService:
         # Convert timestamp to find-compatible format
         since_date = datetime.fromtimestamp(since_timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
-        process = await asyncio.create_subprocess_shell(
-            f'find "{directory}" -type f -newermt "{since_date}"',
+        # Trigger: incremental scans ask `find` to filter by modification time.
+        # Why: passing argv directly avoids shell interpretation of paths and timestamps.
+        # Outcome: optimized scanning keeps its speed without a shell injection boundary.
+        process = await asyncio.create_subprocess_exec(
+            "find",
+            str(directory),
+            "-type",
+            "f",
+            "-newermt",
+            since_date,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
