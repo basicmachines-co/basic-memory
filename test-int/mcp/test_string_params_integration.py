@@ -28,6 +28,7 @@ async def test_search_notes_entity_types_as_string(mcp_server, app, test_project
             {
                 "project": test_project.name,
                 "query": "coercion",
+                "search_type": "text",
                 "entity_types": '["entity"]',
             },
         )
@@ -54,6 +55,7 @@ async def test_search_notes_note_types_as_string(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "query": "coercion",
+                "search_type": "text",
                 "note_types": '["note"]',
             },
         )
@@ -81,6 +83,7 @@ async def test_search_notes_tags_as_string(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "query": "tagged",
+                "search_type": "text",
                 "tags": '["alpha"]',
             },
         )
@@ -107,6 +110,7 @@ async def test_search_notes_metadata_filters_as_string(mcp_server, app, test_pro
             {
                 "project": test_project.name,
                 "query": "metadata",
+                "search_type": "text",
                 "metadata_filters": '{"type": "note"}',
             },
         )
