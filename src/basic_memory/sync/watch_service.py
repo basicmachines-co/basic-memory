@@ -274,8 +274,30 @@ class WatchService:
             True if the file should be watched, False if it should be ignored
         """
 
-        # Skip hidden directories and files
-        path_parts = Path(path).parts
+        path_obj = Path(path).expanduser().resolve()
+
+        project_paths = sorted(
+            (
+                Path(entry.path).expanduser().resolve()
+                for entry in self.app_config.projects.values()
+                if entry.path
+            ),
+            key=lambda project_path: len(project_path.parts),
+            reverse=True,
+        )
+
+        relative_path = None
+        for project_path in project_paths:
+            try:
+                relative_path = path_obj.relative_to(project_path)
+                break
+            except ValueError:
+                continue
+
+        # Trigger: a project may live under a hidden parent such as ~/.claude.
+        # Why: only dotfiles and dot-directories inside the watched project should be ignored.
+        # Outcome: hidden parents outside the project root do not mute legitimate project changes.
+        path_parts = relative_path.parts if relative_path is not None else path_obj.parts
         for part in path_parts:
             if part.startswith("."):
                 return False

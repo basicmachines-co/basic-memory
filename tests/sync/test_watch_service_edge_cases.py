@@ -3,6 +3,8 @@
 import pytest
 from watchfiles import Change
 
+from basic_memory.config import ProjectEntry
+
 
 def test_filter_changes_valid_path(watch_service, project_config):
     """Test the filter_changes method with valid non-hidden paths."""
@@ -19,6 +21,19 @@ def test_filter_changes_valid_path(watch_service, project_config):
         )
         is True
     )
+
+
+def test_filter_changes_allows_project_under_hidden_parent(watch_service, tmp_path):
+    """Hidden parent directories outside the project root must not mute the watcher."""
+    project_home = tmp_path / ".claude" / "projects" / "memory"
+    project_home.mkdir(parents=True)
+    watch_service.app_config.projects["hidden-parent"] = ProjectEntry(path=str(project_home))
+
+    visible_note = project_home / "notes" / "visible.md"
+    hidden_note = project_home / "notes" / ".drafts" / "hidden.md"
+
+    assert watch_service.filter_changes(Change.added, str(visible_note)) is True
+    assert watch_service.filter_changes(Change.added, str(hidden_note)) is False
 
 
 def test_filter_changes_hidden_path(watch_service, project_config):
