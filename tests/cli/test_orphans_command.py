@@ -1,7 +1,7 @@
 """Tests for the 'basic-memory orphans' CLI command."""
 
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
@@ -41,6 +41,19 @@ def _mock_config_manager():
 @asynccontextmanager
 async def _fake_get_client(project_name=None):
     yield MagicMock()
+
+
+@patch("basic_memory.cli.commands.orphans.run_orphans", new_callable=AsyncMock)
+@patch("basic_memory.cli.commands.orphans.force_routing")
+def test_orphans_preserves_project_routing_by_default(mock_force_routing, mock_run_orphans):
+    """Default invocation keeps routing implicit so project mode can choose local/cloud."""
+    mock_force_routing.return_value = nullcontext()
+    mock_run_orphans.return_value = ("test-project", [])
+
+    result = runner.invoke(cli_app, ["orphans"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    mock_force_routing.assert_called_once_with(local=False, cloud=False)
 
 
 @patch("basic_memory.cli.commands.orphans.ConfigManager")

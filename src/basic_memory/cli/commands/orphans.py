@@ -51,11 +51,6 @@ def orphans(
 
     try:
         validate_routing_flags(local, cloud)
-        # Trigger: no explicit routing flag provided.
-        # Why: orphans is a project-local graph inspection command like status.
-        # Outcome: default to local routing unless --cloud was explicitly requested.
-        if not local and not cloud:
-            local = True
         with force_routing(local=local, cloud=cloud):
             project_name, entities = run_with_cleanup(run_orphans(project))
 
