@@ -22,7 +22,7 @@ from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
     is_workspace_qualified_plain_identifier,
 )
-from basic_memory.utils import validate_project_path
+from basic_memory.utils import normalize_project_reference, validate_project_path
 
 
 def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]:
@@ -88,7 +88,8 @@ def _format_ambiguous_workspace_identifier_response(
 ) -> str:
     """Format the safe-stop response for ambiguous plain write identifiers."""
     cleaned_identifier = identifier.strip()
-    workspace_hint, project_hint, note_identifier = cleaned_identifier.strip("/").split("/", 2)
+    normalized_identifier = normalize_project_reference(cleaned_identifier).strip("/")
+    workspace_hint, project_hint, note_identifier = normalized_identifier.split("/", 2)
 
     return f"""# Edit Failed - Ambiguous Identifier
 
@@ -99,7 +100,7 @@ Because edit_note changes content, Basic Memory will not infer a workspace route
 Retry with one of these explicit routes:
 - `edit_note(identifier="{note_identifier}", project="{detected_project}", operation=..., content=...)`
 - `edit_note(identifier="{note_identifier}", workspace="{workspace_hint}", project="{project_hint}", operation=..., content=...)`
-- `edit_note(identifier="memory://{cleaned_identifier}", operation=..., content=...)`
+- `edit_note(identifier="memory://{normalized_identifier}", operation=..., content=...)`
 - `edit_note(identifier="{note_identifier}", project_id="<project external_id>", operation=..., content=...)`"""
 
 

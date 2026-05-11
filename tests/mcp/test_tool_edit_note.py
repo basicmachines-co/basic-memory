@@ -983,6 +983,48 @@ async def test_edit_note_workspace_qualified_plain_permalink_json_error(
 
 
 @pytest.mark.asyncio
+async def test_edit_note_ambiguous_namespace_identifier_returns_guidance(
+    monkeypatch,
+    test_project,
+):
+    """Namespace-style workspace identifiers should still return ambiguity guidance."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+    workspace_slug = "team-acme"
+    identifier = f"{workspace_slug}::{test_project.name}/team/plain-edit-note"
+    normalized_identifier = f"{workspace_slug}/{test_project.name}/team/plain-edit-note"
+
+    async def detect_workspace_project(raw_identifier, config, context=None):
+        assert raw_identifier == identifier
+        return f"{workspace_slug}/{test_project.name}"
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "_cloud_workspace_discovery_available",
+        lambda config: True,
+    )
+    monkeypatch.setattr(
+        edit_note_module,
+        "detect_project_from_workspace_identifier_prefix",
+        detect_workspace_project,
+        raising=False,
+    )
+
+    result = await edit_note(
+        identifier=identifier,
+        operation="append",
+        content="\nAppended via namespace-style plain identifier.",
+        project=None,
+    )
+
+    assert isinstance(result, str)
+    assert "# Edit Failed - Ambiguous Identifier" in result
+    assert f"`{identifier}` could refer to a local note path" in result
+    assert f"memory://{normalized_identifier}" in result
+
+
+@pytest.mark.asyncio
 async def test_edit_note_workspace_project_args_compose_explicit_route(monkeypatch):
     """workspace plus project should route like project='workspace/project'."""
     from contextlib import asynccontextmanager
