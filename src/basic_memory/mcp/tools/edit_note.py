@@ -52,6 +52,57 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
     return title, directory
 
 
+def _compose_workspace_project_route(
+    *,
+    workspace: Optional[str],
+    project: Optional[str],
+    project_id: Optional[str],
+) -> Optional[str]:
+    """Return the explicit project route requested by workspace/project args."""
+    if workspace is None:
+        return project
+
+    cleaned_workspace = workspace.strip().strip("/")
+    if not cleaned_workspace:
+        raise ValueError("workspace must not be empty when provided")
+    if "/" in cleaned_workspace:
+        raise ValueError("workspace must be a single workspace slug, name, or tenant_id")
+    if project_id is not None:
+        raise ValueError("workspace cannot be combined with project_id; use project_id alone")
+    if project is None or not project.strip().strip("/"):
+        raise ValueError("workspace requires an explicit project argument")
+
+    cleaned_project = project.strip().strip("/")
+    if "/" in cleaned_project:
+        raise ValueError(
+            "Use either workspace='workspace' with project='project', "
+            "or project='workspace/project', not both"
+        )
+    return f"{cleaned_workspace}/{cleaned_project}"
+
+
+def _format_ambiguous_workspace_identifier_response(
+    *,
+    identifier: str,
+    detected_project: str,
+) -> str:
+    """Format the safe-stop response for ambiguous plain write identifiers."""
+    cleaned_identifier = identifier.strip()
+    workspace_hint, project_hint, note_identifier = cleaned_identifier.strip("/").split("/", 2)
+
+    return f"""# Edit Failed - Ambiguous Identifier
+
+`{cleaned_identifier}` could refer to a local note path in the active project, or to a note in `{detected_project}`.
+
+Because edit_note changes content, Basic Memory will not infer a workspace route from a plain path.
+
+Retry with one of these explicit routes:
+- `edit_note(identifier="{note_identifier}", project="{detected_project}", operation=..., content=...)`
+- `edit_note(identifier="{note_identifier}", workspace="{workspace_hint}", project="{project_hint}", operation=..., content=...)`
+- `edit_note(identifier="memory://{cleaned_identifier}", operation=..., content=...)`
+- `edit_note(identifier="{note_identifier}", project_id="<project external_id>", operation=..., content=...)`"""
+
+
 def _format_error_response(
     error_message: str,
     operation: str,
@@ -186,6 +237,7 @@ async def edit_note(
         ),
     ],
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     project_id: Optional[str] = None,
     # Section/heading naming varies across tools; accept the descriptive forms.
     section: Annotated[
@@ -229,7 +281,10 @@ async def edit_note(
                   - "insert_after_section": Insert content after a section heading without consuming it (note must exist)
         content: The content to add or use for replacement
         project: Project name to edit in. Optional - server will resolve using hierarchy.
+                Use "workspace/project" to route to a project in a specific cloud workspace.
                 If unknown, use list_memory_projects() to discover available projects.
+        workspace: Workspace slug, name, or tenant_id. When provided with `project`,
+                routes as `workspace/project`. Cannot be combined with `project_id`.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
@@ -292,14 +347,18 @@ async def edit_note(
     """
     # Resolve effective default: allow MCP clients to send null for optional int field
     effective_replacements = expected_replacements if expected_replacements is not None else 1
+    project = _compose_workspace_project_route(
+        workspace=workspace,
+        project=project,
+        project_id=project_id,
+    )
 
-    # Detect project from routable identifier prefixes before selecting a client.
+    # Resolve or reject routable identifier prefixes before selecting a client.
     # Trigger: no explicit project/project_id was provided.
-    # Why: memory:// URLs and cloud workspace-qualified plain permalinks carry
-    #   enough route information to avoid accidental edits in the default project.
-    # Outcome: plain project-relative paths such as "research/note" still stay on
-    #   the active/default project route; three-segment local paths only attempt
-    #   workspace routing when cloud workspace discovery is actually available.
+    # Why: memory:// URLs are explicit routes, but plain three-segment identifiers
+    #   are ambiguous for a mutating tool.
+    # Outcome: memory:// can route; plain workspace/project/path matches stop with
+    #   guidance instead of silently editing another project.
     if project is None and project_id is None:
         config = ConfigManager().config
         if identifier.strip().startswith("memory://"):
@@ -316,6 +375,22 @@ async def edit_note(
                 config,
                 context=context,
             )
+            if detected:
+                if output_format == "json":
+                    return {
+                        "title": None,
+                        "permalink": None,
+                        "file_path": None,
+                        "checksum": None,
+                        "operation": operation,
+                        "fileCreated": False,
+                        "error": "AMBIGUOUS_IDENTIFIER",
+                        "project": detected,
+                    }
+                return _format_ambiguous_workspace_identifier_response(
+                    identifier=identifier,
+                    detected_project=detected,
+                )
         else:
             detected = None
         if detected:

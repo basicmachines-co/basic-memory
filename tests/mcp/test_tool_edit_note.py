@@ -9,6 +9,68 @@ from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
 
 
+def test_edit_note_workspace_project_route_helper():
+    """workspace/project routing should be explicit and deterministic."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+
+    assert (
+        edit_note_module._compose_workspace_project_route(
+            workspace=None,
+            project="docs/setup",
+            project_id=None,
+        )
+        == "docs/setup"
+    )
+    assert (
+        edit_note_module._compose_workspace_project_route(
+            workspace="docs",
+            project="setup",
+            project_id=None,
+        )
+        == "docs/setup"
+    )
+
+
+@pytest.mark.parametrize(
+    ("route_kwargs", "message"),
+    [
+        (
+            {"workspace": " ", "project": "setup", "project_id": None},
+            "workspace must not be empty",
+        ),
+        (
+            {"workspace": "docs/setup", "project": "setup", "project_id": None},
+            "workspace must be a single workspace",
+        ),
+        (
+            {"workspace": "docs", "project": "setup", "project_id": "project-id"},
+            "workspace cannot be combined with project_id",
+        ),
+        (
+            {"workspace": "docs", "project": None, "project_id": None},
+            "workspace requires an explicit project",
+        ),
+        (
+            {"workspace": "docs", "project": "setup/install", "project_id": None},
+            "not both",
+        ),
+    ],
+)
+def test_edit_note_workspace_project_route_helper_rejects_invalid_inputs(
+    route_kwargs,
+    message,
+):
+    """Ambiguous workspace/project argument combinations should fail before routing."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+
+    with pytest.raises(ValueError, match=message):
+        edit_note_module._compose_workspace_project_route(**route_kwargs)
+
+
 @pytest.mark.asyncio
 async def test_edit_note_append_operation(client, test_project):
     """Test appending content to an existing note."""
@@ -828,15 +890,13 @@ async def test_edit_note_workspace_qualified_memory_url_keeps_complete_permalink
 
 
 @pytest.mark.asyncio
-async def test_edit_note_workspace_qualified_plain_permalink_detects_project(
+async def test_edit_note_workspace_qualified_plain_permalink_requires_explicit_route(
     monkeypatch,
-    client,
     test_project,
 ):
-    """Plain workspace-qualified permalinks should route before edit lookup."""
-    from basic_memory.workspace_context import workspace_permalink_context
-
+    """Plain workspace-qualified write identifiers should stop before mutating."""
     import importlib
+    from contextlib import asynccontextmanager
 
     edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
     workspace_slug = "team-acme"
@@ -845,7 +905,56 @@ async def test_edit_note_workspace_qualified_plain_permalink_detects_project(
 
     async def detect_workspace_project(identifier, config, context=None):
         detected_identifiers.append(identifier)
-        return test_project.name
+        return f"{workspace_slug}/{test_project.name}"
+
+    @asynccontextmanager
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("ambiguous plain identifiers should not select a project client")
+        yield
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "_cloud_workspace_discovery_available",
+        lambda config: True,
+    )
+    monkeypatch.setattr(
+        edit_note_module,
+        "detect_project_from_workspace_identifier_prefix",
+        detect_workspace_project,
+        raising=False,
+    )
+    monkeypatch.setattr(edit_note_module, "get_project_client", fail_if_called)
+
+    result = await edit_note(
+        identifier=qualified_identifier,
+        operation="append",
+        content="\nAppended via plain workspace-qualified permalink.",
+        project=None,
+    )
+
+    assert detected_identifiers == [qualified_identifier]
+    assert isinstance(result, str)
+    assert "# Edit Failed - Ambiguous Identifier" in result
+    assert f"`{qualified_identifier}` could refer to a local note path" in result
+    assert f'project="{workspace_slug}/{test_project.name}"' in result
+    assert f"memory://{qualified_identifier}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_workspace_qualified_plain_permalink_json_error(
+    monkeypatch,
+    test_project,
+):
+    """Ambiguous plain write identifiers should stay machine-readable in JSON mode."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+    workspace_slug = "team-acme"
+    qualified_identifier = f"{workspace_slug}/{test_project.name}/team/plain-edit-note"
+
+    async def detect_workspace_project(identifier, config, context=None):
+        assert identifier == qualified_identifier
+        return f"{workspace_slug}/{test_project.name}"
 
     monkeypatch.setattr(
         edit_note_module,
@@ -859,25 +968,48 @@ async def test_edit_note_workspace_qualified_plain_permalink_detects_project(
         raising=False,
     )
 
-    with workspace_permalink_context(workspace_slug=workspace_slug, workspace_type="organization"):
-        await write_note(
-            project=test_project.name,
-            title="Plain Edit Note",
-            directory="team",
-            content="# Plain Edit Note\nOriginal content.",
-        )
-
     result = await edit_note(
         identifier=qualified_identifier,
         operation="append",
         content="\nAppended via plain workspace-qualified permalink.",
+        output_format="json",
         project=None,
     )
 
-    assert detected_identifiers == [qualified_identifier]
-    assert isinstance(result, str)
-    assert "Edited note (append)" in result
-    assert f"project: {test_project.name}" in result
+    assert isinstance(result, dict)
+    assert result["error"] == "AMBIGUOUS_IDENTIFIER"
+    assert result["project"] == f"{workspace_slug}/{test_project.name}"
+    assert result["fileCreated"] is False
+
+
+@pytest.mark.asyncio
+async def test_edit_note_workspace_project_args_compose_explicit_route(monkeypatch):
+    """workspace plus project should route like project='workspace/project'."""
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+    captured_routes: list[tuple[str | None, str | None]] = []
+
+    @asynccontextmanager
+    async def fake_get_project_client(project, context=None, project_id=None):
+        captured_routes.append((project, project_id))
+        yield object(), SimpleNamespace(name="setup")
+
+    monkeypatch.setattr(edit_note_module, "get_project_client", fake_get_project_client)
+
+    with pytest.raises(ValueError, match="Invalid operation"):
+        await edit_note(
+            identifier="install",
+            operation="invalid",
+            content="content",
+            workspace="docs",
+            project="setup",
+        )
+
+    assert captured_routes == [("docs/setup", None)]
 
 
 @pytest.mark.asyncio
