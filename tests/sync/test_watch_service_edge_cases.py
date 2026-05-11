@@ -28,12 +28,27 @@ def test_filter_changes_allows_project_under_hidden_parent(watch_service, tmp_pa
     project_home = tmp_path / ".claude" / "projects" / "memory"
     project_home.mkdir(parents=True)
     watch_service.app_config.projects["hidden-parent"] = ProjectEntry(path=str(project_home))
+    watch_service._watch_filter_roots = (project_home.resolve(),)
 
     visible_note = project_home / "notes" / "visible.md"
     hidden_note = project_home / "notes" / ".drafts" / "hidden.md"
 
     assert watch_service.filter_changes(Change.added, str(visible_note)) is True
     assert watch_service.filter_changes(Change.added, str(hidden_note)) is False
+
+
+def test_filter_changes_rejects_nested_project_inside_hidden_directory(watch_service, tmp_path):
+    """A nested project must not make its enclosing project's hidden path visible."""
+    outer_project = tmp_path / "outer"
+    nested_project = outer_project / ".private" / "subproject"
+    nested_project.mkdir(parents=True)
+    watch_service.app_config.projects["outer"] = ProjectEntry(path=str(outer_project))
+    watch_service.app_config.projects["nested"] = ProjectEntry(path=str(nested_project))
+    watch_service._watch_filter_roots = (outer_project.resolve(), nested_project.resolve())
+
+    nested_note = nested_project / "notes" / "visible.md"
+
+    assert watch_service.filter_changes(Change.added, str(nested_note)) is False
 
 
 def test_filter_changes_hidden_path(watch_service, project_config):

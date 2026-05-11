@@ -93,6 +93,7 @@ class WatchService:
         self.status_path = app_config.data_dir_path / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
+        self._watch_filter_roots: tuple[Path, ...] | None = None
         self._sync_service_factory = sync_service_factory
         # When set (typically from BASIC_MEMORY_MCP_PROJECT), the watch cycle
         # only observes this project. Without it, each `basic-memory mcp --project X`
@@ -126,41 +127,48 @@ class WatchService:
     async def _watch_projects_cycle(self, projects: Sequence[Project], stop_event: asyncio.Event):
         """Run one cycle of watching the given projects until stop_event is set."""
         project_paths = [project.path for project in projects]
+        previous_filter_roots = self._watch_filter_roots
+        self._watch_filter_roots = tuple(
+            Path(project.path).expanduser().resolve() for project in projects
+        )
 
-        async for changes in awatch(
-            *project_paths,
-            debounce=self.app_config.sync_delay,
-            watch_filter=self.filter_changes,
-            recursive=True,
-            stop_event=stop_event,
-        ):
-            # group changes by project and filter using ignore patterns
-            project_changes = defaultdict(list)
-            for change, path in changes:
-                for project in projects:
-                    if self.is_project_path(project, path):
-                        # Check if the file should be ignored based on gitignore patterns
-                        project_path = Path(project.path)
-                        file_path = Path(path)
-                        ignore_patterns = self._get_ignore_patterns(project_path)
+        try:
+            async for changes in awatch(
+                *project_paths,
+                debounce=self.app_config.sync_delay,
+                watch_filter=self.filter_changes,
+                recursive=True,
+                stop_event=stop_event,
+            ):
+                # group changes by project and filter using ignore patterns
+                project_changes = defaultdict(list)
+                for change, path in changes:
+                    for project in projects:
+                        if self.is_project_path(project, path):
+                            # Check if the file should be ignored based on gitignore patterns
+                            project_path = Path(project.path)
+                            file_path = Path(path)
+                            ignore_patterns = self._get_ignore_patterns(project_path)
 
-                        if should_ignore_path(file_path, project_path, ignore_patterns):
-                            logger.trace(
-                                f"Ignoring watched file change: {file_path.relative_to(project_path)}"
-                            )
-                            continue
+                            if should_ignore_path(file_path, project_path, ignore_patterns):
+                                logger.trace(
+                                    f"Ignoring watched file change: {file_path.relative_to(project_path)}"
+                                )
+                                continue
 
-                        project_changes[project].append((change, path))
-                        break
+                            project_changes[project].append((change, path))
+                            break
 
-            # create coroutines to handle changes
-            change_handlers = [
-                self.handle_changes(project, set(changes))
-                for project, changes in project_changes.items()
-            ]
+                # create coroutines to handle changes
+                change_handlers = [
+                    self.handle_changes(project, set(changes))
+                    for project, changes in project_changes.items()
+                ]
 
-            # process changes
-            await asyncio.gather(*change_handlers)
+                # process changes
+                await asyncio.gather(*change_handlers)
+        finally:
+            self._watch_filter_roots = previous_filter_roots
 
     async def _select_projects_to_watch(self) -> list[Project]:
         """Return the set of projects this watch cycle should observe.
@@ -276,14 +284,20 @@ class WatchService:
 
         path_obj = Path(path).expanduser().resolve()
 
-        project_paths = sorted(
-            (
+        project_roots = self._watch_filter_roots
+        if project_roots is None:
+            project_roots = tuple(
                 Path(entry.path).expanduser().resolve()
                 for entry in self.app_config.projects.values()
                 if entry.path
-            ),
+            )
+
+        project_paths = sorted(
+            project_roots,
+            # Trigger: configured project roots can overlap.
+            # Why: an enclosing project's hidden directory should still hide descendants.
+            # Outcome: choose the outermost matching root when checking hidden path parts.
             key=lambda project_path: len(project_path.parts),
-            reverse=True,
         )
 
         relative_path = None
