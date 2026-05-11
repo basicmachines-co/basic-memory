@@ -464,10 +464,7 @@ class EntityRepository(Repository[Entity]):
         # Trigger: entity appears as the resolved target in any relation.
         # Why: only resolved relation targets are graph nodes with an incoming edge.
         # Outcome: entities referenced by resolved links are excluded from orphans.
-        has_incoming = exists().where(
-            Relation.to_id == Entity.id,
-            Relation.to_id.is_not(None),
-        )
+        has_incoming = exists().where(Relation.to_id == Entity.id)
 
         query = self.select().where(~has_outgoing).where(~has_incoming).order_by(Entity.file_path)
         result = await self.execute_query(query, use_query_options=False)

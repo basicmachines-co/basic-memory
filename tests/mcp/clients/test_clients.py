@@ -133,6 +133,39 @@ class TestKnowledgeClient:
         result = await client.resolve_entity("my-note")
         assert result == "entity-uuid-123"
 
+    @pytest.mark.asyncio
+    async def test_get_orphans_validates_response(self, monkeypatch):
+        """Orphan responses are validated into GraphNode objects."""
+        from basic_memory.mcp.clients import knowledge as knowledge_mod
+        from basic_memory.schemas.v2.graph import GraphNode
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "entities": [
+                {
+                    "external_id": "entity-uuid-123",
+                    "title": "Orphan Note",
+                    "file_path": "notes/orphan.md",
+                    "note_type": "note",
+                }
+            ],
+            "total": 1,
+        }
+
+        async def mock_call_get(client, url, **kwargs):
+            assert "/v2/projects/proj-123/knowledge/orphans" in url
+            return mock_response
+
+        monkeypatch.setattr(knowledge_mod, "call_get", mock_call_get)
+
+        mock_http = MagicMock()
+        client = KnowledgeClient(mock_http, "proj-123")
+        result = await client.get_orphans()
+
+        assert len(result) == 1
+        assert isinstance(result[0], GraphNode)
+        assert result[0].title == "Orphan Note"
+
 
 class TestSearchClient:
     """Tests for SearchClient."""

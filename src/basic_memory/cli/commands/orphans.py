@@ -15,11 +15,12 @@ from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients.knowledge import KnowledgeClient
 from basic_memory.mcp.project_context import get_active_project
+from basic_memory.schemas.v2.graph import GraphNode
 
 console = Console()
 
 
-async def run_orphans(project: Optional[str] = None) -> tuple[str, list[dict]]:
+async def run_orphans(project: Optional[str] = None) -> tuple[str, list[GraphNode]]:
     """Fetch entities that have no relations in the knowledge graph."""
     project = project or ConfigManager().default_project
 
@@ -55,7 +56,7 @@ def orphans(
             project_name, entities = run_with_cleanup(run_orphans(project))
 
         if json_output:
-            print(json.dumps(entities, indent=2, default=str))
+            print(json.dumps([entity.model_dump(mode="json") for entity in entities], indent=2))
             return
 
         if not entities:
@@ -69,9 +70,9 @@ def orphans(
 
         for entity in entities:
             table.add_row(
-                entity.get("title", ""),
-                entity.get("file_path", ""),
-                entity.get("note_type") or "",
+                entity.title,
+                entity.file_path,
+                entity.note_type or "",
             )
 
         console.print(table)
