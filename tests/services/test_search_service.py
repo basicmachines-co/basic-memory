@@ -1,6 +1,6 @@
 """Tests for search service."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -199,8 +199,6 @@ async def test_after_date_uses_updated_at(search_service):
     An entity created before the timeframe but updated within it must appear
     in recent-activity results. A stale entity (updated_at also old) must not.
     """
-    from datetime import timezone
-
     cutoff = datetime(2020, 1, 1, tzinfo=timezone.utc)
     old_created = datetime(2015, 6, 1, tzinfo=timezone.utc)
     recently_updated = datetime(2023, 3, 15, tzinfo=timezone.utc)
@@ -250,7 +248,11 @@ async def test_after_date_uses_updated_at(search_service):
     # results should be ordered newest updated_at first
     updated_ats = []
     for r in results:
-        ua = r.updated_at if isinstance(r.updated_at, datetime) else datetime.fromisoformat(r.updated_at)
+        ua = (
+            r.updated_at
+            if isinstance(r.updated_at, datetime)
+            else datetime.fromisoformat(r.updated_at)
+        )
         updated_ats.append(ua.replace(tzinfo=timezone.utc) if ua.tzinfo is None else ua)
     assert updated_ats == sorted(updated_ats, reverse=True)
 
