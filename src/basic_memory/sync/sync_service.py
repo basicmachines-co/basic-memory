@@ -1538,10 +1538,28 @@ class SyncService:
             str(directory),
             "-type",
             "f",
+            "-print0",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+
+        count = 0
+        stderr_task = None
+        if process.stderr is not None:
+            stderr_task = asyncio.create_task(process.stderr.read())
+
+        if process.stdout is None:
+            await process.wait()
+        else:
+            # Trigger: `find` can emit one path per file for very large projects.
+            # Why: collecting every path via communicate() scales memory with path bytes.
+            # Outcome: count null-delimited records in fixed-size chunks.
+            while chunk := await process.stdout.read(1024 * 1024):
+                count += chunk.count(b"\0")
+
+            await process.wait()
+
+        stderr = await stderr_task if stderr_task is not None else b""
 
         if process.returncode != 0:
             error_msg = stderr.decode().strip()
@@ -1556,7 +1574,7 @@ class SyncService:
                 count += 1
             return count
 
-        return len(stdout.splitlines())
+        return count
 
     async def _scan_directory_modified_since(
         self, directory: Path, since_timestamp: float
