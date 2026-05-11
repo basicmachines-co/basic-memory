@@ -1,5 +1,6 @@
 """Tests for the edit_note MCP tool."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -828,15 +829,150 @@ async def test_edit_note_workspace_qualified_memory_url_keeps_complete_permalink
 
 
 @pytest.mark.asyncio
+async def test_edit_note_workspace_qualified_plain_permalink_detects_project(
+    monkeypatch,
+    client,
+    test_project,
+):
+    """Plain workspace-qualified permalinks should route before edit lookup."""
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+    workspace_slug = "team-acme"
+    qualified_identifier = f"{workspace_slug}/{test_project.name}/team/plain-edit-note"
+    detected_identifiers: list[str] = []
+
+    async def detect_workspace_project(identifier, config, context=None):
+        detected_identifiers.append(identifier)
+        return test_project.name
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "detect_project_from_workspace_identifier_prefix",
+        detect_workspace_project,
+        raising=False,
+    )
+
+    with workspace_permalink_context(workspace_slug=workspace_slug, workspace_type="organization"):
+        await write_note(
+            project=test_project.name,
+            title="Plain Edit Note",
+            directory="team",
+            content="# Plain Edit Note\nOriginal content.",
+        )
+
+    result = await edit_note(
+        identifier=qualified_identifier,
+        operation="append",
+        content="\nAppended via plain workspace-qualified permalink.",
+        project=None,
+    )
+
+    assert detected_identifiers == [qualified_identifier]
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_detect_project_from_workspace_identifier_prefix_requires_workspace_shape(
+    monkeypatch,
+    config_manager,
+):
+    """Two-segment project-relative paths should not trigger workspace discovery."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+
+    def fail_if_called(config):
+        raise AssertionError("plain project-relative paths should skip cloud discovery")
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "_cloud_workspace_discovery_available",
+        fail_if_called,
+    )
+
+    detected = await edit_note_module.detect_project_from_workspace_identifier_prefix(
+        "research/note",
+        config_manager.config,
+    )
+
+    assert detected is None
+
+
+@pytest.mark.asyncio
+async def test_detect_project_from_workspace_identifier_prefix_skips_without_discovery(
+    monkeypatch,
+    config_manager,
+):
+    """Workspace-shaped paths stay local when cloud workspace discovery is unavailable."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "_cloud_workspace_discovery_available",
+        lambda config: False,
+    )
+
+    detected = await edit_note_module.detect_project_from_workspace_identifier_prefix(
+        "team-acme/research/note",
+        config_manager.config,
+    )
+
+    assert detected is None
+
+
+@pytest.mark.asyncio
+async def test_detect_project_from_workspace_identifier_prefix_returns_project(
+    monkeypatch,
+    config_manager,
+):
+    """Workspace-qualified plain identifiers should return the resolved project route."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+
+    async def resolve_workspace_identifier(identifier, context=None):
+        assert identifier == "team-acme/research/note"
+        return SimpleNamespace(project_identifier="team-acme/research")
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "_cloud_workspace_discovery_available",
+        lambda config: True,
+    )
+    monkeypatch.setattr(
+        edit_note_module,
+        "resolve_workspace_qualified_identifier",
+        resolve_workspace_identifier,
+    )
+
+    detected = await edit_note_module.detect_project_from_workspace_identifier_prefix(
+        "team-acme/research/note",
+        config_manager.config,
+    )
+
+    assert detected == "team-acme/research"
+
+
+@pytest.mark.asyncio
 async def test_edit_note_skips_detection_for_plain_path(client, test_project):
     """edit_note should NOT call detect_project_from_url_prefix for plain path identifiers.
 
     A plain path like 'research/note' should not be misrouted to a project
     named 'research' — the 'research' segment is a directory, not a project.
     """
-    with patch(
-        "basic_memory.mcp.tools.edit_note.detect_project_from_memory_url_prefix"
-    ) as mock_detect:
+    with (
+        patch("basic_memory.mcp.tools.edit_note.detect_project_from_memory_url_prefix") as mock_url,
+        patch(
+            "basic_memory.mcp.tools.edit_note.detect_project_from_workspace_identifier_prefix"
+        ) as mock_workspace,
+    ):
         # Use a plain path (no memory:// prefix) — detection should not be called
         await edit_note(
             identifier="test/some-note",
@@ -845,15 +981,19 @@ async def test_edit_note_skips_detection_for_plain_path(client, test_project):
             project=None,
         )
 
-        mock_detect.assert_not_called()
+        mock_url.assert_not_called()
+        mock_workspace.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_edit_note_skips_detection_when_project_provided(client, test_project):
     """edit_note should skip URL detection when project is explicitly provided."""
-    with patch(
-        "basic_memory.mcp.tools.edit_note.detect_project_from_memory_url_prefix"
-    ) as mock_detect:
+    with (
+        patch("basic_memory.mcp.tools.edit_note.detect_project_from_memory_url_prefix") as mock_url,
+        patch(
+            "basic_memory.mcp.tools.edit_note.detect_project_from_workspace_identifier_prefix"
+        ) as mock_workspace,
+    ):
         await edit_note(
             identifier=f"memory://{test_project.name}/test/some-note",
             operation="append",
@@ -861,7 +1001,8 @@ async def test_edit_note_skips_detection_when_project_provided(client, test_proj
             project=test_project.name,
         )
 
-        mock_detect.assert_not_called()
+        mock_url.assert_not_called()
+        mock_workspace.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -885,6 +1026,11 @@ async def test_edit_note_skips_detection_when_project_id_provided(
 
     edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
     monkeypatch.setattr(edit_note_module, "detect_project_from_memory_url_prefix", fail_if_called)
+    monkeypatch.setattr(
+        edit_note_module,
+        "detect_project_from_workspace_identifier_prefix",
+        fail_if_called,
+    )
 
     result = await edit_note(
         identifier=f"memory://{test_project.name}/test/project-id-memory-url-edit",

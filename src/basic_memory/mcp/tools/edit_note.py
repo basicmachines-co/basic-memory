@@ -7,17 +7,19 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, Field
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.mcp.project_context import (
+    _cloud_workspace_discovery_available,
     detect_project_from_memory_url_prefix,
     get_project_client,
     add_project_metadata,
     resolve_project_and_path,
+    resolve_workspace_qualified_identifier,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.response import EntityResponse
-from basic_memory.utils import validate_project_path
+from basic_memory.utils import normalize_project_reference, validate_project_path
 
 
 def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]:
@@ -45,6 +47,37 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
         title = cleaned
 
     return title, directory
+
+
+def _is_workspace_qualified_plain_identifier(identifier: str) -> bool:
+    """Return True for plain ``<workspace>/<project>/<path>`` identifiers."""
+    stripped = identifier.strip()
+    if stripped.startswith("memory://"):
+        return False
+
+    normalized = normalize_project_reference(stripped).strip("/")
+    return len(normalized.split("/", 2)) == 3
+
+
+async def detect_project_from_workspace_identifier_prefix(
+    identifier: str,
+    config: BasicMemoryConfig,
+    context: Context | None = None,
+) -> Optional[str]:
+    """Resolve a project route from a plain workspace-qualified identifier."""
+    if not _is_workspace_qualified_plain_identifier(identifier):
+        return None
+
+    if not _cloud_workspace_discovery_available(config):
+        return None
+
+    workspace_resolution = await resolve_workspace_qualified_identifier(
+        identifier,
+        context=context,
+    )
+    if workspace_resolution is None:
+        return None
+    return workspace_resolution.project_identifier
 
 
 def _format_error_response(
@@ -288,17 +321,28 @@ async def edit_note(
     # Resolve effective default: allow MCP clients to send null for optional int field
     effective_replacements = expected_replacements if expected_replacements is not None else 1
 
-    # Detect project from memory URL prefix before routing
-    # Trigger: identifier starts with memory:// and no explicit project/project_id was provided
-    # Why: only gate on memory:// to avoid misrouting plain paths like "research/note"
-    #      where "research" is a directory, not a project name
-    # Outcome: project is set from the URL prefix, routing goes to the correct project
-    if project is None and project_id is None and identifier.strip().startswith("memory://"):
-        detected = await detect_project_from_memory_url_prefix(
-            identifier,
-            ConfigManager().config,
-            context=context,
-        )
+    # Detect project from routable identifier prefixes before selecting a client.
+    # Trigger: no explicit project/project_id was provided.
+    # Why: memory:// URLs and cloud workspace-qualified plain permalinks carry
+    #   enough route information to avoid accidental edits in the default project.
+    # Outcome: plain project-relative paths such as "research/note" still stay on
+    #   the active/default project route.
+    if project is None and project_id is None:
+        config = ConfigManager().config
+        if identifier.strip().startswith("memory://"):
+            detected = await detect_project_from_memory_url_prefix(
+                identifier,
+                config,
+                context=context,
+            )
+        elif _is_workspace_qualified_plain_identifier(identifier):
+            detected = await detect_project_from_workspace_identifier_prefix(
+                identifier,
+                config,
+                context=context,
+            )
+        else:
+            detected = None
         if detected:
             project = detected
 
