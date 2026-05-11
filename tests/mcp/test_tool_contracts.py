@@ -37,6 +37,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "operation",
         "content",
         "project",
+        "workspace",
         "project_id",
         "section",
         "find_text",
