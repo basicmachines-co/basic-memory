@@ -1,7 +1,7 @@
-"""Service for resolving markdown links to permalinks."""
+"""Service and helpers for resolving markdown links and permalink-like identifiers."""
 
 import uuid as uuid_mod
-from typing import Optional, Tuple, Dict
+from typing import Any, Optional, Tuple, Dict
 
 from loguru import logger
 
@@ -18,6 +18,42 @@ from basic_memory.utils import (
     normalize_project_reference,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
+
+
+def is_workspace_qualified_plain_identifier(identifier: str) -> bool:
+    """Return True for plain ``<workspace>/<project>/<path>`` identifiers."""
+    stripped = identifier.strip()
+    if stripped.startswith("memory://"):
+        return False
+
+    normalized = normalize_project_reference(stripped).strip("/")
+    return len(normalized.split("/", 2)) == 3
+
+
+async def detect_project_from_workspace_identifier_prefix(
+    identifier: str,
+    config: BasicMemoryConfig,
+    context: Any | None = None,
+) -> Optional[str]:
+    """Resolve a project route from a plain workspace-qualified identifier."""
+    if not is_workspace_qualified_plain_identifier(identifier):
+        return None
+
+    from basic_memory.mcp.project_context import (
+        _cloud_workspace_discovery_available,
+        resolve_workspace_qualified_identifier,
+    )
+
+    if not _cloud_workspace_discovery_available(config):
+        return None
+
+    workspace_resolution = await resolve_workspace_qualified_identifier(
+        identifier,
+        context=context,
+    )
+    if workspace_resolution is None:
+        return None
+    return workspace_resolution.project_identifier
 
 
 class LinkResolver:

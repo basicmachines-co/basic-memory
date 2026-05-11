@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -116,6 +117,92 @@ async def link_resolver(entity_repository, search_service, test_entities):
 def project_prefix(test_entities) -> str:
     """Project permalink prefix for expected permalinks."""
     return test_entities[0].permalink.split("/", 1)[0]
+
+
+def test_workspace_qualified_plain_identifier_shape_helper_lives_in_link_resolver():
+    """Workspace route shape detection belongs with permalink/link resolution."""
+    from basic_memory.services import link_resolver
+
+    assert link_resolver.is_workspace_qualified_plain_identifier("team-acme/research/note")
+    assert link_resolver.is_workspace_qualified_plain_identifier("team-acme/research/folder/note")
+    assert not link_resolver.is_workspace_qualified_plain_identifier(
+        "memory://team-acme/research/note"
+    )
+    assert not link_resolver.is_workspace_qualified_plain_identifier("research/note")
+
+
+@pytest.mark.asyncio
+async def test_workspace_identifier_project_detection_requires_workspace_shape(
+    monkeypatch,
+    config_manager,
+):
+    """Two-segment project-relative paths should not trigger workspace discovery."""
+    from basic_memory.services import link_resolver
+
+    def fail_if_called(config):
+        raise AssertionError("plain project-relative paths should skip cloud discovery")
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._cloud_workspace_discovery_available",
+        fail_if_called,
+    )
+
+    detected = await link_resolver.detect_project_from_workspace_identifier_prefix(
+        "research/note",
+        config_manager.config,
+    )
+
+    assert detected is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_identifier_project_detection_skips_without_discovery(
+    monkeypatch,
+    config_manager,
+):
+    """Workspace-shaped paths stay local when cloud workspace discovery is unavailable."""
+    from basic_memory.services import link_resolver
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._cloud_workspace_discovery_available",
+        lambda config: False,
+    )
+
+    detected = await link_resolver.detect_project_from_workspace_identifier_prefix(
+        "team-acme/research/note",
+        config_manager.config,
+    )
+
+    assert detected is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_identifier_project_detection_returns_project(
+    monkeypatch,
+    config_manager,
+):
+    """Workspace-qualified plain identifiers should return the resolved project route."""
+    from basic_memory.services import link_resolver
+
+    async def resolve_workspace_identifier(identifier, context=None):
+        assert identifier == "team-acme/research/note"
+        return SimpleNamespace(project_identifier="team-acme/research")
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._cloud_workspace_discovery_available",
+        lambda config: True,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.resolve_workspace_qualified_identifier",
+        resolve_workspace_identifier,
+    )
+
+    detected = await link_resolver.detect_project_from_workspace_identifier_prefix(
+        "team-acme/research/note",
+        config_manager.config,
+    )
+
+    assert detected == "team-acme/research"
 
 
 @pytest.mark.asyncio

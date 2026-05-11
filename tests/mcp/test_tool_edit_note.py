@@ -1,6 +1,5 @@
 """Tests for the edit_note MCP tool."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -929,90 +928,6 @@ async def test_edit_note_three_segment_plain_path_stays_local_without_workspace_
         project=test_project.name,
     )
     assert "Appended locally." in updated
-
-
-@pytest.mark.asyncio
-async def test_detect_project_from_workspace_identifier_prefix_requires_workspace_shape(
-    monkeypatch,
-    config_manager,
-):
-    """Two-segment project-relative paths should not trigger workspace discovery."""
-    import importlib
-
-    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
-
-    def fail_if_called(config):
-        raise AssertionError("plain project-relative paths should skip cloud discovery")
-
-    monkeypatch.setattr(
-        edit_note_module,
-        "_cloud_workspace_discovery_available",
-        fail_if_called,
-    )
-
-    detected = await edit_note_module.detect_project_from_workspace_identifier_prefix(
-        "research/note",
-        config_manager.config,
-    )
-
-    assert detected is None
-
-
-@pytest.mark.asyncio
-async def test_detect_project_from_workspace_identifier_prefix_skips_without_discovery(
-    monkeypatch,
-    config_manager,
-):
-    """Workspace-shaped paths stay local when cloud workspace discovery is unavailable."""
-    import importlib
-
-    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
-
-    monkeypatch.setattr(
-        edit_note_module,
-        "_cloud_workspace_discovery_available",
-        lambda config: False,
-    )
-
-    detected = await edit_note_module.detect_project_from_workspace_identifier_prefix(
-        "team-acme/research/note",
-        config_manager.config,
-    )
-
-    assert detected is None
-
-
-@pytest.mark.asyncio
-async def test_detect_project_from_workspace_identifier_prefix_returns_project(
-    monkeypatch,
-    config_manager,
-):
-    """Workspace-qualified plain identifiers should return the resolved project route."""
-    import importlib
-
-    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
-
-    async def resolve_workspace_identifier(identifier, context=None):
-        assert identifier == "team-acme/research/note"
-        return SimpleNamespace(project_identifier="team-acme/research")
-
-    monkeypatch.setattr(
-        edit_note_module,
-        "_cloud_workspace_discovery_available",
-        lambda config: True,
-    )
-    monkeypatch.setattr(
-        edit_note_module,
-        "resolve_workspace_qualified_identifier",
-        resolve_workspace_identifier,
-    )
-
-    detected = await edit_note_module.detect_project_from_workspace_identifier_prefix(
-        "team-acme/research/note",
-        config_manager.config,
-    )
-
-    assert detected == "team-acme/research"
 
 
 @pytest.mark.asyncio
