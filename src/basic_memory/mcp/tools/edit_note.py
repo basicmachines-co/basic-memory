@@ -326,7 +326,8 @@ async def edit_note(
     # Why: memory:// URLs and cloud workspace-qualified plain permalinks carry
     #   enough route information to avoid accidental edits in the default project.
     # Outcome: plain project-relative paths such as "research/note" still stay on
-    #   the active/default project route.
+    #   the active/default project route; three-segment local paths only attempt
+    #   workspace routing when cloud workspace discovery is actually available.
     if project is None and project_id is None:
         config = ConfigManager().config
         if identifier.strip().startswith("memory://"):
@@ -335,7 +336,9 @@ async def edit_note(
                 config,
                 context=context,
             )
-        elif _is_workspace_qualified_plain_identifier(identifier):
+        elif _cloud_workspace_discovery_available(
+            config
+        ) and _is_workspace_qualified_plain_identifier(identifier):
             detected = await detect_project_from_workspace_identifier_prefix(
                 identifier,
                 config,

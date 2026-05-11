@@ -850,6 +850,11 @@ async def test_edit_note_workspace_qualified_plain_permalink_detects_project(
 
     monkeypatch.setattr(
         edit_note_module,
+        "_cloud_workspace_discovery_available",
+        lambda config: True,
+    )
+    monkeypatch.setattr(
+        edit_note_module,
         "detect_project_from_workspace_identifier_prefix",
         detect_workspace_project,
         raising=False,
@@ -874,6 +879,56 @@ async def test_edit_note_workspace_qualified_plain_permalink_detects_project(
     assert isinstance(result, str)
     assert "Edited note (append)" in result
     assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_three_segment_plain_path_stays_local_without_workspace_discovery(
+    monkeypatch,
+    client,
+    test_project,
+):
+    """Three-segment local paths should stay on the active project without discovery."""
+    import importlib
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+
+    await write_note(
+        project=test_project.name,
+        title="Local Three Segment",
+        directory="folder/subdir",
+        content="# Local Three Segment\nOriginal content.",
+    )
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("local three-segment paths should not trigger workspace detection")
+
+    monkeypatch.setattr(
+        edit_note_module,
+        "_cloud_workspace_discovery_available",
+        lambda config: False,
+    )
+    monkeypatch.setattr(
+        edit_note_module,
+        "detect_project_from_workspace_identifier_prefix",
+        fail_if_called,
+    )
+
+    result = await edit_note(
+        identifier="folder/subdir/local-three-segment",
+        operation="append",
+        content="\nAppended locally.",
+        project=None,
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert f"project: {test_project.name}" in result
+
+    updated = await read_note(
+        identifier="folder/subdir/local-three-segment",
+        project=test_project.name,
+    )
+    assert "Appended locally." in updated
 
 
 @pytest.mark.asyncio
