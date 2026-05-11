@@ -93,7 +93,7 @@ class WatchService:
         self.status_path = app_config.data_dir_path / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
-        self._watch_filter_roots: tuple[Path, ...] | None = None
+        self._sorted_watch_filter_roots: tuple[Path, ...] | None = None
         self._sync_service_factory = sync_service_factory
         # When set (typically from BASIC_MEMORY_MCP_PROJECT), the watch cycle
         # only observes this project. Without it, each `basic-memory mcp --project X`
@@ -127,9 +127,15 @@ class WatchService:
     async def _watch_projects_cycle(self, projects: Sequence[Project], stop_event: asyncio.Event):
         """Run one cycle of watching the given projects until stop_event is set."""
         project_paths = [project.path for project in projects]
-        previous_filter_roots = self._watch_filter_roots
-        self._watch_filter_roots = tuple(
-            Path(project.path).expanduser().resolve() for project in projects
+        previous_filter_roots = self._sorted_watch_filter_roots
+        self._sorted_watch_filter_roots = tuple(
+            sorted(
+                (Path(project.path).expanduser().resolve() for project in projects),
+                # Trigger: configured project roots can overlap.
+                # Why: an enclosing project's hidden directory should still hide descendants.
+                # Outcome: choose the outermost matching root when checking hidden path parts.
+                key=lambda project_path: len(project_path.parts),
+            )
         )
 
         try:
@@ -168,7 +174,7 @@ class WatchService:
                 # process changes
                 await asyncio.gather(*change_handlers)
         finally:
-            self._watch_filter_roots = previous_filter_roots
+            self._sorted_watch_filter_roots = previous_filter_roots
 
     async def _select_projects_to_watch(self) -> list[Project]:
         """Return the set of projects this watch cycle should observe.
@@ -275,7 +281,7 @@ class WatchService:
             self.state.running = False
             await self.write_status()
 
-    def filter_changes(self, change: Change, path: str) -> bool:  # pragma: no cover
+    def filter_changes(self, change: Change, path: str) -> bool:
         """Filter to only watch non-hidden files and directories.
 
         Returns:
@@ -284,21 +290,21 @@ class WatchService:
 
         path_obj = Path(path).expanduser().resolve()
 
-        project_roots = self._watch_filter_roots
-        if project_roots is None:
-            project_roots = tuple(
-                Path(entry.path).expanduser().resolve()
-                for entry in self.app_config.projects.values()
-                if entry.path
+        project_paths = self._sorted_watch_filter_roots
+        if project_paths is None:
+            project_paths = tuple(
+                sorted(
+                    (
+                        Path(entry.path).expanduser().resolve()
+                        for entry in self.app_config.projects.values()
+                        if entry.path
+                    ),
+                    # Trigger: direct callers may not run inside a watch cycle.
+                    # Why: tests and one-off calls still need the same hidden-path semantics.
+                    # Outcome: compute the stable outermost-first order only for fallback calls.
+                    key=lambda project_path: len(project_path.parts),
+                )
             )
-
-        project_paths = sorted(
-            project_roots,
-            # Trigger: configured project roots can overlap.
-            # Why: an enclosing project's hidden directory should still hide descendants.
-            # Outcome: choose the outermost matching root when checking hidden path parts.
-            key=lambda project_path: len(project_path.parts),
-        )
 
         relative_path = None
         for project_path in project_paths:
