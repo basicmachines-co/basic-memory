@@ -16,7 +16,9 @@ runner = CliRunner()
     "argv",
     [
         ["cloud", "sync", "--name", "research"],
+        ["cloud", "sync", "--project", "research"],
         ["cloud", "bisync", "--name", "research"],
+        ["cloud", "bisync", "--project", "research"],
     ],
 )
 def test_cloud_sync_commands_skip_explicit_cloud_project_sync(monkeypatch, argv, config_manager):
