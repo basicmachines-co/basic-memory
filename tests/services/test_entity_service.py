@@ -1006,7 +1006,7 @@ async def test_edit_entity_with_observations_and_relations(
         # Test Note
         
         - [note] This is an observation
-        - links to [[Other Entity]]
+        - "links to" [[Other Entity]]
         
         Original content
         """).strip()
@@ -1028,7 +1028,7 @@ async def test_edit_entity_with_observations_and_relations(
     updated = await entity_service.edit_entity(
         identifier=_permalink(entity),
         operation="append",
-        content="\n- [category] New observation\n- relates to [[New Entity]]",
+        content='\n- [category] New observation\n- "relates to" [[New Entity]]',
     )
 
     # Verify observations and relations were updated

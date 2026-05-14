@@ -85,6 +85,28 @@ def parse_observation(token: Token) -> Dict[str, Any]:
 
 
 # Relation handling functions
+def parse_relation_type(content: str) -> str | None:
+    """Return the explicit relation label before the first wikilink, if any."""
+    before_link = content.partition("[[")[0].strip()
+    if not before_link:
+        return None
+
+    # Trigger: relation labels that need spaces must be quoted.
+    # Why: unquoted multi-word prefixes are indistinguishable from prose
+    # containing a wikilink.
+    # Outcome: `some_type [[Target]]`, `"some type" [[Target]]`, and
+    # `'some type' [[Target]]` are explicit; `some other thing [[Target]]`
+    # falls back to inline `links_to` handling.
+    quote = before_link[0]
+    if quote in {"'", '"'} and before_link.endswith(quote):
+        quoted_label = before_link[1:-1].strip()
+        return quoted_label or None
+
+    if any(char.isspace() for char in before_link):
+        return None
+    return before_link
+
+
 def is_explicit_relation(token: Token) -> bool:
     """Check if token looks like our relation format."""
     if token.type != "inline":  # pragma: no cover
@@ -92,7 +114,7 @@ def is_explicit_relation(token: Token) -> bool:
 
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
-    return "[[" in content and "]]" in content
+    return "[[" in content and "]]" in content and parse_relation_type(content) is not None
 
 
 def parse_relation(token: Token) -> Dict[str, Any] | None:
@@ -101,20 +123,18 @@ def parse_relation(token: Token) -> Dict[str, Any] | None:
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
 
+    rel_type = parse_relation_type(content)
+    if rel_type is None:
+        return None
+
     # Extract [[target]]
     target = None
-    rel_type = "relates_to"  # default
     context = None
 
     start = content.find("[[")
-    end = content.find("]]")
+    end = content.find("]]", start + 2)
 
     if start != -1 and end != -1:
-        # Get text before link as relation type
-        before = content[:start].strip()
-        if before:
-            rel_type = before
-
         # Get target
         target = normalize_project_reference(content[start + 2 : end].strip())
 
@@ -217,6 +237,8 @@ def relation_plugin(md: MarkdownIt) -> None:
 
     Explicit relations:
     - relation_type [[target]] (context)
+    - "multi word relation type" [[target]] (context)
+    - 'multi word relation type' [[target]] (context)
 
     Implicit relations (links in content):
     Some text with [[target]] reference

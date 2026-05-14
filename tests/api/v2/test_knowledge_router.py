@@ -302,7 +302,7 @@ async def test_create_entity_with_observations_and_relations(
 
 ## Observations
 - [note] This is a test observation #tag1 (context)
-- related to [[OtherEntity]]
+- "related to" [[OtherEntity]]
 """,
     }
 

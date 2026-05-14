@@ -1,34 +1,30 @@
-"""
-Integration test for long relation_type values (regression guard for issue #721).
+"""Integration test for long prose before inline wikilinks.
 
-When a markdown bullet contains an inline `[[wikilink]]` preceded by long prose,
-`parse_relation()` extracts ALL of that prose as the `relation_type`. Previously
-the response model `RelationType` had a `MaxLen(200)` constraint that caused
-edit_note (which round-trips through the response model when re-indexing) to
-fail with:
+Issue #721 was originally triggered by markdown bullets that contained inline
+`[[wikilinks]]` preceded by long prose. The parser treated all prose before the
+wikilink as `relation_type`, and the response model's former `MaxLen(200)`
+constraint caused edit_note to fail with:
 
     1 validation error for EntityResponseV2
     relations.0.relation_type
       String should have at most 200 characters
 
-Commit 01cbad1d removed the cap from `RelationType`. This test locks in that
-fix so a future contributor reintroducing `MaxLen` will see the test fail
-before shipping it.
-
-Out of scope: improving `parse_relation()` to fall back to a default relation
-type when the prose-before-link looks like a sentence rather than a label.
-That's a knowledge-graph-quality improvement, not a correctness fix, and is
-not required to keep edit_note working.
+The relation grammar now fixes the root ambiguity too: unquoted multi-word
+prefixes are prose, so this shape should index as a generic `links_to`
+relation rather than preserving prose as a custom relation type.
 """
 
 import pytest
 from fastmcp import Client
 
+from basic_memory.repository.relation_repository import RelationRepository
+
 
 @pytest.mark.asyncio
-async def test_edit_note_handles_long_prose_around_wikilink(mcp_server, app, test_project):
-    """edit_note must succeed on notes whose inline wikilinks have >200 chars
-    of prose preceding them — that prose becomes the parsed relation_type."""
+async def test_edit_note_handles_long_prose_around_wikilink(
+    mcp_server, app, test_project, engine_factory
+):
+    """Long prose before an inline wikilink should not become a relation type."""
     long_prose = (
         "**Lorem ipsum dolor sit amet** — consectetur adipiscing elit, sed do eiusmod "
         "tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, "
@@ -75,3 +71,11 @@ async def test_edit_note_handles_long_prose_around_wikilink(mcp_server, app, tes
         )
         assert len(edit_result.content) == 1
         assert "Edited note (append)" in edit_result.content[0].text
+
+    _, session_maker = engine_factory
+    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
+    links_to_relations = await relation_repository.find_by_type("links_to")
+    prose_type_relations = await relation_repository.find_by_type(long_prose)
+
+    assert any(relation.to_name == "Some Note Title" for relation in links_to_relations)
+    assert not prose_type_relations
