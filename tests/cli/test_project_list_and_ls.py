@@ -420,6 +420,72 @@ def test_project_list_workspace_type_filter_selects_unique_workspace(
     assert data["projects"][0]["workspace"] == "Team"
 
 
+def test_project_list_workspace_type_filter_lists_ambiguous_matches(
+    runner: CliRunner, write_config, monkeypatch
+):
+    """Ambiguous workspace type filters should list copyable matching slugs."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": None,
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    async def fake_get_available_workspaces():
+        return [
+            _workspace(
+                tenant_id="tenant-personal",
+                slug="personal",
+                name="Personal",
+                workspace_type="personal",
+                is_default=True,
+            ),
+            _workspace(
+                tenant_id="tenant-team-alpha",
+                slug="team-alpha",
+                name="Team Alpha",
+                workspace_type="organization",
+            ),
+            _workspace(
+                tenant_id="tenant-team-beta",
+                slug="team-beta",
+                name="Team Beta",
+                workspace_type="organization",
+            ),
+        ]
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield object()
+
+    async def fake_list_projects(self):
+        return ProjectList.model_validate({"projects": [], "default_project": None})
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(
+        app,
+        ["project", "list", "--workspace", "organization"],
+        env={"COLUMNS": "240"},
+    )
+
+    assert result.exit_code == 1
+    assert "Workspace 'organization' matches multiple workspaces" in result.stdout
+    assert "Choose one of these matching workspaces by slug" in result.stdout
+    assert "workspace: team-alpha" in result.stdout
+    assert "workspace: team-beta" in result.stdout
+    assert "tenant_id: tenant-team-alpha" in result.stdout
+    assert "tenant_id: tenant-team-beta" in result.stdout
+    assert "workspace: personal" not in result.stdout
+
+
 def test_project_list_invalid_workspace_exits_without_local_fallback(
     runner: CliRunner, write_config, tmp_path, monkeypatch
 ):

@@ -9,6 +9,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
     _workspace_choices,
     _workspace_matches_identifier,
+    _workspace_selection_choices,
     get_available_workspaces,
 )
 
@@ -100,10 +101,12 @@ def set_default_workspace(
 
     if len(matches) > 1:
         console.print(
-            f"[red]Error: Workspace '{identifier}' matches multiple workspaces. "
-            f"Use tenant_id instead.[/red]"
+            f"[red]Error: Workspace '{identifier}' matches multiple workspaces.[/red]"
         )
-        console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+        console.print(
+            "[dim]Choose one of these matching workspaces by slug:\n"
+            f"{_workspace_selection_choices(matches)}[/dim]"
+        )
         raise typer.Exit(1)
 
     selected = matches[0]

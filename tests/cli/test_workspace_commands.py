@@ -182,6 +182,48 @@ class TestWorkspaceSetDefault:
         assert result.exit_code == 1
         assert "not found" in result.stdout
 
+    def test_set_default_workspace_ambiguous_type_lists_matching_choices(
+        self, runner, monkeypatch
+    ):
+        async def fake_get_available_workspaces(context=None):
+            return [
+                _workspace(
+                    tenant_id="11111111-1111-1111-1111-111111111111",
+                    workspace_type="personal",
+                    slug="personal",
+                    name="Personal",
+                    role="owner",
+                    is_default=True,
+                ),
+                _workspace(
+                    tenant_id="22222222-2222-2222-2222-222222222222",
+                    workspace_type="organization",
+                    slug="team-alpha",
+                    name="Team Alpha",
+                    role="editor",
+                ),
+                _workspace(
+                    tenant_id="33333333-3333-3333-3333-333333333333",
+                    workspace_type="organization",
+                    slug="team-beta",
+                    name="Team Beta",
+                    role="owner",
+                ),
+            ]
+
+        monkeypatch.setattr(
+            workspace_cmd, "get_available_workspaces", fake_get_available_workspaces
+        )
+
+        result = runner.invoke(app, ["cloud", "workspace", "set-default", "organization"])
+
+        assert result.exit_code == 1
+        assert "Workspace 'organization' matches multiple workspaces" in result.stdout
+        assert "Choose one of these matching workspaces by slug" in result.stdout
+        assert "workspace: team-alpha" in result.stdout
+        assert "workspace: team-beta" in result.stdout
+        assert "workspace: personal" not in result.stdout
+
     def test_set_default_workspace_no_workspaces(self, runner, monkeypatch):
         async def fake_get_available_workspaces(context=None):
             return []

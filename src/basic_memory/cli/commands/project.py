@@ -286,6 +286,7 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
     from basic_memory.mcp.project_context import (
         _workspace_choices,
         _workspace_matches_identifier,
+        _workspace_selection_choices,
         get_available_workspaces,
     )
 
@@ -299,10 +300,12 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
             raise typer.Exit(1)
         if len(matches) > 1:
             console.print(
-                f"[red]Error: Workspace '{workspace}' matches multiple workspaces. "
-                f"Use tenant_id instead.[/red]"
+                f"[red]Error: Workspace '{workspace}' matches multiple workspaces.[/red]"
             )
-            console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+            console.print(
+                "[dim]Choose one of these matching workspaces by slug:\n"
+                f"{_workspace_selection_choices(matches)}[/dim]"
+            )
             raise typer.Exit(1)
         return matches[0].tenant_id
 
@@ -358,6 +361,7 @@ def list_projects(
             from basic_memory.mcp.project_context import (
                 _workspace_choices,
                 _workspace_matches_identifier,
+                _workspace_selection_choices,
                 get_available_workspaces,
             )
 
@@ -379,10 +383,12 @@ def list_projects(
                     raise typer.Exit(1)
                 if len(matches) > 1:
                     console.print(
-                        f"[red]Error: Workspace '{workspace}' matches multiple workspaces. "
-                        f"Use tenant_id instead.[/red]"
+                        f"[red]Error: Workspace '{workspace}' matches multiple workspaces.[/red]"
                     )
-                    console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+                    console.print(
+                        "[dim]Choose one of these matching workspaces by slug:\n"
+                        f"{_workspace_selection_choices(matches)}[/dim]"
+                    )
                     raise typer.Exit(1)
                 selected_workspaces = matches
 

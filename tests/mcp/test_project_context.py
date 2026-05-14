@@ -341,6 +341,53 @@ async def test_workspace_invalid_selection_lists_choices(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_workspace_ambiguous_type_selection_lists_matching_choices(monkeypatch):
+    from basic_memory.mcp.project_context import resolve_workspace_parameter
+
+    workspaces = [
+        _workspace(
+            tenant_id="11111111-1111-1111-1111-111111111111",
+            workspace_type="personal",
+            slug="personal",
+            name="Personal",
+            role="owner",
+            is_default=True,
+        ),
+        _workspace(
+            tenant_id="22222222-2222-2222-2222-222222222222",
+            workspace_type="organization",
+            slug="team-alpha",
+            name="Team Alpha",
+            role="editor",
+        ),
+        _workspace(
+            tenant_id="33333333-3333-3333-3333-333333333333",
+            workspace_type="organization",
+            slug="team-beta",
+            name="Team Beta",
+            role="owner",
+        ),
+    ]
+
+    async def fake_get_available_workspaces(context=None):
+        return workspaces
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await resolve_workspace_parameter(workspace="organization")
+
+    message = str(exc_info.value)
+    assert "Workspace 'organization' matches multiple workspaces" in message
+    assert "workspace: team-alpha" in message
+    assert "workspace: team-beta" in message
+    assert "workspace: personal" not in message
+
+
+@pytest.mark.asyncio
 async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
 

@@ -324,6 +324,20 @@ def _workspace_choices(workspaces: list[WorkspaceInfo]) -> str:
     )
 
 
+def _workspace_selection_choices(workspaces: list[WorkspaceInfo]) -> str:
+    """Format matching workspaces with copyable unique identifiers first."""
+    return "\n".join(
+        [
+            (
+                f"- {item.name} ({item.workspace_type}, role={item.role})\n"
+                f"  workspace: {item.slug}\n"
+                f"  tenant_id: {item.tenant_id}"
+            )
+            for item in workspaces
+        ]
+    )
+
+
 def _workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | None:
     """Deserialize a cached workspace project index from MCP context state."""
     if not isinstance(raw, dict):
@@ -1016,8 +1030,8 @@ async def resolve_workspace_parameter(
             if len(matches) > 1:
                 raise ValueError(
                     f"Workspace '{workspace}' matches multiple workspaces. "
-                    "Use tenant_id instead.\n"
-                    f"Available workspaces:\n{_workspace_choices(workspaces)}"
+                    "Choose one of these matching workspaces by slug or tenant_id:\n"
+                    f"{_workspace_selection_choices(matches)}"
                 )
             selected_workspace = matches[0]
         elif len(workspaces) == 1:
