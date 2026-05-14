@@ -78,14 +78,25 @@ def convert_bmignore_to_rclone_filters() -> Path:
                     patterns.append(line)
                     continue
 
-                # Convert gitignore pattern to rclone filter syntax
-                # gitignore: node_modules  → rclone: - node_modules/**
-                # gitignore: *.pyc        → rclone: - *.pyc
-                if "*" in line:
-                    # Pattern already has wildcard, just add exclude prefix
+                # Convert gitignore pattern to rclone filter syntax.
+                #
+                # Two rules are always emitted per pattern:
+                #   1. `- pattern`     — excludes the item itself (file or dir entry)
+                #   2. `- pattern/**`  — excludes all contents when the item is a dir
+                #
+                # Why both? rclone globs treat `*` as not crossing `/`, so:
+                #   - `- .*` matches hidden *files* but NOT hidden dir contents
+                #     (e.g. `.obsidian/workspace.json` would pass through)
+                #   - `- config.json/**` excludes contents of a *dir* named
+                #     config.json, but NOT the file config.json itself
+                # Emitting both forms covers files, directories, and directory contents.
+                if line.endswith("/**"):
+                    # Trigger: pattern already fully qualified as recursive dir exclude
+                    # Why: avoid doubling up on /** suffix
+                    # Outcome: written as-is
                     patterns.append(f"- {line}")
                 else:
-                    # Directory pattern - add /** for recursive exclude
+                    patterns.append(f"- {line}")
                     patterns.append(f"- {line}/**")
 
     except Exception:

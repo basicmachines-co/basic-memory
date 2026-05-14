@@ -32,11 +32,50 @@ def test_convert_bmignore_to_rclone_filters_creates_and_converts(config_home):
     # Comments/empties preserved
     assert "# comment" in content
     assert "" in content
-    # Directory pattern becomes recursive exclude
+    # Each pattern emits both a direct-match and a recursive-contents rule
+    assert "- node_modules" in content
     assert "- node_modules/**" in content
-    # Wildcard pattern becomes simple exclude
     assert "- *.pyc" in content
+    assert "- *.pyc/**" in content
+    assert "- .git" in content
     assert "- .git/**" in content
+
+
+def test_convert_bmignore_file_pattern_not_mangled_as_directory(config_home):
+    """Regression: config.json must be excluded as a FILE, not as a dir content glob.
+
+    Previously `config.json` (no wildcard) became `- config.json/**`, which only
+    excludes contents of a *directory* named config.json, leaving the actual file
+    unfiltered during bisync.
+    """
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_text("config.json\n", encoding="utf-8")
+
+    content = convert_bmignore_to_rclone_filters().read_text(encoding="utf-8").splitlines()
+
+    # Must match the file itself
+    assert "- config.json" in content
+    # Also emit the /** form for completeness (covers any hypothetical dir of that name)
+    assert "- config.json/**" in content
+
+
+def test_convert_bmignore_hidden_glob_covers_directory_contents(config_home):
+    """Regression: `.*` must exclude hidden directory *contents*, not just hidden files.
+
+    Previously `.*` became `- .*` only. rclone globs don't cross `/`, so
+    `.obsidian/workspace.json` would not be matched by `- .*` alone.
+    """
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_text(".*\n", encoding="utf-8")
+
+    content = convert_bmignore_to_rclone_filters().read_text(encoding="utf-8").splitlines()
+
+    # Must exclude hidden files at any level
+    assert "- .*" in content
+    # Must also exclude contents of hidden directories
+    assert "- .*/**" in content
 
 
 def test_convert_bmignore_to_rclone_filters_is_cached_when_up_to_date(config_home):
