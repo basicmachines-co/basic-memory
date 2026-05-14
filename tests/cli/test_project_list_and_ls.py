@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 from basic_memory.mcp.clients.project import ProjectClient
+from basic_memory.schemas.cloud import WorkspaceInfo
 from basic_memory.schemas.project_info import ProjectList
 
 # Importing registers project subcommands on the shared app instance.
@@ -44,13 +45,17 @@ def write_config(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_client(monkeypatch):
-    """Mock get_client with a no-op async context manager."""
+    """Mock get_client and get_available_workspaces with no-ops for project list tests."""
 
     @asynccontextmanager
     async def fake_get_client(workspace=None):
         yield object()
 
+    async def fake_get_available_workspaces():
+        return []
+
     monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(project_cmd, "get_available_workspaces", fake_get_available_workspaces)
 
 
 def test_project_list_shows_local_cloud_presence_and_routes(
@@ -357,3 +362,155 @@ def test_project_ls_cloud_route_uses_cloud_listing(
     assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
     assert "Files in alpha (CLOUD)" in result.stdout
     assert "cloud.md" in result.stdout
+
+
+# --- Bug #820 regression tests ---
+
+
+def test_project_list_workspace_column_populated_without_explicit_workspace(
+    runner: CliRunner, write_config, tmp_path, monkeypatch
+):
+    """Workspace column should be populated even when no default_workspace is set.
+
+    Bug: the column was always empty because workspace resolution was gated on
+    ``effective_workspace`` being truthy. With no ``--workspace`` flag and no
+    ``default_workspace`` in config, the column showed empty for every row.
+    """
+    ws = WorkspaceInfo(
+        tenant_id="ws-personal-111",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+
+    async def fake_get_available_workspaces():
+        return [ws]
+
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": "main",
+            "cloud_api_key": "bmc_test_key_123",
+            # Intentionally no "default_workspace" key — this triggers Bug 1.
+        }
+    )
+
+    local_payload = {
+        "projects": [
+            {"id": 1, "external_id": "11111111-1111-1111-1111-111111111111", "name": "main", "path": "/main", "is_default": True}
+        ],
+        "default_project": "main",
+    }
+    cloud_payload = {
+        "projects": [
+            {"id": 1, "external_id": "11111111-1111-1111-1111-111111111111", "name": "main", "path": "/main", "is_default": True}
+        ],
+        "default_project": "main",
+    }
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield object()
+
+    async def fake_list_projects(self):
+        if os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes"):
+            return ProjectList.model_validate(cloud_payload)
+        return ProjectList.model_validate(local_payload)
+
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(project_cmd, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    # The Workspace column must show the workspace name for the cloud-sourced project.
+    assert "Personal" in result.stdout
+
+
+def test_project_list_fetches_from_all_workspaces(
+    runner: CliRunner, write_config, tmp_path, monkeypatch
+):
+    """Projects from every cloud workspace should appear in the listing.
+
+    Bug: only the single default/specified workspace was queried; projects in
+    any other workspace were silently omitted.
+    """
+    ws_a = WorkspaceInfo(
+        tenant_id="ws-aaa",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    ws_b = WorkspaceInfo(
+        tenant_id="ws-bbb",
+        workspace_type="organization",
+        slug="my-org",
+        name="My Org",
+        role="admin",
+        is_default=False,
+    )
+
+    async def fake_get_available_workspaces():
+        return [ws_a, ws_b]
+
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": None,
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    local_payload = {"projects": [], "default_project": None}
+
+    ws_a_payload = {
+        "projects": [
+            {"id": 1, "external_id": "aaaa-1111-1111-1111-111111111111", "name": "personal-notes", "path": "/personal-notes", "is_default": False}
+        ],
+        "default_project": None,
+    }
+    ws_b_payload = {
+        "projects": [
+            {"id": 2, "external_id": "bbbb-2222-2222-2222-222222222222", "name": "org-docs", "path": "/org-docs", "is_default": False}
+        ],
+        "default_project": None,
+    }
+
+    # Track which workspace get_client was last called with so list_projects can
+    # return the correct per-workspace payload.
+    current_workspace: list[str | None] = [None]
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        current_workspace[0] = workspace
+        yield object()
+
+    async def fake_list_projects(self):
+        if os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() not in ("true", "1", "yes"):
+            return ProjectList.model_validate(local_payload)
+        if current_workspace[0] == "ws-aaa":
+            return ProjectList.model_validate(ws_a_payload)
+        if current_workspace[0] == "ws-bbb":
+            return ProjectList.model_validate(ws_b_payload)
+        return ProjectList.model_validate({"projects": [], "default_project": None})
+
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(project_cmd, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    # Projects from both workspaces must appear.
+    assert "personal-notes" in result.stdout
+    assert "org-docs" in result.stdout
+    # Each row must show its workspace name.
+    assert "Personal" in result.stdout
+    assert "My Org" in result.stdout

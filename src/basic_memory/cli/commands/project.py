@@ -29,6 +29,7 @@ from basic_memory.cli.commands.routing import force_routing, validate_routing_fl
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client, resolve_configured_workspace
 from basic_memory.mcp.clients import ProjectClient
+from basic_memory.mcp.project_context import get_available_workspaces
 from basic_memory.schemas.cloud import (
     CloudProjectIndexStatus,
     CloudTenantIndexStatusResponse,
@@ -343,13 +344,66 @@ def list_projects(
         effective_workspace = workspace or config.default_workspace
 
         local_result: ProjectList | None = None
-        cloud_result: ProjectList | None = None
+        # cloud_workspace_results: list of (WorkspaceInfo | None, ProjectList) pairs.
+        # Each pair carries the workspace object so rows can be labelled correctly.
+        cloud_workspace_results: list[tuple] = []
         cloud_error: Exception | None = None
+
+        def _fetch_cloud_workspace_results() -> list[tuple]:
+            """Return (WorkspaceInfo | None, ProjectList) pairs for all reachable workspaces.
+
+            Trigger: cloud credentials are present and projects need cloud augmentation.
+            Why: fetching from every available workspace prevents silently omitting projects
+                 in workspaces other than the default, and ensures the Workspace column is
+                 populated for every cloud-sourced row.
+            Outcome: each (ws, result) pair carries the workspace object for display labeling.
+            """
+            try:
+                all_workspaces = run_with_cleanup(get_available_workspaces())
+            except Exception:
+                all_workspaces = []
+
+            if effective_workspace:
+                # Trigger: user requested a specific workspace (--workspace / default_workspace).
+                # Why: honour the explicit filter; don't silently expand to other workspaces.
+                # Outcome: only the selected workspace's projects appear.
+                target = [ws for ws in all_workspaces if ws.tenant_id == effective_workspace]
+                if not target:
+                    # Not in available list; try the raw ID anyway (best-effort).
+                    result = run_with_cleanup(_list_projects(effective_workspace))
+                    return [(None, result)] if result else []
+                pairs: list[tuple] = []
+                for ws in target:
+                    try:
+                        result = run_with_cleanup(_list_projects(ws.tenant_id))
+                        if result:
+                            pairs.append((ws, result))
+                    except Exception:
+                        pass
+                return pairs
+
+            if all_workspaces:
+                # Trigger: no workspace filter — fetch from every available workspace.
+                # Why: ensures cross-workspace projects are not silently omitted.
+                # Outcome: projects from all workspaces appear in the listing.
+                pairs = []
+                for ws in all_workspaces:
+                    try:
+                        result = run_with_cleanup(_list_projects(ws.tenant_id))
+                        if result:
+                            pairs.append((ws, result))
+                    except Exception:
+                        pass
+                return pairs
+
+            # No workspaces found; fall back to un-scoped fetch.
+            result = run_with_cleanup(_list_projects(None))
+            return [(None, result)] if result else []
 
         if cloud:
             with console.status("[bold blue]Fetching cloud projects...", spinner="dots"):
                 with force_routing(cloud=True):
-                    cloud_result = run_with_cleanup(_list_projects(effective_workspace))
+                    cloud_workspace_results = _fetch_cloud_workspace_results()
         elif local:
             with force_routing(local=True):
                 local_result = run_with_cleanup(_list_projects())
@@ -362,28 +416,9 @@ def list_projects(
                 try:
                     with console.status("[bold blue]Fetching cloud projects...", spinner="dots"):
                         with force_routing(cloud=True):
-                            cloud_result = run_with_cleanup(_list_projects(effective_workspace))
+                            cloud_workspace_results = _fetch_cloud_workspace_results()
                 except Exception as exc:  # pragma: no cover
                     cloud_error = exc
-
-        # Resolve workspace name for cloud projects (best-effort)
-        cloud_ws_name: str | None = None
-        cloud_ws_type: str | None = None
-        if cloud_result and effective_workspace:
-            try:
-                from basic_memory.mcp.project_context import get_available_workspaces
-
-                with console.status("[bold blue]Resolving workspace...", spinner="dots"):
-                    workspaces = run_with_cleanup(get_available_workspaces())
-                matched = next(
-                    (ws for ws in workspaces if ws.tenant_id == effective_workspace),
-                    None,
-                )
-                if matched:
-                    cloud_ws_name = matched.name
-                    cloud_ws_type = matched.workspace_type
-            except Exception:
-                pass
 
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
@@ -395,46 +430,105 @@ def list_projects(
         table.add_column("Sync", style="green")
         table.add_column("Default", style="magenta")
 
-        project_names_by_permalink: dict[str, str] = {}
+        # --- Build lookup structures ---
         local_projects_by_permalink: dict[str, ProjectItem] = {}
-        cloud_projects_by_permalink: dict[str, ProjectItem] = {}
-
         if local_result:
             for project in local_result.projects:
                 permalink = generate_permalink(project.name)
-                project_names_by_permalink[permalink] = project.name
                 local_projects_by_permalink[permalink] = project
 
-        if cloud_result:
-            for project in cloud_result.projects:
+        # cloud_entries_by_permalink: permalink → list of (WorkspaceInfo | None, ProjectItem).
+        # Multiple workspaces can contribute the same permalink — each produces its own row.
+        cloud_entries_by_permalink: dict[str, list[tuple]] = {}
+        for ws_obj, ws_result in cloud_workspace_results:
+            for project in ws_result.projects:
                 permalink = generate_permalink(project.name)
-                project_names_by_permalink[permalink] = project.name
-                cloud_projects_by_permalink[permalink] = project
+                cloud_entries_by_permalink.setdefault(permalink, []).append((ws_obj, project))
 
         # --- Build unified project list ---
+        # One row per (workspace, permalink) pair for cloud entries.
+        # Local-only projects get a single row after all cloud rows.
         project_rows: list[dict] = []
-        for permalink in sorted(project_names_by_permalink):
-            project_name = project_names_by_permalink[permalink]
-            local_project = local_projects_by_permalink.get(permalink)
-            cloud_project = cloud_projects_by_permalink.get(permalink)
-            entry = config.projects.get(project_name)
+        covered_local_permalinks: set[str] = set()
 
-            local_path = ""
-            if local_project is not None:
-                local_path = format_path(normalize_project_path(local_project.path))
-            elif entry and entry.local_sync_path:
-                local_path = format_path(entry.local_sync_path)
-            elif entry and entry.mode == ProjectMode.LOCAL and entry.path:
-                local_path = format_path(normalize_project_path(entry.path))
+        for permalink, entries in sorted(cloud_entries_by_permalink.items()):
+            for ws_obj, cloud_project in entries:
+                local_project = local_projects_by_permalink.get(permalink)
+                if local_project is not None:
+                    covered_local_permalinks.add(permalink)
 
-            # Clear local path for cloud-mode projects — only local projects
-            # should display a local path
+                entry = config.projects.get(cloud_project.name)
+
+                local_path = ""
+                if local_project is not None:
+                    local_path = format_path(normalize_project_path(local_project.path))
+                elif entry and entry.local_sync_path:
+                    local_path = format_path(entry.local_sync_path)
+                elif entry and entry.mode == ProjectMode.LOCAL and entry.path:
+                    local_path = format_path(normalize_project_path(entry.path))
+
+                # Clear local path for cloud-mode projects — only local projects
+                # should display a local path.
+                if entry and entry.mode == ProjectMode.CLOUD:
+                    local_path = ""
+
+                cloud_path = normalize_project_path(cloud_project.path)
+
+                if local:
+                    cli_route = "local (flag)"
+                elif cloud:
+                    cli_route = "cloud (flag)"
+                elif entry:
+                    cli_route = entry.mode.value
+                else:
+                    cli_route = ProjectMode.CLOUD.value
+
+                is_default = config.default_project == cloud_project.name
+                has_sync = bool(entry and entry.local_sync_path)
+
+                # Determine MCP transport based on project routing mode.
+                if entry and entry.mode == ProjectMode.CLOUD:
+                    mcp_transport = "https"
+                elif entry is None:
+                    mcp_transport = "https"
+                else:
+                    mcp_transport = "stdio"
+
+                # display_name is a human label for private UUID-named projects (e.g., "My Project").
+                # Keep "name" as the canonical identifier for scripting/JSON consumers;
+                # the Rich table uses display_name when available.
+                display_name = cloud_project.display_name or None
+
+                row_data: dict = {
+                    "name": cloud_project.name,
+                    "permalink": permalink,
+                    "local_path": local_path,
+                    "cloud_path": cloud_path,
+                    "cli_route": cli_route,
+                    "mcp_stdio": mcp_transport,
+                    "sync": has_sync,
+                    "is_default": is_default,
+                }
+                if display_name:
+                    row_data["display_name"] = display_name
+                if ws_obj is not None:
+                    row_data["workspace"] = ws_obj.name
+                    if ws_obj.workspace_type:
+                        row_data["workspace_type"] = ws_obj.workspace_type
+
+                project_rows.append(row_data)
+
+        # Add local-only projects (not present in any cloud workspace result).
+        for permalink in sorted(local_projects_by_permalink):
+            if permalink in covered_local_permalinks:
+                continue
+            local_project = local_projects_by_permalink[permalink]
+            entry = config.projects.get(local_project.name)
+
+            local_path = format_path(normalize_project_path(local_project.path))
+            # Clear local path for cloud-mode projects.
             if entry and entry.mode == ProjectMode.CLOUD:
                 local_path = ""
-
-            cloud_path = ""
-            if cloud_project is not None:
-                cloud_path = normalize_project_path(cloud_project.path)
 
             if local:
                 cli_route = "local (flag)"
@@ -442,50 +536,23 @@ def list_projects(
                 cli_route = "cloud (flag)"
             elif entry:
                 cli_route = entry.mode.value
-            elif cloud_project is not None and local_project is None:
-                cli_route = ProjectMode.CLOUD.value
             else:
                 cli_route = ProjectMode.LOCAL.value
 
-            is_default = config.default_project == project_name
-
+            is_default = config.default_project == local_project.name
             has_sync = bool(entry and entry.local_sync_path)
-            # Determine MCP transport based on project routing mode
-            if entry and entry.mode == ProjectMode.CLOUD:
-                mcp_transport = "https"
-            elif entry is None and cloud_project is not None:
-                mcp_transport = "https"
-            else:
-                mcp_transport = "stdio"
+            mcp_transport = "https" if (entry and entry.mode == ProjectMode.CLOUD) else "stdio"
 
-            # Show workspace name (type) for cloud-sourced projects
-            ws_label = ""
-            if cloud_project is not None and cloud_ws_name:
-                ws_label = f"{cloud_ws_name} ({cloud_ws_type})" if cloud_ws_type else cloud_ws_name
-
-            # display_name is a human label for private UUID-named projects (e.g., "My Project").
-            # Keep "name" as the canonical identifier for scripting/JSON consumers;
-            # the Rich table uses display_name when available.
-            display_name = (
-                cloud_project.display_name if cloud_project and cloud_project.display_name else None
-            )
             row_data = {
-                "name": project_name,
+                "name": local_project.name,
                 "permalink": permalink,
                 "local_path": local_path,
-                "cloud_path": cloud_path,
+                "cloud_path": "",
                 "cli_route": cli_route,
                 "mcp_stdio": mcp_transport,
                 "sync": has_sync,
                 "is_default": is_default,
             }
-            if display_name:
-                row_data["display_name"] = display_name
-            if ws_label:
-                row_data["workspace"] = cloud_ws_name or ""
-                if cloud_ws_type:
-                    row_data["workspace_type"] = cloud_ws_type
-
             project_rows.append(row_data)
 
         # --- JSON output ---
