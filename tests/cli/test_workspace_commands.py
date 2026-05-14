@@ -15,6 +15,9 @@ from basic_memory.schemas.cloud import WorkspaceInfo
 import basic_memory.cli.commands.cloud as cloud_cmd  # noqa: F401
 import basic_memory.cli.commands.cloud.workspace as workspace_cmd  # noqa: F401
 
+# Importing workspace registers the top-level redirect stub on app.
+import basic_memory.cli.commands.workspace  # noqa: F401
+
 
 def _workspace(
     *,
@@ -209,3 +212,25 @@ class TestWorkspaceSetDefault:
 
         assert result.exit_code == 1
         assert "OAuth login" in result.stdout
+
+
+class TestWorkspaceRedirectStub:
+    """Tests for the top-level 'bm workspace' redirect stub."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    def test_workspace_bare_prints_redirect_and_exits_nonzero(self, runner):
+        result = runner.invoke(app, ["workspace"])
+        assert result.exit_code == 1
+        assert "bm cloud workspace" in result.output
+
+    def test_workspace_with_subcommand_prints_redirect_and_exits_nonzero(self, runner):
+        result = runner.invoke(app, ["workspace", "list"])
+        assert result.exit_code == 1
+        assert "bm cloud workspace list" in result.output
+
+    def test_workspace_redirect_mentions_set_default(self, runner):
+        result = runner.invoke(app, ["workspace"])
+        assert "bm cloud workspace set-default" in result.output

@@ -9,6 +9,7 @@ from . import (
     format,
     schema,
     update,
+    workspace,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "format",
     "schema",
     "update",
+    "workspace",
 ]
