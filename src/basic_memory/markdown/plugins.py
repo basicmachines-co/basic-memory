@@ -85,14 +85,39 @@ def parse_observation(token: Token) -> Dict[str, Any]:
 
 
 # Relation handling functions
+
+# A relation type is a short label ("relates_to", "depends on"), never a
+# sentence of prose. A list item can legitimately contain a [[wikilink]] inside
+# ordinary prose ("- I read about this in [[Some Note]] last week") -- that is
+# an inline link, not an explicit `type [[target]]` relation. The bound below
+# is what separates the two: anything longer before the [[ is treated as prose.
+# Why a bound is needed: without it, the entire prose prefix is captured as the
+# relation type (see parse_relation), producing meaningless edges -- and, while
+# RelationType still carried a MaxLen, failing the whole note write.
+MAX_RELATION_TYPE_LENGTH = 100
+
+
 def is_explicit_relation(token: Token) -> bool:
-    """Check if token looks like our relation format."""
+    """Check if token looks like our relation format.
+
+    An explicit relation is `relation_type [[target]] (context)` where
+    relation_type is a short label. A list item whose [[wikilink]] is preceded
+    by a long prose prefix is NOT an explicit relation -- returning False here
+    lets relation_rule fall through to parse_inline_relations, which records it
+    as an inline "links_to" relation instead.
+    """
     if token.type != "inline":  # pragma: no cover
         return False
 
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
-    return "[[" in content and "]]" in content
+    if "[[" not in content or "]]" not in content:
+        return False
+
+    # The text before the first [[ is the candidate relation type. A prose-
+    # length prefix is prose, not a label -- defer to inline link handling.
+    before = content[: content.find("[[")].strip()
+    return len(before) <= MAX_RELATION_TYPE_LENGTH
 
 
 def parse_relation(token: Token) -> Dict[str, Any] | None:
@@ -113,6 +138,12 @@ def parse_relation(token: Token) -> Dict[str, Any] | None:
         # Get text before link as relation type
         before = content[:start].strip()
         if before:
+            # Defense-in-depth: is_explicit_relation already filters prose-
+            # length prefixes out before relation_rule calls us, but guard
+            # directly too so a prose prefix can never become a relation type
+            # regardless of caller.
+            if len(before) > MAX_RELATION_TYPE_LENGTH:
+                return None
             rel_type = before
 
         # Get target

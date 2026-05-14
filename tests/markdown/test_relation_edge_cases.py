@@ -2,7 +2,12 @@
 
 from markdown_it import MarkdownIt
 
-from basic_memory.markdown.plugins import relation_plugin, parse_relation, parse_inline_relations
+from basic_memory.markdown.plugins import (
+    MAX_RELATION_TYPE_LENGTH,
+    relation_plugin,
+    parse_relation,
+    parse_inline_relations,
+)
 from basic_memory.markdown.schemas import Relation
 
 
@@ -128,3 +133,47 @@ def test_unicode_targets():
     assert relation.type == "type"
     assert relation.target == "Target"
     assert relation.context == "测试"
+
+
+def test_prose_prefix_not_captured_as_relation_type():
+    """A long prose prefix before a [[wikilink]] is prose, not a relation type.
+
+    A list item can legitimately mention a [[wikilink]] inside ordinary prose.
+    Without a length bound, the whole sentence before the [[ was captured as
+    the relation type -- a meaningless edge that (while RelationType carried a
+    MaxLen) failed the entire note write. Such a list item must instead fall
+    through to inline handling and be recorded as a generic "links_to".
+    """
+    md = MarkdownIt().use(relation_plugin)
+
+    prose = (
+        "This is a long bullet describing something in detail, going on well "
+        "past a hundred characters so the text before the wikilink is clearly "
+        "prose and not a relation type, and only at the very end does it cite "
+    )
+    assert len(prose) > MAX_RELATION_TYPE_LENGTH  # guard: prefix exceeds the bound
+
+    tokens = md.parse(f"- {prose}[[Some Target Note]]\n")
+    token = next(t for t in tokens if t.type == "inline")
+
+    # relation_rule routes it to parse_inline_relations: generic "links_to",
+    # target preserved, prose not captured as the type.
+    rels = token.meta["relations"]
+    assert len(rels) == 1
+    assert rels[0]["type"] == "links_to"
+    assert rels[0]["target"] == "Some Target Note"
+
+    # parse_relation itself also refuses to mint a prose-length type.
+    assert parse_relation(token) is None
+
+
+def test_short_relation_type_still_parses():
+    """A genuine short relation type is unaffected by the prose-prefix guard."""
+    md = MarkdownIt().use(relation_plugin)
+
+    tokens = md.parse("- relates_to [[Some Target Note]]")
+    token = next(t for t in tokens if t.type == "inline")
+    rel = parse_relation(token)
+    assert rel is not None
+    assert rel["type"] == "relates_to"
+    assert rel["target"] == "Some Target Note"
