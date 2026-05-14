@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 from basic_memory.mcp.clients.project import ProjectClient
+from basic_memory.schemas.cloud import WorkspaceInfo
 from basic_memory.schemas.project_info import ProjectList
 
 # Importing registers project subcommands on the shared app instance.
@@ -51,6 +52,26 @@ def mock_client(monkeypatch):
         yield object()
 
     monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+
+
+def _workspace(
+    *,
+    tenant_id: str,
+    slug: str,
+    name: str,
+    workspace_type: str,
+    is_default: bool = False,
+) -> WorkspaceInfo:
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type=workspace_type,
+        slug=slug,
+        name=name,
+        role="owner",
+        is_default=is_default,
+        organization_id=None,
+        has_active_subscription=True,
+    )
 
 
 def test_project_list_shows_local_cloud_presence_and_routes(
@@ -213,6 +234,110 @@ def test_project_list_shows_display_name_for_private_projects(
     private_project = next(p for p in data["projects"] if p.get("display_name") == "My Project")
     assert private_project["name"] == private_uuid
     assert private_project["display_name"] == "My Project"
+
+
+def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalinks(
+    runner: CliRunner, write_config, monkeypatch
+):
+    """Cloud project list should include every workspace without collapsing matching names."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": None,
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    personal = _workspace(
+        tenant_id="tenant-personal",
+        slug="personal",
+        name="Personal",
+        workspace_type="personal",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="tenant-team",
+        slug="team",
+        name="Team",
+        workspace_type="organization",
+    )
+
+    async def fake_get_available_workspaces():
+        return [personal, team]
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    payloads_by_workspace = {
+        None: {"projects": [], "default_project": None},
+        "tenant-personal": {
+            "projects": [
+                {
+                    "id": 1,
+                    "external_id": "11111111-1111-1111-1111-111111111111",
+                    "name": "shared",
+                    "path": "/personal/shared",
+                    "is_default": True,
+                }
+            ],
+            "default_project": "shared",
+        },
+        "tenant-team": {
+            "projects": [
+                {
+                    "id": 2,
+                    "external_id": "22222222-2222-2222-2222-222222222222",
+                    "name": "shared",
+                    "path": "/team/shared",
+                    "is_default": False,
+                }
+            ],
+            "default_project": None,
+        },
+    }
+    seen_workspaces: list[str | None] = []
+
+    async def fake_list_projects(self):
+        workspace = self.http_client.workspace
+        seen_workspaces.append(workspace)
+        return ProjectList.model_validate(payloads_by_workspace[workspace])
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list", "--json"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    assert seen_workspaces == [None, "tenant-personal", "tenant-team"]
+
+    data = json.loads(result.stdout)
+    shared_projects = [project for project in data["projects"] if project["name"] == "shared"]
+    assert len(shared_projects) == 2
+    assert {project["cloud_path"] for project in shared_projects} == {
+        "/personal/shared",
+        "/team/shared",
+    }
+    assert {project["workspace"] for project in shared_projects} == {"Personal", "Team"}
+    assert {project["workspace_type"] for project in shared_projects} == {
+        "personal",
+        "organization",
+    }
+
+    table_result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
+
+    assert table_result.exit_code == 0
+    assert "Personal (personal)" in table_result.stdout
+    assert "Team (organization)" in table_result.stdout
 
 
 def test_project_ls_local_mode_defaults_to_local_route(
