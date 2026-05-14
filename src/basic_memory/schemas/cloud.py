@@ -88,6 +88,45 @@ class WorkspaceListResponse(BaseModel):
     )
 
 
+def workspace_matches_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
+    """Return True when identifier matches workspace tenant_id, slug, name, or type."""
+    if workspace.tenant_id == identifier:
+        return True
+    if workspace.slug.casefold() == identifier.casefold():
+        return True
+    if workspace.workspace_type.casefold() == identifier.casefold():
+        return True
+    return workspace.name.casefold() == identifier.casefold()
+
+
+def format_workspace_choices(workspaces: list[WorkspaceInfo]) -> str:
+    """Format deterministic workspace choices for prompt-style errors."""
+    return "\n".join(
+        [
+            (
+                f"- {item.name} "
+                f"(slug={item.slug}, type={item.workspace_type}, "
+                f"role={item.role}, tenant_id={item.tenant_id})"
+            )
+            for item in workspaces
+        ]
+    )
+
+
+def format_workspace_selection_choices(workspaces: list[WorkspaceInfo]) -> str:
+    """Format matching workspaces with copyable unique identifiers first."""
+    return "\n".join(
+        [
+            (
+                f"- {item.name} ({item.workspace_type}, role={item.role})\n"
+                f"  workspace: {item.slug}\n"
+                f"  tenant_id: {item.tenant_id}"
+            )
+            for item in workspaces
+        ]
+    )
+
+
 class CloudProjectIndexStatus(BaseModel):
     """Index freshness summary for one cloud project."""
 

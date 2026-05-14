@@ -318,6 +318,7 @@ def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalin
     result = runner.invoke(app, ["project", "list", "--json"], env={"COLUMNS": "240"})
 
     assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    # The initial None call is the local project fetch before cloud workspaces are listed.
     assert seen_workspaces == [None, "tenant-personal", "tenant-team"]
 
     data = json.loads(result.stdout)
@@ -338,6 +339,138 @@ def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalin
     assert table_result.exit_code == 0
     assert "Personal (personal)" in table_result.stdout
     assert "Team (organization)" in table_result.stdout
+
+
+def test_project_list_workspace_discovery_failure_warns_and_uses_fallback(
+    runner: CliRunner, write_config, monkeypatch
+):
+    """Workspace discovery failures should fall back and explain the degraded result."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": None,
+            "default_workspace": "tenant-default",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    async def fail_get_available_workspaces():
+        raise RuntimeError("workspace service unavailable")
+
+    payloads_by_workspace = {
+        None: {"projects": [], "default_project": None},
+        "tenant-default": {
+            "projects": [
+                {
+                    "id": 1,
+                    "external_id": "11111111-1111-1111-1111-111111111111",
+                    "name": "fallback-project",
+                    "path": "/fallback-project",
+                    "is_default": False,
+                }
+            ],
+            "default_project": None,
+        },
+    }
+
+    async def fake_list_projects(self):
+        return ProjectList.model_validate(payloads_by_workspace[self.http_client.workspace])
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fail_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    assert "fallback-project" in result.stdout
+    assert "Cloud workspace discovery failed: workspace service unavailable" in result.stdout
+    assert "Showing cloud projects from the configured/default workspace only" in result.stdout
+
+
+def test_project_list_partial_workspace_failure_warns_and_keeps_successes(
+    runner: CliRunner, write_config, monkeypatch
+):
+    """A failed workspace fetch should not hide projects from successful workspaces."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": None,
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    personal = _workspace(
+        tenant_id="tenant-personal",
+        slug="personal",
+        name="Personal",
+        workspace_type="personal",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="tenant-team",
+        slug="team",
+        name="Team",
+        workspace_type="organization",
+    )
+
+    async def fake_get_available_workspaces():
+        return [personal, team]
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    payloads_by_workspace = {
+        None: {"projects": [], "default_project": None},
+        "tenant-personal": {
+            "projects": [
+                {
+                    "id": 1,
+                    "external_id": "11111111-1111-1111-1111-111111111111",
+                    "name": "personal-project",
+                    "path": "/personal-project",
+                    "is_default": False,
+                }
+            ],
+            "default_project": None,
+        },
+    }
+
+    async def fake_list_projects(self):
+        if self.http_client.workspace == "tenant-team":
+            raise RuntimeError("team unavailable")
+        return ProjectList.model_validate(payloads_by_workspace[self.http_client.workspace])
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    assert "personal-project" in result.stdout
+    assert "Cloud project discovery failed for workspace Team: team unavailable" in result.stdout
 
 
 def test_project_list_workspace_type_filter_selects_unique_workspace(

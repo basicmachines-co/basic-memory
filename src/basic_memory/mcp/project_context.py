@@ -11,7 +11,7 @@ compatibility with existing MCP tools.
 import asyncio
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Awaitable, Callable, Optional, List, Tuple, cast
+from typing import AsyncIterator, Awaitable, Callable, List, Optional, Sequence, Tuple, cast
 from uuid import UUID
 
 from httpx import AsyncClient
@@ -25,7 +25,13 @@ from mcp.server.fastmcp.exceptions import ToolError
 import logfire
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, has_cloud_credentials
 from basic_memory.project_resolver import ProjectResolver
-from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
+from basic_memory.schemas.cloud import (
+    WorkspaceInfo,
+    WorkspaceListResponse,
+    format_workspace_choices,
+    format_workspace_selection_choices,
+    workspace_matches_identifier,
+)
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.schemas.memory import memory_url_path
@@ -297,45 +303,6 @@ async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = N
     response = await call_get(client, "/v2/projects/", headers=headers)
     project_list = ProjectList.model_validate(response.json())
     return [project.name for project in project_list.projects]
-
-
-def _workspace_matches_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
-    """Return True when identifier matches workspace tenant_id, slug, name, or type."""
-    if workspace.tenant_id == identifier:
-        return True
-    if workspace.slug.casefold() == identifier.casefold():
-        return True
-    if workspace.workspace_type.casefold() == identifier.casefold():
-        return True
-    return workspace.name.lower() == identifier.lower()
-
-
-def _workspace_choices(workspaces: list[WorkspaceInfo]) -> str:
-    """Format deterministic workspace choices for prompt-style errors."""
-    return "\n".join(
-        [
-            (
-                f"- {item.name} "
-                f"(slug={item.slug}, type={item.workspace_type}, "
-                f"role={item.role}, tenant_id={item.tenant_id})"
-            )
-            for item in workspaces
-        ]
-    )
-
-
-def _workspace_selection_choices(workspaces: list[WorkspaceInfo]) -> str:
-    """Format matching workspaces with copyable unique identifiers first."""
-    return "\n".join(
-        [
-            (
-                f"- {item.name} ({item.workspace_type}, role={item.role})\n"
-                f"  workspace: {item.slug}\n"
-                f"  tenant_id: {item.tenant_id}"
-            )
-            for item in workspaces
-        ]
-    )
 
 
 def _workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | None:
@@ -640,7 +607,7 @@ async def _resolve_workspace_segments(
     return WorkspaceMemoryUrlResolution(entry=entry, canonical_path=canonical_path)
 
 
-def _format_qualified_choices(entries: tuple[WorkspaceProjectEntry, ...]) -> str:
+def _format_qualified_choices(entries: Sequence[WorkspaceProjectEntry]) -> str:
     """Format qualified project choices for collision errors."""
     return " or ".join(entry.qualified_name for entry in entries)
 
@@ -869,7 +836,7 @@ async def resolve_workspace_project_identifier(
             )
         return matches[0]
 
-    matches = index.entries_by_permalink.get(project_permalink, ())
+    matches = list(index.entries_by_permalink.get(project_permalink, ()))
     if not matches:
         failed_note = ""
         if index.failed_workspaces:
@@ -1003,7 +970,7 @@ async def resolve_workspace_parameter(
             cached_raw = await context.get_state("active_workspace")
             if isinstance(cached_raw, dict):
                 cached_workspace = WorkspaceInfo.model_validate(cached_raw)
-                if workspace is None or _workspace_matches_identifier(cached_workspace, workspace):
+                if workspace is None or workspace_matches_identifier(cached_workspace, workspace):
                     logger.debug(
                         f"Using cached workspace from context: {cached_workspace.tenant_id}"
                     )
@@ -1020,18 +987,18 @@ async def resolve_workspace_parameter(
 
         if workspace:
             matches = [
-                item for item in workspaces if _workspace_matches_identifier(item, workspace)
+                item for item in workspaces if workspace_matches_identifier(item, workspace)
             ]
             if not matches:
                 raise ValueError(
                     f"Workspace '{workspace}' was not found.\n"
-                    f"Available workspaces:\n{_workspace_choices(workspaces)}"
+                    f"Available workspaces:\n{format_workspace_choices(workspaces)}"
                 )
             if len(matches) > 1:
                 raise ValueError(
                     f"Workspace '{workspace}' matches multiple workspaces. "
                     "Choose one of these matching workspaces by slug or tenant_id:\n"
-                    f"{_workspace_selection_choices(matches)}"
+                    f"{format_workspace_selection_choices(matches)}"
                 )
             selected_workspace = matches[0]
         elif len(workspaces) == 1:
@@ -1040,7 +1007,7 @@ async def resolve_workspace_parameter(
             raise ValueError(
                 "Multiple workspaces are available. Ask the user which workspace to use, then retry "
                 "with the 'workspace' argument set to the tenant_id or unique name/slug/type.\n"
-                f"Available workspaces:\n{_workspace_choices(workspaces)}"
+                f"Available workspaces:\n{format_workspace_choices(workspaces)}"
             )
 
         await _set_cached_active_workspace(context, selected_workspace)

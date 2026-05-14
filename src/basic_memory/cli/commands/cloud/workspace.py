@@ -6,11 +6,11 @@ from rich.table import Table
 
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.project_context import (
-    _workspace_choices,
-    _workspace_matches_identifier,
-    _workspace_selection_choices,
-    get_available_workspaces,
+from basic_memory.mcp.project_context import get_available_workspaces
+from basic_memory.schemas.cloud import (
+    format_workspace_choices,
+    format_workspace_selection_choices,
+    workspace_matches_identifier,
 )
 
 console = Console()
@@ -92,11 +92,11 @@ def set_default_workspace(
         console.print("[yellow]No accessible workspaces found.[/yellow]")
         raise typer.Exit(1)
 
-    matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, identifier)]
+    matches = [ws for ws in workspaces if workspace_matches_identifier(ws, identifier)]
 
     if not matches:
         console.print(f"[red]Error: Workspace '{identifier}' not found[/red]")
-        console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+        console.print(f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]")
         raise typer.Exit(1)
 
     if len(matches) > 1:
@@ -105,7 +105,7 @@ def set_default_workspace(
         )
         console.print(
             "[dim]Choose one of these matching workspaces by slug:\n"
-            f"{_workspace_selection_choices(matches)}[/dim]"
+            f"{format_workspace_selection_choices(matches)}[/dim]"
         )
         raise typer.Exit(1)
 

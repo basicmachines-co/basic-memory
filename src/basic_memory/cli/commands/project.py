@@ -34,6 +34,9 @@ from basic_memory.schemas.cloud import (
     CloudTenantIndexStatusResponse,
     ProjectVisibility,
     WorkspaceInfo,
+    format_workspace_choices,
+    format_workspace_selection_choices,
+    workspace_matches_identifier,
 )
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink, normalize_project_path
@@ -284,19 +287,16 @@ def _normalize_project_visibility(visibility: str | None) -> ProjectVisibility:
 def _resolve_workspace_id(config, workspace: str | None) -> str | None:
     """Resolve a workspace name, slug, type, or tenant_id to a tenant_id."""
     from basic_memory.mcp.project_context import (
-        _workspace_choices,
-        _workspace_matches_identifier,
-        _workspace_selection_choices,
         get_available_workspaces,
     )
 
     if workspace is not None:
         workspaces = run_with_cleanup(get_available_workspaces())
-        matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, workspace)]
+        matches = [ws for ws in workspaces if workspace_matches_identifier(ws, workspace)]
         if not matches:
             console.print(f"[red]Error: Workspace '{workspace}' not found[/red]")
             if workspaces:
-                console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+                console.print(f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]")
             raise typer.Exit(1)
         if len(matches) > 1:
             console.print(
@@ -304,7 +304,7 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
             )
             console.print(
                 "[dim]Choose one of these matching workspaces by slug:\n"
-                f"{_workspace_selection_choices(matches)}[/dim]"
+                f"{format_workspace_selection_choices(matches)}[/dim]"
             )
             raise typer.Exit(1)
         return matches[0].tenant_id
@@ -347,6 +347,8 @@ def list_projects(
 
     try:
         config = ConfigManager().config
+        workspace_filter = workspace
+        workspace_filter_requested = workspace_filter is not None
 
         local_result: ProjectList | None = None
         cloud_results: list[tuple[WorkspaceInfo | None, ProjectList]] = []
@@ -355,47 +357,55 @@ def list_projects(
         cloud_workspace_error: Exception | None = None
         failed_cloud_workspaces: list[tuple[WorkspaceInfo, Exception]] = []
 
-        def _fetch_cloud_workspace_results() -> list[tuple[WorkspaceInfo | None, ProjectList]]:
-            nonlocal available_cloud_workspaces, cloud_workspace_error
-
+        def _fetch_cloud_workspace_results() -> tuple[
+            list[tuple[WorkspaceInfo | None, ProjectList]],
+            list[WorkspaceInfo],
+            Exception | None,
+            list[tuple[WorkspaceInfo, Exception]],
+        ]:
             from basic_memory.mcp.project_context import (
-                _workspace_choices,
-                _workspace_matches_identifier,
-                _workspace_selection_choices,
                 get_available_workspaces,
             )
 
             try:
                 workspaces = run_with_cleanup(get_available_workspaces())
-                available_cloud_workspaces = workspaces
             except Exception as exc:
-                cloud_workspace_error = exc
-                fallback_workspace = workspace or config.default_workspace
-                return [(None, run_with_cleanup(_list_projects(fallback_workspace)))]
+                fallback_workspace = workspace_filter or config.default_workspace
+                return (
+                    [(None, run_with_cleanup(_list_projects(fallback_workspace)))],
+                    [],
+                    exc,
+                    [],
+                )
 
             selected_workspaces = workspaces
-            if workspace is not None:
-                matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, workspace)]
+            if workspace_filter is not None:
+                matches = [
+                    ws for ws in workspaces if workspace_matches_identifier(ws, workspace_filter)
+                ]
                 if not matches:
-                    console.print(f"[red]Error: Workspace '{workspace}' not found[/red]")
+                    console.print(f"[red]Error: Workspace '{workspace_filter}' not found[/red]")
                     if workspaces:
-                        console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+                        console.print(
+                            f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]"
+                        )
                     raise typer.Exit(1)
                 if len(matches) > 1:
                     console.print(
-                        f"[red]Error: Workspace '{workspace}' matches multiple workspaces.[/red]"
+                        f"[red]Error: Workspace '{workspace_filter}' matches multiple workspaces.[/red]"
                     )
                     console.print(
                         "[dim]Choose one of these matching workspaces by slug:\n"
-                        f"{_workspace_selection_choices(matches)}[/dim]"
+                        f"{format_workspace_selection_choices(matches)}[/dim]"
                     )
                     raise typer.Exit(1)
                 selected_workspaces = matches
 
             if not selected_workspaces:
-                return []
+                return [], workspaces, None, []
 
             results: list[tuple[WorkspaceInfo | None, ProjectList]] = []
+            failed_workspaces: list[tuple[WorkspaceInfo, Exception]] = []
             for cloud_workspace in selected_workspaces:
                 try:
                     results.append(
@@ -405,17 +415,22 @@ def list_projects(
                         )
                     )
                 except Exception as exc:
-                    failed_cloud_workspaces.append((cloud_workspace, exc))
+                    failed_workspaces.append((cloud_workspace, exc))
 
-            if not results and failed_cloud_workspaces:
-                raise failed_cloud_workspaces[0][1]
+            if not results and failed_workspaces:
+                raise failed_workspaces[0][1]
 
-            return results
+            return results, workspaces, None, failed_workspaces
 
         if cloud:
             with console.status("[bold blue]Fetching cloud projects...", spinner="dots"):
                 with force_routing(cloud=True):
-                    cloud_results = _fetch_cloud_workspace_results()
+                    (
+                        cloud_results,
+                        available_cloud_workspaces,
+                        cloud_workspace_error,
+                        failed_cloud_workspaces,
+                    ) = _fetch_cloud_workspace_results()
         elif local:
             with force_routing(local=True):
                 local_result = run_with_cleanup(_list_projects())
@@ -428,7 +443,12 @@ def list_projects(
                 try:
                     with console.status("[bold blue]Fetching cloud projects...", spinner="dots"):
                         with force_routing(cloud=True):
-                            cloud_results = _fetch_cloud_workspace_results()
+                            (
+                                cloud_results,
+                                available_cloud_workspaces,
+                                cloud_workspace_error,
+                                failed_cloud_workspaces,
+                            ) = _fetch_cloud_workspace_results()
                 except typer.Exit:
                     raise
                 except Exception as exc:  # pragma: no cover
@@ -491,7 +511,7 @@ def list_projects(
 
         def _select_attached_row_key(
             permalink: str, entry: ProjectEntry | None
-        ) -> tuple[str | None, str]:
+        ) -> tuple[str | None, str] | None:
             """Choose the single row that owns local config/default/sync state."""
             cloud_keys = cloud_keys_by_permalink.get(permalink, [])
             if not cloud_keys:
@@ -517,8 +537,10 @@ def list_projects(
                     if row_key[0] == workspace_id:
                         return row_key
 
-            if workspace is not None and preferred_workspace_ids:
-                return (preferred_workspace_ids[0], permalink)
+            if workspace_filter_requested and preferred_workspace_ids:
+                # A filtered list can exclude the workspace that owns local config state.
+                # In that case, do not attach local/default/sync state to another workspace row.
+                return None
 
             default_workspace_keys = [
                 row_key
@@ -534,7 +556,7 @@ def list_projects(
 
             return sorted(cloud_keys, key=_workspace_priority)[0]
 
-        attached_row_by_permalink: dict[str, tuple[str | None, str]] = {}
+        attached_row_by_permalink: dict[str, tuple[str | None, str] | None] = {}
         for permalink in set(local_projects_by_permalink) | set(configured_names_by_permalink):
             configured_name = configured_names_by_permalink.get(permalink)
             local_project = local_projects_by_permalink.get(permalink)
@@ -633,7 +655,7 @@ def list_projects(
             if display_name:
                 row_data["display_name"] = display_name
             if cloud_project is not None and cloud_ws_name:
-                row_data["workspace"] = cloud_ws_name or ""
+                row_data["workspace"] = cloud_ws_name
                 if cloud_ws_type:
                     row_data["workspace_type"] = cloud_ws_type
 
