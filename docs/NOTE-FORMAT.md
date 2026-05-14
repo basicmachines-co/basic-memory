@@ -106,7 +106,7 @@ The parser excludes these list item patterns:
 |---------|---------|--------|
 | Checkboxes | `- [ ] Todo item`, `- [x] Done`, `- [-] Cancelled` | Task list syntax |
 | Markdown links | `- [text](url)` | URL link syntax |
-| Bare wiki links | `- [[Target]]` | Treated as a relation instead |
+| Bare wiki links | `- [[Target]]` | Treated as a `links_to` relation instead |
 
 A list item with `#tags` but no `[category]` is still parsed — the tags are extracted and the category defaults to `Note`.
 
@@ -116,47 +116,65 @@ Relations connect documents to form the knowledge graph. There are two kinds.
 
 ### Explicit Relations
 
-Written as list items with a relation type and a `[[wiki link]]` target.
+Written as list items with a relation type and a `[[wiki link]]` target. Unquoted
+relation types are single tokens. Quote relation types that contain spaces.
 
 **Syntax:**
 
 ```
 - relation_type [[Target Entity]] (context)
+- "multi word relation type" [[Target Entity]] (context)
+- 'multi word relation type' [[Target Entity]] (context)
 ```
 
 | Part | Required | Description |
 |------|----------|-------------|
-| `relation_type` | No | Text before `[[`. Defaults to `relates_to` if omitted. |
+| `relation_type` | Yes | Single unquoted token before `[[`, or quoted text for multi-word labels. |
 | `[[Target]]` | Yes | Wiki link to the target entity. Matched by title or permalink. |
 | `(context)` | No | Parenthesized text after `]]`. Supporting details. |
 
 ### Examples
 
+Explicit relations:
+
 ```markdown
 - implements [[Search Design]]
 - depends_on [[Database Schema]]
 - works_at [[Y Combinator]] (co-founder)
-- [[Some Entity]]
+- "based on" [[Customer Interview]]
+- 'in response to' [[Incident Review]]
 ```
 
-The last example — a bare `[[wiki link]]` in a list item — gets relation type `relates_to`.
+Bare wiki links and prose list items create implicit `links_to` relations:
+
+```markdown
+- [[Some Entity]]
+- some other thing [[Some Entity]]
+```
+
+Both examples above create `links_to [[Some Entity]]`. Use quotes when the words before
+`[[` are meant to be a multi-word relation type.
 
 Common relation types:
 - `implements`, `depends_on`, `relates_to`, `inspired_by`
 - `extends`, `part_of`, `contains`, `pairs_with`
 - `works_at`, `authored`, `collaborated_with`
 
-Any text works as a relation type. These are conventions, not a fixed set.
+Any single-token text or quoted text works as a relation type. These are conventions,
+not a fixed set.
 
 ### Inline References
 
-Wiki links appearing in regular prose (not as list items) create implicit `links_to` relations.
+Wiki links appearing in regular prose create implicit `links_to` relations. This includes
+list items that do not match the explicit relation grammar above.
 
 ```markdown
 This builds on [[Core Design]] and uses [[Utility Functions]].
+- We should revisit [[Search Design]] after the API changes.
 ```
 
-This creates two relations: `links_to [[Core Design]]` and `links_to [[Utility Functions]]`.
+This creates three relations: `links_to [[Core Design]]`, `links_to [[Utility Functions]]`,
+and `links_to [[Search Design]]`.
 
 ### Forward References
 

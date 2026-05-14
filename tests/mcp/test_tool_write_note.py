@@ -7,6 +7,7 @@ import pytest
 
 from basic_memory import config as config_module
 from basic_memory.mcp.tools import write_note, read_note, delete_note
+from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.utils import normalize_newlines
 
 
@@ -309,7 +310,7 @@ async def test_write_note_with_tag_array_from_bug_report(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_verbose(app, test_project):
+async def test_write_note_verbose(app, test_project, engine_factory):
     """Test creating a new note.
 
     Should:
@@ -326,7 +327,7 @@ async def test_write_note_verbose(app, test_project):
 # Test\nThis is a test note
 
 - [note] First observation
-- relates to [[Knowledge]]
+- "relates to" [[Knowledge]]
 
 """,
         tags=["test", "documentation"],
@@ -342,6 +343,11 @@ async def test_write_note_verbose(app, test_project):
     assert "## Tags" in result
     assert "- test, documentation" in result
     assert f"[Session: Using project '{test_project.name}']" in result
+
+    _, session_maker = engine_factory
+    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
+    relations = await relation_repository.find_by_type("relates to")
+    assert any(relation.to_name == "Knowledge" for relation in relations)
 
 
 @pytest.mark.asyncio

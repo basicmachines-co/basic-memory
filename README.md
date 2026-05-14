@@ -285,7 +285,12 @@ Markdown format:
 
 ```markdown
 - relation_type [[WikiLink]] (optional context)
+- "multi word relation type" [[WikiLink]] (optional context)
+- 'multi word relation type' [[WikiLink]] (optional context)
 ```
+
+Unquoted relation types are single tokens. Use quotes when the relation type contains
+spaces. Bare wikilinks and prose with wikilinks are stored as `links_to` relations.
 
 Examples of relations:
 
@@ -295,6 +300,8 @@ Examples of relations:
 - contrasts_with [[Tea Brewing Methods]]
 - requires [[Burr Grinder]]
 - improves_with [[Fresh Beans]]
+- "pairs well with" [[Chocolate Desserts]]
+- 'documented in' [[Coffee Journal]]
 - relates_to [[Morning Routine]]
 - inspired_by [[Japanese Coffee Culture]]
 - documented_in [[Coffee Journal]]

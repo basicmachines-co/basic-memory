@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+- Relation parsing no longer treats unquoted multi-word text before a wikilink as a
+  custom relation type. Use single-token relation types like `relates_to [[Target]]`,
+  or quote multi-word relation types like `"relates to" [[Target]]` or
+  `'relates to' [[Target]]`.
+  - Bare list wikilinks like `- [[Target]]` now index as `links_to`.
+  - Prose list items like `- some other thing [[Target]]` now index as `links_to`.
+  - To preserve existing multi-word relation types on re-sync, quote them before upgrading.
+
 ## v0.20.3 (2026-03-26)
 
 ### Bug Fixes

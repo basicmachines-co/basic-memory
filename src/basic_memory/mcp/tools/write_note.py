@@ -66,10 +66,14 @@ async def write_note(
 
     Relations format:
         - Explicit: `- relation_type [[Entity]] (optional context)`
-        - Inline: Any `[[Entity]]` reference creates a relation
+        - Quoted: `- "multi word relation type" [[Entity]] (optional context)`
+        - Quoted: `- 'multi word relation type' [[Entity]] (optional context)`
+        - Inline: Any other `[[Entity]]` reference creates a `links_to` relation
 
         Examples:
         `- depends_on [[Content Parser]] (Need for semantic extraction)`
+        `- "based on" [[Design Notes]]`
+        `- 'in response to' [[Incident Review]]`
         `- implements [[Search Spec]] (Initial implementation)`
         `- This feature extends [[Base Design]] and uses [[Core Utils]]`
 
