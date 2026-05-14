@@ -35,11 +35,10 @@ async def write_note(
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: Annotated[dict | None, BeforeValidator(coerce_dict)] = None,
-    # Force/replace are the file-write idioms models default to.
-    overwrite: Annotated[
-        bool | None,
-        Field(default=None, validation_alias=AliasChoices("overwrite", "force", "replace")),
-    ] = None,
+    # Simple bool so FastMCP generates a correct boolean schema for external clients.
+    # AliasChoices caused external clients (e.g. Claude Code) to receive a broken schema
+    # where overwrite appeared as type null-only, silently dropping the value (issue #818).
+    overwrite: bool | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:

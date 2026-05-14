@@ -310,31 +310,37 @@ async def test_write_note_accepts_directory_aliases(mcp_server, app, test_projec
 
 
 @pytest.mark.asyncio
-async def test_write_note_accepts_overwrite_aliases(mcp_server, app, test_project):
-    """`force`/`replace` should map to `overwrite`."""
+async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_project):
+    """Canonical overwrite=True must reach the function body when sent via MCP protocol.
+
+    Regression test for issue #818: PR #766 introduced AliasChoices on the overwrite
+    parameter which caused external MCP clients (e.g. Claude Code) to receive a broken
+    JSON schema where overwrite appeared as type null-only. The boolean value was silently
+    dropped, so the note could never be replaced even with overwrite=True.
+    """
     async with Client(mcp_server) as client:
         # First create
         await client.call_tool(
             "write_note",
             {
                 "project": test_project.name,
-                "title": "Overwrite Alias Note",
+                "title": "Overwrite Canonical Note",
                 "directory": "overwrite-test",
                 "content": "v1",
             },
         )
-        # Overwrite using `force` alias
+        # Overwrite using the canonical overwrite parameter
         result = await client.call_tool(
             "write_note",
             {
                 "project": test_project.name,
-                "title": "Overwrite Alias Note",
+                "title": "Overwrite Canonical Note",
                 "directory": "overwrite-test",
                 "content": "v2",
-                "force": True,  # alias for overwrite
+                "overwrite": True,
             },
         )
-        assert "Updated note" in result.content[0].text or "Created note" in result.content[0].text
+        assert "Updated note" in result.content[0].text
 
 
 # --- move_note aliases ---
