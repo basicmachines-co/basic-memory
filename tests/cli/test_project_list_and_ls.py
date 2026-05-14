@@ -340,6 +340,154 @@ def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalin
     assert "Team (organization)" in table_result.stdout
 
 
+def test_project_list_workspace_type_filter_selects_unique_workspace(
+    runner: CliRunner, write_config, monkeypatch
+):
+    """--workspace can use a workspace type when it resolves to one workspace."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": None,
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    personal = _workspace(
+        tenant_id="tenant-personal",
+        slug="personal",
+        name="Personal",
+        workspace_type="personal",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="tenant-team",
+        slug="team",
+        name="Team",
+        workspace_type="organization",
+    )
+
+    async def fake_get_available_workspaces():
+        return [personal, team]
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    payloads_by_workspace = {
+        None: {"projects": [], "default_project": None},
+        "tenant-team": {
+            "projects": [
+                {
+                    "id": 1,
+                    "external_id": "11111111-1111-1111-1111-111111111111",
+                    "name": "team-project",
+                    "path": "/team-project",
+                    "is_default": True,
+                }
+            ],
+            "default_project": "team-project",
+        },
+    }
+    seen_workspaces: list[str | None] = []
+
+    async def fake_list_projects(self):
+        workspace = self.http_client.workspace
+        seen_workspaces.append(workspace)
+        return ProjectList.model_validate(payloads_by_workspace[workspace])
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(
+        app,
+        ["project", "list", "--workspace", "organization", "--json"],
+        env={"COLUMNS": "240"},
+    )
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    assert seen_workspaces == [None, "tenant-team"]
+    data = json.loads(result.stdout)
+    assert [project["name"] for project in data["projects"]] == ["team-project"]
+    assert data["projects"][0]["workspace"] == "Team"
+
+
+def test_project_list_invalid_workspace_exits_without_local_fallback(
+    runner: CliRunner, write_config, tmp_path, monkeypatch
+):
+    """Invalid explicit workspace filters should stop instead of showing local-only rows."""
+    local_path = (tmp_path / "main").as_posix()
+    write_config(
+        {
+            "env": "dev",
+            "projects": {"main": {"path": local_path, "mode": "local"}},
+            "default_project": "main",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    personal = _workspace(
+        tenant_id="tenant-personal",
+        slug="personal",
+        name="Personal",
+        workspace_type="personal",
+        is_default=True,
+    )
+
+    async def fake_get_available_workspaces():
+        return [personal]
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    async def fake_list_projects(self):
+        return ProjectList.model_validate(
+            {
+                "projects": [
+                    {
+                        "id": 1,
+                        "external_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "main",
+                        "path": local_path,
+                        "is_default": True,
+                    }
+                ],
+                "default_project": "main",
+            }
+        )
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(
+        app,
+        ["project", "list", "--workspace", "missing"],
+        env={"COLUMNS": "240"},
+    )
+
+    assert result.exit_code == 1
+    assert "Workspace 'missing' not found" in result.stdout
+    assert "Basic Memory Projects" not in result.stdout
+    assert "Cloud project discovery failed" not in result.stdout
+
+
 def test_project_list_attaches_local_state_to_one_duplicate_cloud_project(
     runner: CliRunner, write_config, tmp_path, monkeypatch
 ):
@@ -457,6 +605,25 @@ def test_project_list_attaches_local_state_to_one_duplicate_cloud_project(
     assert team_row["mcp_stdio"] == "https"
     assert team_row["sync"] is False
     assert team_row["is_default"] is False
+
+    filtered_result = runner.invoke(
+        app,
+        ["project", "list", "--workspace", "organization", "--json"],
+        env={"COLUMNS": "240"},
+    )
+
+    assert filtered_result.exit_code == 0, (
+        f"Exit code: {filtered_result.exit_code}, output: {filtered_result.stdout}"
+    )
+    filtered_data = json.loads(filtered_result.stdout)
+    assert len(filtered_data["projects"]) == 1
+    filtered_team_row = filtered_data["projects"][0]
+    assert filtered_team_row["workspace"] == "Team"
+    assert filtered_team_row["local_path"] == ""
+    assert filtered_team_row["cli_route"] == "cloud"
+    assert filtered_team_row["mcp_stdio"] == "https"
+    assert filtered_team_row["sync"] is False
+    assert filtered_team_row["is_default"] is False
 
 
 def test_project_list_hides_bisync_flag_for_attached_team_workspace(

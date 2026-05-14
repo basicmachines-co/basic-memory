@@ -62,7 +62,10 @@ def list_workspaces() -> None:
 
 @workspace_app.command("set-default")
 def set_default_workspace(
-    identifier: str = typer.Argument(..., help="Workspace name or tenant_id to set as default"),
+    identifier: str = typer.Argument(
+        ...,
+        help="Workspace name, slug, type, or tenant_id to set as default",
+    ),
 ) -> None:
     """Set the default cloud workspace.
 
@@ -71,6 +74,7 @@ def set_default_workspace(
 
     Examples:
       bm cloud workspace set-default Personal
+      bm cloud workspace set-default organization
       bm cloud workspace set-default 11111111-1111-1111-1111-111111111111
     """
 
@@ -96,7 +100,7 @@ def set_default_workspace(
 
     if len(matches) > 1:
         console.print(
-            f"[red]Error: Workspace name '{identifier}' matches multiple workspaces. "
+            f"[red]Error: Workspace '{identifier}' matches multiple workspaces. "
             f"Use tenant_id instead.[/red]"
         )
         console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")

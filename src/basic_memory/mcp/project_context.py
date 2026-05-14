@@ -300,10 +300,12 @@ async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = N
 
 
 def _workspace_matches_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
-    """Return True when identifier matches workspace tenant_id, slug, or name."""
+    """Return True when identifier matches workspace tenant_id, slug, name, or type."""
     if workspace.tenant_id == identifier:
         return True
     if workspace.slug.casefold() == identifier.casefold():
+        return True
+    if workspace.workspace_type.casefold() == identifier.casefold():
         return True
     return workspace.name.lower() == identifier.lower()
 
@@ -1013,7 +1015,7 @@ async def resolve_workspace_parameter(
                 )
             if len(matches) > 1:
                 raise ValueError(
-                    f"Workspace name '{workspace}' matches multiple workspaces. "
+                    f"Workspace '{workspace}' matches multiple workspaces. "
                     "Use tenant_id instead.\n"
                     f"Available workspaces:\n{_workspace_choices(workspaces)}"
                 )
@@ -1023,7 +1025,7 @@ async def resolve_workspace_parameter(
         else:
             raise ValueError(
                 "Multiple workspaces are available. Ask the user which workspace to use, then retry "
-                "with the 'workspace' argument set to the tenant_id or unique name.\n"
+                "with the 'workspace' argument set to the tenant_id or unique name/slug/type.\n"
                 f"Available workspaces:\n{_workspace_choices(workspaces)}"
             )
 

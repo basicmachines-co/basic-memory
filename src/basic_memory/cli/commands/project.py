@@ -282,7 +282,7 @@ def _normalize_project_visibility(visibility: str | None) -> ProjectVisibility:
 
 
 def _resolve_workspace_id(config, workspace: str | None) -> str | None:
-    """Resolve a workspace name or tenant_id to a tenant_id."""
+    """Resolve a workspace name, slug, type, or tenant_id to a tenant_id."""
     from basic_memory.mcp.project_context import (
         _workspace_choices,
         _workspace_matches_identifier,
@@ -299,7 +299,7 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
             raise typer.Exit(1)
         if len(matches) > 1:
             console.print(
-                f"[red]Error: Workspace name '{workspace}' matches multiple workspaces. "
+                f"[red]Error: Workspace '{workspace}' matches multiple workspaces. "
                 f"Use tenant_id instead.[/red]"
             )
             console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
@@ -324,7 +324,11 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
 def list_projects(
     local: bool = typer.Option(False, "--local", help="Force local routing for this command"),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-    workspace: str = typer.Option(None, "--workspace", help="Cloud workspace name or tenant_id"),
+    workspace: str = typer.Option(
+        None,
+        "--workspace",
+        help="Cloud workspace name, slug, type, or tenant_id",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
 ) -> None:
     """List Basic Memory projects from local and (when available) cloud."""
@@ -343,12 +347,13 @@ def list_projects(
 
         local_result: ProjectList | None = None
         cloud_results: list[tuple[WorkspaceInfo | None, ProjectList]] = []
+        available_cloud_workspaces: list[WorkspaceInfo] = []
         cloud_error: Exception | None = None
         cloud_workspace_error: Exception | None = None
         failed_cloud_workspaces: list[tuple[WorkspaceInfo, Exception]] = []
 
         def _fetch_cloud_workspace_results() -> list[tuple[WorkspaceInfo | None, ProjectList]]:
-            nonlocal cloud_workspace_error
+            nonlocal available_cloud_workspaces, cloud_workspace_error
 
             from basic_memory.mcp.project_context import (
                 _workspace_choices,
@@ -358,6 +363,7 @@ def list_projects(
 
             try:
                 workspaces = run_with_cleanup(get_available_workspaces())
+                available_cloud_workspaces = workspaces
             except Exception as exc:
                 cloud_workspace_error = exc
                 fallback_workspace = workspace or config.default_workspace
@@ -373,7 +379,7 @@ def list_projects(
                     raise typer.Exit(1)
                 if len(matches) > 1:
                     console.print(
-                        f"[red]Error: Workspace name '{workspace}' matches multiple workspaces. "
+                        f"[red]Error: Workspace '{workspace}' matches multiple workspaces. "
                         f"Use tenant_id instead.[/red]"
                     )
                     console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
@@ -417,6 +423,8 @@ def list_projects(
                     with console.status("[bold blue]Fetching cloud projects...", spinner="dots"):
                         with force_routing(cloud=True):
                             cloud_results = _fetch_cloud_workspace_results()
+                except typer.Exit:
+                    raise
                 except Exception as exc:  # pragma: no cover
                     cloud_error = exc
 
@@ -488,17 +496,29 @@ def list_projects(
                 preferred_workspace_ids.append(entry.workspace_id)
             if config.default_workspace and config.default_workspace not in preferred_workspace_ids:
                 preferred_workspace_ids.append(config.default_workspace)
+            default_cloud_workspace = next(
+                (item for item in available_cloud_workspaces if item.is_default),
+                None,
+            )
+            if (
+                default_cloud_workspace
+                and default_cloud_workspace.tenant_id not in preferred_workspace_ids
+            ):
+                preferred_workspace_ids.append(default_cloud_workspace.tenant_id)
 
             for workspace_id in preferred_workspace_ids:
                 for row_key in cloud_keys:
                     if row_key[0] == workspace_id:
                         return row_key
 
+            if workspace is not None and preferred_workspace_ids:
+                return (preferred_workspace_ids[0], permalink)
+
             default_workspace_keys = [
                 row_key
                 for row_key in cloud_keys
-                if (workspace := cloud_workspaces_by_key.get(row_key)) is not None
-                and workspace.is_default
+                if (row_workspace := cloud_workspaces_by_key.get(row_key)) is not None
+                and row_workspace.is_default
             ]
             if len(default_workspace_keys) == 1:
                 return default_workspace_keys[0]
@@ -670,7 +690,7 @@ def add_project(
     workspace: str = typer.Option(
         None,
         "--workspace",
-        help="Cloud workspace name or tenant_id (cloud mode only)",
+        help="Cloud workspace name, slug, type, or tenant_id (cloud mode only)",
     ),
     visibility: str = typer.Option(
         None,
@@ -1053,7 +1073,7 @@ def set_cloud(
     workspace: str = typer.Option(
         None,
         "--workspace",
-        help="Cloud workspace name or tenant_id to associate with this project",
+        help="Cloud workspace name, slug, type, or tenant_id to associate with this project",
     ),
 ) -> None:
     """Set a project to cloud mode (route through cloud API).
