@@ -30,6 +30,7 @@ from basic_memory.schemas.cloud import (
     WorkspaceListResponse,
     format_workspace_choices,
     format_workspace_selection_choices,
+    workspace_matches_exact_identifier,
     workspace_matches_identifier,
 )
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
@@ -970,7 +971,9 @@ async def resolve_workspace_parameter(
             cached_raw = await context.get_state("active_workspace")
             if isinstance(cached_raw, dict):
                 cached_workspace = WorkspaceInfo.model_validate(cached_raw)
-                if workspace is None or workspace_matches_identifier(cached_workspace, workspace):
+                if workspace is None or workspace_matches_exact_identifier(
+                    cached_workspace, workspace
+                ):
                     logger.debug(
                         f"Using cached workspace from context: {cached_workspace.tenant_id}"
                     )

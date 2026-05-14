@@ -388,6 +388,59 @@ async def test_workspace_ambiguous_type_selection_lists_matching_choices(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_workspace_type_selection_ignores_cached_workspace_for_ambiguity(monkeypatch):
+    from basic_memory.mcp.project_context import resolve_workspace_parameter
+
+    cached_workspace = _workspace(
+        tenant_id="22222222-2222-2222-2222-222222222222",
+        workspace_type="organization",
+        slug="team-alpha",
+        name="Team Alpha",
+        role="editor",
+    )
+    workspaces = [
+        _workspace(
+            tenant_id="11111111-1111-1111-1111-111111111111",
+            workspace_type="personal",
+            slug="personal",
+            name="Personal",
+            role="owner",
+            is_default=True,
+        ),
+        cached_workspace,
+        _workspace(
+            tenant_id="33333333-3333-3333-3333-333333333333",
+            workspace_type="organization",
+            slug="team-beta",
+            name="Team Beta",
+            role="owner",
+        ),
+    ]
+    context = _ContextState()
+    await context.set_state("active_workspace", cached_workspace.model_dump())
+    fetches = 0
+
+    async def fake_get_available_workspaces(context=None):
+        nonlocal fetches
+        fetches += 1
+        return workspaces
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        await resolve_workspace_parameter(workspace="organization", context=_ctx(context))
+
+    message = str(exc_info.value)
+    assert fetches == 1
+    assert "Workspace 'organization' matches multiple workspaces" in message
+    assert "workspace: team-alpha" in message
+    assert "workspace: team-beta" in message
+
+
+@pytest.mark.asyncio
 async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
     from basic_memory.mcp.project_context import resolve_workspace_parameter
 

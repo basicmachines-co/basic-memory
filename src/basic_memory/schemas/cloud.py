@@ -88,15 +88,21 @@ class WorkspaceListResponse(BaseModel):
     )
 
 
-def workspace_matches_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
-    """Return True when identifier matches workspace tenant_id, slug, name, or type."""
+def workspace_matches_exact_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
+    """Return True when identifier matches workspace tenant_id, slug, or name."""
     if workspace.tenant_id == identifier:
         return True
     if workspace.slug.casefold() == identifier.casefold():
         return True
-    if workspace.workspace_type.casefold() == identifier.casefold():
-        return True
     return workspace.name.casefold() == identifier.casefold()
+
+
+def workspace_matches_identifier(workspace: WorkspaceInfo, identifier: str) -> bool:
+    """Return True when identifier matches workspace tenant_id, slug, name, or type."""
+    return (
+        workspace_matches_exact_identifier(workspace, identifier)
+        or workspace.workspace_type.casefold() == identifier.casefold()
+    )
 
 
 def format_workspace_choices(workspaces: list[WorkspaceInfo]) -> str:

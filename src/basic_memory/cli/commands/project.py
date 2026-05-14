@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 import typer
+from loguru import logger
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
@@ -316,9 +317,9 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
         workspaces = run_with_cleanup(get_available_workspaces())
         if len(workspaces) == 1:
             return workspaces[0].tenant_id
-    except Exception:
+    except Exception as exc:
         # Workspace resolution is optional until a command needs a specific tenant.
-        pass
+        logger.debug("Workspace resolution failed: {}", exc)
 
     return None
 
