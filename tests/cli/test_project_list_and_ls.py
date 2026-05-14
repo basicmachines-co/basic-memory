@@ -340,6 +340,214 @@ def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalin
     assert "Team (organization)" in table_result.stdout
 
 
+def test_project_list_attaches_local_state_to_one_duplicate_cloud_project(
+    runner: CliRunner, write_config, tmp_path, monkeypatch
+):
+    """Local path/default/sync state should not appear on every matching workspace."""
+    local_path = (tmp_path / "main").as_posix()
+    write_config(
+        {
+            "env": "dev",
+            "projects": {
+                "main": {
+                    "path": local_path,
+                    "mode": "local",
+                    "local_sync_path": local_path,
+                }
+            },
+            "default_project": "main",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    personal = _workspace(
+        tenant_id="tenant-personal",
+        slug="personal",
+        name="Personal",
+        workspace_type="personal",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="tenant-team",
+        slug="team",
+        name="Team",
+        workspace_type="organization",
+    )
+
+    async def fake_get_available_workspaces():
+        return [personal, team]
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    payloads_by_workspace = {
+        None: {
+            "projects": [
+                {
+                    "id": 1,
+                    "external_id": "11111111-1111-1111-1111-111111111111",
+                    "name": "main",
+                    "path": local_path,
+                    "is_default": True,
+                }
+            ],
+            "default_project": "main",
+        },
+        "tenant-personal": {
+            "projects": [
+                {
+                    "id": 2,
+                    "external_id": "22222222-2222-2222-2222-222222222222",
+                    "name": "main",
+                    "path": "/basic-memory",
+                    "is_default": True,
+                }
+            ],
+            "default_project": "main",
+        },
+        "tenant-team": {
+            "projects": [
+                {
+                    "id": 3,
+                    "external_id": "33333333-3333-3333-3333-333333333333",
+                    "name": "main",
+                    "path": "/basic-memory",
+                    "is_default": True,
+                }
+            ],
+            "default_project": "main",
+        },
+    }
+
+    async def fake_list_projects(self):
+        return ProjectList.model_validate(
+            payloads_by_workspace[self.http_client.workspace]
+        )
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list", "--json"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    data = json.loads(result.stdout)
+    main_rows = [project for project in data["projects"] if project["name"] == "main"]
+    assert len(main_rows) == 2
+
+    personal_row = next(project for project in main_rows if project["workspace"] == "Personal")
+    team_row = next(project for project in main_rows if project["workspace"] == "Team")
+
+    assert personal_row["local_path"] == project_cmd.format_path(local_path)
+    assert personal_row["cli_route"] == "local"
+    assert personal_row["mcp_stdio"] == "stdio"
+    assert personal_row["sync"] is True
+    assert personal_row["is_default"] is True
+
+    assert team_row["local_path"] == ""
+    assert team_row["cli_route"] == "cloud"
+    assert team_row["mcp_stdio"] == "https"
+    assert team_row["sync"] is False
+    assert team_row["is_default"] is False
+
+
+def test_project_list_hides_bisync_flag_for_attached_team_workspace(
+    runner: CliRunner, write_config, tmp_path, monkeypatch
+):
+    """Bisync is only supported for personal workspaces."""
+    local_path = (tmp_path / "team-main").as_posix()
+    write_config(
+        {
+            "env": "dev",
+            "projects": {
+                "main": {
+                    "path": local_path,
+                    "mode": "cloud",
+                    "workspace_id": "tenant-team",
+                    "local_sync_path": local_path,
+                }
+            },
+            "default_project": "main",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    personal = _workspace(
+        tenant_id="tenant-personal",
+        slug="personal",
+        name="Personal",
+        workspace_type="personal",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="tenant-team",
+        slug="team",
+        name="Team",
+        workspace_type="organization",
+    )
+
+    async def fake_get_available_workspaces():
+        return [personal, team]
+
+    class FakeClient:
+        def __init__(self, workspace: str | None):
+            self.workspace = workspace
+
+    @asynccontextmanager
+    async def fake_get_client(workspace=None):
+        yield FakeClient(workspace)
+
+    project_payload = {
+        "projects": [
+            {
+                "id": 1,
+                "external_id": "11111111-1111-1111-1111-111111111111",
+                "name": "main",
+                "path": "/basic-memory",
+                "is_default": True,
+            }
+        ],
+        "default_project": "main",
+    }
+    payloads_by_workspace = {
+        None: {"projects": [], "default_project": None},
+        "tenant-personal": project_payload,
+        "tenant-team": project_payload,
+    }
+
+    async def fake_list_projects(self):
+        return ProjectList.model_validate(
+            payloads_by_workspace[self.http_client.workspace]
+        )
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list", "--json"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    data = json.loads(result.stdout)
+    main_rows = [project for project in data["projects"] if project["name"] == "main"]
+    team_row = next(project for project in main_rows if project["workspace"] == "Team")
+
+    assert team_row["cli_route"] == "cloud"
+    assert team_row["mcp_stdio"] == "https"
+    assert team_row["sync"] is False
+    assert team_row["is_default"] is True
+
+
 def test_project_ls_local_mode_defaults_to_local_route(
     runner: CliRunner, write_config, mock_client, tmp_path, monkeypatch
 ):

@@ -454,6 +454,68 @@ def list_projects(
             if permalink not in cloud_permalinks:
                 row_names_by_key[(None, permalink)] = project.name
 
+        cloud_keys_by_permalink: dict[str, list[tuple[str | None, str]]] = {}
+        for row_key in cloud_projects_by_key:
+            cloud_keys_by_permalink.setdefault(row_key[1], []).append(row_key)
+
+        configured_names_by_permalink = {
+            generate_permalink(project_name): project_name for project_name in config.projects
+        }
+
+        def _workspace_priority(row_key: tuple[str | None, str]) -> tuple[bool, int, str, str]:
+            """Prefer the user's default/personal workspace when a project is duplicated."""
+            workspace = cloud_workspaces_by_key.get(row_key)
+            if workspace is None:
+                return (True, 2, "", row_key[0] or "")
+            workspace_type_rank = 0 if workspace.workspace_type == "personal" else 1
+            return (
+                not workspace.is_default,
+                workspace_type_rank,
+                workspace.name.casefold(),
+                row_key[0] or "",
+            )
+
+        def _select_attached_row_key(
+            permalink: str, entry: ProjectEntry | None
+        ) -> tuple[str | None, str]:
+            """Choose the single row that owns local config/default/sync state."""
+            cloud_keys = cloud_keys_by_permalink.get(permalink, [])
+            if not cloud_keys:
+                return (None, permalink)
+
+            preferred_workspace_ids: list[str] = []
+            if entry and entry.workspace_id:
+                preferred_workspace_ids.append(entry.workspace_id)
+            if config.default_workspace and config.default_workspace not in preferred_workspace_ids:
+                preferred_workspace_ids.append(config.default_workspace)
+
+            for workspace_id in preferred_workspace_ids:
+                for row_key in cloud_keys:
+                    if row_key[0] == workspace_id:
+                        return row_key
+
+            default_workspace_keys = [
+                row_key
+                for row_key in cloud_keys
+                if (workspace := cloud_workspaces_by_key.get(row_key)) is not None
+                and workspace.is_default
+            ]
+            if len(default_workspace_keys) == 1:
+                return default_workspace_keys[0]
+
+            if len(cloud_keys) == 1:
+                return cloud_keys[0]
+
+            return sorted(cloud_keys, key=_workspace_priority)[0]
+
+        attached_row_by_permalink: dict[str, tuple[str | None, str]] = {}
+        for permalink in set(local_projects_by_permalink) | set(configured_names_by_permalink):
+            configured_name = configured_names_by_permalink.get(permalink)
+            local_project = local_projects_by_permalink.get(permalink)
+            entry_name = configured_name or (local_project.name if local_project else None)
+            entry = config.projects.get(entry_name) if entry_name else None
+            attached_row_by_permalink[permalink] = _select_attached_row_key(permalink, entry)
+
         # --- Build unified project list ---
         project_rows: list[dict] = []
         sorted_row_keys = sorted(
@@ -463,10 +525,19 @@ def list_projects(
         for row_key in sorted_row_keys:
             _, permalink = row_key
             project_name = row_names_by_key[row_key]
-            local_project = local_projects_by_permalink.get(permalink)
+            is_attached_row = attached_row_by_permalink.get(permalink) == row_key
+            local_project = (
+                local_projects_by_permalink.get(permalink) if is_attached_row else None
+            )
             cloud_project = cloud_projects_by_key.get(row_key)
             cloud_workspace = cloud_workspaces_by_key.get(row_key)
-            entry = config.projects.get(project_name)
+            configured_name = configured_names_by_permalink.get(permalink)
+            configured_entry = (
+                config.projects.get(configured_name)
+                if configured_name
+                else config.projects.get(project_name)
+            )
+            entry = configured_entry if is_attached_row else None
 
             local_path = ""
             if local_project is not None:
@@ -496,9 +567,15 @@ def list_projects(
             else:
                 cli_route = ProjectMode.LOCAL.value
 
-            is_default = config.default_project == project_name
+            default_permalink = (
+                generate_permalink(config.default_project) if config.default_project else None
+            )
+            is_default = bool(is_attached_row and permalink == default_permalink)
 
-            has_sync = bool(entry and entry.local_sync_path)
+            sync_supported = (
+                cloud_workspace is None or cloud_workspace.workspace_type == "personal"
+            )
+            has_sync = bool(is_attached_row and entry and entry.local_sync_path and sync_supported)
             # Determine MCP transport based on project routing mode
             if entry and entry.mode == ProjectMode.CLOUD:
                 mcp_transport = "https"
