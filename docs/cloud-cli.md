@@ -94,12 +94,17 @@ bm cloud setup
 ```
 
 **What this does:**
-1. Installs rclone automatically (if needed)
+1. Installs rclone with a supported package manager (if needed)
 2. Fetches your tenant information from cloud
 3. Generates scoped S3 credentials for sync
 4. Configures single rclone remote: `basic-memory-cloud`
 
 **Result:** You're ready to sync projects. No sync directories created yet - those come with project setup.
+
+Rclone setup uses package managers such as Homebrew, MacPorts, apt, dnf, yum, pacman,
+zypper, snap, winget, Chocolatey, or Scoop when available. It does not run remote
+install scripts with `sudo`; if no supported package manager is found, the CLI prints
+manual install instructions.
 
 ### 3. Add Projects with Sync
 
@@ -485,6 +490,9 @@ bm cloud create-key "my-laptop"    # Creates key and saves it locally
 ```
 
 The API key is account-level — it grants access to all your cloud projects. It's stored in `~/.basic-memory/config.json` as `cloud_api_key`.
+On POSIX systems, Basic Memory writes `~/.basic-memory/` as user-private (`0700`) and
+`config.json` as user-read/write only (`0600`). Treat this config file as a credential
+file when an API key is saved.
 
 ### Setting Project Modes
 
@@ -624,6 +632,33 @@ bm project bisync --name research
 
 ## Troubleshooting
 
+### Rclone Setup Cannot Install Automatically
+
+**Problem:** `bm cloud setup` cannot find a supported package manager, or package-manager
+installation fails.
+
+**Explanation:** The CLI avoids remote privileged install scripts. It only invokes known
+package managers and otherwise asks you to install rclone manually.
+
+**Solution:** Install rclone with your OS package manager, then rerun setup:
+
+```bash
+# macOS
+brew install rclone
+
+# Debian/Ubuntu
+sudo apt install rclone
+
+# Fedora
+sudo dnf install rclone
+
+# Arch
+sudo pacman -S rclone
+
+# After rclone is on PATH
+bm cloud setup
+```
+
 ### Authentication Issues
 
 **Problem:** "Authentication failed" or "Invalid token"
@@ -759,8 +794,10 @@ If instance is down, wait a few minutes and retry.
 
 - **Authentication**: OAuth 2.1 with PKCE flow
 - **Tokens**: Stored securely in `~/.basic-memory/basic-memory-cloud.json`
+- **API keys**: Stored in `~/.basic-memory/config.json`, which is written with private file permissions on POSIX systems
 - **Transport**: All data encrypted in transit (HTTPS)
 - **Credentials**: Scoped S3 credentials (read-write to your tenant only)
+- **Rclone setup**: Uses package managers or manual instructions; no remote privileged install-script fallback
 - **Isolation**: Your data isolated from other tenants
 - **Ignore patterns**: Sensitive files automatically excluded via `.bmignore`
 
@@ -785,7 +822,7 @@ bm cloud create-key <name>  # Create API key via cloud API (requires OAuth login
 ### Setup
 
 ```bash
-bm cloud setup              # Install rclone and configure credentials
+bm cloud setup              # Install rclone via package manager and configure credentials
 ```
 
 ### Project Management

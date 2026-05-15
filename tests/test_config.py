@@ -1,5 +1,7 @@
 """Test configuration management."""
 
+import os
+import stat
 import tempfile
 import pytest
 from datetime import datetime
@@ -448,6 +450,23 @@ class TestConfigManager:
 
         with pytest.raises(ValueError, match="Project 'nonexistent' not found"):
             config_manager.set_default_project("nonexistent")
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits are not portable to Windows")
+    def test_save_config_uses_private_permissions(self, temp_config_manager):
+        """Config can contain cloud credentials, so writes should enforce private modes."""
+        config_manager = temp_config_manager
+        config = config_manager.load_config()
+        config.cloud_api_key = "bmc_test123"
+
+        config_manager.config_dir.chmod(0o777)
+        config_manager.config_file.chmod(0o666)
+        config_manager.save_config(config)
+
+        dir_mode = stat.S_IMODE(config_manager.config_dir.stat().st_mode)
+        file_mode = stat.S_IMODE(config_manager.config_file.stat().st_mode)
+
+        assert dir_mode == 0o700
+        assert file_mode == 0o600
 
     def test_disable_permalinks_flag_default(self):
         """Test that disable_permalinks flag defaults to False."""

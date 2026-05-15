@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, Form, HTTPException, UploadFile, status, Path
 
 from basic_memory.deps import (
+    AppConfigDep,
     ChatGPTImporterV2ExternalDep,
     ClaudeConversationsImporterV2ExternalDep,
     ClaudeProjectsImporterV2ExternalDep,
@@ -27,9 +28,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/import", tags=["import-v2"])
 
 
+async def read_import_upload(file: UploadFile, max_bytes: int) -> bytes:
+    """Read an import upload with a hard cap before JSON parsing."""
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"Import file exceeds maximum size of {max_bytes} bytes.",
+        )
+    return content
+
+
 @router.post("/chatgpt", response_model=ChatImportResult)
 async def import_chatgpt(
     importer: ChatGPTImporterV2ExternalDep,
+    config: AppConfigDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
     directory: str = Form("conversations"),
@@ -49,12 +62,13 @@ async def import_chatgpt(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing ChatGPT conversations for project {project_id}")
-    return await import_file(importer, file, directory)
+    return await import_file(importer, file, directory, config.import_upload_max_bytes)
 
 
 @router.post("/claude/conversations", response_model=ChatImportResult)
 async def import_claude_conversations(
     importer: ClaudeConversationsImporterV2ExternalDep,
+    config: AppConfigDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
     directory: str = Form("conversations"),
@@ -74,12 +88,13 @@ async def import_claude_conversations(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing Claude conversations for project {project_id}")
-    return await import_file(importer, file, directory)
+    return await import_file(importer, file, directory, config.import_upload_max_bytes)
 
 
 @router.post("/claude/projects", response_model=ProjectImportResult)
 async def import_claude_projects(
     importer: ClaudeProjectsImporterV2ExternalDep,
+    config: AppConfigDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
     directory: str = Form("projects"),
@@ -99,12 +114,13 @@ async def import_claude_projects(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing Claude projects for project {project_id}")
-    return await import_file(importer, file, directory)
+    return await import_file(importer, file, directory, config.import_upload_max_bytes)
 
 
 @router.post("/memory-json", response_model=EntityImportResult)
 async def import_memory_json(
     importer: MemoryJsonImporterV2ExternalDep,
+    config: AppConfigDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
     directory: str = Form("conversations"),
@@ -126,7 +142,7 @@ async def import_memory_json(
     logger.info(f"V2 Importing memory.json for project {project_id}")
     try:
         file_data = []
-        file_bytes = await file.read()
+        file_bytes = await read_import_upload(file, config.import_upload_max_bytes)
         file_str = file_bytes.decode("utf-8")
         for line in file_str.splitlines():
             json_data = json.loads(line)
@@ -138,6 +154,8 @@ async def import_memory_json(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=result.error_message or "Import failed",
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("V2 Import failed")
         raise HTTPException(
@@ -147,7 +165,9 @@ async def import_memory_json(
     return result
 
 
-async def import_file(importer: Importer, file: UploadFile, destination_directory: str):
+async def import_file(
+    importer: Importer, file: UploadFile, destination_directory: str, max_bytes: int
+):
     """Helper function to import a file using an importer instance.
 
     Args:
@@ -163,7 +183,8 @@ async def import_file(importer: Importer, file: UploadFile, destination_director
     """
     try:
         # Process file
-        json_data = json.load(file.file)
+        upload_bytes = await read_import_upload(file, max_bytes)
+        json_data = json.loads(upload_bytes)
         result = await importer.import_data(json_data, destination_directory)
         if not result.success:  # pragma: no cover
             raise HTTPException(
@@ -173,6 +194,8 @@ async def import_file(importer: Importer, file: UploadFile, destination_director
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("V2 Import failed")
         raise HTTPException(

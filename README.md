@@ -397,6 +397,10 @@ basic-memory cloud setup
 basic-memory cloud status
 ```
 
+`basic-memory cloud setup` installs rclone through supported package managers when one is
+available. It does not run remote install scripts with `sudo`; if no supported package
+manager is found, it prints manual install instructions.
+
 **Per-Project Cloud Routing** (API key based):
 
 Individual projects can be routed through the cloud while others stay local. This uses an API key for routed
@@ -417,6 +421,10 @@ basic-memory project set-local research
 # List projects and route metadata
 basic-memory project list
 ```
+
+Cloud API keys are stored in `~/.basic-memory/config.json` as `cloud_api_key`.
+On POSIX systems, Basic Memory writes the config directory as user-private
+(`0700`) and the config file as user-read/write only (`0600`).
 
 `basic-memory cloud login` / `basic-memory cloud logout` are authentication commands. They do not change default CLI
 routing behavior.
@@ -574,6 +582,7 @@ Basic Memory uses [Loguru](https://github.com/Delgan/loguru) for logging. The lo
 | `BASIC_MEMORY_EXPLICIT_ROUTING` | `false` | When `true`, marks route selection as explicit (`--local`/`--cloud`) |
 | `BASIC_MEMORY_ENV` | `dev` | Set to `test` for test mode (stderr only) |
 | `BASIC_MEMORY_NO_PROMOS` | `false` | When `true`, disables cloud promo messages and telemetry |
+| `BASIC_MEMORY_IMPORT_UPLOAD_MAX_BYTES` | `104857600` | Maximum uploaded JSON import size accepted by API import endpoints |
 
 ### Examples
 

@@ -483,6 +483,23 @@ async def test_import_missing_file(client: AsyncClient, v2_project_url: str):
 
 
 @pytest.mark.asyncio
+async def test_import_rejects_oversized_file(
+    client: AsyncClient, tmp_path, app_config, v2_project_url: str
+):
+    """Import endpoints should reject files before parsing unbounded JSON."""
+    app_config.import_upload_max_bytes = 8
+    file_path = tmp_path / "large.json"
+    file_path.write_text(json.dumps([{"message": "too large"}]), encoding="utf-8")
+
+    with open(file_path, "rb") as f:
+        files = {"file": ("large.json", f, "application/json")}
+        response = await client.post(f"{v2_project_url}/import/chatgpt", files=files)
+
+    assert response.status_code == 413
+    assert "maximum size" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_import_empty_file(client: AsyncClient, tmp_path, v2_project_url: str):
     """Test importing an empty file via v2 endpoint."""
     # Create an empty file

@@ -53,7 +53,9 @@ def run_command(command: list[str], check: bool = True) -> subprocess.CompletedP
 
 
 def install_rclone_macos() -> None:
-    """Install rclone on macOS using Homebrew or official script."""
+    """Install rclone on macOS using package managers."""
+    install_errors: list[str] = []
+
     # Try Homebrew first
     if shutil.which("brew"):
         try:
@@ -61,35 +63,37 @@ def install_rclone_macos() -> None:
             run_command(["brew", "install", "rclone"])
             console.print("[green]rclone installed via Homebrew[/green]")
             return
-        except RcloneInstallError:
-            console.print(
-                "[yellow]Homebrew installation failed, trying official script...[/yellow]"
-            )
+        except RcloneInstallError as exc:
+            install_errors.append(f"Homebrew failed: {exc}")
+            console.print("[yellow]Homebrew installation failed, trying MacPorts...[/yellow]")
 
-    # Fallback to official script
-    console.print("[blue]Installing rclone via official script...[/blue]")
-    try:
-        run_command(["sh", "-c", "curl https://rclone.org/install.sh | sudo bash"])
-        console.print("[green]rclone installed via official script[/green]")
-    except RcloneInstallError:
-        raise RcloneInstallError(
-            "Failed to install rclone. Please install manually: brew install rclone"
-        )
+    if shutil.which("port"):
+        try:
+            console.print("[blue]Installing rclone via MacPorts...[/blue]")
+            run_command(["sudo", "port", "install", "rclone"])
+            console.print("[green]rclone installed via MacPorts[/green]")
+            return
+        except RcloneInstallError as exc:
+            install_errors.append(f"MacPorts failed: {exc}")
+            console.print("[yellow]MacPorts installation failed[/yellow]")
+
+    details = "\n".join(f"- {error}" for error in install_errors)
+    if details:
+        details = f"\n\nAttempts:\n{details}"
+    raise RcloneInstallError(
+        "Could not install rclone automatically with an available package manager.\n\n"
+        "Install rclone manually with one of:\n"
+        "  brew install rclone\n"
+        "  sudo port install rclone\n"
+        "  Download from https://rclone.org/downloads/ and add rclone to PATH"
+        f"{details}"
+    )
 
 
 def install_rclone_linux() -> None:
-    """Install rclone on Linux using package managers or official script."""
-    # Try snap first (most universal)
-    if shutil.which("snap"):
-        try:
-            console.print("[blue]Installing rclone via snap...[/blue]")
-            run_command(["sudo", "snap", "install", "rclone"])
-            console.print("[green]rclone installed via snap[/green]")
-            return
-        except RcloneInstallError:
-            console.print("[yellow]Snap installation failed, trying apt...[/yellow]")
+    """Install rclone on Linux using package managers."""
+    install_errors: list[str] = []
 
-    # Try apt (Debian/Ubuntu)
     if shutil.which("apt"):
         try:
             console.print("[blue]Installing rclone via apt...[/blue]")
@@ -97,18 +101,75 @@ def install_rclone_linux() -> None:
             run_command(["sudo", "apt", "install", "-y", "rclone"])
             console.print("[green]rclone installed via apt[/green]")
             return
-        except RcloneInstallError:
-            console.print("[yellow]apt installation failed, trying official script...[/yellow]")
+        except RcloneInstallError as exc:
+            install_errors.append(f"apt failed: {exc}")
+            console.print("[yellow]apt installation failed, trying dnf...[/yellow]")
 
-    # Fallback to official script
-    console.print("[blue]Installing rclone via official script...[/blue]")
-    try:
-        run_command(["sh", "-c", "curl https://rclone.org/install.sh | sudo bash"])
-        console.print("[green]rclone installed via official script[/green]")
-    except RcloneInstallError:
-        raise RcloneInstallError(
-            "Failed to install rclone. Please install manually: sudo snap install rclone"
-        )
+    if shutil.which("dnf"):
+        try:
+            console.print("[blue]Installing rclone via dnf...[/blue]")
+            run_command(["sudo", "dnf", "install", "-y", "rclone"])
+            console.print("[green]rclone installed via dnf[/green]")
+            return
+        except RcloneInstallError as exc:
+            install_errors.append(f"dnf failed: {exc}")
+            console.print("[yellow]dnf installation failed, trying yum...[/yellow]")
+
+    if shutil.which("yum"):
+        try:
+            console.print("[blue]Installing rclone via yum...[/blue]")
+            run_command(["sudo", "yum", "install", "-y", "rclone"])
+            console.print("[green]rclone installed via yum[/green]")
+            return
+        except RcloneInstallError as exc:
+            install_errors.append(f"yum failed: {exc}")
+            console.print("[yellow]yum installation failed, trying pacman...[/yellow]")
+
+    if shutil.which("pacman"):
+        try:
+            console.print("[blue]Installing rclone via pacman...[/blue]")
+            run_command(["sudo", "pacman", "-S", "--noconfirm", "rclone"])
+            console.print("[green]rclone installed via pacman[/green]")
+            return
+        except RcloneInstallError as exc:
+            install_errors.append(f"pacman failed: {exc}")
+            console.print("[yellow]pacman installation failed, trying zypper...[/yellow]")
+
+    if shutil.which("zypper"):
+        try:
+            console.print("[blue]Installing rclone via zypper...[/blue]")
+            run_command(["sudo", "zypper", "--non-interactive", "install", "rclone"])
+            console.print("[green]rclone installed via zypper[/green]")
+            return
+        except RcloneInstallError as exc:
+            install_errors.append(f"zypper failed: {exc}")
+            console.print("[yellow]zypper installation failed, trying snap...[/yellow]")
+
+    if shutil.which("snap"):
+        try:
+            console.print("[blue]Installing rclone via snap...[/blue]")
+            run_command(["sudo", "snap", "install", "rclone"])
+            console.print("[green]rclone installed via snap[/green]")
+            return
+        except RcloneInstallError as exc:
+            install_errors.append(f"snap failed: {exc}")
+            console.print("[yellow]snap installation failed[/yellow]")
+
+    details = "\n".join(f"- {error}" for error in install_errors)
+    if details:
+        details = f"\n\nAttempts:\n{details}"
+    raise RcloneInstallError(
+        "Could not install rclone automatically with an available package manager.\n\n"
+        "Install rclone manually with one of your OS package managers, for example:\n"
+        "  sudo apt install rclone\n"
+        "  sudo dnf install rclone\n"
+        "  sudo yum install rclone\n"
+        "  sudo pacman -S rclone\n"
+        "  sudo zypper install rclone\n"
+        "  sudo snap install rclone\n"
+        "Or download from https://rclone.org/downloads/ and add rclone to PATH"
+        f"{details}"
+    )
 
 
 def install_rclone_windows() -> None:
