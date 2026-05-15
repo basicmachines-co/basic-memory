@@ -174,6 +174,7 @@ async def import_file(
         importer: The importer instance to use
         file: The file to import
         destination_directory: Destination directory for imported content
+        max_bytes: Maximum upload size in bytes; raises HTTP 413 if exceeded
 
     Returns:
         Import result from the importer
