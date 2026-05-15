@@ -80,3 +80,26 @@ def test_bm_version_does_not_import_heavy_modules():
     assert "CLEAN" in result.stdout, (
         f"Heavy modules loaded during --version: {result.stdout.strip()}"
     )
+
+
+def test_bm_help_does_not_import_api_app():
+    """Regression test: 'bm --help' must not build the FastAPI app graph."""
+    check_script = (
+        "import sys; "
+        "sys.argv = ['bm', '--help']; "
+        "import basic_memory.cli.main; "
+        "heavy = [m for m in sys.modules "
+        "if m == 'basic_memory.api.app' or m.startswith('basic_memory.api.v2.routers')]; "
+        "print(','.join(heavy) if heavy else 'CLEAN')"
+    )
+    result = subprocess.run(
+        ["uv", "run", "python", "-c", check_script],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=Path(__file__).parent.parent.parent,
+    )
+    assert result.returncode == 0
+    assert "CLEAN" in result.stdout, (
+        f"API app modules loaded during --help: {result.stdout.strip()}"
+    )

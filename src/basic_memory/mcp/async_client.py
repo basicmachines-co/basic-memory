@@ -6,7 +6,6 @@ from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
 import logfire
-from basic_memory.api.app import app as fastapi_app
 from basic_memory.config import ConfigManager, ProjectMode
 
 
@@ -37,6 +36,9 @@ def _build_timeout() -> Timeout:
 
 def _asgi_client(timeout: Timeout) -> AsyncClient:
     """Create a local ASGI client."""
+    # Import on first local-client use so CLI help/version paths can import
+    # routing helpers without constructing the full FastAPI router graph.
+    from basic_memory.api.app import app as fastapi_app
     from basic_memory.workspace_context import workspace_permalink_headers
 
     return AsyncClient(
