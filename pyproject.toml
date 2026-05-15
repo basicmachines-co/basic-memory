@@ -30,7 +30,7 @@ dependencies = [
     "pillow>=11.1.0",
     "pybars3>=0.9.7",
     # Keep FastMCP pinned until each minor upgrade passes the MCP transport matrix.
-    "fastmcp==3.2.4",
+    "fastmcp==3.3.0",
     "pyjwt>=2.10.1",
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
