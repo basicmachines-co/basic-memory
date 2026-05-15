@@ -14,6 +14,24 @@ class BisyncError(Exception):
     pass
 
 
+def _rclone_exclude_filters(pattern: str) -> list[str]:
+    """Return rclone exclude filters for a gitignore-style pattern."""
+    if pattern.endswith("/"):
+        # Trigger: gitignore-style patterns ending in / are directory-only rules.
+        # Why: stripping the slash would also exclude a same-named file.
+        # Outcome: rclone keeps the directory rule and excludes recursive contents.
+        return [f"- {pattern}", f"- {pattern}**"]
+
+    path_pattern = pattern.removesuffix("/**")
+
+    # Trigger: rclone treats a directory contents filter separately from the
+    # directory/file path itself.
+    # Why: files like config.json and directory markers like .obsidian must both
+    # be excluded, along with anything below matching directories.
+    # Outcome: every ignore pattern excludes the direct match and recursive children.
+    return [f"- {path_pattern}", f"- {path_pattern}/**"]
+
+
 async def get_mount_info() -> TenantMountInfo:
     """Get current tenant information from cloud API."""
     try:
@@ -78,19 +96,11 @@ def convert_bmignore_to_rclone_filters() -> Path:
                     patterns.append(line)
                     continue
 
-                # Convert gitignore pattern to rclone filter syntax
-                # gitignore: node_modules  → rclone: - node_modules/**
-                # gitignore: *.pyc        → rclone: - *.pyc
-                if "*" in line:
-                    # Pattern already has wildcard, just add exclude prefix
-                    patterns.append(f"- {line}")
-                else:
-                    # Directory pattern - add /** for recursive exclude
-                    patterns.append(f"- {line}/**")
+                patterns.extend(_rclone_exclude_filters(line))
 
     except Exception:
         # If we can't read the file, create a minimal filter
-        patterns = ["# Error reading .bmignore, using minimal filters", "- .git/**"]
+        patterns = ["# Error reading .bmignore, using minimal filters", "- .git", "- .git/**"]
 
     # Write rclone filter file
     rclone_filter_path.write_text("\n".join(patterns) + "\n")

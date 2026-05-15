@@ -582,33 +582,62 @@ bm cloud logout
 **Default patterns:**
 
 ```gitignore
-# Version control
-.git/**
-
-# Python
-__pycache__/**
-*.pyc
-.venv/**
-venv/**
-
-# Node.js
-node_modules/**
+# Hidden files and directories
+.*
 
 # Basic Memory internals
-memory.db/**
-memory.db-shm/**
-memory.db-wal/**
-config.json/**
-watch-status.json/**
-.bmignore.rclone/**
+*.db
+*.db-shm
+*.db-wal
+config.json
+
+# Version control
+.git
+.svn
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+*.egg-info
+.tox
+.mypy_cache
+.ruff_cache
+
+# Virtual environments
+.venv
+venv
+env
+.env
+
+# Node.js
+node_modules
+
+# Build artifacts
+build
+dist
+.cache
+
+# IDE
+.idea
+.vscode
 
 # OS files
-.DS_Store/**
-Thumbs.db/**
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Environment files
-.env/**
-.env.local/**
+# Obsidian
+.obsidian
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
 ```
 
 **How it works:**
@@ -617,6 +646,11 @@ Thumbs.db/**
 3. Rclone uses filters during sync
 4. Same patterns used by all projects
 
+During conversion, file patterns exclude the direct match and recursive contents.
+For example, `config.json` becomes both `- config.json` and `- config.json/**`,
+while `.*` becomes both `- .*` and `- .*/**`. Directory-only patterns keep
+their trailing slash, so `cache/` becomes `- cache/` and `- cache/**`.
+
 **Customizing:**
 
 ```bash
@@ -624,7 +658,7 @@ Thumbs.db/**
 code ~/.basic-memory/.bmignore
 
 # Add custom patterns
-echo "*.tmp/**" >> ~/.basic-memory/.bmignore
+echo "*.tmp" >> ~/.basic-memory/.bmignore
 
 # Next sync uses updated patterns
 bm project bisync --name research

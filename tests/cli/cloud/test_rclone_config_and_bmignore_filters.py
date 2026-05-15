@@ -32,11 +32,46 @@ def test_convert_bmignore_to_rclone_filters_creates_and_converts(config_home):
     # Comments/empties preserved
     assert "# comment" in content
     assert "" in content
-    # Directory pattern becomes recursive exclude
+    # Plain and wildcard patterns exclude direct matches and recursive contents.
+    assert "- node_modules" in content
     assert "- node_modules/**" in content
-    # Wildcard pattern becomes simple exclude
     assert "- *.pyc" in content
+    assert "- *.pyc/**" in content
+    assert "- .git" in content
     assert "- .git/**" in content
+
+
+def test_convert_bmignore_to_rclone_filters_excludes_files_and_hidden_directory_contents(
+    config_home,
+):
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_text("config.json\n.*\nnode_modules/**\n", encoding="utf-8")
+
+    rclone_filter = convert_bmignore_to_rclone_filters()
+    content = rclone_filter.read_text(encoding="utf-8").splitlines()
+
+    assert "- config.json" in content
+    assert "- config.json/**" in content
+    assert "- .*" in content
+    assert "- .*/**" in content
+    assert "- node_modules" in content
+    assert "- node_modules/**" in content
+
+
+def test_convert_bmignore_to_rclone_filters_preserves_directory_only_patterns(config_home):
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_text("cache/\nconfig.json/**\n", encoding="utf-8")
+
+    rclone_filter = convert_bmignore_to_rclone_filters()
+    content = rclone_filter.read_text(encoding="utf-8").splitlines()
+
+    assert "- cache/" in content
+    assert "- cache/**" in content
+    assert "- cache" not in content
+    assert "- config.json" in content
+    assert "- config.json/**" in content
 
 
 def test_convert_bmignore_to_rclone_filters_is_cached_when_up_to_date(config_home):
