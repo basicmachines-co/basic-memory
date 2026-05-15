@@ -734,7 +734,7 @@ async def _ensure_workspace_project_index(
                 )
             continue
 
-        workspace_entries = cast(tuple[WorkspaceProjectEntry, ...], result)
+        workspace_entries = result
         successful_fetches += 1
         entries_list.extend(workspace_entries)
 
@@ -989,9 +989,7 @@ async def resolve_workspace_parameter(
         selected_workspace: WorkspaceInfo | None = None
 
         if workspace:
-            matches = [
-                item for item in workspaces if workspace_matches_identifier(item, workspace)
-            ]
+            matches = [item for item in workspaces if workspace_matches_identifier(item, workspace)]
             if not matches:
                 raise ValueError(
                     f"Workspace '{workspace}' was not found.\n"

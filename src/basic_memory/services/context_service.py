@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 
 from loguru import logger
@@ -307,7 +307,7 @@ class ContextService:
         entity_id_values = ", ".join([str(i) for i in entity_ids])
 
         # Parameters for bindings - include project_id for security filtering
-        params = {
+        params: dict[str, Any] = {
             "max_depth": max_depth,
             "max_results": max_results,
             "project_id": self.search_repository.project_id,
@@ -322,9 +322,9 @@ class ContextService:
                 since_utc = (
                     since.astimezone(timezone.utc) if since.tzinfo else since
                 )  # pragma: no cover
-                params["since_date"] = since_utc.replace(tzinfo=None)  # pyright: ignore  # pragma: no cover
+                params["since_date"] = since_utc.replace(tzinfo=None)  # pragma: no cover
             else:
-                params["since_date"] = since.isoformat()  # pyright: ignore
+                params["since_date"] = since.isoformat()
             date_filter = "AND e.created_at >= :since_date"
             relation_date_filter = "AND e_from.created_at >= :since_date"
             timeframe_condition = "AND eg.relation_date >= :since_date"

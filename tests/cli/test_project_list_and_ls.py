@@ -772,9 +772,7 @@ def test_project_list_attaches_local_state_to_one_duplicate_cloud_project(
     }
 
     async def fake_list_projects(self):
-        return ProjectList.model_validate(
-            payloads_by_workspace[self.http_client.workspace]
-        )
+        return ProjectList.model_validate(payloads_by_workspace[self.http_client.workspace])
 
     monkeypatch.setattr(
         "basic_memory.mcp.project_context.get_available_workspaces",
@@ -890,9 +888,7 @@ def test_project_list_hides_bisync_flag_for_attached_team_workspace(
     }
 
     async def fake_list_projects(self):
-        return ProjectList.model_validate(
-            payloads_by_workspace[self.http_client.workspace]
-        )
+        return ProjectList.model_validate(payloads_by_workspace[self.http_client.workspace])
 
     monkeypatch.setattr(
         "basic_memory.mcp.project_context.get_available_workspaces",

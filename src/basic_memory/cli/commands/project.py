@@ -300,9 +300,7 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
                 console.print(f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]")
             raise typer.Exit(1)
         if len(matches) > 1:
-            console.print(
-                f"[red]Error: Workspace '{workspace}' matches multiple workspaces.[/red]"
-            )
+            console.print(f"[red]Error: Workspace '{workspace}' matches multiple workspaces.[/red]")
             console.print(
                 "[dim]Choose one of these matching workspaces by slug:\n"
                 f"{format_workspace_selection_choices(matches)}[/dim]"
@@ -575,9 +573,7 @@ def list_projects(
             _, permalink = row_key
             project_name = row_names_by_key[row_key]
             is_attached_row = attached_row_by_permalink.get(permalink) == row_key
-            local_project = (
-                local_projects_by_permalink.get(permalink) if is_attached_row else None
-            )
+            local_project = local_projects_by_permalink.get(permalink) if is_attached_row else None
             cloud_project = cloud_projects_by_key.get(row_key)
             cloud_workspace = cloud_workspaces_by_key.get(row_key)
             configured_name = configured_names_by_permalink.get(permalink)
@@ -621,9 +617,7 @@ def list_projects(
             )
             is_default = bool(is_attached_row and permalink == default_permalink)
 
-            sync_supported = (
-                cloud_workspace is None or cloud_workspace.workspace_type == "personal"
-            )
+            sync_supported = cloud_workspace is None or cloud_workspace.workspace_type == "personal"
             has_sync = bool(is_attached_row and entry and entry.local_sync_path and sync_supported)
             # Determine MCP transport based on project routing mode
             if entry and entry.mode == ProjectMode.CLOUD:

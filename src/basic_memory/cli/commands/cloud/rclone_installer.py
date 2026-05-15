@@ -4,7 +4,7 @@ import os
 import platform
 import shutil
 import subprocess
-from typing import Optional
+from typing import Any, Optional, cast
 
 from rich.console import Console
 
@@ -209,27 +209,38 @@ def refresh_windows_path() -> None:
     if platform.system().lower() != "windows":
         return
 
-    # Importing here after performing platform detection. Also note that we have to ignore pylance/pyright
-    # warnings about winreg attributes so that "errors" don't appear on non-Windows platforms.
+    # Importing here after performing platform detection. Non-Windows type checkers may still
+    # resolve a stub without registry members, so keep this platform-only module dynamic here.
     import winreg
 
+    winreg_module = cast(Any, winreg)
     user_key_path = r"Environment"
     system_key_path = r"System\CurrentControlSet\Control\Session Manager\Environment"
     new_path = ""
 
     # Read user PATH
     try:
-        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, user_key_path, 0, winreg.KEY_READ)  # type: ignore[reportAttributeAccessIssue]
-        user_path, _ = winreg.QueryValueEx(reg_key, "PATH")  # type: ignore[reportAttributeAccessIssue]
-        winreg.CloseKey(reg_key)  # type: ignore[reportAttributeAccessIssue]
+        reg_key = winreg_module.OpenKey(
+            winreg_module.HKEY_CURRENT_USER,
+            user_key_path,
+            0,
+            winreg_module.KEY_READ,
+        )
+        user_path, _ = winreg_module.QueryValueEx(reg_key, "PATH")
+        winreg_module.CloseKey(reg_key)
     except Exception:
         user_path = ""
 
     # Read system PATH
     try:
-        reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, system_key_path, 0, winreg.KEY_READ)  # type: ignore[reportAttributeAccessIssue]
-        system_path, _ = winreg.QueryValueEx(reg_key, "PATH")  # type: ignore[reportAttributeAccessIssue]
-        winreg.CloseKey(reg_key)  # type: ignore[reportAttributeAccessIssue]
+        reg_key = winreg_module.OpenKey(
+            winreg_module.HKEY_LOCAL_MACHINE,
+            system_key_path,
+            0,
+            winreg_module.KEY_READ,
+        )
+        system_path, _ = winreg_module.QueryValueEx(reg_key, "PATH")
+        winreg_module.CloseKey(reg_key)
     except Exception:
         system_path = ""
 

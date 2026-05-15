@@ -1042,9 +1042,9 @@ class EntityService(BaseService[EntityModel]):
             for rel, resolved in zip(markdown.relations, resolved_entities):
                 # Handle exceptions from gather and None results
                 target_entity: Optional[Entity] = None
-                if not isinstance(resolved, Exception):
-                    # Type narrowing: resolved is Optional[Entity] here, not Exception
-                    target_entity = resolved  # pyright: ignore [reportAssignmentType]
+                if not isinstance(resolved, BaseException):
+                    # asyncio.gather(..., return_exceptions=True) can return any BaseException.
+                    target_entity = resolved
 
                 if target_entity is None and not resolve_targets:
                     target_entity = await self._resolve_deferred_self_relation(rel.target, entity)

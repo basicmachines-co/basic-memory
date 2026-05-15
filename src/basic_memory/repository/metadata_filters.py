@@ -5,11 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 import re
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, cast
 
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
+_COMPARISON_OPERATORS = {
+    "$gt": "gt",
+    "$gte": "gte",
+    "$lt": "lt",
+    "$lte": "lte",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +54,11 @@ def _normalize_scalar(value: Any) -> Any:
     return value
 
 
+def _normalize_numeric(value: object) -> float:
+    """Normalize a value already proven numeric by _is_numeric_value."""
+    return float(cast(str | int | float, value))
+
+
 def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter]:
     """Parse metadata filters into normalized clauses.
 
@@ -73,7 +84,12 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
         if isinstance(raw_value, dict):
             if len(raw_value) != 1:
                 raise ValueError(f"Invalid metadata filter for '{raw_key}': {raw_value}")
-            op, value = next(iter(raw_value.items()))
+            raw_op, value = next(iter(raw_value.items()))
+            if not isinstance(raw_op, str):
+                raise ValueError(
+                    f"Unsupported operator '{raw_op}' in metadata filter for '{raw_key}'"
+                )
+            op = raw_op
 
             if op == "$in":
                 if not isinstance(value, list) or not value:
@@ -83,15 +99,20 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
                 )
                 continue
 
-            if op in {"$gt", "$gte", "$lt", "$lte"}:
+            if op in _COMPARISON_OPERATORS:
                 if _is_numeric_value(value):
-                    normalized = float(value)
+                    normalized = _normalize_numeric(value)
                     comparison = "numeric"
                 else:
                     normalized = _normalize_scalar(value)
                     comparison = "text"
                 parsed.append(
-                    ParsedMetadataFilter(path_parts, op.lstrip("$"), normalized, comparison)
+                    ParsedMetadataFilter(
+                        path_parts,
+                        _COMPARISON_OPERATORS[op],
+                        normalized,
+                        comparison,
+                    )
                 )
                 continue
 
@@ -99,7 +120,7 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
                 if not isinstance(value, list) or len(value) != 2:
                     raise ValueError(f"$between requires [min, max] for '{raw_key}'")
                 if _is_numeric_collection(value):
-                    normalized = [float(v) for v in value]
+                    normalized = [_normalize_numeric(v) for v in value]
                     comparison = "numeric"
                 else:
                     normalized = [_normalize_scalar(v) for v in value]

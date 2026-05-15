@@ -182,9 +182,7 @@ class TestWorkspaceSetDefault:
         assert result.exit_code == 1
         assert "not found" in result.stdout
 
-    def test_set_default_workspace_ambiguous_type_lists_matching_choices(
-        self, runner, monkeypatch
-    ):
+    def test_set_default_workspace_ambiguous_type_lists_matching_choices(self, runner, monkeypatch):
         async def fake_get_available_workspaces(context=None):
             return [
                 _workspace(

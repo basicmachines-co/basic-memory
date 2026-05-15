@@ -168,13 +168,15 @@ class BasicMemoryConfig(BaseSettings):
     env: Environment = Field(default="dev", description="Environment name")
 
     projects: Dict[str, ProjectEntry] = Field(
-        default_factory=lambda: {
-            "main": ProjectEntry(
-                path=str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
-            )
-        }
-        if os.getenv("BASIC_MEMORY_HOME")
-        else {},
+        default_factory=lambda: (
+            {
+                "main": ProjectEntry(
+                    path=str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
+                )
+            }
+            if os.getenv("BASIC_MEMORY_HOME")
+            else {}
+        ),
         description="Mapping of project names to their ProjectEntry configuration",
     )
     default_project: Optional[str] = Field(

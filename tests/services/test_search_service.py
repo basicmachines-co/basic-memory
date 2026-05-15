@@ -235,9 +235,7 @@ async def test_after_date_uses_updated_at(search_service):
     await search_service.repository.index_item(recently_updated_row)
     await search_service.repository.index_item(stale_row)
 
-    results = await search_service.search(
-        SearchQuery(after_date=cutoff.isoformat())
-    )
+    results = await search_service.search(SearchQuery(after_date=cutoff.isoformat()))
 
     permalinks = {r.permalink for r in results}
     # recently-updated entity must appear despite old created_at

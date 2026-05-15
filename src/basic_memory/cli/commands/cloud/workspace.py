@@ -100,9 +100,7 @@ def set_default_workspace(
         raise typer.Exit(1)
 
     if len(matches) > 1:
-        console.print(
-            f"[red]Error: Workspace '{identifier}' matches multiple workspaces.[/red]"
-        )
+        console.print(f"[red]Error: Workspace '{identifier}' matches multiple workspaces.[/red]")
         console.print(
             "[dim]Choose one of these matching workspaces by slug:\n"
             f"{format_workspace_selection_choices(matches)}[/dim]"
