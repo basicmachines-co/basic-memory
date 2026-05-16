@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Optional, Sequence, Union
 
 
+from loguru import logger
 from sqlalchemy import inspect as sa_inspect, select, text
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import NoResultFound, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -175,14 +176,31 @@ class ProjectRepository(Repository[Project]):
             # we delete the chunk rows below.
             if "search_vector_chunks" in existing_tables:
                 if is_sqlite and "search_vector_embeddings" in existing_tables:
-                    await session.execute(
-                        text(
-                            "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                            "SELECT id FROM search_vector_chunks "
-                            "WHERE project_id = :project_id)"
-                        ),
-                        {"project_id": entity_id},
-                    )
+                    try:
+                        await session.execute(
+                            text(
+                                "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                                "SELECT id FROM search_vector_chunks "
+                                "WHERE project_id = :project_id)"
+                            ),
+                            {"project_id": entity_id},
+                        )
+                    except OperationalError as exc:
+                        # Trigger: the vec0 SQLite extension isn't loaded into this
+                        # connection — common on Windows builds where
+                        # enable_load_extension is unavailable (#711).
+                        # Why: the embeddings table is registered as a vec0 virtual
+                        # table, so any access (even a DELETE) needs the module
+                        # loaded. If it isn't, no row was ever inserted either, so
+                        # there's nothing to leak.
+                        # Outcome: log and continue — the chunk DELETE below still
+                        # runs, and the absence of vec0 means no orphan vectors.
+                        if "vec0" not in str(exc):
+                            raise
+                        logger.debug(
+                            "Skipping search_vector_embeddings purge: vec0 "
+                            "extension not loaded on this connection"
+                        )
                 await session.execute(
                     text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
                     {"project_id": entity_id},
