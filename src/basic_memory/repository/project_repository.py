@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Optional, Sequence, Union
 
 
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -120,6 +121,38 @@ class ProjectRepository(Repository[Project]):
                 await session.flush()
                 return target_project
             return None  # pragma: no cover
+
+    async def delete(self, entity_id: int) -> bool:
+        """Delete a project and its derived search rows in one transaction.
+
+        Postgres carries an ON DELETE CASCADE FK from search_index.project_id to
+        project.id, so the search rows go with the project automatically there.
+        SQLite stores search_index as an FTS5 virtual table, which cannot hold
+        foreign keys — without an explicit purge here the FTS rows survive as
+        orphans, and a later project that reuses the same auto-increment id
+        inherits the previous tenant's content. search_vector_chunks is a real
+        table on both backends but only carries the FK on Postgres.
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            try:
+                result = await session.execute(
+                    select(self.Model).filter(self.primary_key == entity_id)
+                )
+                project = result.scalars().one()
+            except NoResultFound:
+                return False
+
+            await session.execute(
+                text("DELETE FROM search_index WHERE project_id = :project_id"),
+                {"project_id": entity_id},
+            )
+            await session.execute(
+                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                {"project_id": entity_id},
+            )
+
+            await session.delete(project)
+            return True
 
     async def update_path(self, project_id: int, new_path: str) -> Optional[Project]:
         """Update project path.

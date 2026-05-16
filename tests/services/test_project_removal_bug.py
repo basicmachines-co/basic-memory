@@ -6,7 +6,9 @@ from datetime import timezone, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 
+from basic_memory import db
 from basic_memory.services.project_service import ProjectService
 
 
@@ -136,3 +138,107 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
                     project = await project_service.get_project(test_project_name)
                     if project:
                         await project_service.repository.delete(project.id)
+
+
+@pytest.mark.asyncio
+async def test_remove_project_purges_search_rows(project_service: ProjectService):
+    """Project deletion must sweep the derived search tables.
+
+    SQLite stores search_index as an FTS5 virtual table, which cannot carry a
+    foreign key, so without an explicit purge the FTS rows survive the project
+    and leak into the next project that reuses the same auto-increment id.
+    Postgres has the cascade FK, but we expect the same end-state on either
+    backend. This test fails on the pre-fix code: search_index still holds the
+    project's rows after remove_project completes.
+    """
+    test_project_name = f"test-search-cleanup-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_project_path = str(Path(temp_dir) / "test-search-cleanup")
+        os.makedirs(test_project_path, exist_ok=True)
+
+        await project_service.add_project(test_project_name, test_project_path)
+        project = await project_service.get_project(test_project_name)
+        assert project is not None
+        project_id = project.id
+
+        # Seed both derived tables directly. The bug is in the cleanup path,
+        # not the indexer, so a synthetic row is enough to prove the sweep.
+        async with db.scoped_session(project_service.repository.session_maker) as session:
+            await session.execute(
+                text(
+                    "INSERT INTO search_index "
+                    "(id, title, content_stems, content_snippet, permalink, "
+                    " file_path, type, project_id) "
+                    "VALUES (:id, :title, :stems, :snippet, :permalink, "
+                    " :file_path, :type, :project_id)"
+                ),
+                {
+                    "id": 999_001,
+                    "title": "leak canary",
+                    "stems": "leak canary",
+                    "snippet": "leak canary",
+                    "permalink": f"leak-canary-{project_id}",
+                    "file_path": "leak-canary.md",
+                    "type": "entity",
+                    "project_id": project_id,
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_chunks "
+                    "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                    " entity_fingerprint, embedding_model) "
+                    "VALUES (:entity_id, :project_id, :chunk_key, :chunk_text, "
+                    " :source_hash, :entity_fingerprint, :embedding_model)"
+                ),
+                {
+                    "entity_id": 999_001,
+                    "project_id": project_id,
+                    "chunk_key": "canary",
+                    "chunk_text": "leak canary",
+                    "source_hash": "abc",
+                    "entity_fingerprint": "",
+                    "embedding_model": "",
+                },
+            )
+
+        async with db.scoped_session(project_service.repository.session_maker) as session:
+            pre_index = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM search_index WHERE project_id = :pid"),
+                    {"pid": project_id},
+                )
+            ).scalar_one()
+            pre_chunks = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :pid"),
+                    {"pid": project_id},
+                )
+            ).scalar_one()
+        assert pre_index >= 1, "seed row should exist before removal"
+        assert pre_chunks >= 1, "seed chunk should exist before removal"
+
+        await project_service.remove_project(test_project_name)
+
+        async with db.scoped_session(project_service.repository.session_maker) as session:
+            post_index = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM search_index WHERE project_id = :pid"),
+                    {"pid": project_id},
+                )
+            ).scalar_one()
+            post_chunks = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :pid"),
+                    {"pid": project_id},
+                )
+            ).scalar_one()
+
+        assert post_index == 0, (
+            f"search_index still has {post_index} rows for deleted project_id={project_id} "
+            "— project deletion did not sweep the FTS table."
+        )
+        assert post_chunks == 0, (
+            f"search_vector_chunks still has {post_chunks} rows for deleted "
+            f"project_id={project_id}."
+        )
