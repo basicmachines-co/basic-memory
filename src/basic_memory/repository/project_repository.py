@@ -125,23 +125,24 @@ class ProjectRepository(Repository[Project]):
     async def delete(self, entity_id: int) -> bool:
         """Delete a project and its derived search rows in one transaction.
 
-        Postgres carries an ON DELETE CASCADE FK from search_index.project_id to
-        project.id, so the search rows go with the project automatically there.
-        SQLite stores search_index as an FTS5 virtual table, which cannot hold
-        foreign keys — without an explicit purge here the FTS rows survive as
-        orphans, and a later project that reuses the same auto-increment id
-        inherits the previous tenant's content. search_vector_chunks is a real
-        table on both backends but only carries the FK on Postgres.
+        The cascade picture differs by backend:
 
-        sqlite-vec stores embeddings in a separate vec0 virtual table keyed by
-        chunk rowid with no cascade, so embeddings must be purged before the
-        chunk rows or `_run_vector_query` will keep returning stale vectors
-        that crowd out live results.
+        - search_index → project: Postgres has ON DELETE CASCADE FK; SQLite
+          stores search_index as an FTS5 virtual table and can't carry FKs,
+          so it needs explicit cleanup.
+        - search_vector_chunks → project: neither backend has an FK here, so
+          both need an explicit DELETE.
+        - search_vector_embeddings → search_vector_chunks: Postgres has an FK
+          (chunk_id REFERENCES … ON DELETE CASCADE); SQLite stores embeddings
+          in a vec0 virtual table keyed by rowid with no cascade. On SQLite
+          the embeddings must be purged before the chunk rows, otherwise
+          `_run_vector_query` keeps returning stale vectors that crowd out
+          live results.
 
-        Each derived table — search_index, search_vector_chunks,
-        search_vector_embeddings — is created lazily on first use, so any of
-        them may be absent on minimal test DBs or installs without semantic
-        search. Inspect the connection once and skip whichever is missing.
+        Each derived table is created lazily (search_index by
+        SearchRepository.init_search_index, the vector tables once semantic
+        search initializes), so any of them may be absent on minimal test DBs.
+        Inspect the connection once and skip whichever is missing.
         """
         async with db.scoped_session(self.session_maker) as session:
             try:
@@ -152,20 +153,28 @@ class ProjectRepository(Repository[Project]):
             except NoResultFound:
                 return False
 
+            dialect_name = session.bind.dialect.name if session.bind else "sqlite"
+            is_sqlite = dialect_name == "sqlite"
+
             existing_tables = await session.run_sync(
                 lambda sync_session: set(sa_inspect(sync_session.connection()).get_table_names())
             )
 
-            if "search_index" in existing_tables:
+            # search_index: SQLite has no FK on the FTS5 virtual table; Postgres
+            # cascades from the project FK, so the explicit DELETE is redundant.
+            if is_sqlite and "search_index" in existing_tables:
                 await session.execute(
                     text("DELETE FROM search_index WHERE project_id = :project_id"),
                     {"project_id": entity_id},
                 )
 
+            # search_vector_chunks: no FK to project on either backend, so both
+            # backends need this. SQLite must purge vec0 embeddings first
+            # (rowid pseudocolumn — Postgres uses chunk_id and would 500 here);
+            # Postgres' chunk_id FK CASCADE handles its embeddings cleanup when
+            # we delete the chunk rows below.
             if "search_vector_chunks" in existing_tables:
-                if "search_vector_embeddings" in existing_tables:
-                    # sqlite-vec has no CASCADE — drop embeddings first while the
-                    # chunk rows that name them still exist.
+                if is_sqlite and "search_vector_embeddings" in existing_tables:
                     await session.execute(
                         text(
                             "DELETE FROM search_vector_embeddings WHERE rowid IN ("
