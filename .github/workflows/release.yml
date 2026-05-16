@@ -63,25 +63,63 @@ jobs:
     # Only run for stable releases (not dev, beta, or rc versions)
     if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') }}
     permissions:
-      contents: write
-      actions: read
+      contents: read
     steps:
+      # Inline bump replaces mislav/bump-homebrew-formula-action@v4.x.
+      # The action does a HEAD request to api.github.com /repos/.../tarball/<ref>
+      # with the bearer token and expects a 302 redirect. GitHub now returns
+      # 303 on that endpoint when authenticated, which the action treats as a
+      # fatal error. Re-implementing the bump as plain git+sed keeps the same
+      # contract (update url + sha256, commit, push) with no third-party action.
       - name: Update Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v4.1
-        with:
-          # Formula name in homebrew-basic-memory repo
-          formula-name: basic-memory
-          # The tap repository
-          homebrew-tap: basicmachines-co/homebrew-basic-memory
-          # Base branch of the tap repository
-          base-branch: main
-          # Download URL will be automatically constructed from the tag
-          download-url: https://github.com/basicmachines-co/basic-memory/archive/refs/tags/${{ github.ref_name }}.tar.gz
-          # Commit message for the formula update
-          commit-message: |
-            {{formulaName}} {{version}}
-
-            Created by https://github.com/basicmachines-co/basic-memory/actions/runs/${{ github.run_id }}
         env:
-          # Personal Access Token with repo scope for homebrew-basic-memory repo
-          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+          HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+          REF: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${REF#v}"
+          ARCHIVE_URL="https://github.com/${REPO}/archive/refs/tags/${REF}.tar.gz"
+
+          echo "::group::Compute tarball sha256"
+          SHA256="$(curl --fail --silent --location "$ARCHIVE_URL" | sha256sum | awk '{print $1}')"
+          test -n "$SHA256"
+          echo "sha256: $SHA256"
+          echo "::endgroup::"
+
+          echo "::group::Clone tap"
+          git clone \
+            --depth 1 \
+            "https://x-access-token:${HOMEBREW_TOKEN}@github.com/basicmachines-co/homebrew-basic-memory.git" \
+            tap
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "::endgroup::"
+
+          echo "::group::Patch Formula/basic-memory.rb"
+          # Pipe-delimited sed because the URL contains slashes. The Formula
+          # only has one `url` and one `sha256` directive, so a first-match
+          # replacement is unambiguous. POSIX character classes ([[:space:]])
+          # keep this portable across BSD and GNU sed.
+          sed -i -E \
+            -e "s|^([[:space:]]*url[[:space:]]+)\"[^\"]+\"|\1\"${ARCHIVE_URL}\"|" \
+            -e "s|^([[:space:]]*sha256[[:space:]]+)\"[^\"]+\"|\1\"${SHA256}\"|" \
+            Formula/basic-memory.rb
+          git --no-pager diff Formula/basic-memory.rb
+          echo "::endgroup::"
+
+          if git diff --quiet Formula/basic-memory.rb; then
+            echo "Formula already at ${REF}; nothing to do."
+            exit 0
+          fi
+
+          echo "::group::Commit & push"
+          git add Formula/basic-memory.rb
+          git commit -m "basic-memory ${VERSION}
+
+          Created by ${RUN_URL}"
+          git push origin HEAD:main
+          echo "::endgroup::"
