@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Sequence, Union
 
 
-from sqlalchemy import select, text
+from sqlalchemy import inspect as sa_inspect, select, text
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -132,6 +132,11 @@ class ProjectRepository(Repository[Project]):
         orphans, and a later project that reuses the same auto-increment id
         inherits the previous tenant's content. search_vector_chunks is a real
         table on both backends but only carries the FK on Postgres.
+
+        search_index is created at runtime by SearchRepository.init_search_index
+        and search_vector_chunks only appears once semantic search initializes,
+        so each table may be absent on minimal test DBs. Inspect first and
+        skip whichever table isn't there.
         """
         async with db.scoped_session(self.session_maker) as session:
             try:
@@ -142,14 +147,15 @@ class ProjectRepository(Repository[Project]):
             except NoResultFound:
                 return False
 
-            await session.execute(
-                text("DELETE FROM search_index WHERE project_id = :project_id"),
-                {"project_id": entity_id},
+            existing_tables = await session.run_sync(
+                lambda sync_session: set(sa_inspect(sync_session.connection()).get_table_names())
             )
-            await session.execute(
-                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
-                {"project_id": entity_id},
-            )
+            for table in ("search_index", "search_vector_chunks"):
+                if table in existing_tables:
+                    await session.execute(
+                        text(f"DELETE FROM {table} WHERE project_id = :project_id"),
+                        {"project_id": entity_id},
+                    )
 
             await session.delete(project)
             return True
