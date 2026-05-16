@@ -8,38 +8,8 @@ import pytest
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
 
 
-def _stub_routing_mode(monkeypatch, *, cloud: bool) -> None:
-    """Pin the three cloud-route signals search.py reads.
-
-    `_search_all_projects` only forwards project_id (external UUID) when a
-    cloud route is available. The composite mirrors get_project_client:
-    factory mode OR explicit --cloud OR has_cloud_credentials. Tests stub
-    all three so a dev box with OAuth tokens on disk can't bleed into the
-    local-mode case.
-    """
-    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
-    monkeypatch.setattr(search_mod, "is_factory_mode", lambda: False)
-    monkeypatch.setattr(search_mod, "_explicit_routing", lambda: cloud)
-    monkeypatch.setattr(search_mod, "_force_local_mode", lambda: False)
-    monkeypatch.setattr(search_mod, "has_cloud_credentials", lambda config: cloud)
-
-
-@pytest.fixture
-def cloud_routing(monkeypatch):
-    """Force the cloud-routing path for multi-project search tests."""
-    _stub_routing_mode(monkeypatch, cloud=True)
-
-
-@pytest.fixture
-def local_routing(monkeypatch):
-    """Force the local-routing path for multi-project search tests."""
-    _stub_routing_mode(monkeypatch, cloud=False)
-
-
 @pytest.mark.asyncio
-async def test_search_notes_search_all_projects_qualifies_result_permalinks(
-    monkeypatch, cloud_routing
-):
+async def test_search_notes_search_all_projects_qualifies_result_permalinks(monkeypatch):
     """Multi-project search belongs to search_notes and keeps result ids routable."""
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
@@ -62,7 +32,10 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
     class StubProject:
         def __init__(self, name: str | None, external_id: str | None):
             self.name = name or "main"
-            self.external_id = external_id or "local-main"
+            # When the fan-out routes by name only, project_id is None — keep
+            # the test stable by falling back to the name so the downstream
+            # SearchClient still has a stable per-project identifier.
+            self.external_id = external_id or self.name
 
     @asynccontextmanager
     async def fake_get_project_client(project=None, context=None, project_id=None):
@@ -74,10 +47,12 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
 
     class MockSearchClient:
         def __init__(self, client, project_id):
+            # The fake project supplies the workspace-qualified name as the
+            # external_id, so each per-project search keys off that.
             self.project_id = project_id
 
         async def search(self, payload, page, page_size):
-            if self.project_id == "11111111-1111-1111-1111-111111111111":
+            if self.project_id == "personal/main":
                 title = "Personal MCP Test Note"
                 score = 0.5
             else:
@@ -111,9 +86,13 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
     )
 
     assert isinstance(result, dict)
+    # Fan-out now routes by qualified_name only; project_id is omitted because
+    # the workspace-qualified name is already unambiguous and UUID routing
+    # hits get_project_client's cloud branch even for local projects when
+    # local OAuth credentials are present.
     assert searched_projects == [
-        ("personal/main", "11111111-1111-1111-1111-111111111111"),
-        ("team-paul/main", "22222222-2222-2222-2222-222222222222"),
+        ("personal/main", None),
+        ("team-paul/main", None),
     ]
     assert [item["permalink"] for item in result["results"]] == [
         "team-paul/main/tests/mcp-test-note",
@@ -198,9 +177,7 @@ async def test_search_notes_search_all_projects_with_no_refs_returns_empty_all_p
 
 
 @pytest.mark.asyncio
-async def test_search_notes_search_all_projects_continues_after_project_failure(
-    monkeypatch, cloud_routing
-):
+async def test_search_notes_search_all_projects_continues_after_project_failure(monkeypatch):
     """One failing project should not discard successful all-project search results."""
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
@@ -223,7 +200,7 @@ async def test_search_notes_search_all_projects_continues_after_project_failure(
     class StubProject:
         def __init__(self, name: str | None, external_id: str | None):
             self.name = name or "main"
-            self.external_id = external_id or "local-main"
+            self.external_id = external_id or self.name
 
     @asynccontextmanager
     async def fake_get_project_client(project=None, context=None, project_id=None):
@@ -244,10 +221,12 @@ async def test_search_notes_search_all_projects_continues_after_project_failure(
 
     class MockSearchClient:
         def __init__(self, client, project_id):
+            # Fan-out routes by name now, so the stub project reflects the
+            # workspace-qualified name back as the SearchClient's project_id.
             self.project_id = project_id
 
         async def search(self, payload, page, page_size):
-            if self.project_id == "22222222-2222-2222-2222-222222222222":
+            if self.project_id == "team-paul/main":
                 raise RuntimeError("team index unavailable")
             return SearchResponse(
                 results=[
@@ -287,15 +266,15 @@ async def test_search_notes_search_all_projects_continues_after_project_failure(
 
 
 @pytest.mark.asyncio
-async def test_search_notes_search_all_projects_local_omits_project_id(
-    monkeypatch, local_routing
-):
-    """Without a cloud route, fan-out must address each project by name only.
+async def test_search_notes_search_all_projects_omits_project_id(monkeypatch):
+    """Fan-out must address each project by name, never by external UUID.
 
-    project_id (external UUID) routes through the cloud v2 API path, which
-    returns 401 on local installs because there's no JWT to present. Local
-    fan-out has to fall back to the name-routed path so each per-project
-    search actually returns results instead of silently failing.
+    project_id routes through get_project_client's UUID branch, which treats
+    any unknown identifier as cloud — so when a local install still has OAuth
+    tokens from a past `bm cloud login`, every per-project recursive call 401s
+    and the merged result list silently stays empty. Routing by name avoids
+    that path on both backends; cloud refs disambiguate via the
+    workspace/project qualified_name already baked into project_ref["project"].
     """
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
