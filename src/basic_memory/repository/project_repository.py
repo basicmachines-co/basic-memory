@@ -133,10 +133,15 @@ class ProjectRepository(Repository[Project]):
         inherits the previous tenant's content. search_vector_chunks is a real
         table on both backends but only carries the FK on Postgres.
 
-        search_index is created at runtime by SearchRepository.init_search_index
-        and search_vector_chunks only appears once semantic search initializes,
-        so each table may be absent on minimal test DBs. Inspect first and
-        skip whichever table isn't there.
+        sqlite-vec stores embeddings in a separate vec0 virtual table keyed by
+        chunk rowid with no cascade, so embeddings must be purged before the
+        chunk rows or `_run_vector_query` will keep returning stale vectors
+        that crowd out live results.
+
+        Each derived table — search_index, search_vector_chunks,
+        search_vector_embeddings — is created lazily on first use, so any of
+        them may be absent on minimal test DBs or installs without semantic
+        search. Inspect the connection once and skip whichever is missing.
         """
         async with db.scoped_session(self.session_maker) as session:
             try:
@@ -150,12 +155,29 @@ class ProjectRepository(Repository[Project]):
             existing_tables = await session.run_sync(
                 lambda sync_session: set(sa_inspect(sync_session.connection()).get_table_names())
             )
-            for table in ("search_index", "search_vector_chunks"):
-                if table in existing_tables:
+
+            if "search_index" in existing_tables:
+                await session.execute(
+                    text("DELETE FROM search_index WHERE project_id = :project_id"),
+                    {"project_id": entity_id},
+                )
+
+            if "search_vector_chunks" in existing_tables:
+                if "search_vector_embeddings" in existing_tables:
+                    # sqlite-vec has no CASCADE — drop embeddings first while the
+                    # chunk rows that name them still exist.
                     await session.execute(
-                        text(f"DELETE FROM {table} WHERE project_id = :project_id"),
+                        text(
+                            "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                            "SELECT id FROM search_vector_chunks "
+                            "WHERE project_id = :project_id)"
+                        ),
                         {"project_id": entity_id},
                     )
+                await session.execute(
+                    text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                    {"project_id": entity_id},
+                )
 
             await session.delete(project)
             return True

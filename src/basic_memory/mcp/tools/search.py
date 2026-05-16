@@ -10,8 +10,13 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, has_cloud_credentials
 from basic_memory.utils import build_canonical_permalink, coerce_dict, coerce_list
+from basic_memory.mcp.async_client import (
+    _explicit_routing,
+    _force_local_mode,
+    is_factory_mode,
+)
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import (
     detect_project_from_identifier_prefix,
@@ -479,12 +484,30 @@ async def _search_all_projects(
     total = 0
     any_project_has_more = False
 
+    # Trigger: caller asked for an account-wide search.
+    # Why: project_id (external UUID) routes through the cloud v2 API path,
+    #      which 401s on local installs because there's no JWT to present.
+    #      Project names route through the local-ASGI path and work for both
+    #      backends — cloud disambiguates names via the workspace/project
+    #      qualified_name already baked into project_ref["project"].
+    # Outcome: forward project_id only when the same signals get_project_client
+    #          uses to pick a cloud route are present. Mirrors the cloud_available
+    #          composite in project_context.get_project_client (single source of
+    #          truth for "can we route to cloud?").
+    config = ConfigManager().config
+    use_cloud_routing = (
+        is_factory_mode()
+        or (_explicit_routing() and not _force_local_mode())
+        or has_cloud_credentials(config)
+    )
+
     for project_ref in project_refs:
+        recursive_project_id = project_ref["project_id"] if use_cloud_routing else None
         try:
             results = await search_notes(
                 query=query,
                 project=project_ref["project"],
-                project_id=project_ref["project_id"],
+                project_id=recursive_project_id,
                 page=1,
                 page_size=per_project_page_size,
                 search_type=search_type,

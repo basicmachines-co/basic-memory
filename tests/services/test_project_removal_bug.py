@@ -140,6 +140,16 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
                         await project_service.repository.delete(project.id)
 
 
+async def _table_exists(session_maker, table: str) -> bool:
+    """Return True if the named table is present on the current connection."""
+    from sqlalchemy import inspect as sa_inspect
+
+    async with db.scoped_session(session_maker) as session:
+        return await session.run_sync(
+            lambda sync_session: table in sa_inspect(sync_session.connection()).get_table_names()
+        )
+
+
 @pytest.mark.asyncio
 async def test_remove_project_purges_search_rows(project_service: ProjectService):
     """Project deletion must sweep the derived search tables.
@@ -241,4 +251,90 @@ async def test_remove_project_purges_search_rows(project_service: ProjectService
         assert post_chunks == 0, (
             f"search_vector_chunks still has {post_chunks} rows for deleted "
             f"project_id={project_id}."
+        )
+
+
+@pytest.mark.asyncio
+async def test_remove_project_purges_vector_embeddings(project_service: ProjectService):
+    """Project deletion must also drop sqlite-vec embeddings keyed by chunk rowid.
+
+    sqlite-vec stores vectors in a vec0 virtual table that has no cascade
+    behavior. If embeddings linger after the chunks they reference are gone,
+    `_run_vector_query` pulls them as top-k candidates and crowds out live
+    results. The test only runs when the embeddings table is present, which
+    matches the install path that exercises semantic search.
+    """
+    test_project_name = f"test-vec-cleanup-{os.urandom(4).hex()}"
+    session_maker = project_service.repository.session_maker
+
+    # The embeddings table only exists once semantic search has initialized.
+    # Skipping when it's absent keeps this test honest on minimal CI DBs.
+    if not await _table_exists(session_maker, "search_vector_embeddings"):
+        pytest.skip("search_vector_embeddings is not present on this connection")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_project_path = str(Path(temp_dir) / "test-vec-cleanup")
+        os.makedirs(test_project_path, exist_ok=True)
+
+        await project_service.add_project(test_project_name, test_project_path)
+        project = await project_service.get_project(test_project_name)
+        assert project is not None
+        project_id = project.id
+
+        async with db.scoped_session(session_maker) as session:
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_chunks "
+                    "(id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                    " entity_fingerprint, embedding_model) "
+                    "VALUES (:id, :entity_id, :project_id, :chunk_key, :chunk_text, "
+                    " :source_hash, :entity_fingerprint, :embedding_model)"
+                ),
+                {
+                    "id": 999_201,
+                    "entity_id": 999_201,
+                    "project_id": project_id,
+                    "chunk_key": "vec-canary",
+                    "chunk_text": "vec canary",
+                    "source_hash": "abc",
+                    "entity_fingerprint": "",
+                    "embedding_model": "",
+                },
+            )
+            # vec0 requires a vector matching the configured dimensions, but the
+            # delete path filters by rowid; a non-existing dimension would block
+            # this seed step. Skip the insert if the embeddings DDL hasn't run.
+            try:
+                await session.execute(
+                    text(
+                        "INSERT INTO search_vector_embeddings (rowid, embedding) "
+                        "VALUES (:rowid, :embedding)"
+                    ),
+                    {"rowid": 999_201, "embedding": "[" + ",".join(["0.0"] * 384) + "]"},
+                )
+            except Exception:
+                pytest.skip("search_vector_embeddings rejected the synthetic seed row")
+
+        async with db.scoped_session(session_maker) as session:
+            pre = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = :rowid"),
+                    {"rowid": 999_201},
+                )
+            ).scalar_one()
+        assert pre >= 1, "seed embedding should exist before removal"
+
+        await project_service.remove_project(test_project_name)
+
+        async with db.scoped_session(session_maker) as session:
+            post = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = :rowid"),
+                    {"rowid": 999_201},
+                )
+            ).scalar_one()
+
+        assert post == 0, (
+            f"search_vector_embeddings still has {post} rows for rowid 999_201 "
+            "— project deletion did not sweep the sqlite-vec embeddings table."
         )
