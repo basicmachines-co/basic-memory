@@ -255,6 +255,18 @@ async def test_remove_project_purges_search_rows(project_service: ProjectService
 
 
 @pytest.mark.asyncio
+async def test_delete_returns_false_for_missing_project_id(project_service: ProjectService):
+    """ProjectRepository.delete must return False when the project id is gone.
+
+    The override loses the base Repository.delete contract if the NoResultFound
+    branch isn't covered — a silent True would mislead callers into thinking
+    a non-existent project was removed.
+    """
+    result = await project_service.repository.delete(9_999_999)
+    assert result is False
+
+
+@pytest.mark.asyncio
 async def test_remove_project_purges_vector_embeddings(project_service: ProjectService):
     """Project deletion must also drop sqlite-vec embeddings keyed by chunk rowid.
 

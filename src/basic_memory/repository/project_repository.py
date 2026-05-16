@@ -14,6 +14,65 @@ from basic_memory.models.project import Project
 from basic_memory.repository.repository import Repository
 
 
+async def _load_sqlite_vec_on_session(session) -> bool:
+    """Ensure the sqlite-vec extension is loaded on this session's connection.
+
+    Returns True when vec0 is available after the call. Returns False when the
+    extension can't be loaded on this Python build (e.g., python.org macOS or
+    Windows interpreters without `enable_load_extension`) — every connection in
+    the pool shares the same interpreter, so a False here also means no
+    embedding row could ever have been written, and skipping the embeddings
+    purge is safe.
+
+    Mirrors SQLiteSearchRepository._ensure_sqlite_vec_loaded but as a free
+    function: we don't have a SearchRepository instance during project delete,
+    and the per-connection nature of extension loading means a pooled connection
+    routed to this session might not have vec loaded even when other
+    connections wrote embeddings.
+    """
+    try:
+        await session.execute(text("SELECT vec_version()"))
+        return True
+    except OperationalError:
+        pass
+
+    try:
+        import sqlite_vec  # type: ignore[import-not-found]
+    except ImportError:
+        logger.debug("sqlite-vec package not installed; skipping vec purge")
+        return False
+
+    async_connection = await session.connection()
+    raw_connection = await async_connection.get_raw_connection()
+    driver_connection = raw_connection.driver_connection
+
+    if not hasattr(driver_connection, "enable_load_extension"):
+        # Trigger: CPython build without sqlite extension support (#711).
+        # Why: load_extension is unavailable, so no connection in this pool
+        #      can host vec0. No embeddings exist anywhere.
+        # Outcome: skip the embeddings purge entirely.
+        logger.debug(
+            "Skipping search_vector_embeddings purge: this Python build does "
+            "not support SQLite extension loading"
+        )
+        return False
+
+    try:
+        await driver_connection.enable_load_extension(True)
+        await driver_connection.load_extension(sqlite_vec.loadable_path())
+        await driver_connection.enable_load_extension(False)
+        await session.execute(text("SELECT vec_version()"))
+    except Exception as exc:
+        logger.warning(
+            "Failed to load sqlite-vec for project delete cleanup; "
+            "skipping embeddings purge: {}",
+            exc,
+        )
+        return False
+
+    return True
+
+
 class ProjectRepository(Repository[Project]):
     """Repository for Project model.
 
@@ -145,6 +204,7 @@ class ProjectRepository(Repository[Project]):
         search initializes), so any of them may be absent on minimal test DBs.
         Inspect the connection once and skip whichever is missing.
         """
+        logger.debug(f"Deleting Project and search rows for project_id: {entity_id}")
         async with db.scoped_session(self.session_maker) as session:
             try:
                 result = await session.execute(
@@ -152,6 +212,7 @@ class ProjectRepository(Repository[Project]):
                 )
                 project = result.scalars().one()
             except NoResultFound:
+                logger.debug(f"No Project found to delete: {entity_id}")
                 return False
 
             dialect_name = session.bind.dialect.name if session.bind else "sqlite"
@@ -176,7 +237,11 @@ class ProjectRepository(Repository[Project]):
             # we delete the chunk rows below.
             if "search_vector_chunks" in existing_tables:
                 if is_sqlite and "search_vector_embeddings" in existing_tables:
-                    try:
+                    # Extension loading is per-connection. We must load vec0 on
+                    # *this* session before the DELETE; otherwise a different
+                    # pooled connection might have written embeddings that we'd
+                    # silently leave behind.
+                    if await _load_sqlite_vec_on_session(session):
                         await session.execute(
                             text(
                                 "DELETE FROM search_vector_embeddings WHERE rowid IN ("
@@ -185,28 +250,13 @@ class ProjectRepository(Repository[Project]):
                             ),
                             {"project_id": entity_id},
                         )
-                    except OperationalError as exc:
-                        # Trigger: the vec0 SQLite extension isn't loaded into this
-                        # connection — common on Windows builds where
-                        # enable_load_extension is unavailable (#711).
-                        # Why: the embeddings table is registered as a vec0 virtual
-                        # table, so any access (even a DELETE) needs the module
-                        # loaded. If it isn't, no row was ever inserted either, so
-                        # there's nothing to leak.
-                        # Outcome: log and continue — the chunk DELETE below still
-                        # runs, and the absence of vec0 means no orphan vectors.
-                        if "vec0" not in str(exc):
-                            raise
-                        logger.debug(
-                            "Skipping search_vector_embeddings purge: vec0 "
-                            "extension not loaded on this connection"
-                        )
                 await session.execute(
                     text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
                     {"project_id": entity_id},
                 )
 
             await session.delete(project)
+            logger.debug(f"Deleted Project and search rows for project_id: {entity_id}")
             return True
 
     async def update_path(self, project_id: int, new_path: str) -> Optional[Project]:
