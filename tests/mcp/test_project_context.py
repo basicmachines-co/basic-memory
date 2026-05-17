@@ -1233,6 +1233,57 @@ async def test_get_project_client_with_project_id_routes_locally_without_cloud(
 
 
 @pytest.mark.asyncio
+async def test_get_project_client_with_project_id_routes_locally_with_cloud_credentials(
+    config_manager, monkeypatch
+):
+    """A local UUID project_id must not be forced through cloud workspace lookup."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import get_project_client
+
+    config = config_manager.load_config()
+    local_path = config_manager.config_dir.parent / "local-project"
+    local_path.mkdir(parents=True, exist_ok=True)
+    config.projects["local-project"] = ProjectEntry(path=str(local_path))
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def fake_get_client(**kwargs) -> AsyncIterator[object]:
+        captured["get_client_kwargs"] = kwargs
+        yield object()
+
+    async def fake_get_active_project(client, project, context=None, headers=None):
+        captured["validated_project"] = project
+        return _project("Local Project", id=99, external_id=project)
+
+    async def fail_resolve_workspace_project_identifier(
+        project_name, context=None
+    ):  # pragma: no cover
+        raise AssertionError("Local project_id should route locally before cloud discovery")
+
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+    monkeypatch.setattr(
+        project_context,
+        "resolve_workspace_project_identifier",
+        fail_resolve_workspace_project_identifier,
+    )
+
+    canonical_uuid = "66666666-6666-6666-6666-666666666666"
+    async with get_project_client(project_id=canonical_uuid) as (_, active):
+        assert active.external_id == canonical_uuid
+
+    assert captured["get_client_kwargs"] == {}
+    assert captured["validated_project"] == canonical_uuid
+
+
+@pytest.mark.asyncio
 async def test_get_project_client_prefers_project_id_over_project_name(monkeypatch):
     """When both project and project_id are passed, the UUID takes precedence."""
     import basic_memory.mcp.project_context as project_context

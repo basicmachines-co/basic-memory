@@ -1459,6 +1459,45 @@ async def get_project_client(
     # Outcome: in pure local mode, treat UUID identifiers as local routing; cloud
     #   discovery still happens when factory/explicit/credentials are present
     cloud_available = factory_mode or explicit_cloud_routing or has_cloud_credentials(config)
+
+    # Trigger: project_id is a local external_id in a mixed local+cloud setup.
+    # Why: UUIDs are not local config keys, so get_project_mode() treats them as
+    #   cloud projects and searches only the cloud workspace index.
+    # Outcome: first give the local ASGI API a chance to resolve the UUID; if it
+    #   is not a local project, keep the existing cloud workspace lookup path.
+    if project_id and config.projects and not factory_mode and not explicit_cloud_routing:
+        try:
+            canonical_project_id = str(UUID(project_id))
+        except ValueError:
+            pass
+        else:
+            with logfire.span(
+                "routing.local_project_id_probe",
+                project_id=canonical_project_id,
+            ):
+                async with get_client() as client:
+                    try:
+                        active_project = await get_active_project(
+                            client,
+                            canonical_project_id,
+                            None,
+                        )
+                    except ToolError as exc:
+                        if "not found" not in str(exc).lower():
+                            raise
+                    else:
+                        route_mode = "local_asgi"
+                        await _clear_cached_active_workspace_for_local_route(context)
+                        await _set_cached_active_project(context, active_project)
+                        with logfire.span(
+                            "routing.client_session",
+                            project_name=active_project.name,
+                            route_mode=route_mode,
+                        ):
+                            logger.debug("Using local ASGI routing for project_id")
+                            yield client, active_project
+                        return
+
     if project_id and not cloud_available:
         project_mode = ProjectMode.LOCAL
 
