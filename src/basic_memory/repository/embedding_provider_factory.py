@@ -151,6 +151,18 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             request_concurrency=app_config.semantic_embedding_request_concurrency,
             **extra_kwargs,
         )
+    elif provider_name == "litellm":
+        from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+
+        model_name = app_config.semantic_embedding_model or "openai/text-embedding-3-small"
+        if model_name == "bge-small-en-v1.5":
+            model_name = "openai/text-embedding-3-small"
+        provider = LiteLLMEmbeddingProvider(
+            model_name=model_name,
+            batch_size=app_config.semantic_embedding_batch_size,
+            request_concurrency=app_config.semantic_embedding_request_concurrency,
+            **extra_kwargs,
+        )
     else:
         raise ValueError(f"Unsupported semantic embedding provider: {provider_name}")
 
