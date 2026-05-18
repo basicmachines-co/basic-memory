@@ -1,181 +1,204 @@
-"""Tests for LiteLLMEmbeddingProvider.
+"""Tests for LiteLLMEmbeddingProvider and factory litellm branch."""
 
-Uses AST parsing and direct SDK mocking to avoid importing the full
-basic_memory dependency chain (logfire, alembic, etc.).
-"""
-
-import ast
+import asyncio
+import builtins
 import sys
-import types
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 
 import pytest
 
-PROVIDER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "src"
-    / "basic_memory"
-    / "repository"
-    / "litellm_provider.py"
+from basic_memory.config import BasicMemoryConfig
+from basic_memory.repository.embedding_provider_factory import (
+    create_embedding_provider,
+    reset_embedding_provider_cache,
 )
-FACTORY_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "src"
-    / "basic_memory"
-    / "repository"
-    / "embedding_provider_factory.py"
-)
+from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
-class TestLiteLLMProviderStructure:
-    """Verify the provider file has the correct structure."""
-
-    def _parse(self):
-        return ast.parse(PROVIDER_PATH.read_text())
-
-    def test_file_exists(self):
-        assert PROVIDER_PATH.exists()
-
-    def test_has_litellm_embedding_provider_class(self):
-        tree = self._parse()
-        classes = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
-        assert "LiteLLMEmbeddingProvider" in classes
-
-    def test_has_embed_documents_method(self):
-        tree = self._parse()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name == "LiteLLMEmbeddingProvider":
-                methods = [
-                    n.name
-                    for n in node.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                ]
-                assert "embed_documents" in methods
-                assert "embed_query" in methods
-                return
-        pytest.fail("LiteLLMEmbeddingProvider class not found")
-
-    def test_embed_documents_is_async(self):
-        tree = self._parse()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name == "LiteLLMEmbeddingProvider":
-                for item in node.body:
-                    if isinstance(item, ast.AsyncFunctionDef) and item.name == "embed_documents":
-                        return
-        pytest.fail("embed_documents is not async")
-
-    def test_uses_drop_params_true(self):
-        src = PROVIDER_PATH.read_text()
-        assert "drop_params" in src
-
-    def test_uses_litellm_aembedding(self):
-        src = PROVIDER_PATH.read_text()
-        assert "aembedding" in src
-
-    def test_has_runtime_log_attrs(self):
-        tree = self._parse()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name == "LiteLLMEmbeddingProvider":
-                methods = [
-                    n.name
-                    for n in node.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                ]
-                assert "runtime_log_attrs" in methods
-                return
-
-    def test_default_model_in_source(self):
-        src = PROVIDER_PATH.read_text()
-        assert "openai/text-embedding-3-small" in src
+def _make_embedding_response(inputs: list[str], dim: int = 3):
+    """Build a fake litellm.aembedding response matching the real shape."""
+    data = []
+    for index, text in enumerate(inputs):
+        base = float(len(text))
+        data.append({"index": index, "embedding": [base + float(d) for d in range(dim)]})
+    return SimpleNamespace(data=data)
 
 
-class TestFactoryRegistration:
-    """Verify the factory recognizes litellm as a provider."""
+def _install_litellm_stub(monkeypatch, dim: int = 3):
+    """Install a fake litellm module and return the mock aembedding callable."""
+    calls: list[dict] = []
 
-    def test_litellm_branch_in_factory(self):
-        src = FACTORY_PATH.read_text()
-        assert 'provider_name == "litellm"' in src
+    async def _aembedding(**kwargs):
+        calls.append(kwargs)
+        return _make_embedding_response(kwargs["input"], dim)
 
-    def test_imports_litellm_provider(self):
-        src = FACTORY_PATH.read_text()
-        assert "LiteLLMEmbeddingProvider" in src
+    module = type(sys)("litellm")
+    setattr(module, "aembedding", _aembedding)
+    monkeypatch.setitem(sys.modules, "litellm", module)
+    return calls
 
 
-class TestLiteLLMSDKInteraction:
-    """Test litellm SDK calls directly (no basic_memory deps needed)."""
+@pytest.fixture(autouse=True)
+def _reset_cache():
+    reset_embedding_provider_cache()
+    yield
+    reset_embedding_provider_cache()
 
-    def test_aembedding_called_with_drop_params(self):
-        fake = types.ModuleType("litellm")
-        response = MagicMock()
-        response.data = [{"index": 0, "embedding": [0.1, 0.2]}]
-        fake.aembedding = AsyncMock(return_value=response)
-        sys.modules["litellm"] = fake
 
-        try:
-            import asyncio
+@pytest.mark.asyncio
+async def test_litellm_provider_embed_query(monkeypatch):
+    """embed_query should return a single vector through litellm.aembedding."""
+    _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="openai/text-embedding-3-small", batch_size=2, dimensions=3
+    )
+    result = await provider.embed_query("hello world")
+    assert len(result) == 3
+    assert all(isinstance(v, float) for v in result)
 
-            async def run():
-                await fake.aembedding(
-                    model="openai/text-embedding-3-small",
-                    input=["hello"],
-                    drop_params=True,
-                )
 
-            asyncio.run(run())
-            kwargs = fake.aembedding.call_args.kwargs
-            assert kwargs["drop_params"] is True
-            assert kwargs["model"] == "openai/text-embedding-3-small"
-        finally:
-            del sys.modules["litellm"]
+@pytest.mark.asyncio
+async def test_litellm_provider_embed_documents(monkeypatch):
+    """embed_documents should return vectors for each input text."""
+    _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="openai/text-embedding-3-small", batch_size=2, dimensions=3
+    )
+    texts = ["first doc", "second doc", "third doc"]
+    result = await provider.embed_documents(texts)
+    assert len(result) == 3
+    assert all(len(v) == 3 for v in result)
 
-    def test_aembedding_forwards_api_key(self):
-        fake = types.ModuleType("litellm")
-        response = MagicMock()
-        response.data = [{"index": 0, "embedding": [0.1]}]
-        fake.aembedding = AsyncMock(return_value=response)
-        sys.modules["litellm"] = fake
 
-        try:
-            import asyncio
+@pytest.mark.asyncio
+async def test_litellm_provider_empty_input(monkeypatch):
+    """embed_documents with empty list should return empty list."""
+    _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    result = await provider.embed_documents([])
+    assert result == []
 
-            async def run():
-                await fake.aembedding(
-                    model="openai/text-embedding-3-small",
-                    input=["hello"],
-                    api_key="sk-test",
-                    drop_params=True,
-                )
 
-            asyncio.run(run())
-            assert fake.aembedding.call_args.kwargs["api_key"] == "sk-test"
-        finally:
-            del sys.modules["litellm"]
+@pytest.mark.asyncio
+async def test_litellm_provider_batching(monkeypatch):
+    """Provider should split inputs into batches of batch_size."""
+    calls = _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="openai/text-embedding-3-small", batch_size=2, dimensions=3
+    )
+    texts = ["a", "b", "c", "d", "e"]
+    result = await provider.embed_documents(texts)
 
-    def test_aembedding_response_has_vectors(self):
-        fake = types.ModuleType("litellm")
-        response = MagicMock()
-        response.data = [
-            {"index": 0, "embedding": [0.1, 0.2, 0.3]},
-            {"index": 1, "embedding": [0.4, 0.5, 0.6]},
-        ]
-        fake.aembedding = AsyncMock(return_value=response)
-        sys.modules["litellm"] = fake
+    assert len(result) == 5
+    assert len(calls) == 3  # 2 + 2 + 1
 
-        try:
-            import asyncio
 
-            async def run():
-                resp = await fake.aembedding(
-                    model="openai/text-embedding-3-small",
-                    input=["hello", "world"],
-                    drop_params=True,
-                )
-                return resp
+@pytest.mark.asyncio
+async def test_litellm_provider_api_key_forwarded(monkeypatch):
+    """api_key should be passed to litellm.aembedding when set."""
+    calls = _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="openai/text-embedding-3-small",
+        api_key="sk-test-key",
+        dimensions=3,
+    )
+    await provider.embed_query("test")
+    assert calls[0]["api_key"] == "sk-test-key"
 
-            resp = asyncio.run(run())
-            assert len(resp.data) == 2
-            assert resp.data[0]["embedding"] == [0.1, 0.2, 0.3]
-            assert resp.data[1]["embedding"] == [0.4, 0.5, 0.6]
-        finally:
-            del sys.modules["litellm"]
+
+@pytest.mark.asyncio
+async def test_litellm_provider_api_key_omitted_when_none(monkeypatch):
+    """api_key should not appear in kwargs when not set."""
+    calls = _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="openai/text-embedding-3-small", dimensions=3
+    )
+    await provider.embed_query("test")
+    assert "api_key" not in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_drop_params_always_set(monkeypatch):
+    """drop_params=True should always be in the call kwargs."""
+    calls = _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    await provider.embed_query("test")
+    assert calls[0]["drop_params"] is True
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_dimension_mismatch_raises_error(monkeypatch):
+    """Provider should fail fast when response dimensions differ from configured."""
+    _install_litellm_stub(monkeypatch, dim=3)
+    provider = LiteLLMEmbeddingProvider(dimensions=5)
+    with pytest.raises(RuntimeError, match="3-dimensional vectors"):
+        await provider.embed_documents(["test text"])
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_missing_dependency_raises_actionable_error(monkeypatch):
+    """Missing litellm package should raise SemanticDependenciesMissingError."""
+    monkeypatch.delitem(sys.modules, "litellm", raising=False)
+    original_import = builtins.__import__
+
+    def _raising_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "litellm":
+            raise ImportError("litellm not installed")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _raising_import)
+
+    provider = LiteLLMEmbeddingProvider(model_name="openai/text-embedding-3-small")
+    with pytest.raises(SemanticDependenciesMissingError):
+        await provider.embed_query("test")
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_output_ordering(monkeypatch):
+    """Vectors should be returned in the same order as input texts."""
+    _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(dimensions=3, batch_size=2)
+    texts = ["short", "a longer text here"]
+    result = await provider.embed_documents(texts)
+
+    assert result[0][0] == float(len("short"))
+    assert result[1][0] == float(len("a longer text here"))
+
+
+def test_factory_selects_litellm_provider():
+    """Factory should select LiteLLMEmbeddingProvider for litellm config."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="openai/text-embedding-3-small",
+    )
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider.model_name == "openai/text-embedding-3-small"
+
+
+def test_factory_maps_default_model_for_litellm():
+    """Factory should remap bge-small-en-v1.5 default to openai/text-embedding-3-small."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="bge-small-en-v1.5",
+    )
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider.model_name == "openai/text-embedding-3-small"
+
+
+def test_runtime_log_attrs():
+    """runtime_log_attrs should return batch_size and concurrency."""
+    provider = LiteLLMEmbeddingProvider(batch_size=32, request_concurrency=8)
+    attrs = provider.runtime_log_attrs()
+    assert attrs["provider_batch_size"] == 32
+    assert attrs["request_concurrency"] == 8
