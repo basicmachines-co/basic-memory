@@ -94,8 +94,12 @@ async def test_get_client_preinitializes_local_asgi_database(config_manager, mon
             fastapi_app.state.session_maker = previous_session_maker
 
 
+@pytest.mark.parametrize("async_override", [False, True])
 @pytest.mark.asyncio
-async def test_get_client_uses_existing_local_asgi_database_override(config_manager):
+async def test_get_client_uses_existing_local_asgi_database_override(
+    config_manager,
+    async_override,
+):
     """Local ASGI routing honors FastAPI test dependency overrides."""
     from basic_memory.api.app import app as fastapi_app
     from basic_memory.deps import get_engine_factory
@@ -113,9 +117,17 @@ async def test_get_client_uses_existing_local_asgi_database_override(config_mana
     session_maker = object()
     calls = []
 
-    def override_engine_factory():
-        calls.append("override")
-        return engine, session_maker
+    if async_override:
+
+        async def override_engine_factory():
+            calls.append("override")
+            return engine, session_maker
+
+    else:
+
+        def override_engine_factory():
+            calls.append("override")
+            return engine, session_maker
 
     fastapi_app.dependency_overrides[get_engine_factory] = override_engine_factory
 
