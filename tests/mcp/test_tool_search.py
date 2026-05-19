@@ -4,6 +4,7 @@ import pytest
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import (
@@ -269,7 +270,8 @@ async def test_search_workspace_memory_url_routes_with_local_config(monkeypatch,
     assert captured["project"] == "personal/main"
     assert captured["project_id"] is None
     assert captured["search_project_id"] == "11111111-1111-1111-1111-111111111111"
-    assert captured["payload"]["permalink"] == "personal/main/tests/search-note"
+    payload = cast(dict[str, object], captured["payload"])
+    assert payload["permalink"] == "personal/main/tests/search-note"
     assert isinstance(response, dict)
     assert response["results"][0]["permalink"] == "personal/main/tests/search-note"
 

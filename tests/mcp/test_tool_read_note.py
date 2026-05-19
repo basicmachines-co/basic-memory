@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from textwrap import dedent
+from typing import Any, cast
 
 import pytest
 
@@ -22,6 +23,10 @@ class _ContextState:
 
     async def set_state(self, key: str, value: object, **kwargs) -> None:
         self._state[key] = value
+
+
+def _ctx(context: _ContextState) -> Any:
+    return cast(Any, context)
 
 
 def test_parse_opening_frontmatter_handles_crlf():
@@ -297,7 +302,7 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
         "memory://todo",
         project="personal/main",
         output_format="json",
-        context=context,
+        context=_ctx(context),
     )
 
     assert isinstance(result, dict)

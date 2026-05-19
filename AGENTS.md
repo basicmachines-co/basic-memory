@@ -56,6 +56,15 @@ Run `just test-smoke` when you specifically need the MCP smoke flow.
 
 If testmon is “cold,” the first run may be long. Subsequent runs get much faster.
 
+### PR CI Gate
+
+Before opening or updating a PR, run the checks that mirror the common required CI failures:
+
+- Run `just typecheck` in addition to targeted `ruff` and `pytest` commands when tests were added or changed.
+- Sign commits with `git commit -s` so DCO passes. If a PR branch already has unsigned commits, rewrite the branch with signed-off commits before asking for review.
+- Use a semantic PR title accepted by `.github/workflows/pr-title.yml`: `type(scope): summary`.
+- Use one of the allowed scopes: `core`, `cli`, `api`, `mcp`, `sync`, `ui`, `deps`, `installer`.
+
 ### Test Structure
 
 - `tests/` - Unit tests for individual components (mocked, fast)
