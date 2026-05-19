@@ -206,6 +206,43 @@ async def test_workspace_identifier_project_detection_returns_project(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Workspace 'team-acme' was not found.",
+        "No accessible workspaces found for this account.",
+        "Unable to discover projects in any accessible workspace. Failed workspaces: team-acme",
+    ],
+)
+async def test_workspace_identifier_project_detection_ignores_discovery_failures(
+    monkeypatch,
+    config_manager,
+    message,
+):
+    """Workspace detection should fall back when cloud discovery is unavailable."""
+    from basic_memory.services import link_resolver
+
+    async def fail_workspace_identifier(identifier, context=None):
+        raise ValueError(message)
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._workspace_identifier_discovery_available",
+        lambda identifier, config: True,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.resolve_workspace_qualified_identifier",
+        fail_workspace_identifier,
+    )
+
+    detected = await link_resolver.detect_project_from_workspace_identifier_prefix(
+        "team-acme/research/note",
+        config_manager.config,
+    )
+
+    assert detected is None
+
+
+@pytest.mark.asyncio
 async def test_workspace_identifier_project_detection_allows_mixed_local_cloud_config(
     monkeypatch,
     config_manager,
