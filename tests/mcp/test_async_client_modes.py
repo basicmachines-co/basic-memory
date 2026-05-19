@@ -52,6 +52,47 @@ async def test_get_client_default_uses_local_asgi_transport(config_manager):
 
 
 @pytest.mark.asyncio
+async def test_get_client_preinitializes_local_asgi_database(config_manager, monkeypatch):
+    """Local ASGI routing initializes DB state before request handling."""
+    from basic_memory import db
+    from basic_memory.api.app import app as fastapi_app
+
+    cfg = config_manager.load_config()
+    config_manager.save_config(cfg)
+
+    previous_engine = getattr(fastapi_app.state, "engine", None)
+    previous_session_maker = getattr(fastapi_app.state, "session_maker", None)
+    fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+    fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+
+    engine = object()
+    session_maker = object()
+    calls = []
+
+    async def fake_get_or_create_db(db_path):
+        calls.append(db_path)
+        return engine, session_maker
+
+    monkeypatch.setattr(db, "get_or_create_db", fake_get_or_create_db)
+
+    try:
+        async with get_client() as client:
+            assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+            assert calls == [cfg.database_path]
+            assert fastapi_app.state.engine is engine
+            assert fastapi_app.state.session_maker is session_maker
+    finally:
+        if previous_engine is None:
+            fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.engine = previous_engine
+        if previous_session_maker is None:
+            fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.session_maker = previous_session_maker
+
+
+@pytest.mark.asyncio
 async def test_get_client_explicit_cloud_uses_api_key(config_manager, monkeypatch):
     cfg = config_manager.load_config()
     cfg.cloud_host = "https://cloud.example.test"

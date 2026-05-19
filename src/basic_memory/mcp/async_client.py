@@ -34,11 +34,8 @@ def _build_timeout() -> Timeout:
     )
 
 
-def _asgi_client(timeout: Timeout) -> AsyncClient:
-    """Create a local ASGI client."""
-    # Import on first local-client use so CLI help/version paths can import
-    # routing helpers without constructing the full FastAPI router graph.
-    from basic_memory.api.app import app as fastapi_app
+def _build_asgi_client(fastapi_app, timeout: Timeout) -> AsyncClient:
+    """Create a local ASGI client for an already-prepared FastAPI app."""
     from basic_memory.workspace_context import workspace_permalink_headers
 
     return AsyncClient(
@@ -49,6 +46,33 @@ def _asgi_client(timeout: Timeout) -> AsyncClient:
         # the same workspace permalink metadata that cloud proxy calls receive.
         headers=workspace_permalink_headers(),
     )
+
+
+async def _prepare_local_asgi_database(fastapi_app) -> None:
+    """Initialize local ASGI database state before the first request."""
+    from basic_memory import db
+
+    config = ConfigManager().config
+    engine, session_maker = await db.get_or_create_db(config.database_path)
+    fastapi_app.state.engine = engine
+    fastapi_app.state.session_maker = session_maker
+
+
+@asynccontextmanager
+async def _asgi_client(timeout: Timeout) -> AsyncIterator[AsyncClient]:
+    """Create a local ASGI client."""
+    # Import on first local-client use so CLI help/version paths can import
+    # routing helpers without constructing the full FastAPI router graph.
+    from basic_memory.api.app import app as fastapi_app
+
+    # Trigger: local ASGITransport does not execute FastAPI lifespan startup.
+    # Why: letting request dependencies initialize Postgres can run asyncpg DDL
+    # under Starlette's request loop and trigger CPython's empty-ready-queue race.
+    # Outcome: request handling sees the same app.state database objects as API
+    # lifespan startup would have provided.
+    await _prepare_local_asgi_database(fastapi_app)
+    async with _build_asgi_client(fastapi_app, timeout) as client:
+        yield client
 
 
 async def _resolve_cloud_token(config) -> str:
@@ -260,7 +284,12 @@ def create_client() -> AsyncClient:
 
     if _force_local_mode() or not _force_cloud_mode():
         logger.info("Creating ASGI client for local Basic Memory API")
-        return _asgi_client(timeout)
+        # Deprecated sync path: create_client() cannot await the local ASGI
+        # pre-initialization used by get_client(), so callers that need proper
+        # resource setup should use the async context manager instead.
+        from basic_memory.api.app import app as fastapi_app
+
+        return _build_asgi_client(fastapi_app, timeout)
 
     logger.info("Creating HTTP client for cloud proxy (legacy create_client path)")
     config = ConfigManager().config
