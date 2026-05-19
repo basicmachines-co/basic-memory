@@ -3,6 +3,8 @@
 import pytest
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import (
@@ -169,6 +171,109 @@ async def test_search_memory_url_with_project_prefix(client, test_project):
         )
     else:
         pytest.fail(f"Search failed with error: {response}")
+
+
+@pytest.mark.asyncio
+async def test_search_workspace_memory_url_routes_with_local_config(monkeypatch, config_manager):
+    """Workspace-qualified memory URL searches should self-route in mixed mode."""
+    import importlib
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+    )
+    from basic_memory.schemas.cloud import WorkspaceInfo
+    from basic_memory.schemas.project_info import ProjectItem
+    from basic_memory.schemas.search import SearchItemType, SearchResult
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    config = config_manager.load_config()
+    config.projects["hermes-memory"] = ProjectEntry(
+        path=str(config_manager.config_dir.parent / "hermes-memory")
+    )
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    personal = WorkspaceInfo(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    project_item = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (WorkspaceProjectEntry(workspace=personal, project=project_item),),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def fake_get_project_client(project=None, context=None, project_id=None):
+        captured["project"] = project
+        captured["project_id"] = project_id
+        yield object(), SimpleNamespace(name="main", external_id=project_item.external_id)
+
+    async def fake_resolve_project_and_path(client, identifier, project=None, context=None):
+        assert identifier == "memory://personal/main/tests/search-note"
+        assert project == "main"
+        return None, "personal/main/tests/search-note", True
+
+    class FakeSearchClient:
+        def __init__(self, client, project_id):
+            captured["search_project_id"] = project_id
+
+        async def search(self, payload, *, page, page_size):
+            captured["payload"] = payload
+            return SearchResponse(
+                results=[
+                    SearchResult(
+                        title="Search Note",
+                        type=SearchItemType.ENTITY,
+                        score=1.0,
+                        permalink="personal/main/tests/search-note",
+                        file_path="tests/Search Note.md",
+                    )
+                ],
+                current_page=page,
+                page_size=page_size,
+                total=1,
+            )
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", FakeSearchClient)
+
+    response = await search_notes(
+        query="memory://personal/main/tests/search-note",
+        output_format="json",
+    )
+
+    assert captured["project"] == "personal/main"
+    assert captured["project_id"] is None
+    assert captured["search_project_id"] == "11111111-1111-1111-1111-111111111111"
+    payload = cast(dict[str, object], captured["payload"])
+    assert payload["permalink"] == "personal/main/tests/search-note"
+    assert isinstance(response, dict)
+    assert response["results"][0]["permalink"] == "personal/main/tests/search-note"
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
-    _cloud_workspace_discovery_available,
+    _workspace_identifier_discovery_available,
     detect_project_from_memory_url_prefix,
     get_project_client,
     add_project_metadata,
@@ -368,8 +368,9 @@ async def edit_note(
                 config,
                 context=context,
             )
-        elif _cloud_workspace_discovery_available(
-            config
+        elif _workspace_identifier_discovery_available(
+            identifier,
+            config,
         ) and is_workspace_qualified_plain_identifier(identifier):
             detected = await detect_project_from_workspace_identifier_prefix(
                 identifier,

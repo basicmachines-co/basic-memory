@@ -914,8 +914,8 @@ async def test_edit_note_workspace_qualified_plain_permalink_requires_explicit_r
 
     monkeypatch.setattr(
         edit_note_module,
-        "_cloud_workspace_discovery_available",
-        lambda config: True,
+        "_workspace_identifier_discovery_available",
+        lambda identifier, config: True,
     )
     monkeypatch.setattr(
         edit_note_module,
@@ -958,8 +958,8 @@ async def test_edit_note_workspace_qualified_plain_permalink_json_error(
 
     monkeypatch.setattr(
         edit_note_module,
-        "_cloud_workspace_discovery_available",
-        lambda config: True,
+        "_workspace_identifier_discovery_available",
+        lambda identifier, config: True,
     )
     monkeypatch.setattr(
         edit_note_module,
@@ -1001,8 +1001,8 @@ async def test_edit_note_ambiguous_namespace_identifier_returns_guidance(
 
     monkeypatch.setattr(
         edit_note_module,
-        "_cloud_workspace_discovery_available",
-        lambda config: True,
+        "_workspace_identifier_discovery_available",
+        lambda identifier, config: True,
     )
     monkeypatch.setattr(
         edit_note_module,
@@ -1055,6 +1055,83 @@ async def test_edit_note_workspace_project_args_compose_explicit_route(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_edit_note_plain_workspace_route_returns_guidance_with_local_config(
+    monkeypatch,
+    config_manager,
+    test_project,
+):
+    """Mixed local+cloud configs should still stop ambiguous plain write routes."""
+    from contextlib import asynccontextmanager
+    import importlib
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+    )
+    from basic_memory.schemas.cloud import WorkspaceInfo
+    from basic_memory.schemas.project_info import ProjectItem
+
+    edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
+    config = config_manager.load_config()
+    config.projects["hermes-memory"] = ProjectEntry(
+        path=str(config_manager.config_dir.parent / "hermes-memory")
+    )
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    personal = WorkspaceInfo(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (
+            WorkspaceProjectEntry(
+                workspace=personal,
+                project=ProjectItem(
+                    id=1,
+                    external_id="11111111-1111-1111-1111-111111111111",
+                    name="main",
+                    path="/tmp/main",
+                    is_default=False,
+                ),
+            ),
+        ),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    @asynccontextmanager
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("ambiguous plain identifiers should not select a project client")
+        yield
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(edit_note_module, "get_project_client", fail_if_called)
+
+    result = await edit_note(
+        identifier="personal/main/team/plain-edit-note",
+        operation="append",
+        content="\nAppended via plain workspace-qualified permalink.",
+        project=None,
+    )
+
+    assert isinstance(result, str)
+    assert "# Edit Failed - Ambiguous Identifier" in result
+    assert 'project="personal/main"' in result
+
+
+@pytest.mark.asyncio
 async def test_edit_note_three_segment_plain_path_stays_local_without_workspace_discovery(
     monkeypatch,
     client,
@@ -1077,8 +1154,8 @@ async def test_edit_note_three_segment_plain_path_stays_local_without_workspace_
 
     monkeypatch.setattr(
         edit_note_module,
-        "_cloud_workspace_discovery_available",
-        lambda config: False,
+        "_workspace_identifier_discovery_available",
+        lambda identifier, config: False,
     )
     monkeypatch.setattr(
         edit_note_module,
