@@ -16,11 +16,13 @@ from basic_memory.mcp.async_client import (
 @pytest.fixture(autouse=True)
 def _reset_async_client_state(monkeypatch):
     async_client_module._client_factory = None
+    async_client_module._prepared_local_asgi_databases.clear()
     monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
     monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
     monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
     yield
     async_client_module._client_factory = None
+    async_client_module._prepared_local_asgi_databases.clear()
 
 
 @pytest.mark.asyncio
@@ -141,6 +143,76 @@ async def test_get_client_uses_existing_local_asgi_database_override(
         assert not hasattr(fastapi_app.state, "session_maker")
     finally:
         fastapi_app.dependency_overrides = previous_overrides
+        if previous_engine is None:
+            fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.engine = previous_engine
+        if previous_session_maker is None:
+            fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.session_maker = previous_session_maker
+
+
+@pytest.mark.asyncio
+async def test_get_client_keeps_local_asgi_database_during_overlapping_contexts(
+    config_manager,
+    monkeypatch,
+):
+    """Local ASGI database state stays installed until the last overlapping client exits."""
+    from basic_memory import db
+    from basic_memory.api.app import app as fastapi_app
+
+    cfg = config_manager.load_config()
+    config_manager.save_config(cfg)
+
+    previous_engine = getattr(fastapi_app.state, "engine", None)
+    previous_session_maker = getattr(fastapi_app.state, "session_maker", None)
+    fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+    fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+
+    engine = object()
+    session_maker = object()
+    calls = []
+
+    async def fake_get_or_create_db(db_path):
+        calls.append(db_path)
+        return engine, session_maker
+
+    monkeypatch.setattr(db, "get_or_create_db", fake_get_or_create_db)
+
+    first_context = get_client()
+    second_context = get_client()
+    first_entered = False
+    second_entered = False
+    first_exited = False
+
+    try:
+        first_client = await first_context.__aenter__()
+        first_entered = True
+        second_client = await second_context.__aenter__()
+        second_entered = True
+
+        assert isinstance(first_client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+        assert isinstance(second_client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+        assert calls == [cfg.database_path]
+
+        await first_context.__aexit__(None, None, None)
+        first_exited = True
+
+        assert fastapi_app.state.engine is engine
+        assert fastapi_app.state.session_maker is session_maker
+
+        await second_context.__aexit__(None, None, None)
+        second_entered = False
+
+        assert not hasattr(fastapi_app.state, "engine")
+        assert not hasattr(fastapi_app.state, "session_maker")
+    finally:
+        if second_entered:
+            await second_context.__aexit__(None, None, None)
+        if first_entered and not first_exited:
+            await first_context.__aexit__(None, None, None)
+
         if previous_engine is None:
             fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
         else:

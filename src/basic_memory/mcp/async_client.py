@@ -1,6 +1,8 @@
 import os
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from inspect import isawaitable
+from threading import RLock
 from typing import TYPE_CHECKING, AsyncIterator, Callable, Optional, cast
 
 from fastapi import FastAPI
@@ -15,6 +17,17 @@ if TYPE_CHECKING:
 
 LocalDatabaseState = tuple["AsyncEngine", "async_sessionmaker[AsyncSession]"]
 _MISSING_STATE_VALUE = object()
+
+
+@dataclass
+class _PreparedLocalAsgiDatabase:
+    active_count: int
+    previous_engine: object
+    previous_session_maker: object
+
+
+_prepared_local_asgi_database_lock = RLock()
+_prepared_local_asgi_databases: dict[FastAPI, _PreparedLocalAsgiDatabase] = {}
 
 
 def _force_local_mode() -> bool:
@@ -73,30 +86,81 @@ async def _resolve_local_asgi_database(app: FastAPI) -> LocalDatabaseState:
     return await db.get_or_create_db(config.database_path)
 
 
+def _retain_prepared_local_asgi_database(app: FastAPI) -> bool:
+    """Retain an active local ASGI database preparation if one exists."""
+    with _prepared_local_asgi_database_lock:
+        active = _prepared_local_asgi_databases.get(app)
+        if active is None:
+            return False
+
+        active.active_count += 1
+        return True
+
+
+def _install_prepared_local_asgi_database(
+    app: FastAPI,
+    database_state: LocalDatabaseState,
+) -> None:
+    """Install local ASGI database state or retain an overlapping installation."""
+    with _prepared_local_asgi_database_lock:
+        active = _prepared_local_asgi_databases.get(app)
+        if active is not None:
+            active.active_count += 1
+            return
+
+        previous_engine = getattr(app.state, "engine", _MISSING_STATE_VALUE)
+        previous_session_maker = getattr(app.state, "session_maker", _MISSING_STATE_VALUE)
+        engine, session_maker = database_state
+
+        app.state.engine = engine
+        app.state.session_maker = session_maker
+        _prepared_local_asgi_databases[app] = _PreparedLocalAsgiDatabase(
+            active_count=1,
+            previous_engine=previous_engine,
+            previous_session_maker=previous_session_maker,
+        )
+
+
+def _restore_local_asgi_state_attribute(app: FastAPI, name: str, previous_value: object) -> None:
+    """Restore a FastAPI app.state attribute captured before local ASGI preparation."""
+    if previous_value is _MISSING_STATE_VALUE:
+        if hasattr(app.state, name):
+            delattr(app.state, name)
+    else:
+        setattr(app.state, name, previous_value)
+
+
+def _release_prepared_local_asgi_database(app: FastAPI) -> None:
+    """Release local ASGI database state after a client context exits."""
+    with _prepared_local_asgi_database_lock:
+        active = _prepared_local_asgi_databases.get(app)
+        if active is None:
+            raise RuntimeError("Local ASGI database state released without a matching retain")
+
+        active.active_count -= 1
+        if active.active_count > 0:
+            return
+
+        del _prepared_local_asgi_databases[app]
+        _restore_local_asgi_state_attribute(app, "engine", active.previous_engine)
+        _restore_local_asgi_state_attribute(
+            app,
+            "session_maker",
+            active.previous_session_maker,
+        )
+
+
 @asynccontextmanager
 async def _prepared_local_asgi_database(app: FastAPI) -> AsyncIterator[None]:
     """Initialize local ASGI database state before the first request."""
-    previous_engine = getattr(app.state, "engine", _MISSING_STATE_VALUE)
-    previous_session_maker = getattr(app.state, "session_maker", _MISSING_STATE_VALUE)
-
-    engine, session_maker = await _resolve_local_asgi_database(app)
-    app.state.engine = engine
-    app.state.session_maker = session_maker
+    if not _retain_prepared_local_asgi_database(app):
+        database_state = await _resolve_local_asgi_database(app)
+        _install_prepared_local_asgi_database(app, database_state)
 
     try:
         yield
     finally:
-        if previous_engine is _MISSING_STATE_VALUE:
-            if hasattr(app.state, "engine"):
-                delattr(app.state, "engine")
-        else:
-            app.state.engine = previous_engine
-
-        if previous_session_maker is _MISSING_STATE_VALUE:
-            if hasattr(app.state, "session_maker"):
-                delattr(app.state, "session_maker")
-        else:
-            app.state.session_maker = previous_session_maker
+        _release_prepared_local_asgi_database(app)
 
 
 @asynccontextmanager
