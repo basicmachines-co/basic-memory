@@ -1,6 +1,7 @@
 import os
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import AsyncIterator, Callable, Optional
+from inspect import isawaitable
+from typing import TYPE_CHECKING, AsyncIterator, Callable, Optional, cast
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Timeout
@@ -8,6 +9,12 @@ from loguru import logger
 
 import logfire
 from basic_memory.config import ConfigManager, ProjectMode
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+LocalDatabaseState = tuple["AsyncEngine", "async_sessionmaker[AsyncSession]"]
+_MISSING_STATE_VALUE = object()
 
 
 def _force_local_mode() -> bool:
@@ -49,14 +56,47 @@ def _build_asgi_client(app: FastAPI, timeout: Timeout) -> AsyncClient:
     )
 
 
-async def _prepare_local_asgi_database(app: FastAPI) -> None:
-    """Initialize local ASGI database state before the first request."""
+async def _resolve_local_asgi_database(app: FastAPI) -> LocalDatabaseState:
+    """Resolve database state for a local ASGI request."""
+    from basic_memory.deps import get_engine_factory
+
+    override = app.dependency_overrides.get(get_engine_factory)
+    if override is not None:
+        result = override()
+        if isawaitable(result):
+            result = await result
+        return cast(LocalDatabaseState, result)
+
     from basic_memory import db
 
     config = ConfigManager().config
-    engine, session_maker = await db.get_or_create_db(config.database_path)
+    return await db.get_or_create_db(config.database_path)
+
+
+@asynccontextmanager
+async def _prepared_local_asgi_database(app: FastAPI) -> AsyncIterator[None]:
+    """Initialize local ASGI database state before the first request."""
+    previous_engine = getattr(app.state, "engine", _MISSING_STATE_VALUE)
+    previous_session_maker = getattr(app.state, "session_maker", _MISSING_STATE_VALUE)
+
+    engine, session_maker = await _resolve_local_asgi_database(app)
     app.state.engine = engine
     app.state.session_maker = session_maker
+
+    try:
+        yield
+    finally:
+        if previous_engine is _MISSING_STATE_VALUE:
+            if hasattr(app.state, "engine"):
+                delattr(app.state, "engine")
+        else:
+            app.state.engine = previous_engine
+
+        if previous_session_maker is _MISSING_STATE_VALUE:
+            if hasattr(app.state, "session_maker"):
+                delattr(app.state, "session_maker")
+        else:
+            app.state.session_maker = previous_session_maker
 
 
 @asynccontextmanager
@@ -71,9 +111,9 @@ async def _asgi_client(timeout: Timeout) -> AsyncIterator[AsyncClient]:
     # under Starlette's request loop and trigger CPython's empty-ready-queue race.
     # Outcome: request handling sees the same app.state database objects as API
     # lifespan startup would have provided.
-    await _prepare_local_asgi_database(fastapi_app)
-    async with _build_asgi_client(fastapi_app, timeout) as client:
-        yield client
+    async with _prepared_local_asgi_database(fastapi_app):
+        async with _build_asgi_client(fastapi_app, timeout) as client:
+            yield client
 
 
 async def _resolve_cloud_token(config) -> str:

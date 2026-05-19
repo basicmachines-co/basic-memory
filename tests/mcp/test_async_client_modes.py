@@ -81,7 +81,54 @@ async def test_get_client_preinitializes_local_asgi_database(config_manager, mon
             assert calls == [cfg.database_path]
             assert fastapi_app.state.engine is engine
             assert fastapi_app.state.session_maker is session_maker
+        assert not hasattr(fastapi_app.state, "engine")
+        assert not hasattr(fastapi_app.state, "session_maker")
     finally:
+        if previous_engine is None:
+            fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.engine = previous_engine
+        if previous_session_maker is None:
+            fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.session_maker = previous_session_maker
+
+
+@pytest.mark.asyncio
+async def test_get_client_uses_existing_local_asgi_database_override(config_manager):
+    """Local ASGI routing honors FastAPI test dependency overrides."""
+    from basic_memory.api.app import app as fastapi_app
+    from basic_memory.deps import get_engine_factory
+
+    cfg = config_manager.load_config()
+    config_manager.save_config(cfg)
+
+    previous_overrides = dict(fastapi_app.dependency_overrides)
+    previous_engine = getattr(fastapi_app.state, "engine", None)
+    previous_session_maker = getattr(fastapi_app.state, "session_maker", None)
+    fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+    fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+
+    engine = object()
+    session_maker = object()
+    calls = []
+
+    def override_engine_factory():
+        calls.append("override")
+        return engine, session_maker
+
+    fastapi_app.dependency_overrides[get_engine_factory] = override_engine_factory
+
+    try:
+        async with get_client() as client:
+            assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+            assert calls == ["override"]
+            assert fastapi_app.state.engine is engine
+            assert fastapi_app.state.session_maker is session_maker
+        assert not hasattr(fastapi_app.state, "engine")
+        assert not hasattr(fastapi_app.state, "session_maker")
+    finally:
+        fastapi_app.dependency_overrides = previous_overrides
         if previous_engine is None:
             fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
         else:
