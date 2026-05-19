@@ -1,11 +1,11 @@
 import os
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from asyncio import Lock
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from inspect import isawaitable
 from threading import RLock
-from typing import TYPE_CHECKING, AsyncIterator, Callable, Optional, cast
+from typing import TYPE_CHECKING, Annotated, Any, AsyncIterator, Callable, Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
@@ -24,9 +24,11 @@ class _PreparedLocalAsgiDatabase:
     active_count: int
     previous_engine: object
     previous_session_maker: object
+    dependency_context: AbstractAsyncContextManager[LocalDatabaseState]
 
 
 _prepared_local_asgi_database_lock = RLock()
+_prepared_local_asgi_database_prepare_locks: dict[FastAPI, Lock] = {}
 _prepared_local_asgi_databases: dict[FastAPI, _PreparedLocalAsgiDatabase] = {}
 
 
@@ -69,21 +71,60 @@ def _build_asgi_client(app: FastAPI, timeout: Timeout) -> AsyncClient:
     )
 
 
-async def _resolve_local_asgi_database(app: FastAPI) -> LocalDatabaseState:
+def _get_prepared_local_asgi_database_prepare_lock(app: FastAPI) -> Lock:
+    """Get the async lock that serializes first-time DB preparation for an app."""
+    with _prepared_local_asgi_database_lock:
+        prepare_lock = _prepared_local_asgi_database_prepare_locks.get(app)
+        if prepare_lock is None:
+            prepare_lock = Lock()
+            _prepared_local_asgi_database_prepare_locks[app] = prepare_lock
+        return prepare_lock
+
+
+@asynccontextmanager
+async def _resolve_local_asgi_database(app: FastAPI) -> AsyncIterator[LocalDatabaseState]:
     """Resolve database state for a local ASGI request."""
+    from fastapi.dependencies.utils import get_dependant, solve_dependencies
+
     from basic_memory.deps import get_engine_factory
 
-    override = app.dependency_overrides.get(get_engine_factory)
-    if override is not None:
-        result = override()
-        if isawaitable(result):
-            result = await result
-        return cast(LocalDatabaseState, result)
+    async def resolve_database_state(
+        database_state: Annotated[LocalDatabaseState, Depends(get_engine_factory)],
+    ) -> LocalDatabaseState:
+        return database_state
 
-    from basic_memory import db
+    scope: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "method": "GET",
+        "scheme": "http",
+        "path": "/",
+        "raw_path": b"/",
+        "root_path": "",
+        "query_string": b"",
+        "headers": [],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "app": app,
+        "path_params": {},
+    }
 
-    config = ConfigManager().config
-    return await db.get_or_create_db(config.database_path)
+    async with AsyncExitStack() as request_stack, AsyncExitStack() as function_stack:
+        scope["fastapi_inner_astack"] = request_stack
+        scope["fastapi_function_astack"] = function_stack
+        request = Request(scope)
+        dependant = get_dependant(path="/", call=resolve_database_state)
+        solved = await solve_dependencies(
+            request=request,
+            dependant=dependant,
+            dependency_overrides_provider=app,
+            async_exit_stack=request_stack,
+            embed_body_fields=False,
+        )
+        if solved.errors:
+            raise RuntimeError(f"Failed to resolve local ASGI database dependency: {solved.errors}")
+
+        yield await resolve_database_state(**solved.values)
 
 
 def _retain_prepared_local_asgi_database(app: FastAPI) -> bool:
@@ -100,13 +141,13 @@ def _retain_prepared_local_asgi_database(app: FastAPI) -> bool:
 def _install_prepared_local_asgi_database(
     app: FastAPI,
     database_state: LocalDatabaseState,
+    dependency_context: AbstractAsyncContextManager[LocalDatabaseState],
 ) -> None:
-    """Install local ASGI database state or retain an overlapping installation."""
+    """Install local ASGI database state after dependency resolution."""
     with _prepared_local_asgi_database_lock:
         active = _prepared_local_asgi_databases.get(app)
         if active is not None:
-            active.active_count += 1
-            return
+            raise RuntimeError("Local ASGI database state installed while another state is active")
 
         previous_engine = getattr(app.state, "engine", _MISSING_STATE_VALUE)
         previous_session_maker = getattr(app.state, "session_maker", _MISSING_STATE_VALUE)
@@ -118,6 +159,7 @@ def _install_prepared_local_asgi_database(
             active_count=1,
             previous_engine=previous_engine,
             previous_session_maker=previous_session_maker,
+            dependency_context=dependency_context,
         )
 
 
@@ -130,7 +172,9 @@ def _restore_local_asgi_state_attribute(app: FastAPI, name: str, previous_value:
         setattr(app.state, name, previous_value)
 
 
-def _release_prepared_local_asgi_database(app: FastAPI) -> None:
+def _release_prepared_local_asgi_database(
+    app: FastAPI,
+) -> AbstractAsyncContextManager[LocalDatabaseState] | None:
     """Release local ASGI database state after a client context exits."""
     with _prepared_local_asgi_database_lock:
         active = _prepared_local_asgi_databases.get(app)
@@ -139,7 +183,7 @@ def _release_prepared_local_asgi_database(app: FastAPI) -> None:
 
         active.active_count -= 1
         if active.active_count > 0:
-            return
+            return None
 
         del _prepared_local_asgi_databases[app]
         _restore_local_asgi_state_attribute(app, "engine", active.previous_engine)
@@ -148,19 +192,29 @@ def _release_prepared_local_asgi_database(app: FastAPI) -> None:
             "session_maker",
             active.previous_session_maker,
         )
+        return active.dependency_context
 
 
 @asynccontextmanager
 async def _prepared_local_asgi_database(app: FastAPI) -> AsyncIterator[None]:
     """Initialize local ASGI database state before the first request."""
-    if not _retain_prepared_local_asgi_database(app):
-        database_state = await _resolve_local_asgi_database(app)
-        _install_prepared_local_asgi_database(app, database_state)
+    prepare_lock = _get_prepared_local_asgi_database_prepare_lock(app)
+    async with prepare_lock:
+        if not _retain_prepared_local_asgi_database(app):
+            database_context = _resolve_local_asgi_database(app)
+            database_state = await database_context.__aenter__()
+            try:
+                _install_prepared_local_asgi_database(app, database_state, database_context)
+            except Exception:
+                await database_context.__aexit__(None, None, None)
+                raise
 
     try:
         yield
     finally:
-        _release_prepared_local_asgi_database(app)
+        database_context = _release_prepared_local_asgi_database(app)
+        if database_context is not None:
+            await database_context.__aexit__(None, None, None)
 
 
 @asynccontextmanager

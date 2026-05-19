@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 import httpx
 import pytest
@@ -17,12 +18,14 @@ from basic_memory.mcp.async_client import (
 def _reset_async_client_state(monkeypatch):
     async_client_module._client_factory = None
     async_client_module._prepared_local_asgi_databases.clear()
+    async_client_module._prepared_local_asgi_database_prepare_locks.clear()
     monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
     monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
     monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
     yield
     async_client_module._client_factory = None
     async_client_module._prepared_local_asgi_databases.clear()
+    async_client_module._prepared_local_asgi_database_prepare_locks.clear()
 
 
 @pytest.mark.asyncio
@@ -139,6 +142,63 @@ async def test_get_client_uses_existing_local_asgi_database_override(
             assert calls == ["override"]
             assert fastapi_app.state.engine is engine
             assert fastapi_app.state.session_maker is session_maker
+        assert not hasattr(fastapi_app.state, "engine")
+        assert not hasattr(fastapi_app.state, "session_maker")
+    finally:
+        fastapi_app.dependency_overrides = previous_overrides
+        if previous_engine is None:
+            fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.engine = previous_engine
+        if previous_session_maker is None:
+            fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+        else:
+            fastapi_app.state.session_maker = previous_session_maker
+
+
+@pytest.mark.asyncio
+async def test_get_client_resolves_local_asgi_database_override_with_fastapi_di(
+    config_manager,
+):
+    """Local ASGI DB pre-init honors FastAPI dependency injection and cleanup."""
+    from fastapi import Request
+
+    from basic_memory.api.app import app as fastapi_app
+    from basic_memory.deps import get_engine_factory
+
+    cfg = config_manager.load_config()
+    config_manager.save_config(cfg)
+
+    previous_overrides = dict(fastapi_app.dependency_overrides)
+    previous_engine = getattr(fastapi_app.state, "engine", None)
+    previous_session_maker = getattr(fastapi_app.state, "session_maker", None)
+    fastapi_app.state._state.pop("engine", None)  # pyright: ignore[reportPrivateUsage]
+    fastapi_app.state._state.pop("session_maker", None)  # pyright: ignore[reportPrivateUsage]
+
+    engine = object()
+    session_maker = object()
+    calls = []
+    cleanup = []
+
+    async def override_engine_factory(
+        request: Request,
+    ) -> AsyncIterator[tuple[object, object]]:
+        calls.append(request.app)
+        try:
+            yield engine, session_maker
+        finally:
+            cleanup.append("closed")
+
+    fastapi_app.dependency_overrides[get_engine_factory] = override_engine_factory
+
+    try:
+        async with get_client() as client:
+            assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+            assert calls == [fastapi_app]
+            assert cleanup == []
+            assert fastapi_app.state.engine is engine
+            assert fastapi_app.state.session_maker is session_maker
+        assert cleanup == ["closed"]
         assert not hasattr(fastapi_app.state, "engine")
         assert not hasattr(fastapi_app.state, "session_maker")
     finally:
