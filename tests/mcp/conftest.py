@@ -20,6 +20,31 @@ def mcp() -> FastMCP:
     return cast(Any, mcp_server)
 
 
+class ContextState:
+    """Minimal FastMCP context-state stub for MCP tests."""
+
+    def __init__(self):
+        self._state: dict[str, object] = {}
+
+    async def get_state(self, key: str):
+        return self._state.get(key)
+
+    async def set_state(self, key: str, value: object, **kwargs) -> None:
+        self._state[key] = value
+
+    async def info(self, message: str) -> None:
+        self._state["info_message"] = message
+
+
+def ctx(context: ContextState) -> Any:
+    return cast(Any, context)
+
+
+@pytest.fixture
+def context_state() -> ContextState:
+    return ContextState()
+
+
 @pytest.fixture(scope="function")
 def app(
     app_config, project_config, engine_factory, config_manager

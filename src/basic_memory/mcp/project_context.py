@@ -1357,10 +1357,22 @@ async def detect_project_from_identifier_prefix(
         return None
 
     if _workspace_identifier_discovery_available(identifier, config):
-        workspace_resolution = await resolve_workspace_qualified_identifier(
-            identifier,
-            context=context,
+        workspace_discovery_fallback_errors = (
+            "not found",
+            "no accessible workspaces",
+            "unable to discover",
         )
+        try:
+            workspace_resolution = await resolve_workspace_qualified_identifier(
+                identifier,
+                context=context,
+            )
+        except ValueError as exc:
+            message = str(exc).lower()
+            if any(error in message for error in workspace_discovery_fallback_errors):
+                return None
+            raise
+
         if workspace_resolution is not None:
             return workspace_resolution.project_identifier
 
@@ -1375,7 +1387,7 @@ async def detect_project_from_identifier_prefix(
             )
         except ValueError as exc:
             message = str(exc).lower()
-            if "not found" in message or "no accessible workspaces" in message:
+            if any(error in message for error in workspace_discovery_fallback_errors):
                 return None
             raise
 

@@ -1,12 +1,11 @@
 """Tests for workspace MCP tools."""
 
-from typing import Any, cast
-
 import pytest
 
 from basic_memory.mcp.project_context import get_available_workspaces, set_workspace_provider
 from basic_memory.mcp.tools.workspaces import list_workspaces
 from basic_memory.schemas.cloud import WorkspaceInfo
+from tests.mcp.conftest import ContextState, ctx
 
 
 def _workspace(
@@ -26,17 +25,6 @@ def _workspace(
         role=role,
         is_default=is_default,
     )
-
-
-class _ContextState:
-    def __init__(self):
-        self._state: dict[str, object] = {}
-
-    async def get_state(self, key: str):
-        return self._state.get(key)
-
-    async def set_state(self, key: str, value: object, **kwargs) -> None:
-        self._state[key] = value
 
 
 @pytest.mark.asyncio
@@ -145,7 +133,7 @@ async def test_list_workspaces_oauth_error_bubbles_up(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_workspaces_uses_context_cache_path(monkeypatch):
-    context = _ContextState()
+    context = ContextState()
     call_count = {"fetches": 0}
     workspace = _workspace(
         tenant_id="33333333-3333-3333-3333-333333333333",
@@ -169,8 +157,8 @@ async def test_list_workspaces_uses_context_cache_path(monkeypatch):
         fake_get_available_workspaces,
     )
 
-    first = await list_workspaces(context=cast(Any, context))
-    second = await list_workspaces(context=cast(Any, context))
+    first = await list_workspaces(context=ctx(context))
+    second = await list_workspaces(context=ctx(context))
 
     assert "# Available Workspaces (1)" in first
     assert "# Available Workspaces (1)" in second
@@ -254,14 +242,14 @@ async def test_get_available_workspaces_provider_caches_in_context():
         return [workspace]
 
     set_workspace_provider(counting_provider)
-    context = _ContextState()
+    context = ContextState()
 
     # First call: provider is invoked, result cached
-    first = await get_available_workspaces(context=cast(Any, context))
+    first = await get_available_workspaces(context=ctx(context))
     assert len(first) == 1
     assert call_count["provider"] == 1
 
     # Second call: served from context cache, provider not called again
-    second = await get_available_workspaces(context=cast(Any, context))
+    second = await get_available_workspaces(context=ctx(context))
     assert len(second) == 1
     assert call_count["provider"] == 1

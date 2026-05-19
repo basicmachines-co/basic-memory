@@ -3,30 +3,13 @@
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from textwrap import dedent
-from typing import Any, cast
 
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from basic_memory.utils import normalize_newlines
-
-
-class _ContextState:
-    """Minimal FastMCP context-state stub for routing tests."""
-
-    def __init__(self):
-        self._state: dict[str, object] = {}
-
-    async def get_state(self, key: str):
-        return self._state.get(key)
-
-    async def set_state(self, key: str, value: object, **kwargs) -> None:
-        self._state[key] = value
-
-
-def _ctx(context: _ContextState) -> Any:
-    return cast(Any, context)
+from tests.mcp.conftest import ContextState, ctx
 
 
 def test_parse_opening_frontmatter_handles_crlf():
@@ -228,7 +211,7 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
         path="/tmp/stale-main",
         is_default=False,
     )
-    context = _ContextState()
+    context = ContextState()
     await context.set_state("active_workspace", personal.model_dump())
     await context.set_state("active_project", stale_project.model_dump())
 
@@ -302,7 +285,7 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
         "memory://todo",
         project="personal/main",
         output_format="json",
-        context=_ctx(context),
+        context=ctx(context),
     )
 
     assert isinstance(result, dict)

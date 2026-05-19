@@ -4,28 +4,15 @@ from __future__ import annotations
 
 import importlib
 from contextlib import contextmanager
-from typing import Any, cast
 
 import logfire
 import pytest
 
 from basic_memory.config import ProjectEntry
 from basic_memory.schemas.cloud import WorkspaceInfo
+from tests.mcp.conftest import ContextState, ctx
 
 project_context = importlib.import_module("basic_memory.mcp.project_context")
-
-
-class _ContextState:
-    """Minimal FastMCP context-state stub for unit tests."""
-
-    def __init__(self) -> None:
-        self._state: dict[str, object] = {}
-
-    async def get_state(self, key: str):
-        return self._state.get(key)
-
-    async def set_state(self, key: str, value: object, **kwargs) -> None:
-        self._state[key] = value
 
 
 def _capture_spans():
@@ -42,7 +29,7 @@ def _capture_spans():
 @pytest.mark.asyncio
 async def test_resolve_workspace_parameter_emits_routing_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
-    context = _ContextState()
+    context = ContextState()
     workspace = WorkspaceInfo(
         tenant_id="11111111-1111-1111-1111-111111111111",
         workspace_type="personal",
@@ -58,7 +45,7 @@ async def test_resolve_workspace_parameter_emits_routing_span(monkeypatch) -> No
     monkeypatch.setattr(logfire, "span", fake_span)
     monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
 
-    resolved = await project_context.resolve_workspace_parameter(context=cast(Any, context))
+    resolved = await project_context.resolve_workspace_parameter(context=ctx(context))
 
     assert resolved.tenant_id == workspace.tenant_id
     assert spans == [
