@@ -139,11 +139,11 @@ async def test_workspace_identifier_project_detection_requires_workspace_shape(
     """Two-segment project-relative paths should not trigger workspace discovery."""
     from basic_memory.services import link_resolver
 
-    def fail_if_called(config):
+    def fail_if_called(identifier, config):
         raise AssertionError("plain project-relative paths should skip cloud discovery")
 
     monkeypatch.setattr(
-        "basic_memory.mcp.project_context._cloud_workspace_discovery_available",
+        "basic_memory.mcp.project_context._workspace_identifier_discovery_available",
         fail_if_called,
     )
 
@@ -164,8 +164,8 @@ async def test_workspace_identifier_project_detection_skips_without_discovery(
     from basic_memory.services import link_resolver
 
     monkeypatch.setattr(
-        "basic_memory.mcp.project_context._cloud_workspace_discovery_available",
-        lambda config: False,
+        "basic_memory.mcp.project_context._workspace_identifier_discovery_available",
+        lambda identifier, config: False,
     )
 
     detected = await link_resolver.detect_project_from_workspace_identifier_prefix(
@@ -189,8 +189,8 @@ async def test_workspace_identifier_project_detection_returns_project(
         return SimpleNamespace(project_identifier="team-acme/research")
 
     monkeypatch.setattr(
-        "basic_memory.mcp.project_context._cloud_workspace_discovery_available",
-        lambda config: True,
+        "basic_memory.mcp.project_context._workspace_identifier_discovery_available",
+        lambda identifier, config: True,
     )
     monkeypatch.setattr(
         "basic_memory.mcp.project_context.resolve_workspace_qualified_identifier",
@@ -203,6 +203,67 @@ async def test_workspace_identifier_project_detection_returns_project(
     )
 
     assert detected == "team-acme/research"
+
+
+@pytest.mark.asyncio
+async def test_workspace_identifier_project_detection_allows_mixed_local_cloud_config(
+    monkeypatch,
+    config_manager,
+):
+    """Plain workspace routes should be discoverable even with local projects configured."""
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+    )
+    from basic_memory.schemas.cloud import WorkspaceInfo
+    from basic_memory.schemas.project_info import ProjectItem
+    from basic_memory.services import link_resolver
+
+    config = config_manager.load_config()
+    config.projects["hermes-memory"] = ProjectEntry(
+        path=str(config_manager.config_dir.parent / "hermes-memory")
+    )
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    workspace = WorkspaceInfo(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    index = _build_workspace_project_index(
+        (workspace,),
+        (WorkspaceProjectEntry(workspace=workspace, project=project),),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._ensure_workspace_project_index",
+        fake_index,
+    )
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+
+    detected = await link_resolver.detect_project_from_workspace_identifier_prefix(
+        "personal/main/todo",
+        config_manager.config,
+    )
+
+    assert detected == "personal/main"
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,7 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from textwrap import dedent
 
 import pytest
@@ -7,6 +9,19 @@ import pytest
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from basic_memory.utils import normalize_newlines
+
+
+class _ContextState:
+    """Minimal FastMCP context-state stub for routing tests."""
+
+    def __init__(self):
+        self._state: dict[str, object] = {}
+
+    async def get_state(self, key: str):
+        return self._state.get(key)
+
+    async def set_state(self, key: str, value: object, **kwargs) -> None:
+        self._state[key] = value
 
 
 def test_parse_opening_frontmatter_handles_crlf():
@@ -164,6 +179,130 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
     assert "Note Not Found" in result
     assert "Missing Exact Title" in result
     assert "existing note content" not in result
+
+
+@pytest.mark.asyncio
+async def test_read_note_explicit_workspace_project_ignores_stale_cached_project(
+    monkeypatch,
+    config_manager,
+):
+    """Explicit workspace routing should use the resolved cloud UUID, not stale cache."""
+    import importlib
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import WorkspaceProjectEntry
+    from basic_memory.schemas.project_info import ProjectItem
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    config = config_manager.load_config()
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    personal = project_context.WorkspaceInfo(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    expected_uuid = "22222222-2222-2222-2222-222222222222"
+    expected_project = ProjectItem(
+        id=2,
+        external_id=expected_uuid,
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    stale_project = ProjectItem(
+        id=99,
+        external_id="33333333-3333-3333-3333-333333333333",
+        name="main",
+        path="/tmp/stale-main",
+        is_default=False,
+    )
+    context = _ContextState()
+    await context.set_state("active_workspace", personal.model_dump())
+    await context.set_state("active_project", stale_project.model_dump())
+
+    async def fake_resolve_workspace_project_identifier(project_name, context=None):
+        assert project_name == "personal/main"
+        return WorkspaceProjectEntry(workspace=personal, project=expected_project)
+
+    @asynccontextmanager
+    async def fake_get_client(project_name=None, workspace=None):
+        assert project_name == "main"
+        assert workspace == "personal-tenant"
+        yield object()
+
+    class FakeProjectResolveResponse:
+        def json(self):
+            return {
+                "external_id": expected_uuid,
+                "project_id": expected_project.id,
+                "name": expected_project.name,
+                "permalink": expected_project.permalink,
+                "path": expected_project.path,
+                "is_active": True,
+                "is_default": False,
+                "resolution_method": "permalink",
+            }
+
+    async def fake_call_post(*args, **kwargs):
+        return FakeProjectResolveResponse()
+
+    class FakeKnowledgeClient:
+        def __init__(self, client, project_id):
+            assert project_id == expected_uuid
+
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            assert identifier == "personal/main/todo"
+            return "entity-1"
+
+        async def get_entity(self, entity_id: str):
+            assert entity_id == "entity-1"
+            return SimpleNamespace(
+                title="TODO",
+                permalink="personal/main/todo",
+                file_path="TODO.md",
+            )
+
+    class FakeResourceClient:
+        def __init__(self, client, project_id):
+            assert project_id == expected_uuid
+
+        async def read(self, entity_id: str):
+            assert entity_id == "entity-1"
+            return SimpleNamespace(
+                status_code=200,
+                text="---\ntitle: TODO\n---\n\n# TODO - Priorities & Tasks\n",
+            )
+
+    monkeypatch.setattr(
+        project_context,
+        "resolve_workspace_project_identifier",
+        fake_resolve_workspace_project_identifier,
+    )
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", FakeKnowledgeClient)
+    monkeypatch.setattr(clients_mod, "ResourceClient", FakeResourceClient)
+
+    result = await read_note_module.read_note(
+        "memory://todo",
+        project="personal/main",
+        output_format="json",
+        context=context,
+    )
+
+    assert isinstance(result, dict)
+    assert result["permalink"] == "personal/main/todo"
+    assert result["content"].strip() == "# TODO - Priorities & Tasks"
 
 
 @pytest.mark.asyncio

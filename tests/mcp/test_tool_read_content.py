@@ -6,6 +6,10 @@ We keep these tests focused on path boundary/security checks, and rely on
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -155,6 +159,109 @@ async def test_read_content_allows_safe_path_integration(client, test_project):
     result = await read_content(project=test_project.name, path="notes/meeting")
     assert result["type"] == "text"
     assert "safe note" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_read_content_workspace_memory_url_routes_with_local_config(
+    monkeypatch,
+    config_manager,
+):
+    """Workspace-qualified memory URLs should route even when local projects exist."""
+    import importlib
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+    )
+    from basic_memory.schemas.cloud import WorkspaceInfo
+    from basic_memory.schemas.project_info import ProjectItem
+
+    read_content_module = importlib.import_module("basic_memory.mcp.tools.read_content")
+    config = config_manager.load_config()
+    config.projects["hermes-memory"] = ProjectEntry(
+        path=str(config_manager.config_dir.parent / "hermes-memory")
+    )
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    personal = WorkspaceInfo(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="main",
+        path="/tmp/main",
+        is_default=False,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (WorkspaceProjectEntry(workspace=personal, project=project),),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    @asynccontextmanager
+    async def fake_get_project_client(project=None, context=None, project_id=None):
+        assert project == "personal/main"
+        assert project_id is None
+        yield (
+            object(),
+            SimpleNamespace(
+                name="main",
+                external_id="11111111-1111-1111-1111-111111111111",
+                home=Path("/tmp/main"),
+            ),
+        )
+
+    async def fake_resolve_project_and_path(client, identifier, project=None, context=None):
+        assert identifier == "memory://personal/main/docs/report"
+        assert project == "main"
+        return None, "personal/main/docs/report", True
+
+    async def fake_resolve_entity_id(client, project_id, url):
+        assert project_id == "11111111-1111-1111-1111-111111111111"
+        assert url == "personal/main/docs/report"
+        return "entity-1"
+
+    class FakeResponse:
+        headers = {"content-type": "text/markdown", "content-length": "17"}
+        text = "# Routed Content"
+        content = b"# Routed Content"
+
+    async def fake_call_get(client, path, **kwargs):
+        assert path == "/v2/projects/11111111-1111-1111-1111-111111111111/resource/entity-1"
+        return FakeResponse()
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(read_content_module, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(
+        read_content_module,
+        "resolve_project_and_path",
+        fake_resolve_project_and_path,
+    )
+    monkeypatch.setattr(read_content_module, "resolve_entity_id", fake_resolve_entity_id)
+    monkeypatch.setattr(read_content_module, "call_get", fake_call_get)
+
+    result = await read_content(path="memory://personal/main/docs/report")
+
+    assert result == {
+        "type": "text",
+        "text": "# Routed Content",
+        "content_type": "text/markdown",
+        "encoding": "utf-8",
+    }
 
 
 @pytest.mark.asyncio
