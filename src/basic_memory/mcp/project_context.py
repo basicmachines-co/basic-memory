@@ -142,6 +142,15 @@ async def _set_cached_active_project(
         await context.set_state("default_project_name", active_project.name)
 
 
+async def _clear_cached_active_project(context: Optional[Context]) -> None:
+    """Clear cached project metadata that may no longer match the active route."""
+    if not context:
+        return
+
+    await context.set_state("active_project", None)
+    await context.set_state("default_project_name", None)
+
+
 async def _get_cached_active_workspace(context: Optional[Context]) -> Optional[WorkspaceInfo]:
     """Return the cached active workspace from context when available."""
     if not context:
@@ -167,8 +176,7 @@ async def _set_cached_active_workspace(
         # Why: project names are only unique inside one workspace, so a cached
         #   ProjectItem from the previous tenant can point at the wrong project
         # Outcome: force the next validation call to resolve within the new tenant
-        await context.set_state("active_project", None)
-        await context.set_state("default_project_name", None)
+        await _clear_cached_active_project(context)
 
     await context.set_state("active_workspace", active_workspace.model_dump())
 
@@ -522,6 +530,28 @@ def _cloud_workspace_discovery_available(config: BasicMemoryConfig) -> bool:
         is_factory_mode()
         or (_explicit_routing() and not _force_local_mode())
         or (not config.projects and has_cloud_credentials(config))
+    )
+
+
+def _workspace_identifier_discovery_available(
+    identifier: str,
+    config: BasicMemoryConfig,
+) -> bool:
+    """Return True when an identifier is allowed to consult workspace discovery."""
+    if _cloud_workspace_discovery_available(config):
+        return True
+
+    from basic_memory.mcp.async_client import (
+        _explicit_routing,
+        _force_local_mode,
+    )
+
+    if _explicit_routing() and _force_local_mode():
+        return False
+
+    return (
+        has_cloud_credentials(config)
+        and _split_workspace_identifier_segments(identifier) is not None
     )
 
 
@@ -1326,7 +1356,7 @@ async def detect_project_from_identifier_prefix(
         # Outcome: keep unqualified search/title input on the active/default project route.
         return None
 
-    if _cloud_workspace_discovery_available(config):
+    if _workspace_identifier_discovery_available(identifier, config):
         workspace_resolution = await resolve_workspace_qualified_identifier(
             identifier,
             context=context,
@@ -1462,9 +1492,26 @@ async def get_project_client(
     if project_id and not cloud_available:
         project_mode = ProjectMode.LOCAL
 
+    if (
+        project_id
+        and config.projects
+        and not factory_mode
+        and not explicit_cloud_routing
+        and project_mode == ProjectMode.CLOUD
+    ):
+        try:
+            canonical_project_id = str(UUID(project_id))
+        except ValueError:
+            pass
+        else:
+            workspace_index = await _ensure_workspace_project_index(context=context)
+            if canonical_project_id not in workspace_index.entries_by_external_id:
+                project_mode = ProjectMode.LOCAL
+
     if factory_mode or project_mode == ProjectMode.CLOUD or explicit_cloud_routing:
         route_mode = "factory" if factory_mode else "cloud_proxy"
         active_ws: WorkspaceInfo | None = None
+        resolved_entry: WorkspaceProjectEntry | None = None
         workspace_id: str
         project_for_api = _unqualified_project_identifier(resolved_project)
 
@@ -1487,6 +1534,13 @@ async def get_project_client(
 
         if active_ws is not None:
             await _set_cached_active_workspace(context, active_ws)
+        if resolved_entry is not None:
+            cached_project = await _get_cached_active_project(context)
+            if (
+                cached_project is not None
+                and cached_project.external_id != resolved_entry.project.external_id
+            ):
+                await _clear_cached_active_project(context)
         with logfire.span(
             "routing.client_session",
             project_name=project_for_api,

@@ -801,7 +801,7 @@ async def test_detect_project_from_memory_url_prefix_skips_workspace_discovery_f
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fail_if_called)
 
     resolved = await detect_project_from_memory_url_prefix(
-        "memory://notes/foo/bar",
+        "memory://notes/foo",
         BasicMemoryConfig(
             projects={"main": ProjectEntry(path="/tmp/main")},
             cloud_api_key="bmc_test123",
@@ -809,6 +809,65 @@ async def test_detect_project_from_memory_url_prefix_skips_workspace_discovery_f
     )
 
     assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_detect_project_from_identifier_prefix_resolves_workspace_with_local_config(
+    monkeypatch,
+):
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig, ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        detect_project_from_identifier_prefix,
+    )
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (
+            WorkspaceProjectEntry(
+                workspace=personal,
+                project=_project("main", id=1, external_id="personal-main-id"),
+            ),
+        ),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+
+    config = BasicMemoryConfig(
+        projects={"hermes-memory": ProjectEntry(path="/tmp/hermes-memory")},
+        cloud_api_key="bmc_test123",
+    )
+
+    assert (
+        await detect_project_from_identifier_prefix(
+            "memory://personal/main/main-to-do-list",
+            config,
+        )
+        == "personal/main"
+    )
+    assert (
+        await detect_project_from_identifier_prefix(
+            "personal/main/main-to-do-list",
+            config,
+        )
+        == "personal/main"
+    )
 
 
 @pytest.mark.asyncio
@@ -1230,6 +1289,231 @@ async def test_get_project_client_with_project_id_routes_locally_without_cloud(
     # ASGI fallback is selected (not the per-project cloud-by-default path).
     assert captured["get_client_kwargs"] == {}
     assert captured["validated_project"] == canonical_uuid
+
+
+@pytest.mark.asyncio
+async def test_get_project_client_with_local_project_id_routes_locally_with_cloud_credentials(
+    config_manager, monkeypatch
+):
+    """A local-only project_id must not be forced through the cloud workspace index."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+    )
+
+    config = config_manager.load_config()
+    config.projects["hermes-memory"] = ProjectEntry(
+        path=str(config_manager.config_dir.parent / "hermes-memory")
+    )
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (
+            WorkspaceProjectEntry(
+                workspace=personal,
+                project=_project(
+                    "main",
+                    id=1,
+                    external_id="11111111-1111-1111-1111-111111111111",
+                ),
+            ),
+        ),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def fake_get_client(**kwargs) -> AsyncIterator[object]:
+        captured["get_client_kwargs"] = kwargs
+        yield object()
+
+    async def fake_get_active_project(client, project, context=None, headers=None):
+        captured["validated_project"] = project
+        return _project("Hermes Memory", id=99, external_id=project)
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr(project_context, "has_cloud_credentials", lambda _config: True)
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+
+    local_uuid = "55555555-5555-5555-5555-555555555555"
+    async with project_context.get_project_client(project_id=local_uuid) as (_, active):
+        assert active.external_id == local_uuid
+
+    assert captured["get_client_kwargs"] == {}
+    assert captured["validated_project"] == local_uuid
+
+
+@pytest.mark.asyncio
+async def test_get_project_client_with_cloud_project_id_routes_to_workspace_with_local_config(
+    config_manager, monkeypatch
+):
+    """Cloud project_id routing still uses the workspace index in mixed mode."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+    )
+
+    config = config_manager.load_config()
+    config.projects["hermes-memory"] = ProjectEntry(
+        path=str(config_manager.config_dir.parent / "hermes-memory")
+    )
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    cloud_uuid = "22222222-2222-2222-2222-222222222222"
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    cloud_project = _project("main", id=2, external_id=cloud_uuid)
+    index = _build_workspace_project_index(
+        (personal,),
+        (WorkspaceProjectEntry(workspace=personal, project=cloud_project),),
+    )
+
+    async def fake_index(context=None):
+        return index
+
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def fake_get_client(project_name=None, workspace=None):
+        captured["project_name"] = project_name
+        captured["workspace"] = workspace
+        yield object()
+
+    async def fake_get_active_project(client, project, context=None, headers=None):
+        captured["validated_project"] = project
+        return _project(project, id=cloud_project.id, external_id=cloud_project.external_id)
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr(project_context, "has_cloud_credentials", lambda _config: True)
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
+
+    async with project_context.get_project_client(project_id=cloud_uuid) as (_, active):
+        assert active.external_id == cloud_uuid
+
+    assert captured == {
+        "project_name": "main",
+        "workspace": "personal-tenant",
+        "validated_project": "main",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_project_client_clears_stale_cached_project_for_workspace_route(
+    config_manager, monkeypatch
+):
+    """Workspace routes must not reuse a same-name project with a different UUID."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import WorkspaceProjectEntry
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(config)
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    expected_uuid = "22222222-2222-2222-2222-222222222222"
+    expected_project = _project("main", id=2, external_id=expected_uuid)
+    stale_project = ProjectItem(
+        id=99,
+        external_id="33333333-3333-3333-3333-333333333333",
+        name="main",
+        path="/tmp/stale-main",
+        is_default=False,
+    )
+    context = _ContextState()
+    await context.set_state("active_workspace", personal.model_dump())
+    await context.set_state("active_project", stale_project.model_dump())
+
+    async def fake_resolve_workspace_project_identifier(project_name, context=None):
+        assert project_name == "personal/main"
+        return WorkspaceProjectEntry(workspace=personal, project=expected_project)
+
+    @asynccontextmanager
+    async def fake_get_client(project_name=None, workspace=None):
+        assert project_name == "main"
+        assert workspace == "personal-tenant"
+        yield object()
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "external_id": expected_uuid,
+                "project_id": expected_project.id,
+                "name": expected_project.name,
+                "permalink": expected_project.permalink,
+                "path": expected_project.path,
+                "is_active": True,
+                "is_default": False,
+                "resolution_method": "permalink",
+            }
+
+    calls = {"count": 0}
+
+    async def fake_call_post(*args, **kwargs):
+        calls["count"] += 1
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        project_context,
+        "resolve_workspace_project_identifier",
+        fake_resolve_workspace_project_identifier,
+    )
+    monkeypatch.setattr(project_context, "has_cloud_credentials", lambda _config: True)
+    monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+
+    async with project_context.get_project_client(
+        project="personal/main",
+        context=_ctx(context),
+    ) as (_, active):
+        assert active.external_id == expected_uuid
+
+    cached_project = await context.get_state("active_project")
+    assert isinstance(cached_project, dict)
+    assert cached_project["external_id"] == expected_uuid
+    assert calls["count"] == 1
 
 
 @pytest.mark.asyncio
