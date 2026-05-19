@@ -2,6 +2,7 @@ import os
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import AsyncIterator, Callable, Optional
 
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
@@ -34,12 +35,12 @@ def _build_timeout() -> Timeout:
     )
 
 
-def _build_asgi_client(fastapi_app, timeout: Timeout) -> AsyncClient:
+def _build_asgi_client(app: FastAPI, timeout: Timeout) -> AsyncClient:
     """Create a local ASGI client for an already-prepared FastAPI app."""
     from basic_memory.workspace_context import workspace_permalink_headers
 
     return AsyncClient(
-        transport=ASGITransport(app=fastapi_app),
+        transport=ASGITransport(app=app),
         base_url="http://test",
         timeout=timeout,
         # Local ASGI calls still cross the HTTP boundary, so request handlers need
@@ -48,14 +49,14 @@ def _build_asgi_client(fastapi_app, timeout: Timeout) -> AsyncClient:
     )
 
 
-async def _prepare_local_asgi_database(fastapi_app) -> None:
+async def _prepare_local_asgi_database(app: FastAPI) -> None:
     """Initialize local ASGI database state before the first request."""
     from basic_memory import db
 
     config = ConfigManager().config
     engine, session_maker = await db.get_or_create_db(config.database_path)
-    fastapi_app.state.engine = engine
-    fastapi_app.state.session_maker = session_maker
+    app.state.engine = engine
+    app.state.session_maker = session_maker
 
 
 @asynccontextmanager
