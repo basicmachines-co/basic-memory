@@ -35,11 +35,7 @@ async def write_note(
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: Annotated[dict | None, BeforeValidator(coerce_dict)] = None,
-    # Force/replace are the file-write idioms models default to.
-    overwrite: Annotated[
-        bool | None,
-        Field(default=None, validation_alias=AliasChoices("overwrite", "force", "replace")),
-    ] = None,
+    overwrite: bool | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:

@@ -310,31 +310,40 @@ async def test_write_note_accepts_directory_aliases(mcp_server, app, test_projec
 
 
 @pytest.mark.asyncio
-async def test_write_note_accepts_overwrite_aliases(mcp_server, app, test_project):
-    """`force`/`replace` should map to `overwrite`."""
+async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_project):
+    """Canonical overwrite=True must reach the handler (#818 regression)."""
     async with Client(mcp_server) as client:
-        # First create
         await client.call_tool(
             "write_note",
             {
                 "project": test_project.name,
-                "title": "Overwrite Alias Note",
+                "title": "Overwrite Canonical Note",
                 "directory": "overwrite-test",
                 "content": "v1",
             },
         )
-        # Overwrite using `force` alias
+        blocked = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Overwrite Canonical Note",
+                "directory": "overwrite-test",
+                "content": "v2",
+            },
+        )
+        assert "# Error: Note already exists" in blocked.content[0].text
+
         result = await client.call_tool(
             "write_note",
             {
                 "project": test_project.name,
-                "title": "Overwrite Alias Note",
+                "title": "Overwrite Canonical Note",
                 "directory": "overwrite-test",
                 "content": "v2",
-                "force": True,  # alias for overwrite
+                "overwrite": True,
             },
         )
-        assert "Updated note" in result.content[0].text or "Created note" in result.content[0].text
+        assert "# Updated note" in result.content[0].text
 
 
 # --- move_note aliases ---
@@ -538,3 +547,19 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
                 assert canonical in props, f"{tool_name}: canonical '{canonical}' missing"
             for alias in must_not_have:
                 assert alias not in props, f"{tool_name}: alias '{alias}' leaked into schema"
+
+        # #818: AliasChoices on optional bool broke external-client JSON schema (null-only).
+        overwrite_schema = tools["write_note"].inputSchema["properties"]["overwrite"]
+        schema_types: set[str] = set()
+        if "type" in overwrite_schema:
+            raw = overwrite_schema["type"]
+            if isinstance(raw, str):
+                schema_types.add(raw)
+            else:
+                schema_types.update(raw)
+        for option in overwrite_schema.get("anyOf", ()):
+            if "type" in option:
+                schema_types.add(option["type"])
+        assert "boolean" in schema_types, (
+            f"write_note overwrite must expose boolean in schema, got {overwrite_schema}"
+        )
