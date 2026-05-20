@@ -1,5 +1,8 @@
 # Docker Compose configuration for Basic Memory with PostgreSQL
-# Use this for local development and testing with Postgres backend
+# Use this for local development and testing with Postgres backend.
+#
+# The Postgres backend requires the pgvector extension (semantic search).
+# This image bundles pgvector; plain postgres:17 will not work for vector search.
 #
 # Usage:
 #   docker-compose -f docker-compose-postgres.yml up -d
@@ -7,7 +10,7 @@
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     container_name: basic-memory-postgres
     environment:
       # Local development/test credentials - NOT for production
