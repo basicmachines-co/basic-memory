@@ -447,8 +447,12 @@ class TaskScheduler(Protocol):
 
 
 def _log_task_failure(completed: asyncio.Task) -> None:
+    if completed.cancelled():
+        return
     try:
         completed.result()
+    except asyncio.CancelledError:
+        return
     except Exception as exc:  # pragma: no cover
         logger.exception("Background task failed", error=str(exc))
 
