@@ -263,6 +263,7 @@ The sqlite-vec extension is loaded per-connection. Vector tables are created laz
 ### Postgres (cloud)
 
 - **Vector storage**: [pgvector](https://github.com/pgvector/pgvector) with HNSW indexing
+- **Local Docker**: use `docker-compose-postgres.yml` (`pgvector/pgvector:pg17`). Plain `postgres:17` lacks the extension; run `CREATE EXTENSION IF NOT EXISTS vector;` on any external instance before first migration.
 - **Chunk metadata table**: Created via Alembic migration (`search_vector_chunks` with `BIGSERIAL` primary key)
 - **Embedding table**: `search_vector_embeddings` created at runtime (dimension-dependent, same pattern as SQLite)
 - **Index**: HNSW index on the embedding column for fast approximate nearest-neighbour queries

@@ -66,7 +66,7 @@ docker-compose -f docker-compose-postgres.yml up -d
 ```
 
 This starts:
-- Postgres 17 on port **5433** (not 5432 to avoid conflicts)
+- Postgres 17 with **pgvector** (`pgvector/pgvector:pg17`) on port **5433** (not 5432 to avoid conflicts)
 - Test database: `basic_memory_test`
 - Credentials: `basic_memory_user` / `dev_password`
 
@@ -121,7 +121,7 @@ jobs:
     # Postgres service container
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_DB: basic_memory_test
           POSTGRES_USER: basic_memory_user
