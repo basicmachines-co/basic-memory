@@ -10,6 +10,8 @@ pytest
 
 # Run tests against Postgres only (requires docker-compose)
 docker-compose -f docker-compose-postgres.yml up -d
+BASIC_MEMORY_TEST_POSTGRES=1 \
+POSTGRES_TEST_URL=postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory \
 pytest -m postgres
 
 # Run tests against BOTH backends
@@ -54,7 +56,7 @@ database_url = None  # Uses default SQLite path
 
 # Postgres config
 database_backend = DatabaseBackend.POSTGRES
-database_url = "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+database_url = "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory"
 ```
 
 ## Running Postgres Tests
@@ -67,17 +69,21 @@ docker-compose -f docker-compose-postgres.yml up -d
 
 This starts:
 - Postgres 17 with **pgvector** (`pgvector/pgvector:pg17`) on port **5433** (not 5432 to avoid conflicts)
-- Test database: `basic_memory_test`
+- Database: `basic_memory`
 - Credentials: `basic_memory_user` / `dev_password`
 
 ### 2. Run Postgres Tests
 
 ```bash
 # Run only Postgres tests
+BASIC_MEMORY_TEST_POSTGRES=1 \
+POSTGRES_TEST_URL=postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory \
 pytest -m postgres
 
 # Run specific test with Postgres
-pytest tests/test_entity_repository.py::test_create -m postgres
+BASIC_MEMORY_TEST_POSTGRES=1 \
+POSTGRES_TEST_URL=postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory \
+pytest tests/repository/test_entity_repository.py::test_create -m postgres
 
 # Skip Postgres tests (default behavior)
 pytest -m "not postgres"
