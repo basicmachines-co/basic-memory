@@ -1504,6 +1504,12 @@ async def get_project_client(
     if project_id and not cloud_available:
         project_mode = ProjectMode.LOCAL
 
+    # Trigger: project_id is a local external_id in a mixed local+cloud setup.
+    # Why: UUIDs are not local config keys, so get_project_mode() treats them as
+    #   cloud projects. A local-first probe avoids making local UUIDs depend on
+    #   healthy cloud workspace discovery.
+    # Outcome: resolve the effective UUID against local ASGI first; if it is not
+    #   local, preserve the existing cloud workspace lookup path.
     if (
         project_id
         and config.projects
@@ -1512,13 +1518,35 @@ async def get_project_client(
         and project_mode == ProjectMode.CLOUD
     ):
         try:
-            canonical_project_id = str(UUID(project_id))
+            canonical_project_id = str(UUID(resolved_project))
         except ValueError:
             pass
         else:
-            workspace_index = await _ensure_workspace_project_index(context=context)
-            if canonical_project_id not in workspace_index.entries_by_external_id:
-                project_mode = ProjectMode.LOCAL
+            with logfire.span(
+                "routing.local_project_id_probe",
+                project_id=canonical_project_id,
+            ):
+                async with get_client() as client:
+                    try:
+                        active_project = await get_active_project(
+                            client,
+                            canonical_project_id,
+                            context,
+                        )
+                    except ToolError as exc:
+                        if "not found" not in str(exc).lower():
+                            raise
+                    else:
+                        route_mode = "local_asgi"
+                        await _clear_cached_active_workspace_for_local_route(context)
+                        with logfire.span(
+                            "routing.client_session",
+                            project_name=active_project.name,
+                            route_mode=route_mode,
+                        ):
+                            logger.debug("Using local ASGI routing for project_id")
+                            yield client, active_project
+                        return
 
     if factory_mode or project_mode == ProjectMode.CLOUD or explicit_cloud_routing:
         route_mode = "factory" if factory_mode else "cloud_proxy"
