@@ -21,7 +21,7 @@ from basic_memory.utils import setup_logging, generate_permalink
 
 DATABASE_NAME = "memory.db"
 APP_DATABASE_NAME = "memory.db"  # Using the same name but in the app directory
-DATA_DIR_NAME = ".basic-memory"
+DATA_DIR_NAME = "basic-memory"
 CONFIG_FILE_NAME = "config.json"
 WATCH_STATUS_JSON = "watch-status.json"
 CONFIG_DIR_MODE = 0o700
@@ -69,15 +69,20 @@ def resolve_data_dir() -> Path:
 
     Single source of truth for the per-user state directory. Honors
     ``BASIC_MEMORY_CONFIG_DIR`` so each process/worktree can isolate config
-    and database state; otherwise falls back to ``<user home>/.basic-memory``.
+    and database state; otherwise falls back to ``<user home>/.basic-memory``,
+    and then to ``XDG_CONFIG_HOME``.
 
     Cross-platform: ``Path.home()`` reads ``$HOME`` on POSIX and
     ``%USERPROFILE%`` on Windows, so there's no need to check ``$HOME``
     explicitly here.
     """
-    if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
-        return Path(config_dir)
-    return Path.home() / DATA_DIR_NAME
+    config_dir_str = (
+        os.getenv("BASIC_MEMORY_CONFIG_DIR")
+        or os.getenv("XDG_CONFIG_HOME")
+    )
+    if config_dir_str:
+        return Path(config_dir_str) / DATA_DIR_NAME
+    return Path.home() / ("." + DATA_DIR_NAME)
 
 
 def default_fastembed_cache_dir() -> str:

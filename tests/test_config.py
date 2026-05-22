@@ -308,8 +308,9 @@ class TestDataDirHelpers:
     """Module-level helpers that resolve the Basic Memory data directory."""
 
     def test_resolve_data_dir_defaults_to_home_dot_basic_memory(self, config_home, monkeypatch):
-        """Without BASIC_MEMORY_CONFIG_DIR, resolver returns ~/.basic-memory."""
+        """Without BASIC_MEMORY_CONFIG_DIR and XDG_CONFIG_HOME, resolver returns ~/.basic-memory."""
         monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
         assert resolve_data_dir() == config_home / ".basic-memory"
 
@@ -319,6 +320,23 @@ class TestDataDirHelpers:
         monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom))
 
         assert resolve_data_dir() == custom
+
+    def test_resolve_data_dir_honors_xdg_config_home(self, tmp_path, monkeypatch):
+        """XDG_CONFIG_HOME is honored when BASIC_MEMORY_CONFIG_DIR is not set."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        xdg_config = tmp_path / "xdg-config"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+
+        assert resolve_data_dir() == xdg_config / "basic-memory"
+
+    def test_basic_memory_config_dir_takes_precedence_over_xdg(self, tmp_path, monkeypatch):
+        """BASIC_MEMORY_CONFIG_DIR takes precedence over XDG_CONFIG_HOME."""
+        xdg_config = tmp_path / "xdg-config"
+        custom = tmp_path / "custom-config"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+        monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom))
+
+        assert resolve_data_dir() == custom / "basic-memory"
 
     def test_default_fastembed_cache_dir_uses_data_dir(self, config_home, monkeypatch):
         """Default cache path is a subdir of the Basic Memory data dir."""
