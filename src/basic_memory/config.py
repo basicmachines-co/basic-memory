@@ -76,12 +76,10 @@ def resolve_data_dir() -> Path:
     ``%USERPROFILE%`` on Windows, so there's no need to check ``$HOME``
     explicitly here.
     """
-    config_dir_str = (
-        os.getenv("BASIC_MEMORY_CONFIG_DIR")
-        or os.getenv("XDG_CONFIG_HOME")
-    )
-    if config_dir_str:
-        return Path(config_dir_str) / DATA_DIR_NAME
+    if basic_memory_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+        return Path(basic_memory_dir)
+    if xdg_config := os.getenv("XDG_CONFIG_HOME"):
+        return Path(xdg_config) / DATA_DIR_NAME
     return Path.home() / ("." + DATA_DIR_NAME)
 
 

@@ -336,7 +336,7 @@ class TestDataDirHelpers:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
         monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom))
 
-        assert resolve_data_dir() == custom / "basic-memory"
+        assert resolve_data_dir() == custom
 
     def test_default_fastembed_cache_dir_uses_data_dir(self, config_home, monkeypatch):
         """Default cache path is a subdir of the Basic Memory data dir."""
