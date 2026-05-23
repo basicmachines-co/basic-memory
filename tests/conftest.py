@@ -225,6 +225,19 @@ def isolate_routing_env(monkeypatch) -> None:
     monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def isolate_data_dir_env(monkeypatch) -> None:
+    """Keep host data-dir env vars from leaking into tests.
+
+    Why: GitHub Actions Ubuntu runners set ``XDG_CONFIG_HOME=/home/runner/.config``,
+    and ``resolve_data_dir()`` honors it ahead of ``Path.home() / ".basic-memory"``.
+    Without clearing it, tests that monkeypatch HOME still see the host XDG path
+    and assertions against the tmp home directory fail.
+    """
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def cleanup_global_db_after_test() -> AsyncGenerator[None, None]:
     """Close any module-level DB engine created outside fixture ownership."""
