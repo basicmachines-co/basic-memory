@@ -253,6 +253,31 @@ async_client.set_client_factory(your_custom_factory)
 
 See SPEC-16 for full context manager refactor details.
 
+### Release Process
+
+Releases are driven by `just release` / `just beta` — never by a bare `git tag`. The recipes bump version metadata, run pre-flight checks, commit, tag, and push. GitHub Actions then publishes to PyPI and updates the Homebrew formula.
+
+**Stable release:**
+
+```
+just release v0.21.3
+```
+
+The recipe runs `just lint` + `just typecheck`, then updates `__version__` in `src/basic_memory/__init__.py` and `"version"` in `server.json` (MCP registry metadata), commits as `chore: update version to X.Y.Z for vX.Y.Z release`, creates the `vX.Y.Z` tag, and pushes both the commit and the tag to `origin/main`. After the tag lands, the `Release` workflow builds the package, publishes to PyPI, creates the GitHub release with auto-generated notes, and updates the Homebrew formula. The recipe finishes by printing the post-release tasks the workflow doesn't cover.
+
+**Beta release:** `just beta v0.21.3b1` — same flow with a beta-suffixed tag. PyPI consumers install with `pip install basic-memory --pre`.
+
+**Development builds:** every commit to `main` publishes a `0.21.3.dev26+468a22f`-style version to PyPI automatically via `.github/workflows/dev-release.yml`. No human action.
+
+**Do not tag releases by hand.** A bare `git tag vX.Y.Z` skips the in-code version bump. Package metadata is still correct (uv-dynamic-versioning derives it from the git tag) but `basic-memory --version` reports the previous release, which is what happened with v0.21.2 → v0.21.3.
+
+**Post-release tasks** the recipe surfaces but doesn't run:
+- `docs.basicmemory.com` — add notes to `src/pages/latest-releases.mdx`
+- `basicmachines.co` — bump version in `src/components/sections/hero.tsx`
+- MCP Registry — `mcp-publisher publish` from the repo root
+
+See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `changelog.md` alongside it) for the full release + post-release runbook, including the slash commands.
+
 ## BASIC MEMORY PRODUCT USAGE
 
 ### Knowledge Structure
