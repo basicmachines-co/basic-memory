@@ -149,6 +149,22 @@ def clean_routing_env(monkeypatch) -> None:
     monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def isolate_data_dir_env(monkeypatch) -> None:
+    """Keep host data-dir env vars from leaking into integration tests.
+
+    Why: GitHub Actions Ubuntu runners set ``XDG_CONFIG_HOME=/home/runner/.config``,
+    and ``resolve_data_dir()`` honors it ahead of ``Path.home() / ".basic-memory"``.
+    Without clearing it, the MCP tool process reads config.json from the host XDG
+    path instead of the tmp dir the ``config_manager`` fixture wrote to — so
+    ``test-project`` is missing from ``config.projects``, ``get_project_mode``
+    falls through to its CLOUD default (#837), and every tool call fails with
+    "Cloud routing requested but no credentials found."
+    """
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 POSTGRES_EPHEMERAL_TABLES = [
     "search_vector_embeddings",
     "search_vector_chunks",
