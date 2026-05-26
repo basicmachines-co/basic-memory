@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import text
 
+from basic_memory import db
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
 from basic_memory.repository.semantic_errors import (
@@ -254,6 +256,98 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
         "skipped": 1,
         "errors": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service, monkeypatch):
+    """Regression for #829: stale vec0 rows must be purged before batch sync."""
+    repository = _sqlite_repo(search_service)
+    repository._semantic_enabled = True
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        search_service.entity_repository,
+        "find_all",
+        AsyncMock(return_value=[SimpleNamespace(id=42, entity_metadata={})]),
+    )
+
+    async def delete_stale_vector_rows():
+        calls.append("purge")
+
+    async def sync_entity_vectors_batch(entity_ids, progress_callback=None):
+        assert entity_ids == [42]
+        assert progress_callback is None
+        calls.append("sync")
+        return VectorSyncBatchResult(entities_total=1, entities_synced=1, entities_failed=0)
+
+    monkeypatch.setattr(repository, "delete_stale_vector_rows", delete_stale_vector_rows)
+    monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_entity_vectors_batch)
+
+    stats = await search_service.reindex_vectors()
+
+    assert calls == ["purge", "sync"]
+    assert stats == {
+        "total_entities": 1,
+        "embedded": 1,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_uses_sqlite_vec_aware_drop(search_service, monkeypatch):
+    """Full service reindex should not drop vec0 tables through a raw connection."""
+    repository = _sqlite_repo(search_service)
+    executed_sql: list[str] = []
+    calls: list[str] = []
+
+    async def execute_query(query, params=None):
+        executed_sql.append(str(query))
+
+    async def drop_vector_tables():
+        calls.append("drop_vector_tables")
+
+    monkeypatch.setattr(repository, "execute_query", execute_query)
+    monkeypatch.setattr(repository, "drop_vector_tables", drop_vector_tables)
+    monkeypatch.setattr(search_service, "init_search_index", AsyncMock())
+    monkeypatch.setattr(search_service.entity_repository, "find_all", AsyncMock(return_value=[]))
+
+    await search_service.reindex_all()
+
+    assert calls == ["drop_vector_tables"]
+    assert all("search_vector_embeddings" not in sql for sql in executed_sql)
+
+
+@pytest.mark.asyncio
+async def test_drop_vector_tables_skips_sqlite_vec_load_for_plain_table(
+    search_service,
+    monkeypatch,
+):
+    """Plain compatibility tables should not require sqlite-vec to be loaded."""
+    repository = _sqlite_repo(search_service)
+    await repository.drop_vector_tables()
+
+    async with db.scoped_session(repository.session_maker) as session:
+        await session.execute(
+            text("CREATE TABLE search_vector_embeddings (rowid INTEGER PRIMARY KEY)")
+        )
+        await session.commit()
+
+    async def fail_if_loaded(_session):
+        raise AssertionError("plain tables should not load sqlite-vec")
+
+    monkeypatch.setattr(repository, "_ensure_sqlite_vec_loaded", fail_if_loaded)
+
+    await repository.drop_vector_tables()
+
+    async with db.scoped_session(repository.session_maker) as session:
+        result = await session.execute(
+            text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'search_vector_embeddings'"
+            )
+        )
+        assert result.scalar() is None
 
 
 @pytest.mark.asyncio

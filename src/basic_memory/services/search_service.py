@@ -126,19 +126,23 @@ class SearchService:
 
     async def reindex_all(self, background_tasks: Optional[BackgroundTasks] = None) -> None:
         """Reindex all content from database."""
+        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 
         logger.info("Starting full reindex")
         # Clear and recreate search index
         await self.repository.execute_query(text("DROP TABLE IF EXISTS search_index"), params={})
-        await self.repository.execute_query(
-            text("DROP TABLE IF EXISTS search_vector_embeddings"), params={}
-        )
-        await self.repository.execute_query(
-            text("DROP TABLE IF EXISTS search_vector_chunks"), params={}
-        )
-        await self.repository.execute_query(
-            text("DROP TABLE IF EXISTS search_vector_index"), params={}
-        )
+        if isinstance(self.repository, SQLiteSearchRepository):
+            await self.repository.drop_vector_tables()
+        else:
+            await self.repository.execute_query(
+                text("DROP TABLE IF EXISTS search_vector_embeddings"), params={}
+            )
+            await self.repository.execute_query(
+                text("DROP TABLE IF EXISTS search_vector_chunks"), params={}
+            )
+            await self.repository.execute_query(
+                text("DROP TABLE IF EXISTS search_vector_index"), params={}
+            )
         await self.init_search_index()
 
         # Reindex all entities

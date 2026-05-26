@@ -620,6 +620,25 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             )
             await session.commit()
 
+    async def drop_vector_tables(self) -> None:
+        """Drop SQLite vector tables on a sqlite-vec-enabled connection."""
+        async with db.scoped_session(self.session_maker) as session:
+            vector_sql_result = await session.execute(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'search_vector_embeddings'"
+                )
+            )
+            vector_sql = vector_sql_result.scalar()
+            if vector_sql and "using vec0" in vector_sql.lower():
+                await self._ensure_sqlite_vec_loaded(session)
+
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_index"))
+            await session.commit()
+        self._vector_tables_initialized = False
+
     async def delete_stale_vector_rows(self) -> None:
         """Delete vector rows whose source entities no longer exist."""
         await self._ensure_vector_tables()
