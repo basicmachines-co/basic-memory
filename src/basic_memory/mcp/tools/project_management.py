@@ -10,7 +10,12 @@ from typing import Literal
 from fastmcp import Context
 from loguru import logger
 
-from basic_memory.config import ConfigManager, has_cloud_credentials
+from basic_memory.config import (
+    BasicMemoryConfig,
+    ConfigManager,
+    ProjectEntry,
+    has_cloud_credentials,
+)
 from basic_memory.mcp.async_client import (
     _explicit_routing,
     _force_local_mode,
@@ -131,9 +136,66 @@ def _merge_projects(
     return merged
 
 
+def _workspace_entry_priority(entry: WorkspaceProjectEntry) -> tuple[bool, int, str, str]:
+    """Prefer default/personal workspaces when duplicate project permalinks exist."""
+    workspace_type_rank = 0 if entry.workspace.workspace_type == "personal" else 1
+    return (
+        # False sorts before True, so the cloud/default workspace comes first.
+        not entry.workspace.is_default,
+        workspace_type_rank,
+        entry.workspace.name.casefold(),
+        entry.workspace.tenant_id,
+    )
+
+
+def _select_attached_cloud_entry(
+    cloud_entries: tuple[WorkspaceProjectEntry, ...],
+    *,
+    config_entry: ProjectEntry | None,
+    config: BasicMemoryConfig | None,
+) -> WorkspaceProjectEntry | None:
+    """Choose the single cloud row that should inherit local project state."""
+    if not cloud_entries:
+        return None
+
+    preferred_workspace_ids: list[str] = []
+    if config_entry and config_entry.workspace_id:
+        preferred_workspace_ids.append(config_entry.workspace_id)
+    if (
+        config
+        and config.default_workspace
+        and config.default_workspace not in preferred_workspace_ids
+    ):
+        preferred_workspace_ids.append(config.default_workspace)
+
+    # The configured default workspace can differ from the cloud-side default.
+    # Use the cloud default only after explicit local config preferences.
+    default_workspace_entry = next(
+        (entry for entry in cloud_entries if entry.workspace.is_default),
+        None,
+    )
+    if (
+        default_workspace_entry is not None
+        and default_workspace_entry.workspace.tenant_id not in preferred_workspace_ids
+    ):
+        preferred_workspace_ids.append(default_workspace_entry.workspace.tenant_id)
+
+    for workspace_id in preferred_workspace_ids:
+        for entry in cloud_entries:
+            if entry.workspace.tenant_id == workspace_id:
+                return entry
+
+    if len(cloud_entries) == 1:
+        return cloud_entries[0]
+
+    return sorted(cloud_entries, key=_workspace_entry_priority)[0]
+
+
 def _merge_workspace_projects(
     local_list: ProjectList | None,
     cloud_entries: tuple[WorkspaceProjectEntry, ...],
+    *,
+    config: BasicMemoryConfig | None = None,
 ) -> list[dict]:
     """Merge local projects with cloud projects from every accessible workspace."""
     local_by_permalink: dict[str, ProjectItem] = {}
@@ -141,20 +203,40 @@ def _merge_workspace_projects(
         for project in local_list.projects:
             local_by_permalink[project.permalink] = project
 
+    config_by_permalink: dict[str, ProjectEntry] = {}
+    if config:
+        config_by_permalink = {
+            generate_permalink(project_name): entry
+            for project_name, entry in config.projects.items()
+        }
+
+    cloud_entries_by_permalink: dict[str, list[WorkspaceProjectEntry]] = {}
+    for entry in cloud_entries:
+        cloud_entries_by_permalink.setdefault(entry.project.permalink, []).append(entry)
+
+    attached_entry_by_permalink: dict[str, WorkspaceProjectEntry | None] = {}
+    for permalink in local_by_permalink:
+        attached_entry_by_permalink[permalink] = _select_attached_cloud_entry(
+            tuple(cloud_entries_by_permalink.get(permalink, ())),
+            config_entry=config_by_permalink.get(permalink),
+            config=config,
+        )
+
     cloud_permalinks = {entry.project.permalink for entry in cloud_entries}
     merged: list[dict] = []
 
     for entry in sorted(
         cloud_entries,
-        key=lambda item: (
-            not item.workspace.is_default,
-            item.workspace.workspace_type != "personal",
-            item.workspace.name.casefold(),
-            item.project.permalink,
-        ),
+        key=lambda item: (*_workspace_entry_priority(item), item.project.permalink),
     ):
         permalink = entry.project.permalink
-        local_proj = local_by_permalink.get(permalink)
+        local_proj = (
+            local_by_permalink.get(permalink)
+            # WorkspaceProjectEntry is a frozen dataclass containing Pydantic
+            # models, so value equality is the intended comparison here.
+            if attached_entry_by_permalink.get(permalink) == entry
+            else None
+        )
         cloud_proj = entry.project
         source = "local+cloud" if local_proj else "cloud"
         local_path = local_proj.path if local_proj else None
@@ -339,7 +421,7 @@ async def list_memory_projects(
                 )
 
     if cloud_entries:
-        merged = _merge_workspace_projects(local_list, cloud_entries)
+        merged = _merge_workspace_projects(local_list, cloud_entries, config=config)
     else:
         merged = _merge_projects(
             local_list,
