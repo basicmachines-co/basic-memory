@@ -1,7 +1,7 @@
 """Tests for LiteLLMEmbeddingProvider and factory litellm branch."""
 
-import asyncio
 import builtins
+import math
 import sys
 from types import SimpleNamespace
 
@@ -21,7 +21,12 @@ def _make_embedding_response(inputs: list[str], dim: int = 3):
     data = []
     for index, text in enumerate(inputs):
         base = float(len(text))
-        data.append({"index": index, "embedding": [base + float(d) for d in range(dim)]})
+        data.append(
+            SimpleNamespace(
+                index=index,
+                embedding=[base + float(d) for d in range(dim)],
+            )
+        )
     return SimpleNamespace(data=data)
 
 
@@ -111,9 +116,7 @@ async def test_litellm_provider_api_key_forwarded(monkeypatch):
 async def test_litellm_provider_api_key_omitted_when_none(monkeypatch):
     """api_key should not appear in kwargs when not set."""
     calls = _install_litellm_stub(monkeypatch)
-    provider = LiteLLMEmbeddingProvider(
-        model_name="openai/text-embedding-3-small", dimensions=3
-    )
+    provider = LiteLLMEmbeddingProvider(model_name="openai/text-embedding-3-small", dimensions=3)
     await provider.embed_query("test")
     assert "api_key" not in calls[0]
 
@@ -156,14 +159,26 @@ async def test_litellm_provider_missing_dependency_raises_actionable_error(monke
 
 @pytest.mark.asyncio
 async def test_litellm_provider_output_ordering(monkeypatch):
-    """Vectors should be returned in the same order as input texts."""
+    """Vectors should be returned in the same order as input texts.
+
+    The mock builds vectors as ``[len(text), len(text)+1, len(text)+2]`` per
+    input, then the provider L2-normalizes them. Reconstruct the expected
+    normalized vectors and assert positional match — this catches both
+    ordering regressions and normalization regressions in one go.
+    """
     _install_litellm_stub(monkeypatch)
     provider = LiteLLMEmbeddingProvider(dimensions=3, batch_size=2)
     texts = ["short", "a longer text here"]
     result = await provider.embed_documents(texts)
 
-    assert result[0][0] == float(len("short"))
-    assert result[1][0] == float(len("a longer text here"))
+    def _expected(text: str) -> list[float]:
+        base = float(len(text))
+        raw = [base + float(d) for d in range(3)]
+        norm = math.sqrt(sum(x * x for x in raw))
+        return [x / norm for x in raw]
+
+    assert result[0] == pytest.approx(_expected("short"))
+    assert result[1] == pytest.approx(_expected("a longer text here"))
 
 
 def test_factory_selects_litellm_provider():
@@ -202,3 +217,73 @@ def test_runtime_log_attrs():
     attrs = provider.runtime_log_attrs()
     assert attrs["provider_batch_size"] == 32
     assert attrs["request_concurrency"] == 8
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_l2_normalizes_output_vectors(monkeypatch):
+    """Returned vectors must be unit-normalized regardless of backend output.
+
+    sqlite_search_repository maps L2 distance to cosine similarity via
+    ``1 - L²/2``, which is correct only for unit norm. Several backends
+    routed through LiteLLM (Cohere, Vertex, Bedrock) do not return
+    normalized vectors, so the provider must normalize at its boundary.
+    """
+
+    async def _aembedding(**kwargs):
+        # Raw vector with norm ~3.74 — must be normalized to unit length.
+        data = [
+            SimpleNamespace(index=i, embedding=[1.0, 2.0, 3.0]) for i in range(len(kwargs["input"]))
+        ]
+        return SimpleNamespace(data=data)
+
+    module = type(sys)("litellm")
+    setattr(module, "aembedding", _aembedding)
+    monkeypatch.setitem(sys.modules, "litellm", module)
+
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    result = await provider.embed_documents(["some text"])
+
+    assert len(result) == 1
+    norm = math.sqrt(sum(x * x for x in result[0]))
+    assert abs(norm - 1.0) < 1e-6, f"Expected unit norm, got {norm}"
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_zero_vector_does_not_raise(monkeypatch):
+    """A zero vector from the backend must pass through without a division error."""
+
+    async def _aembedding(**kwargs):
+        data = [
+            SimpleNamespace(index=i, embedding=[0.0, 0.0, 0.0]) for i in range(len(kwargs["input"]))
+        ]
+        return SimpleNamespace(data=data)
+
+    module = type(sys)("litellm")
+    setattr(module, "aembedding", _aembedding)
+    monkeypatch.setitem(sys.modules, "litellm", module)
+
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    result = await provider.embed_documents(["zero vector"])
+
+    assert result == [[0.0, 0.0, 0.0]]
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_duplicate_index_raises_error(monkeypatch):
+    """A backend returning duplicate indexes is malformed and must fail fast."""
+
+    async def _aembedding(**kwargs):
+        # Both items claim index 0 — ambiguous response.
+        data = [
+            SimpleNamespace(index=0, embedding=[1.0, 0.0, 0.0]),
+            SimpleNamespace(index=0, embedding=[0.0, 1.0, 0.0]),
+        ]
+        return SimpleNamespace(data=data)
+
+    module = type(sys)("litellm")
+    setattr(module, "aembedding", _aembedding)
+    monkeypatch.setitem(sys.modules, "litellm", module)
+
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    with pytest.raises(RuntimeError, match="duplicate vector indexes"):
+        await provider.embed_documents(["a", "b"])

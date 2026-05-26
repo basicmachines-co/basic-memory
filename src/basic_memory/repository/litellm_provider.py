@@ -14,6 +14,7 @@ supported embedding models.
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 from basic_memory.repository.embedding_provider import EmbeddingProvider
@@ -80,8 +81,12 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
 
             vectors_by_index: dict[int, list[float]] = {}
             for item in response.data:
-                response_index = int(item["index"])
-                vectors_by_index[response_index] = [float(v) for v in item["embedding"]]
+                response_index = int(item.index)
+                if response_index in vectors_by_index:
+                    raise RuntimeError(
+                        "LiteLLM embedding response returned duplicate vector indexes."
+                    )
+                vectors_by_index[response_index] = [float(v) for v in item.embedding]
 
             ordered_vectors: list[list[float]] = []
             for index in range(len(batch)):
@@ -104,12 +109,25 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
                 raise RuntimeError("LiteLLM embedding batch did not produce vectors.")
             all_vectors.extend(vectors)
 
-        if all_vectors and len(all_vectors[0]) != self.dimensions:
+        # sqlite_search_repository.py maps L2 distance to cosine similarity via
+        # `1 - L²/2`, which is correct only for unit-normalized vectors. LiteLLM
+        # routes to many backends (Cohere, Vertex, Bedrock, etc.); not all of
+        # them return normalized embeddings, so we normalize here to honor the
+        # provider contract regardless of the underlying model.
+        normalized: list[list[float]] = []
+        for vector in all_vectors:
+            norm = math.sqrt(sum(x * x for x in vector))
+            if norm > 0:
+                normalized.append([x / norm for x in vector])
+            else:
+                normalized.append(vector)
+
+        if normalized and len(normalized[0]) != self.dimensions:
             raise RuntimeError(
-                f"Embedding model returned {len(all_vectors[0])}-dimensional vectors "
+                f"Embedding model returned {len(normalized[0])}-dimensional vectors "
                 f"but provider was configured for {self.dimensions} dimensions."
             )
-        return all_vectors
+        return normalized
 
     async def embed_query(self, text: str) -> list[float]:
         vectors = await self.embed_documents([text])
