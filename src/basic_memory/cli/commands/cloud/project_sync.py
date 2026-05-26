@@ -26,10 +26,19 @@ from basic_memory.cli.commands.routing import force_routing
 from basic_memory.config import ConfigManager, ProjectEntry
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
+from basic_memory.mcp.project_context import get_available_workspaces
+from basic_memory.schemas.cloud import WorkspaceInfo
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_path
 
 console = Console()
+
+TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
+    "Local rclone sync/bisync is supported only for Personal workspaces.\n"
+    "Team workspaces are accessed through the cloud API/MCP and do not support "
+    "local multi-user bisync.\n"
+    "Use `bm project list --workspace <workspace>` to inspect Team projects."
+)
 
 
 # --- Shared helpers ---
@@ -50,6 +59,54 @@ def _require_cloud_credentials(config) -> None:
     console.print("[red]Error: cloud credentials are required for this command[/red]")
     console.print("[dim]Run 'bm cloud login' or 'bm cloud api-key save <key>' first[/dim]")
     raise typer.Exit(1)
+
+
+async def _get_workspace_for_project(name: str, config) -> WorkspaceInfo:
+    """Resolve the cloud workspace targeted by a project-scoped sync command."""
+    workspaces = await get_available_workspaces()
+    if not workspaces:
+        raise ValueError("No accessible cloud workspaces found for this account")
+
+    entry = config.projects.get(name)
+    workspace_id = entry.workspace_id if entry and entry.workspace_id else config.default_workspace
+    if workspace_id:
+        workspace = next(
+            (item for item in workspaces if item.tenant_id == workspace_id),
+            None,
+        )
+        if workspace is None:
+            raise ValueError(
+                f"Configured workspace '{workspace_id}' for project '{name}' is not accessible"
+            )
+        return workspace
+
+    default_workspaces = [item for item in workspaces if item.is_default]
+    if len(default_workspaces) == 1:
+        return default_workspaces[0]
+
+    if len(workspaces) == 1:
+        return workspaces[0]
+
+    raise ValueError(
+        f"Project '{name}' does not have an unambiguous cloud workspace. "
+        "Set a default workspace with `bm cloud workspace set-default <workspace>` "
+        "or attach the project with `bm project set-cloud <name> --workspace <workspace>`."
+    )
+
+
+def _require_personal_workspace(name: str, config) -> WorkspaceInfo:
+    """Exit before rclone work when the target workspace is not personal."""
+    try:
+        workspace = run_with_cleanup(_get_workspace_for_project(name, config))
+    except Exception as exc:
+        console.print(f"[red]Error resolving workspace for project '{name}': {exc}[/red]")
+        raise typer.Exit(1)
+
+    if workspace.workspace_type != "personal":
+        console.print(f"[red]{TEAM_WORKSPACE_SYNC_UNSUPPORTED}[/red]")
+        raise typer.Exit(1)
+
+    return workspace
 
 
 async def _get_cloud_project(name: str) -> ProjectItem | None:
@@ -103,6 +160,7 @@ def sync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
+    _require_personal_workspace(name, config)
 
     try:
         # Get tenant info for bucket name
@@ -152,6 +210,7 @@ def bisync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
+    _require_personal_workspace(name, config)
 
     try:
         # Get tenant info for bucket name
@@ -210,6 +269,7 @@ def check_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
+    _require_personal_workspace(name, config)
 
     try:
         # Get tenant info for bucket name
@@ -253,6 +313,10 @@ def bisync_reset(
     """
     import shutil
 
+    config = ConfigManager().config
+    if _has_cloud_credentials(config):
+        _require_personal_workspace(name, config)
+
     try:
         state_path = get_project_bisync_state(name)
 
@@ -288,6 +352,7 @@ def setup_project_sync(
     config_manager = ConfigManager()
     config = config_manager.config
     _require_cloud_credentials(config)
+    _require_personal_workspace(name, config)
 
     async def _verify_project_exists():
         """Verify the project exists on cloud by listing all projects."""
