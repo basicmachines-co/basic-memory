@@ -23,7 +23,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
 )
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing
-from basic_memory.config import ConfigManager, ProjectEntry
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.project_context import get_available_workspaces
@@ -44,14 +44,14 @@ TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
 # --- Shared helpers ---
 
 
-def _has_cloud_credentials(config) -> bool:
+def _has_cloud_credentials(config: BasicMemoryConfig) -> bool:
     """Return whether cloud credentials are available (API key or OAuth token)."""
     from basic_memory.config import has_cloud_credentials
 
     return has_cloud_credentials(config)
 
 
-def _require_cloud_credentials(config) -> None:
+def _require_cloud_credentials(config: BasicMemoryConfig) -> None:
     """Exit with actionable guidance when cloud credentials are missing."""
     if _has_cloud_credentials(config):
         return
@@ -61,7 +61,7 @@ def _require_cloud_credentials(config) -> None:
     raise typer.Exit(1)
 
 
-async def _get_workspace_for_project(name: str, config) -> WorkspaceInfo:
+async def _get_workspace_for_project(name: str, config: BasicMemoryConfig) -> WorkspaceInfo:
     """Resolve the cloud workspace targeted by a project-scoped sync command."""
     workspaces = await get_available_workspaces()
     if not workspaces:
@@ -94,7 +94,7 @@ async def _get_workspace_for_project(name: str, config) -> WorkspaceInfo:
     )
 
 
-def _require_personal_workspace(name: str, config) -> WorkspaceInfo:
+def _require_personal_workspace(name: str, config: BasicMemoryConfig) -> WorkspaceInfo:
     """Exit before rclone work when the target workspace is not personal."""
     try:
         workspace = run_with_cleanup(_get_workspace_for_project(name, config))
@@ -120,7 +120,7 @@ async def _get_cloud_project(name: str) -> ProjectItem | None:
 
 
 def _get_sync_project(
-    name: str, config, project_data: ProjectItem
+    name: str, config: BasicMemoryConfig, project_data: ProjectItem
 ) -> tuple[SyncProject, str | None]:
     """Build a SyncProject and resolve local_sync_path from config.
 
