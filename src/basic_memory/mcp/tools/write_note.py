@@ -12,7 +12,13 @@ from basic_memory.mcp.project_context import get_project_client, add_project_met
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
-from basic_memory.utils import coerce_dict, parse_tags, validate_project_path
+from basic_memory.utils import (
+    build_qualified_permalink_reference,
+    coerce_dict,
+    parse_tags,
+    validate_project_path,
+)
+from basic_memory.workspace_context import current_workspace_permalink_context
 
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]
@@ -274,11 +280,20 @@ async def write_note(
                 else:
                     # Re-raise if it's not a conflict error
                     raise  # pragma: no cover
+            response_permalink = result.permalink
+            workspace_context = current_workspace_permalink_context()
+            if response_permalink and workspace_context is not None:
+                response_permalink = build_qualified_permalink_reference(
+                    active_project.permalink,
+                    response_permalink,
+                    workspace_permalink=workspace_context.workspace_slug,
+                )
+
             summary = [
                 f"# {action} note",
                 f"project: {active_project.name}",
                 f"file_path: {result.file_path}",
-                f"permalink: {result.permalink}",
+                f"permalink: {response_permalink}",
                 f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
             ]
 
@@ -315,12 +330,12 @@ async def write_note(
 
             # Log the response with structured data
             logger.info(
-                f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
+                f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={response_permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
             )
             if output_format == "json":
                 return {
                     "title": result.title,
-                    "permalink": result.permalink,
+                    "permalink": response_permalink,
                     "file_path": result.file_path,
                     "checksum": result.checksum,
                     "action": action.lower(),

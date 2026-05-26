@@ -70,8 +70,12 @@ def team_workspace() -> WorkspaceInfo:
 @pytest.fixture
 def route_workspaces(app):
     @contextmanager
-    def route(*workspaces: WorkspaceInfo):
-        with _workspace_routing(app, workspaces):
+    def route(*workspaces: WorkspaceInfo, forward_permalink_headers: bool = True):
+        with _workspace_routing(
+            app,
+            workspaces,
+            forward_permalink_headers=forward_permalink_headers,
+        ):
             yield
 
     return route
@@ -117,7 +121,12 @@ def _save_permalink_config(
 
 
 @contextmanager
-def _workspace_routing(app, workspaces: Iterable[WorkspaceInfo]):
+def _workspace_routing(
+    app,
+    workspaces: Iterable[WorkspaceInfo],
+    *,
+    forward_permalink_headers: bool = True,
+):
     """Route MCP tool HTTP calls through an ASGI-backed cloud workspace seam."""
     workspace_list = tuple(workspaces)
     workspace_ids = {workspace.tenant_id for workspace in workspace_list}
@@ -128,10 +137,11 @@ def _workspace_routing(app, workspaces: Iterable[WorkspaceInfo]):
     @asynccontextmanager
     async def factory(workspace: str | None = None):
         assert workspace is None or workspace in workspace_ids
+        headers = workspace_permalink_headers() if forward_permalink_headers else {}
         async with HttpxAsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
-            headers=workspace_permalink_headers(),
+            headers=headers,
         ) as inner:
             yield inner
 
@@ -461,3 +471,39 @@ async def test_team_workspace_permalink_routes_to_specific_workspace(
 
         workspace_read = await _read_json(mcp_server, identifier=expected_permalink)
         assert workspace_read["permalink"] == expected_permalink
+
+
+@pytest.mark.asyncio
+async def test_write_note_by_project_id_qualifies_permalink_when_headers_not_forwarded(
+    mcp_server,
+    test_project,
+    app_config,
+    team_workspace,
+    route_workspaces,
+):
+    """MCP writes should return self-routing IDs even if the API omits slug headers."""
+    _save_permalink_config(app_config, include_project=True, default_project=None)
+
+    title = "Project Id Workspace Permalink"
+    short_permalink = "permalink-suite/project-id-workspace-permalink"
+    expected_permalink = f"{team_workspace.slug}/{test_project.name}/{short_permalink}"
+
+    with route_workspaces(team_workspace, forward_permalink_headers=False):
+        write_payload = await _call_json(
+            mcp_server,
+            "write_note",
+            {
+                "project_id": test_project.external_id,
+                "title": title,
+                "directory": "permalink-suite",
+                "content": f"# {title}\n\nProject ID workspace body.",
+                "output_format": "json",
+            },
+        )
+        assert write_payload["permalink"] == expected_permalink
+
+        workspace_read = await _read_json(
+            mcp_server,
+            identifier=f"memory://{write_payload['permalink']}",
+        )
+        assert workspace_read["title"] == title
