@@ -13,6 +13,21 @@ runner = CliRunner()
 
 
 @pytest.mark.parametrize(
+    "command",
+    ["sync", "bisync", "check", "bisync-reset", "sync-setup"],
+)
+def test_cloud_sync_command_help_marks_personal_workspace_only(command):
+    """Cloud sync help should explain that local mirrors are Personal-only."""
+    importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+
+    result = runner.invoke(app, ["cloud", command, "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "Personal workspace local mirror only" in result.output
+    assert "Not supported for Team workspaces" in result.output
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["cloud", "sync", "--name", "research"],

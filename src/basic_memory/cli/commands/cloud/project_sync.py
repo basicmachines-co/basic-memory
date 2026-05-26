@@ -95,7 +95,10 @@ def sync_project_command(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """One-way sync: local -> cloud (make cloud identical to local).
+    """Personal workspace local mirror only.
+
+    One-way sync: local -> cloud (make cloud identical to local).
+    Not supported for Team workspaces - use cloud API/MCP routing instead.
 
     Example:
       bm cloud sync --name research
@@ -143,7 +146,10 @@ def bisync_project_command(
     resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Two-way sync: local <-> cloud (bidirectional sync).
+    """Personal workspace local mirror only.
+
+    Two-way sync: local <-> cloud (bidirectional sync).
+    Not supported for Team workspaces - use cloud API/MCP routing instead.
 
     Examples:
       bm cloud bisync --name research --resync  # First time
@@ -203,7 +209,10 @@ def check_project_command(
     name: str = typer.Option(..., "--name", help="Project name to check"),
     one_way: bool = typer.Option(False, "--one-way", help="Check one direction only (faster)"),
 ) -> None:
-    """Verify file integrity between local and cloud.
+    """Personal workspace local mirror only.
+
+    Verify file integrity between local and cloud.
+    Not supported for Team workspaces - use cloud API/MCP routing instead.
 
     Example:
       bm cloud check --name research
@@ -246,7 +255,10 @@ def check_project_command(
 def bisync_reset(
     name: str = typer.Argument(..., help="Project name to reset bisync state for"),
 ) -> None:
-    """Clear bisync state for a project.
+    """Personal workspace local mirror only.
+
+    Clear bisync state for a project.
+    Not supported for Team workspaces - use cloud API/MCP routing instead.
 
     This removes the bisync metadata files, forcing a fresh --resync on next bisync.
     Useful when bisync gets into an inconsistent state or when remote path changes.
@@ -277,7 +289,10 @@ def setup_project_sync(
     name: str = typer.Argument(..., help="Project name"),
     local_path: str = typer.Argument(..., help="Local sync directory"),
 ) -> None:
-    """Configure local sync for an existing cloud project.
+    """Personal workspace local mirror only.
+
+    Configure local sync for an existing cloud project.
+    Not supported for Team workspaces - use cloud API/MCP routing instead.
 
     Example:
       bm cloud sync-setup research ~/Documents/research

@@ -1,6 +1,6 @@
 # Basic Memory Cloud CLI Guide
 
-The Basic Memory Cloud CLI provides seamless integration between local and cloud knowledge bases using **project-scoped synchronization**. Each project can optionally sync with the cloud, giving you fine-grained control over what syncs and where.
+The Basic Memory Cloud CLI provides seamless integration between local and cloud knowledge bases using **project-scoped synchronization**. Personal workspaces can optionally use local rclone mirrors, giving you fine-grained control over what syncs and where.
 
 ## Overview
 
@@ -8,8 +8,12 @@ The cloud CLI enables you to:
 - **Authenticate cloud access** - OAuth/API key credentials are stored locally for cloud operations
 - **Project-scoped sync** - Each project independently manages its sync configuration
 - **Explicit operations** - Sync only what you want, when you want
-- **Bidirectional sync** - Keep local and cloud in sync with rclone bisync
+- **Bidirectional sync** - Keep Personal workspace local mirrors and cloud in sync with rclone bisync
 - **Offline access** - Work locally, sync when ready
+
+Team workspaces are accessed through the cloud API/MCP and do not support local
+multi-user rclone sync/bisync. Use `bm project list --workspace <workspace>` to
+inspect Team projects.
 
 ## Prerequisites
 
@@ -39,7 +43,7 @@ If you attempt to log in without an active subscription, you'll receive a "Subsc
 **Projects can exist in three states:**
 
 1. **Cloud-only** - Project exists on cloud, no local copy
-2. **Cloud + Local (synced)** - Project has a local working directory that syncs
+2. **Cloud + Local (synced)** - Personal workspace project has a local working directory that syncs
 3. **Local-only** - Project exists locally and is not routed to cloud
 
 **Example:**
@@ -55,8 +59,8 @@ bm project add work --cloud --local-path ~/work-notes
 bm project add temp --cloud  # No local sync
 
 # Now you can sync individually (after initial --resync):
-bm project bisync --name research
-bm project bisync --name work
+bm cloud bisync --name research
+bm cloud bisync --name work
 # temp stays cloud-only
 ```
 
@@ -87,7 +91,7 @@ Apply OSS discount code `{{OSS_DISCOUNT_CODE}}` during checkout to receive 20% o
 
 ### 2. Set Up Sync
 
-Install rclone and configure credentials:
+Install rclone and configure Personal workspace sync credentials:
 
 ```bash
 bm cloud setup
@@ -99,7 +103,7 @@ bm cloud setup
 3. Generates scoped S3 credentials for sync
 4. Configures single rclone remote: `basic-memory-cloud`
 
-**Result:** You're ready to sync projects. No sync directories created yet - those come with project setup.
+**Result:** You're ready to sync Personal workspace projects. No sync directories created yet - those come with project setup.
 
 Rclone setup uses package managers such as Homebrew, MacPorts, apt, dnf, yum, pacman,
 zypper, snap, winget, Chocolatey, or Scoop when available. It does not run remote
@@ -108,7 +112,7 @@ manual install instructions.
 
 ### 3. Add Projects with Sync
 
-Create projects with optional local sync paths:
+Create Personal workspace projects with optional local sync paths:
 
 ```bash
 # Create cloud project without local sync
@@ -137,10 +141,10 @@ Establish the initial sync baseline. **Best practice:** Always preview with `--d
 
 ```bash
 # Step 1: Preview the initial sync (recommended)
-bm project bisync --name research --resync --dry-run
+bm cloud bisync --name research --resync --dry-run
 
 # Step 2: If all looks good, run the actual sync
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 ```
 
 **What happens under the covers:**
@@ -167,7 +171,7 @@ This will effectively make both Path1 and Path2 filesystems contain a matching s
 After the first sync, just run bisync without `--resync`:
 
 ```bash
-bm project bisync --name research
+bm cloud bisync --name research
 ```
 
 **What happens:**
@@ -235,7 +239,7 @@ bm project add research --cloud --local-path ~/Documents/research
 - Stores sync config in `~/.basic-memory/config.json`
 - Prepares for bisync (but doesn't sync yet)
 
-**Result:** Project ready to sync. Run `bm project bisync --name research --resync` to establish baseline.
+**Result:** Project ready to sync. Run `bm cloud bisync --name research --resync` to establish baseline.
 
 **Use case 3: Add sync to existing cloud project**
 
@@ -292,20 +296,24 @@ For MCP stdio, routing is always local.
 
 ## File Synchronization
 
+Local rclone sync/bisync is supported only for Personal workspaces. Team
+workspaces are cloud-only for local CLI usage; access them through cloud API/MCP
+routing instead of a local multi-user rclone mirror.
+
 ### Understanding the Sync Commands
 
 **There are three sync-related commands:**
 
-1. `bm project sync` - One-way: local → cloud (make cloud match local)
-2. `bm project bisync` - Two-way: local ↔ cloud (recommended)
-3. `bm project check` - Verify files match (no changes)
+1. `bm cloud sync` - One-way: local → cloud (make cloud match local)
+2. `bm cloud bisync` - Two-way: local ↔ cloud (recommended)
+3. `bm cloud check` - Verify files match (no changes)
 
 ### One-Way Sync: Local → Cloud
 
 **Use case:** You made changes locally and want to push to cloud (overwrite cloud).
 
 ```bash
-bm project sync --name research
+bm cloud sync --name research
 ```
 
 **What happens:**
@@ -327,10 +335,10 @@ bm project sync --name research
 
 ```bash
 # First time - establish baseline
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 
 # Subsequent syncs
-bm project bisync --name research
+bm cloud bisync --name research
 ```
 
 **What happens:**
@@ -349,7 +357,7 @@ echo "Local change" > ~/Documents/research/notes.md
 # Cloud now has: "Cloud change"
 
 # Run bisync
-bm project bisync --name research
+bm cloud bisync --name research
 
 # Result: Newer file wins (based on modification time)
 # If cloud was more recent, cloud version kept
@@ -366,7 +374,7 @@ bm project bisync --name research
 **Use case:** Check if local and cloud match without making changes.
 
 ```bash
-bm project check --name research
+bm cloud check --name research
 ```
 
 **What happens:**
@@ -378,7 +386,7 @@ bm project check --name research
 
 ```bash
 # One-way check (faster)
-bm project check --name research --one-way
+bm cloud check --name research --one-way
 ```
 
 ### Preview Changes (Dry Run)
@@ -386,7 +394,7 @@ bm project check --name research --one-way
 **Use case:** See what would change without actually syncing.
 
 ```bash
-bm project bisync --name research --dry-run
+bm cloud bisync --name research --dry-run
 ```
 
 **What happens:**
@@ -432,20 +440,20 @@ bm project add work --cloud --local-path ~/work-notes
 bm project add personal --cloud --local-path ~/personal
 
 # Establish baselines
-bm project bisync --name research --resync
-bm project bisync --name work --resync
-bm project bisync --name personal --resync
+bm cloud bisync --name research --resync
+bm cloud bisync --name work --resync
+bm cloud bisync --name personal --resync
 
 # Daily workflow: sync everything
-bm project bisync --name research
-bm project bisync --name work
-bm project bisync --name personal
+bm cloud bisync --name research
+bm cloud bisync --name work
+bm cloud bisync --name personal
 ```
 
 **Future:** `--all` flag will sync all configured projects:
 
 ```bash
-bm project bisync --all  # Coming soon
+bm cloud bisync --all  # Coming soon
 ```
 
 ### Mixed Usage
@@ -462,8 +470,8 @@ bm project add archive --cloud
 bm project add temp-notes --cloud
 
 # Sync only the configured ones
-bm project bisync --name research
-bm project bisync --name work
+bm cloud bisync --name research
+bm cloud bisync --name work
 
 # Archive and temp-notes stay cloud-only
 ```
@@ -661,7 +669,7 @@ code ~/.basic-memory/.bmignore
 echo "*.tmp" >> ~/.basic-memory/.bmignore
 
 # Next sync uses updated patterns
-bm project bisync --name research
+bm cloud bisync --name research
 ```
 
 ## Troubleshooting
@@ -724,7 +732,7 @@ bm cloud login
 **Solution:**
 
 ```bash
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 ```
 
 **What this does:**
@@ -747,7 +755,7 @@ bm project bisync --name research --resync
 echo "# Research Notes" > ~/Documents/research/README.md
 
 # Now run bisync
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 ```
 
 **Why this happens:** Bisync creates listing files that track the state of each side. When both directories are completely empty, these listing files are considered invalid by rclone.
@@ -764,10 +772,10 @@ bm project bisync --name research --resync
 
 ```bash
 # Clear bisync state
-bm project bisync-reset research
+bm cloud bisync-reset research
 
 # Re-establish baseline
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 ```
 
 **What this does:**
@@ -787,16 +795,16 @@ bm project bisync --name research --resync
 
 ```bash
 # Check what would be deleted
-bm project bisync --name research --dry-run
+bm cloud bisync --name research --dry-run
 
 # If correct, establish new baseline
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 ```
 
 **Solution 2:** Use one-way sync if you know local is correct:
 
 ```bash
-bm project sync --name research
+bm cloud sync --name research
 ```
 
 ### Project Not Configured for Sync
@@ -809,7 +817,7 @@ bm project sync --name research
 
 ```bash
 bm cloud sync-setup research ~/Documents/research
-bm project bisync --name research --resync
+bm cloud bisync --name research --resync
 ```
 
 ### Connection Issues
@@ -881,19 +889,19 @@ bm project set-local <name>  # Revert project to local mode
 
 ```bash
 # One-way sync (local → cloud)
-bm project sync --name <project>
-bm project sync --name <project> --dry-run
-bm project sync --name <project> --verbose
+bm cloud sync --name <project>
+bm cloud sync --name <project> --dry-run
+bm cloud sync --name <project> --verbose
 
 # Two-way sync (local ↔ cloud) - Recommended
-bm project bisync --name <project>          # After first --resync
-bm project bisync --name <project> --resync # First time / force baseline
-bm project bisync --name <project> --dry-run
-bm project bisync --name <project> --verbose
+bm cloud bisync --name <project>          # After first --resync
+bm cloud bisync --name <project> --resync # First time / force baseline
+bm cloud bisync --name <project> --dry-run
+bm cloud bisync --name <project> --verbose
 
 # Integrity check
-bm project check --name <project>
-bm project check --name <project> --one-way
+bm cloud check --name <project>
+bm cloud check --name <project> --one-way
 
 # List project files by route
 bm project ls --name <project>          # Default target: local
@@ -909,9 +917,9 @@ bm project ls --name <project> --cloud --path <subpath>
 1. **Authenticate cloud access** - `bm cloud login`
 2. **Install rclone** - `bm cloud setup`
 3. **Add projects with sync** - `bm project add research --cloud --local-path ~/Documents/research`
-4. **Preview first sync** - `bm project bisync --name research --resync --dry-run`
-5. **Establish baseline** - `bm project bisync --name research --resync`
-6. **Daily workflow** - `bm project bisync --name research`
+4. **Preview first sync** - `bm cloud bisync --name research --resync --dry-run`
+5. **Establish baseline** - `bm cloud bisync --name research --resync`
+6. **Daily workflow** - `bm cloud bisync --name research`
 
 **Key benefits:**
 - ✅ Each project independently syncs (or doesn't)
