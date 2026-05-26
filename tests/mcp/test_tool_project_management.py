@@ -700,7 +700,9 @@ async def test_list_memory_projects_factory_mode(app, test_project):
     assert "Workspace: Personal (personal default)" in result
     assert "Workspace: Team Paul (team-paul)" in result
     assert "- personal-main (cloud) [personal-project-uuid]" in result
-    assert "- team-specs (cloud) [team-project-uuid]" in result
+    assert (
+        "- team-specs (cloud) [team-project-uuid] - cloud-only (local sync unsupported)" in result
+    )
 
 
 @pytest.mark.asyncio
@@ -759,6 +761,9 @@ async def test_list_memory_projects_factory_mode_json_includes_workspace(app, te
     assert proj["workspace_slug"] == "my-org"
     assert proj["workspace_is_default"] is False
     assert proj["qualified_name"] == "my-org/cloud-proj"
+    assert proj["sync_supported"] is False
+    assert proj["sync_reason"] == "organization workspace"
+    assert proj["local_usage"] == "cloud-only"
 
 
 @pytest.mark.asyncio
@@ -828,6 +833,9 @@ async def test_list_memory_projects_json_with_cloud(app, test_project):
     # Backward-compat: path prefers local
     assert main_proj["path"] == "/home/user/basic-memory"
     assert main_proj["is_default"] is True
+    assert main_proj["sync_supported"] is True
+    assert main_proj["sync_reason"] is None
+    assert main_proj["local_usage"] == "sync-supported"
 
     # cloud-only
     cloud_proj = by_name["cloud-only"]
@@ -837,6 +845,9 @@ async def test_list_memory_projects_json_with_cloud(app, test_project):
     assert cloud_proj["path"] == "/cloud-only"
     assert cloud_proj["workspace_slug"] == "personal"
     assert cloud_proj["qualified_name"] == "personal/cloud-only"
+    assert cloud_proj["sync_supported"] is True
+    assert cloud_proj["sync_reason"] is None
+    assert cloud_proj["local_usage"] == "sync-supported"
 
 
 # --- Unit test for _merge_projects ---
@@ -863,6 +874,9 @@ def test_merge_projects_local_only():
     assert all(p["workspace_name"] is None for p in merged)
     assert all(p["workspace_type"] is None for p in merged)
     assert all(p["workspace_tenant_id"] is None for p in merged)
+    assert all(p["sync_supported"] is True for p in merged)
+    assert all(p["sync_reason"] is None for p in merged)
+    assert all(p["local_usage"] == "sync-supported" for p in merged)
 
 
 def test_merge_projects_cloud_only():
@@ -885,6 +899,9 @@ def test_merge_projects_cloud_only():
     assert merged[0]["workspace_name"] == "Personal"
     assert merged[0]["workspace_type"] == "personal"
     assert merged[0]["workspace_tenant_id"] == "tenant-123"
+    assert merged[0]["sync_supported"] is True
+    assert merged[0]["sync_reason"] is None
+    assert merged[0]["local_usage"] == "sync-supported"
 
 
 def test_merge_projects_overlap():
@@ -908,6 +925,9 @@ def test_merge_projects_overlap():
     assert merged[0]["workspace_name"] == "Acme Corp"
     assert merged[0]["workspace_type"] == "organization"
     assert merged[0]["workspace_tenant_id"] == "org-456"
+    assert merged[0]["sync_supported"] is False
+    assert merged[0]["sync_reason"] == "organization workspace"
+    assert merged[0]["local_usage"] == "cloud-only"
 
 
 def test_merge_workspace_projects_attaches_local_state_to_one_duplicate_workspace(tmp_path):
@@ -959,6 +979,9 @@ def test_merge_workspace_projects_attaches_local_state_to_one_duplicate_workspac
     assert team_project["source"] == "cloud"
     assert team_project["local_path"] is None
     assert team_project["path"] == "/cloud/team-main"
+    assert team_project["sync_supported"] is False
+    assert team_project["sync_reason"] == "organization workspace"
+    assert team_project["local_usage"] == "cloud-only"
 
 
 def test_merge_workspace_projects_uses_configured_workspace_for_local_state(tmp_path):

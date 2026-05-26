@@ -617,7 +617,13 @@ def list_projects(
             )
             is_default = bool(is_attached_row and permalink == default_permalink)
 
-            sync_supported = cloud_workspace is None or cloud_workspace.workspace_type == "personal"
+            # Show workspace name (type) for cloud-sourced projects
+            cloud_ws_name = cloud_workspace.name if cloud_workspace else None
+            cloud_ws_type = cloud_workspace.workspace_type if cloud_workspace else None
+
+            sync_supported = cloud_ws_type is None or cloud_ws_type == "personal"
+            sync_reason = None if sync_supported else f"{cloud_ws_type} workspace"
+            local_usage = "sync-supported" if sync_supported else "cloud-only"
             has_sync = bool(is_attached_row and entry and entry.local_sync_path and sync_supported)
             # Determine MCP transport based on project routing mode
             if entry and entry.mode == ProjectMode.CLOUD:
@@ -626,10 +632,6 @@ def list_projects(
                 mcp_transport = "https"
             else:
                 mcp_transport = "stdio"
-
-            # Show workspace name (type) for cloud-sourced projects
-            cloud_ws_name = cloud_workspace.name if cloud_workspace else None
-            cloud_ws_type = cloud_workspace.workspace_type if cloud_workspace else None
 
             # display_name is a human label for private UUID-named projects (e.g., "My Project").
             # Keep "name" as the canonical identifier for scripting/JSON consumers;
@@ -645,6 +647,9 @@ def list_projects(
                 "cli_route": cli_route,
                 "mcp_stdio": mcp_transport,
                 "sync": has_sync,
+                "sync_supported": sync_supported,
+                "sync_reason": sync_reason,
+                "local_usage": local_usage,
                 "is_default": is_default,
             }
             if display_name:
@@ -663,6 +668,13 @@ def list_projects(
 
         # --- Rich table output ---
         for row_data in project_rows:
+            sync_display = (
+                "[X]"
+                if row_data["sync"]
+                else "cloud-only"
+                if not row_data["sync_supported"]
+                else ""
+            )
             table.add_row(
                 row_data.get("display_name") or row_data["name"],
                 row_data["local_path"],
@@ -671,7 +683,7 @@ def list_projects(
                 + (f" ({row_data['workspace_type']})" if row_data.get("workspace_type") else ""),
                 row_data["cli_route"],
                 row_data["mcp_stdio"],
-                "[X]" if row_data["sync"] else "",
+                sync_display,
                 "[X]" if row_data["is_default"] else "",
             )
 

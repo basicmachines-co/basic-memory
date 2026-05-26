@@ -333,12 +333,23 @@ def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalin
         "personal",
         "organization",
     }
+    personal_project = next(
+        project for project in shared_projects if project["workspace"] == "Personal"
+    )
+    team_project = next(project for project in shared_projects if project["workspace"] == "Team")
+    assert personal_project["sync_supported"] is True
+    assert personal_project["sync_reason"] is None
+    assert personal_project["local_usage"] == "sync-supported"
+    assert team_project["sync_supported"] is False
+    assert team_project["sync_reason"] == "organization workspace"
+    assert team_project["local_usage"] == "cloud-only"
 
     table_result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
 
     assert table_result.exit_code == 0
     assert "Personal (personal)" in table_result.stdout
     assert "Team (organization)" in table_result.stdout
+    assert "cloud-only" in table_result.stdout
 
 
 def test_project_list_workspace_discovery_failure_warns_and_uses_fallback(
@@ -907,6 +918,9 @@ def test_project_list_hides_bisync_flag_for_attached_team_workspace(
     assert team_row["cli_route"] == "cloud"
     assert team_row["mcp_stdio"] == "https"
     assert team_row["sync"] is False
+    assert team_row["sync_supported"] is False
+    assert team_row["sync_reason"] == "organization workspace"
+    assert team_row["local_usage"] == "cloud-only"
     assert team_row["is_default"] is True
 
 
