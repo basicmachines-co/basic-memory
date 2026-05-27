@@ -34,10 +34,11 @@ from basic_memory.utils import generate_permalink, normalize_project_path
 console = Console()
 
 TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
-    "Local rclone sync/bisync is supported only for Personal workspaces.\n"
-    "Team workspaces are accessed through the cloud API/MCP and do not support "
-    "local multi-user bisync.\n"
-    "Use `bm project list --workspace <workspace>` to inspect Team projects."
+    "Mirror-style rclone sync/bisync is supported only for Personal workspaces.\n"
+    "Team workspaces should not use local mirror workflows because they can "
+    "overwrite or delete shared cloud files.\n"
+    "Use cloud API/MCP routing for Team workspace edits, or inspect projects with "
+    "`bm project list --workspace <workspace>`."
 )
 
 

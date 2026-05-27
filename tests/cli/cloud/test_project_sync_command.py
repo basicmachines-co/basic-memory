@@ -134,8 +134,9 @@ def test_cloud_sync_commands_block_organization_workspace(monkeypatch, argv, con
     result = runner.invoke(app, argv)
 
     assert result.exit_code == 1, result.output
-    assert "Local rclone sync/bisync is supported only for Personal workspaces" in result.output
-    assert "Team workspaces are accessed through the cloud API/MCP" in result.output
+    output = " ".join(result.output.split())
+    assert "Mirror-style rclone sync/bisync is supported only for Personal workspaces" in output
+    assert "overwrite or delete shared cloud files" in output
 
 
 def test_require_personal_workspace_allows_personal_workspace(monkeypatch, config_manager):
