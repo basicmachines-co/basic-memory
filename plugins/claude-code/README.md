@@ -32,6 +32,15 @@ the session back to it before the context window compacts.
 
 The full design and rationale live in [DESIGN.md](./DESIGN.md).
 
+## Commands
+
+Plugin skills are namespaced under the plugin name:
+
+| Command | What it does |
+|---------|--------------|
+| `/basic-memory:remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
+| `/basic-memory:status` | Diagnostic — shows the active project, capture folders, output-style state, recent session checkpoints, and active-task count. |
+
 ## Requirements
 
 - [Basic Memory](https://github.com/basicmachines-co/basic-memory) `>= 0.19.0`

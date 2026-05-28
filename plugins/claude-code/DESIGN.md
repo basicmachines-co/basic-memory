@@ -487,10 +487,24 @@ the DB — `schema_validate` then can't resolve it. Bootstrap must seed schemas 
 by writing the files and letting the BM file watcher index them. (Recall via
 `metadata_filters` on `type`/`status` is unaffected — that works regardless.)
 
-### Phase 2: Deliberate gestures (3 days)
-- [ ] Write `skills/remember/SKILL.md` → `/basic-memory:remember`
-- [ ] Write `skills/status/SKILL.md` → `/basic-memory:status`
-- [ ] Test slash-command discovery end-to-end (confirm namespaced invocation)
+### Phase 2: Deliberate gestures — ✅ DONE (2026-05-28)
+
+Both skills implemented as **prose skills** (skills are prompts) rather than
+bash-injection scripts — avoids shell-quoting fragility on arbitrary user text and
+the `${CLAUDE_SKILL_DIR}` path uncertainty, and works regardless of the MCP server's
+tool-name prefix.
+
+- [x] Write `skills/remember/SKILL.md` → `/basic-memory:remember` — model-invocable
+  ("remember that…"); writes verbatim to `rememberFolder` with a first-line title and
+  `manual-capture` tag via `write_note`.
+- [x] Write `skills/status/SKILL.md` → `/basic-memory:status` — `disable-model-invocation`
+  (user-only diagnostic); reports project, folders, output-style, recent checkpoints,
+  active-task count.
+- [x] Test slash-command discovery end-to-end — installed from a local marketplace and
+  confirmed via `claude plugin details`: **Skills (2): remember, status**, namespaced
+  as `/basic-memory:<name>` (validates Q3 live). Cleaned up afterward.
+- [x] Validator now requires the shipped skill set (`REQUIRED_SKILLS`); passes
+  `claude plugin validate . --strict`.
 
 ### Phase 3: Bootstrap interview (3 days)
 - [ ] Write `skills/setup/SKILL.md` → `/basic-memory:setup` — the interview script

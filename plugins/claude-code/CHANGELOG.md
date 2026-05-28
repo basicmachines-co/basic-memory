@@ -1,12 +1,24 @@
 # Changelog
 
-## Unreleased — v0.4 bridge redesign (Phase 1)
+## Unreleased — v0.4 bridge redesign (Phases 1–2)
 
 The plugin is reframed as the **bridge between Claude's working memory and Basic
 Memory's durable graph**, rather than a memory layer of its own. See
 [DESIGN.md](./DESIGN.md) for the full rationale and roadmap.
 
 ### Added
+
+- **`/basic-memory:remember <text>`** (`skills/remember/`) — quick deliberate
+  capture. Writes the text verbatim to the `rememberFolder` (default `bm-remember`)
+  with a first-line title and a `manual-capture` tag, via the connected Basic Memory
+  MCP server. Also fires when the user says "remember that…". (Phase 2)
+- **`/basic-memory:status`** (`skills/status/`) — diagnostic that reports the active
+  project, capture/remember folders, output-style state, recent session checkpoints,
+  and active-task count. User-invoked only (`disable-model-invocation`). (Phase 2)
+
+  Both verified discoverable via `claude plugin details` — they surface as
+  plugin-namespaced commands (`/basic-memory:<name>`).
+
 
 - **SessionStart hook** (`hooks/session-start.sh`) — briefs Claude at session
   start with active tasks from the graph (one structured `type: task` query) plus

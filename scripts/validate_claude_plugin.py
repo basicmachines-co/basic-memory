@@ -26,6 +26,9 @@ REQUIRED_HOOK_SCRIPTS = ("hooks/session-start.sh", "hooks/pre-compact.sh")
 # Seed schemas the plugin ships for its note types (copied into the user's
 # project at bootstrap). Each must be a parseable schema note.
 REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
+# Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
+# Phase 2 ships remember + status; Phase 3 will add setup.
+REQUIRED_SKILLS = ("remember", "status")
 
 
 def read_json(path: Path) -> dict:
@@ -98,15 +101,26 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
         if not fm.get("entity"):
             raise SystemExit(f"{schema_file}: missing entity field")
 
-    # --- Skills (optional) ---
-    # No skills ship in the minimal layout; later phases add setup/remember/status.
-    # If a skills/ dir exists, each subdirectory's SKILL.md name must match the dir.
+    # --- Skills ---
+    # Each skill is a directory with a SKILL.md whose `name` matches the directory;
+    # it surfaces as /basic-memory:<dir>. Require the shipped set, and validate the
+    # frontmatter of every skill present.
     skills_root = plugin_dir / "skills"
-    if skills_root.exists():
-        for skill_dir in sorted(p for p in skills_root.iterdir() if p.is_dir()):
-            frontmatter = parse_frontmatter(skill_dir / "SKILL.md")
-            if frontmatter.get("name") != skill_dir.name:
-                raise SystemExit(f"{skill_dir}: skill name must match directory")
+    if not skills_root.exists():
+        raise SystemExit(f"Missing skills directory: {skills_root}")
+    present_skills = {p.name for p in skills_root.iterdir() if p.is_dir()}
+    for required in REQUIRED_SKILLS:
+        if required not in present_skills:
+            raise SystemExit(f"Missing required skill: skills/{required}/SKILL.md")
+    for skill_dir in sorted(p for p in skills_root.iterdir() if p.is_dir()):
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            raise SystemExit(f"{skill_dir}: missing SKILL.md")
+        frontmatter = parse_frontmatter(skill_md)
+        if frontmatter.get("name") != skill_dir.name:
+            raise SystemExit(f"{skill_dir}: skill name must match directory")
+        if not frontmatter.get("description"):
+            raise SystemExit(f"{skill_md}: missing description frontmatter")
 
     print(f"validated Claude Code plugin in {plugin_dir}")
 
