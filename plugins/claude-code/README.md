@@ -38,6 +38,7 @@ Plugin skills are namespaced under the plugin name:
 
 | Command | What it does |
 |---------|--------------|
+| `/basic-memory:setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
 | `/basic-memory:remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
 | `/basic-memory:status` | Diagnostic — shows the active project, capture folders, output-style state, recent session checkpoints, and active-task count. |
 
@@ -56,11 +57,15 @@ claude plugin install basic-memory@basicmachines-co
 
 ## Configuration
 
-The hooks work out of the box against your **default** Basic Memory project — no
-config required. To pin a specific project (recommended, and required for the
-PreCompact checkpoint to write), add a `basicMemory` block to your project's
-`.claude/settings.json`. Copy [`settings.example.json`](./settings.example.json)
-and set `primaryProject`:
+The fastest path is **`/basic-memory:setup`** — a ~2-minute interview that writes
+the config, seeds the schemas, and turns on the capture reflexes. The SessionStart
+hook nudges you toward it on first run.
+
+To configure by hand instead: the hooks work out of the box against your **default**
+Basic Memory project — no config required. To pin a specific project (recommended,
+and required for the PreCompact checkpoint to write), add a `basicMemory` block to
+your project's `.claude/settings.json`. Copy
+[`settings.example.json`](./settings.example.json) and set `primaryProject`:
 
 ```json
 {

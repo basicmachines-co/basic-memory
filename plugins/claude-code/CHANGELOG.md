@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v0.4 bridge redesign (Phases 1–2)
+## Unreleased — v0.4 bridge redesign (Phases 1–3)
 
 The plugin is reframed as the **bridge between Claude's working memory and Basic
 Memory's durable graph**, rather than a memory layer of its own. See
@@ -8,6 +8,13 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Added
 
+- **`/basic-memory:setup`** (`skills/setup/`) — a short guided interview that
+  configures the project for the plugin: maps it to a Basic Memory project (picking
+  an existing one or creating a new one), seeds the `session`/`decision`/`task`
+  schemas into the project, optionally learns the project's placement conventions,
+  and enables the capture reflexes. Writes the `basicMemory` block to
+  `.claude/settings.json` (or `settings.local.json`). The SessionStart hook nudges
+  toward this on first run; running it (writing the config) stops the nudge. (Phase 3)
 - **`/basic-memory:remember <text>`** (`skills/remember/`) — quick deliberate
   capture. Writes the text verbatim to the `rememberFolder` (default `bm-remember`)
   with a first-line title and a `manual-capture` tag, via the connected Basic Memory
@@ -37,6 +44,13 @@ Memory's durable graph**, rather than a memory layer of its own. See
   precise. `task` mirrors the framework-agnostic `memory-tasks` skill. Validation
   mode `warn` — advisory, never blocking.
 - **`settings.example.json`** — copyable configuration with sensible defaults.
+
+### Changed
+
+- **SessionStart hook now nudges toward `/basic-memory:setup` on first run** — when
+  no `basicMemory` config block is present in either settings file. The nudge
+  survives a failed/empty task query (so a brand-new user with no project yet still
+  sees it), and stops once setup writes the config. (Phase 3)
 
 ### Removed (clean break)
 

@@ -52,21 +52,28 @@ cwd = payload.get("cwd") or os.getcwd()
 # Precedence: settings.local.json (per-user) wins over settings.json (team).
 # Bare defaults apply when neither sets a key.
 def load_settings(directory):
+    # Returns (merged basicMemory block, found) where `found` is True if either
+    # settings file declared a basicMemory block at all — that presence is the
+    # first-run sentinel (setup writing the block is what stops the nudge below).
     merged = {}
+    found = False
     for name in ("settings.json", "settings.local.json"):
         path = os.path.join(directory, ".claude", name)
         try:
             with open(path) as fh:
-                block = json.load(fh).get("basicMemory") or {}
-                merged.update(block)
+                data = json.load(fh)
         except FileNotFoundError:
             continue
         except Exception:
             continue
-    return merged
+        block = data.get("basicMemory")
+        if isinstance(block, dict):
+            found = True
+            merged.update(block)
+    return merged, found
 
 
-cfg = load_settings(cwd)
+cfg, configured = load_settings(cwd)
 primary_project = (cfg.get("primaryProject") or "").strip()
 recall_timeframe = cfg.get("recallTimeframe") or "3d"
 default_prompt = (
@@ -93,15 +100,24 @@ def search(args):
     return json.loads(out.stdout)
 
 
+# The first-run nudge — shown until setup writes a basicMemory config block.
+setup_nudge = (
+    "_Basic Memory isn't set up for this project yet. Run "
+    "`/basic-memory:setup` (~2 min) to configure session briefings and checkpoints._"
+)
+
 try:
     tasks = search(["--type", "task", "--status", "active"])
 except Exception:
     tasks = None
 
-# Trigger: the query failed (BM unreachable, no default project, etc.).
-# Why: never nag and never error — absence of a brief is a fine outcome.
-# Outcome: silent no-op.
+# Trigger: the task query couldn't run (no default project yet, transient error).
+# Why: a broken query must never error the session — but a genuine first-run user
+#      (no config, nothing to brief) should still be pointed at setup.
+# Outcome: first-run → nudge only; already-configured → silent no-op.
 if tasks is None:
+    if not configured:
+        print("# Basic Memory\n\n" + setup_nudge)
     sys.exit(0)
 
 
@@ -124,7 +140,13 @@ if results:
 else:
     lines.append(f"**Project:** {project_label} · no active tasks tracked")
 
-if not primary_project:
+# Trigger: no basicMemory config block in either settings file (first run).
+# Why: point the user at the one-time setup so the plugin is wired up properly.
+# Outcome: a single nudge line; once setup writes the block, this stops firing.
+if not configured:
+    lines.append("")
+    lines.append(setup_nudge)
+elif not primary_project:
     lines.append("")
     lines.append(
         "_Tip: set `basicMemory.primaryProject` in `.claude/settings.json` to "

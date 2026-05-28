@@ -480,12 +480,16 @@ nudge* moves to Phase 3 (it should point at `/basic-memory:setup`, which doesn't
 yet); the multi-query parallel brief and the LLM-summarized PreCompact are the enrich
 steps.
 
-**Implementation finding for Phase 3 bootstrap:** the CLI `write-note` cannot set
-`note_type`/`metadata`, so it does **not** index a schema note's `entity`/`schema` into
-the DB — `schema_validate` then can't resolve it. Bootstrap must seed schemas via the
-**MCP `write_note(note_type="schema", metadata={entity, schema, settings})`** path, or
-by writing the files and letting the BM file watcher index them. (Recall via
-`metadata_filters` on `type`/`status` is unaffected — that works regardless.)
+**Implementation finding for Phase 3 bootstrap (corrected in Phase 3):** an earlier
+Phase 1 note claimed the CLI `write-note` couldn't seed a resolvable schema and that
+bootstrap must use the MCP `write_note(note_type="schema", metadata=…)` path. That was
+**confounded by the enum-syntax YAML bug** — at the time of that test the schema
+frontmatter didn't parse, so it couldn't index. Re-verified in Phase 3 with the fixed
+schemas: writing a schema file's content via `write_note` (CLI or MCP, embedded
+frontmatter) indexes it as `type: schema` **and** `schema_validate` resolves it
+(`schema_entity: "Session"`, `valid_count: 1`). So **schema seeding is just a content
+copy** — bootstrap reads each `schemas/*.md` and writes it via `write_note`; no
+`note_type`/`metadata` gymnastics needed.
 
 ### Phase 2: Deliberate gestures — ✅ DONE (2026-05-28)
 
@@ -506,12 +510,34 @@ tool-name prefix.
 - [x] Validator now requires the shipped skill set (`REQUIRED_SKILLS`); passes
   `claude plugin validate . --strict`.
 
-### Phase 3: Bootstrap interview (3 days)
-- [ ] Write `skills/setup/SKILL.md` → `/basic-memory:setup` — the interview script
-- [ ] Wire `schema_infer` into the bootstrap (analyze existing notes → summarize patterns → store in `basicMemory.placementConventions`)
-- [ ] Wire schema-seeding step (copy `schemas/*.md` into primary project, skip existing)
-- [ ] Implement first-run detection in SessionStart (sentinel file → nudge `/basic-memory:setup`); optionally use `{"reloadSkills": true}` after setup
-- [ ] Write tests for the inferred-conventions generation step (read sample notes → emit `placementConventions`)
+### Phase 3: Bootstrap interview — ✅ DONE (2026-05-28)
+
+Implemented as a **prose skill** (the interview is conversational; Claude runs it
+using its MCP tools). Verified the whole loop end-to-end against throwaway projects.
+
+- [x] Write `skills/setup/SKILL.md` → `/basic-memory:setup` — adaptive interview that
+  maps the project, seeds schemas, optionally learns conventions, writes settings, and
+  enables the output style. Model-invocable ("set up basic memory") + user-invocable.
+- [x] Wire `schema_infer`/`list_directory` into the bootstrap — the skill inspects the
+  folder layout + samples notes, summarizes the user's real conventions, and stores the
+  summary string in `basicMemory.placementConventions` (infer, don't dictate).
+- [x] Wire schema-seeding — the skill reads `<plugin>/schemas/*.md` (two dirs up from
+  the skill) and writes each via `write_note` (content copy, skip-if-exists). **Verified
+  end-to-end:** all three seed, index as `type: schema`, and resolve via
+  `schema_validate` (`entity=Session/Decision/Task`). This corrects the earlier Phase 1
+  finding — schema seeding is a plain content copy; the previous "must use
+  `note_type`/`metadata`" conclusion was confounded by the enum YAML bug.
+- [x] First-run detection in SessionStart — nudges toward `/basic-memory:setup` when no
+  `basicMemory` config block exists (config presence is the sentinel; no separate file).
+  The nudge survives a failed/empty task query. Verified across all three config states
+  (no config → nudge; block without project → pin tip; project pinned → silent).
+- [x] `{"reloadSkills": true}` — **not needed.** Setup adds no new skill files mid-session
+  (the skills already ship with the plugin); config changes take effect when the hooks
+  next run. Documented as N/A rather than implemented.
+- [x] Tests for inferred-conventions — the inference is **model-driven** (prose skill),
+  so there's no deterministic code unit to unit-test. The testable contract is the
+  skill's presence + frontmatter, enforced by `validate_claude_plugin.py`'s
+  `REQUIRED_SKILLS` (now `setup`, `remember`, `status`). Real validation is dogfooding.
 
 ### Phase 4: Team workspace support (3 days)
 - [ ] Extend SessionStart to query secondary/team projects in parallel
