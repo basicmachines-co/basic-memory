@@ -493,8 +493,14 @@ class BatchIndexer:
         async def resolve_relation(relation: Relation) -> int:
             async with semaphore:
                 try:
+                    # strict=True for deferred resolution: only fill in to_id on an
+                    # exact permalink/title/file_path match. Fuzzy fallback would silently
+                    # resolve ambiguous links to whichever entity shares tokens with the
+                    # link text, mismatching this with the sync_service forward-reference
+                    # path and producing confidently-wrong graph edges. See
+                    # sync_service.resolve_forward_references for the same change.
                     resolved_entity = await self.entity_service.link_resolver.resolve_link(
-                        relation.to_name
+                        relation.to_name, strict=True
                     )
                     if resolved_entity is None or resolved_entity.id == relation.from_id:
                         return 0

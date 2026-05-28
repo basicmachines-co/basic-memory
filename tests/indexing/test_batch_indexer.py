@@ -689,6 +689,78 @@ async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    """Regression: batch indexer's deferred relation resolution must call
+    resolve_link with strict=True.
+
+    Mirror of sync_service.resolve_forward_references. Fuzzy fallback in the
+    deferred path silently fills in to_id from BM25/ts_rank results, polluting
+    the graph with confidently-wrong edges. Entity-creation already uses
+    strict=True; this is the other deferred path.
+    """
+    path = "notes/source.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            """
+            ---
+            title: Source
+            type: note
+            ---
+
+            # Source
+
+            - links_to [[never-resolves-target]]
+            """
+        ),
+    )
+
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    original_resolve_link = entity_service.link_resolver.resolve_link
+    seen_strict: list[object] = []
+
+    async def spy_resolve_link(*args, **kwargs):
+        seen_strict.append(kwargs.get("strict", False))
+        return await original_resolve_link(*args, **kwargs)
+
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", spy_resolve_link)
+
+    await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+    )
+
+    assert seen_strict, "batch indexer did not invoke link_resolver.resolve_link"
+    assert all(strict is True for strict in seen_strict), (
+        f"Deferred resolution must call resolve_link(strict=True). Observed: {seen_strict!r}"
+    )
+
+    # The unresolvable relation stayed unresolved.
+    source = await entity_repository.get_by_file_path(path)
+    assert source is not None
+    assert len(source.outgoing_relations) == 1
+    assert source.outgoing_relations[0].to_id is None
+    assert source.outgoing_relations[0].to_name == "never-resolves-target"
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_strips_frontmatter_from_search_content_when_body_is_empty(
     app_config,
     entity_service,

@@ -109,6 +109,79 @@ Target content
 
 
 @pytest.mark.asyncio
+async def test_resolve_relations_uses_strict_link_resolution(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    entity_service: EntityService,
+    monkeypatch,
+):
+    """Regression: deferred forward-reference resolution must call resolve_link
+    with strict=True.
+
+    Producers sometimes emit disambiguator-style links like
+    `[[overview (state-management/session-execution)]]` whose exact text does
+    not match any entity's permalink, title, or file_path. The previous
+    behavior fell through to BM25/ts_rank fuzzy search in
+    LinkResolver._resolve_in_project and silently picked whichever entity
+    shared the most tokens — polluting the graph with confidently-wrong edges
+    that no audit catches.
+
+    Entity-creation already resolves relations with strict=True (see
+    entity_service.update_entity_relations). The deferred sync path must use
+    the same contract; otherwise unresolved relations get silently filled
+    later by fuzzy search.
+    """
+    # Create a source file with a forward reference. The target doesn't exist,
+    # so resolution will fail — which is exactly when fuzzy fallback would
+    # previously silently pick a wrong target.
+    source_content = dedent("""
+        ---
+        type: knowledge
+        ---
+        # Source
+
+        ## Relations
+        - part_of [[never-resolves-target]]
+    """)
+    await create_test_file(project_config.home / "source.md", source_content)
+    await sync_service.sync(project_config.home)
+
+    project_prefix = generate_permalink(project_config.name)
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
+    assert len(source.relations) == 1
+    assert source.relations[0].to_id is None  # initial creation already strict
+
+    # Spy on resolve_link to capture the strict flag the deferred resolver uses.
+    original_resolve_link = sync_service.entity_service.link_resolver.resolve_link
+    seen_strict: list[Any] = []
+
+    async def spy_resolve_link(*args, **kwargs):
+        seen_strict.append(kwargs.get("strict", False))
+        return await original_resolve_link(*args, **kwargs)
+
+    monkeypatch.setattr(
+        sync_service.entity_service.link_resolver,
+        "resolve_link",
+        spy_resolve_link,
+    )
+
+    await sync_service.resolve_relations()
+
+    # Deferred resolution invoked resolve_link, and every call passed strict=True.
+    assert seen_strict, "resolve_relations did not invoke link_resolver.resolve_link"
+    assert all(strict is True for strict in seen_strict), (
+        f"Deferred resolution must call resolve_link(strict=True) to avoid silent "
+        f"fuzzy matching. Observed strict values: {seen_strict!r}"
+    )
+
+    # Sanity check: the unresolvable relation stayed unresolved — no silent
+    # fuzzy match polluted it.
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
+    assert source.relations[0].to_id is None
+    assert source.relations[0].to_name == "never-resolves-target"
+
+
+@pytest.mark.asyncio
 async def test_resolve_relations_deletes_duplicate_unresolved_relation(
     sync_service: SyncService,
     project_config: ProjectConfig,
