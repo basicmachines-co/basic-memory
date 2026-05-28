@@ -110,6 +110,13 @@ Because project names repeat across workspaces, team refs must be **workspace-qu
 (`my-team/notes`) or `external_id` UUIDs — `/basic-memory:setup` fills these in for you
 from `list_workspaces`.
 
+## Documentation
+
+- [Why combine Basic Memory with Claude's built-in memory](./docs/why-combine-memory.md) — the value, the personas, the use cases.
+- [Getting started](./docs/getting-started.md) — a ~5-minute walkthrough from install to a working memory loop.
+- [Architecture](./docs/architecture.md) — how it works, flow by flow, with diagrams.
+- [DESIGN.md](./DESIGN.md) — design rationale, decisions, and roadmap.
+
 ## Development
 
 From the monorepo root:

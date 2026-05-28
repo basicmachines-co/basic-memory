@@ -583,13 +583,25 @@ since team usage needs a safe write path.
 - [x] Document the share-vs-capture distinction (README "Teams" section + the
   read-only note in the SessionStart brief itself).
 
-### Phase 5: Docs + dogfood (1 week)
-- [x] Rewrite `README.md` around the bridge story (done in Phase 1 — the old README
-  referenced deleted skills; replaced `PLUGIN.md`). May refine after dogfood.
-- [ ] Migration guide: what changed from v0.3.x, how to upgrade
-- [ ] Internal dogfood — full team uses v0.4 for one week of normal work
-- [ ] File bugs against rough edges
-- [ ] Refine recall prompt and SessionStart format based on actual sessions
+### Phase 5: Docs + dogfood
+
+Docs done 2026-05-28; dogfood is the remaining (human) step.
+
+- [x] Rewrite `README.md` around the bridge story (done in Phase 1; expanded with
+  Commands + Teams sections in Phases 2-4).
+- [x] `docs/why-combine-memory.md` — user-facing value prop, the three personas, use
+  cases, and the "use both" framing.
+- [x] `docs/getting-started.md` — guided install → setup → see-it-work → team walkthrough.
+- [x] `docs/architecture.md` — flow-by-flow with mermaid diagrams (the bridge,
+  SessionStart, PreCompact, capture reflexes, team read/share, component map).
+- [x] Linked all three from the README's Documentation section.
+- [x] ~~Migration guide~~ — **not needed.** v0.4 is a clean break; upgrade = uninstall
+  the old plugin, install the new one. Noted in the CHANGELOG's "Removed" section.
+- [ ] Internal dogfood — full team uses v0.4 for a week of normal work (incl. the team
+  workspace path); file bugs against rough edges.
+- [ ] Refine the recall prompt and SessionStart brief format based on real sessions.
+- [ ] (Likely follow-ups surfaced by dogfood) the multi-query brief enrichment and the
+  LLM-summarized PreCompact checkpoint.
 
 ### Phase 6: Release
 - [ ] Bump version in lockstep with basic-memory release
