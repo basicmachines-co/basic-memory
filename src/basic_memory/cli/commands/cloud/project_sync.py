@@ -33,12 +33,9 @@ from basic_memory.utils import generate_permalink, normalize_project_path
 
 console = Console()
 
-TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
-    "Mirror-style rclone sync/bisync is supported only for Personal workspaces.\n"
-    "Team workspaces should not use local mirror workflows because they can "
-    "overwrite or delete shared cloud files.\n"
-    "Use cloud API/MCP routing for Team workspace edits, or inspect projects with "
-    "`bm project list --workspace <workspace>`."
+TEAM_WORKSPACE_BISYNC_UNSUPPORTED = (
+    "The bisync operation is only supported on Personal workspaces.\n"
+    "Use `bm cloud sync --name {name}` instead."
 )
 
 
@@ -96,7 +93,7 @@ async def _get_workspace_for_project(name: str, config: BasicMemoryConfig) -> Wo
 
 
 def _require_personal_workspace(name: str, config: BasicMemoryConfig) -> WorkspaceInfo:
-    """Exit before rclone work when the target workspace is not personal."""
+    """Exit before bisync work when the target workspace is not personal."""
     try:
         workspace = run_with_cleanup(_get_workspace_for_project(name, config))
     except Exception as exc:
@@ -104,7 +101,7 @@ def _require_personal_workspace(name: str, config: BasicMemoryConfig) -> Workspa
         raise typer.Exit(1)
 
     if workspace.workspace_type != "personal":
-        console.print(f"[red]{TEAM_WORKSPACE_SYNC_UNSUPPORTED}[/red]")
+        console.print(f"[red]{TEAM_WORKSPACE_BISYNC_UNSUPPORTED.format(name=name)}[/red]")
         raise typer.Exit(1)
 
     return workspace
@@ -161,7 +158,6 @@ def sync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
-    _require_personal_workspace(name, config)
 
     try:
         # Get tenant info for bucket name
@@ -270,7 +266,6 @@ def check_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
-    _require_personal_workspace(name, config)
 
     try:
         # Get tenant info for bucket name
@@ -353,7 +348,6 @@ def setup_project_sync(
     config_manager = ConfigManager()
     config = config_manager.config
     _require_cloud_credentials(config)
-    _require_personal_workspace(name, config)
 
     async def _verify_project_exists():
         """Verify the project exists on cloud by listing all projects."""
@@ -402,8 +396,8 @@ def setup_project_sync(
         console.print(f"[green]Sync configured for project '{name}'[/green]")
         console.print(f"\nLocal sync path: {resolved_path}")
         console.print("\nNext steps:")
-        console.print(f"  1. Preview: bm cloud bisync --name {name} --resync --dry-run")
-        console.print(f"  2. Sync: bm cloud bisync --name {name} --resync")
+        console.print(f"  1. Preview: bm cloud sync --name {name} --dry-run")
+        console.print(f"  2. Sync: bm cloud sync --name {name}")
     except Exception as e:
         console.print(f"[red]Error configuring sync: {str(e)}[/red]")
         raise typer.Exit(1)
