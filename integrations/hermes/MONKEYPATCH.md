@@ -2,6 +2,8 @@
 
 This document describes the Hermes Agent-side patch needed when `/bm-*` slash commands do not appear in the gateway even though the Basic Memory provider itself is installed and working.
 
+This issue is tracked upstream in https://github.com/NousResearch/hermes-agent/issues/23603
+
 Agents may use this file as a guide to add support for `/bm-*` slash commands in Hermes Agent builds that do not yet include the upstream fix.
 
 ## Current status and compatibility
