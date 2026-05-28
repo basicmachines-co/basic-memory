@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
-"""Validate the Basic Memory Claude Code plugin layout."""
+"""Validate the Basic Memory Claude Code plugin layout (v0.4 bridge redesign).
+
+The plugin's surfaces are intentionally minimal: lifecycle hooks (SessionStart,
+PreCompact), an opt-in output style, and seed schemas. There is no bundled agent,
+and skills are optional in this layout (added by later phases). This validator
+mirrors that contract so `package-check-claude-code` passes for what the plugin
+actually ships.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from validate_skills import parse_frontmatter
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Hook events the bridge plugin must register, and the scripts that back them.
+REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
+REQUIRED_HOOK_SCRIPTS = ("hooks/session-start.sh", "hooks/pre-compact.sh")
+# Seed schemas the plugin ships for its note types (copied into the user's
+# project at bootstrap). Each must be a parseable schema note.
+REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
 
 
 def read_json(path: Path) -> dict:
@@ -19,6 +34,8 @@ def read_json(path: Path) -> dict:
 
 def validate_claude_plugin(plugin_dir: Path) -> None:
     plugin_dir = plugin_dir.resolve()
+
+    # --- Manifests ---
     plugin_json = plugin_dir / ".claude-plugin/plugin.json"
     local_marketplace_json = plugin_dir / ".claude-plugin/marketplace.json"
     root_marketplace_json = ROOT / ".claude-plugin/marketplace.json"
@@ -46,23 +63,50 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
     if local_plugin.get("name") != "basic-memory" or local_plugin.get("source") != "./":
         raise SystemExit(f"{local_marketplace_json}: expected plugin-local source ./")
 
-    hooks = plugin_dir / "hooks/hooks.json"
-    hooks_json = read_json(hooks)
-    if "PreToolUse" not in hooks_json.get("hooks", {}):
-        raise SystemExit(f"{hooks}: missing PreToolUse hook")
+    # --- Hooks ---
+    # The bridge runs on lifecycle events, not on tool calls. Require the two
+    # event keys and confirm each backing script exists and is executable
+    # (Claude Code invokes them directly via ${CLAUDE_PLUGIN_ROOT}).
+    hooks_json = read_json(plugin_dir / "hooks/hooks.json")
+    hooks = hooks_json.get("hooks", {})
+    for event in REQUIRED_HOOK_EVENTS:
+        if event not in hooks:
+            raise SystemExit(f"hooks/hooks.json: missing {event} hook")
+    for rel in REQUIRED_HOOK_SCRIPTS:
+        script = plugin_dir / rel
+        if not script.exists():
+            raise SystemExit(f"Missing hook script: {script}")
+        if not os.access(script, os.X_OK):
+            raise SystemExit(f"Hook script is not executable: {script}")
 
-    agent = plugin_dir / "agents/basic-memory-manager.md"
-    agent_frontmatter = parse_frontmatter(agent)
-    if agent_frontmatter.get("name") != "basic-memory-manager":
-        raise SystemExit(f"{agent}: missing basic-memory-manager frontmatter")
+    # --- Output style ---
+    output_style = plugin_dir / "output-styles/basic-memory.md"
+    if not output_style.exists():
+        raise SystemExit(f"Missing output style: {output_style}")
+    if not parse_frontmatter(output_style).get("description"):
+        raise SystemExit(f"{output_style}: missing description frontmatter")
 
-    skill_dirs = sorted(path for path in (plugin_dir / "skills").iterdir() if path.is_dir())
-    if not skill_dirs:
-        raise SystemExit(f"{plugin_dir / 'skills'}: no bundled Claude Code skills")
-    for skill_dir in skill_dirs:
-        frontmatter = parse_frontmatter(skill_dir / "SKILL.md")
-        if frontmatter.get("name") != skill_dir.name:
-            raise SystemExit(f"{skill_dir}: skill name must match directory")
+    # --- Seed schemas ---
+    # Each must declare type: schema and an entity so it resolves once indexed.
+    for name in REQUIRED_SCHEMAS:
+        schema_file = plugin_dir / "schemas" / name
+        if not schema_file.exists():
+            raise SystemExit(f"Missing seed schema: {schema_file}")
+        fm = parse_frontmatter(schema_file)
+        if fm.get("type") != "schema":
+            raise SystemExit(f"{schema_file}: expected type: schema")
+        if not fm.get("entity"):
+            raise SystemExit(f"{schema_file}: missing entity field")
+
+    # --- Skills (optional) ---
+    # No skills ship in the minimal layout; later phases add setup/remember/status.
+    # If a skills/ dir exists, each subdirectory's SKILL.md name must match the dir.
+    skills_root = plugin_dir / "skills"
+    if skills_root.exists():
+        for skill_dir in sorted(p for p in skills_root.iterdir() if p.is_dir()):
+            frontmatter = parse_frontmatter(skill_dir / "SKILL.md")
+            if frontmatter.get("name") != skill_dir.name:
+                raise SystemExit(f"{skill_dir}: skill name must match directory")
 
     print(f"validated Claude Code plugin in {plugin_dir}")
 

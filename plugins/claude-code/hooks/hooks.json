@@ -1,23 +1,26 @@
 {
+  "description": "Basic Memory bridge hooks — brief Claude from the knowledge graph on session start, checkpoint the session before compaction.",
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "mcp__.*__write_note",
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"permissionDecision\":\"allow\",\"additionalContext\":\"Before saving this note: invoke the placement skill (basic-memory:placement) to determine the correct directory parameter — unless placement was already settled for this write via the skill, basic-memory.md config, or explicit user instruction. The hook is advisory; this tool call is allowed regardless.\"}'"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh",
+            "timeout": 20,
+            "statusMessage": "Briefing from Basic Memory"
           }
         ]
       }
     ],
-    "PostToolUse": [
+    "PreCompact": [
       {
-        "matcher": "mcp__.*__write_note",
         "hooks": [
           {
             "type": "command",
-            "command": "echo '✓ Note saved to Basic Memory'"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.sh",
+            "timeout": 120,
+            "statusMessage": "Checkpointing session to Basic Memory"
           }
         ]
       }

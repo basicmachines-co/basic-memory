@@ -1,55 +1,80 @@
-# Basic Memory Claude Code Plugin
+# Basic Memory for Claude Code
 
-**Claude Code-specific plugins** for [Basic Memory](https://basicmemory.com) knowledge management.
+The bridge between **Claude's working memory** and **[Basic Memory](https://basicmemory.com)'s durable knowledge graph**.
 
-This package lives in the canonical [`basic-memory`](https://github.com/basicmachines-co/basic-memory) repository under `plugins/claude-code/`. It uses [Claude Code's plugin format](https://docs.claude.com/en/docs/claude-code/plugins) — skills and hooks bundled into an installable marketplace. It only works with Claude Code.
+Claude Code now keeps its own auto-memory — fast, in-context notes Claude writes
+to itself. Basic Memory is the other half: a searchable, portable, semantic graph
+of markdown files you and Claude both own. This plugin connects the two so you get
+the [documented "use both" setup](https://docs.basicmemory.com/concepts/vs-built-in-memory)
+automatically: Claude starts each session briefed from the graph, and checkpoints
+the session back to it before the context window compacts.
 
-> **Looking for framework-agnostic skills?** See the top-level [`skills/`](../../skills) directory — `SKILL.md` files that work in Claude Code, Claude Desktop, and other MCP-compatible agents. Some functionality (commands, hooks) is unique to this Claude Code plugin and isn't available there.
+> This package lives in the canonical [`basic-memory`](https://github.com/basicmachines-co/basic-memory)
+> repository under `plugins/claude-code/` and only works with Claude Code. For
+> framework-agnostic skills that work in any MCP agent, see the top-level
+> [`skills/`](../../skills) directory.
+
+## What it does
+
+- **Session briefing (SessionStart hook).** When a session begins, the plugin
+  queries Basic Memory for your active tasks and recent work and puts a short
+  brief in front of Claude — so you start where you left off instead of cold.
+- **Compaction checkpoint (PreCompact hook).** Right before Claude Code compacts
+  the context window, the plugin writes a `type: session` checkpoint note to the
+  graph, so the texture of the session survives and the next one can resume from
+  it.
+- **Capture reflexes (output style).** An opt-in output style teaches Claude to
+  search the graph before answering recall questions, capture real decisions as
+  typed `decision` notes, and cite permalinks.
+- **Seed schemas.** Picoschema definitions for `session`, `decision`, and `task`
+  notes, so the stuff the plugin writes is structured and findable by
+  `search_notes` metadata filters — recall is precise, not fuzzy.
+
+The full design and rationale live in [DESIGN.md](./DESIGN.md).
+
+## Requirements
+
+- [Basic Memory](https://github.com/basicmachines-co/basic-memory) `>= 0.19.0`
+  installed and configured as an MCP server (`uv tool install basic-memory`).
+- Claude Code.
 
 ## Installation
-
-Add the marketplace and install the plugin:
 
 ```bash
 claude plugin marketplace add basicmachines-co/basic-memory --sparse .claude-plugin plugins/claude-code
 claude plugin install basic-memory@basicmachines-co
 ```
 
-## Available Plugins
-
-### basic-memory
-
-Skills and hooks for [Basic Memory](https://github.com/basicmachines-co/basic-memory) MCP server integration.
-
-**Skills:**
-- `placement` - Decide which folder a new note belongs in (runs automatically before `write_note`)
-- `knowledge-capture` - Capture important information from conversations
-- `continue-conversation` - Continue previous conversations with context
-- `knowledge-organize` - Maintain and organize the knowledge graph
-- `research` - Research topics using web search and save to memory
-- `edit-note` - Edit existing notes in the knowledge base
-
-Skills auto-expose as slash commands in Claude Code (e.g., `/knowledge-organize`). The Basic Memory MCP server provides additional prompts (`continue_conversation`, `recent_activity`, `search`) that surface as their own slash commands.
-
-**Hooks:**
-- Pre-write placement (selects the right folder based on project conventions)
-- Post-write confirmation
-
 ## Configuration
 
-The plugin reads conventions from a unified config file:
+The hooks work out of the box against your **default** Basic Memory project — no
+config required. To pin a specific project (recommended, and required for the
+PreCompact checkpoint to write), add a `basicMemory` block to your project's
+`.claude/settings.json`. Copy [`settings.example.json`](./settings.example.json)
+and set `primaryProject`:
 
-- **Per-project:** a note titled `basic-memory` at the project root
-- **Global:** `~/.basic-memory/basic-memory.md`
+```json
+{
+  "basicMemory": {
+    "primaryProject": "my-project",
+    "captureFolder": "sessions"
+  }
+}
+```
 
-Sections (`## Projects`, `## Placements`, `## Formats`, `## Schemas`) define rules. H3 sub-sections (e.g. `### research`) provide project-specific overrides.
+To enable the capture reflexes, also set `"outputStyle": "basic-memory"` in your
+settings (or select it via `/config`).
 
-If no config exists, the plugin uses sensible built-in defaults. See [PLUGIN.md](./PLUGIN.md) for the full schema and a bootstrap walkthrough.
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `primaryProject` | _(default project)_ | Where briefs read from and checkpoints write to |
+| `captureFolder` | `sessions` | Folder for PreCompact checkpoint notes |
+| `recallTimeframe` | `3d` | Recency window for the session brief |
+| `recallPrompt` | _(built-in)_ | The instruction appended to the brief |
+| `preCompactCapture` | `extractive` | How checkpoints are produced |
 
-## Requirements
-
-- [Basic Memory](https://github.com/basicmachines-co/basic-memory) MCP server must be configured
-- Claude Code CLI
+See [DESIGN.md](./DESIGN.md) for the complete configuration schema, the
+Claude-Code-project ↔ Basic-Memory-project mapping, and team-workspace behavior.
 
 ## Development
 
@@ -65,11 +90,8 @@ From this directory:
 just check
 ```
 
-`just check` validates the root marketplace, plugin-local manifests, bundled skills, hooks, and `basic-memory-manager` agent, then runs `claude plugin validate . --strict`.
-
-## Documentation
-
-See [PLUGIN.md](./PLUGIN.md) for full documentation.
+`just check` validates the manifests, hooks, output style, and seed schemas, then
+runs `claude plugin validate . --strict`.
 
 ## License
 

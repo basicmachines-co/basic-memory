@@ -1,6 +1,6 @@
 {
   "name": "basic-memory",
-  "description": "Claude Code skills, agents, and hooks for Basic Memory — placement-aware note writing and knowledge graph workflows",
+  "description": "The bridge between Claude's working memory and Basic Memory's durable knowledge graph — session briefings, pre-compaction checkpoints, and capture reflexes",
   "version": "0.3.13",
   "author": {
     "name": "Basic Machines"

@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased — v0.4 bridge redesign (Phase 1)
+
+The plugin is reframed as the **bridge between Claude's working memory and Basic
+Memory's durable graph**, rather than a memory layer of its own. See
+[DESIGN.md](./DESIGN.md) for the full rationale and roadmap.
+
+### Added
+
+- **SessionStart hook** (`hooks/session-start.sh`) — briefs Claude at session
+  start with active tasks from the graph (one structured `type: task` query) plus
+  an always-on recall prompt. Works against the default project with zero config;
+  pin a project via `basicMemory.primaryProject`. Plain-stdout output, capped well
+  under the 10k limit, and silent if Basic Memory isn't installed.
+- **PreCompact hook** (`hooks/pre-compact.sh`) — writes a `type: session`
+  checkpoint to the graph before context compaction (extractive in this phase;
+  LLM-summarized capture is the next step). Only writes when a `primaryProject` is
+  configured, so it never touches a graph the user hasn't opted in.
+- **Output style** (`output-styles/basic-memory.md`) — opt-in reflexes: search
+  before recalling, capture decisions as typed `decision` notes, cite permalinks.
+  Sets `keep-coding-instructions: true` so it composes with normal dev work.
+- **Seed schemas** (`schemas/{session,decision,task}.md`) — picoschema for the
+  note types the plugin writes, so recall via `search_notes` metadata filters is
+  precise. `task` mirrors the framework-agnostic `memory-tasks` skill. Validation
+  mode `warn` — advisory, never blocking.
+- **`settings.example.json`** — copyable configuration with sensible defaults.
+
+### Removed (clean break)
+
+- The six bundled skills (`placement`, `knowledge-capture`, `knowledge-organize`,
+  `continue-conversation`, `research`, `edit-note`). Equivalent, framework-agnostic
+  workflows live in the top-level [`skills/`](../../skills) package
+  (`memory-notes`, `memory-research`, `memory-tasks`, `memory-schema`, …); install
+  those for the old capabilities.
+- The `basic-memory-manager` agent. The plugin ships no agent in v0.4 — memory is
+  handled in the main context via hooks and the output style, not delegated.
+- The `PreToolUse`/`PostToolUse` `write_note` hooks (placement advisory + save
+  confirmation). Placement guidance now lives in the `basicMemory` settings block
+  and the output style.
+- The `basic-memory` config-note convention, superseded by `.claude/settings.json`.
+- `PLUGIN.md`, replaced by a bridge-framed `README.md` and `DESIGN.md`.
+
+### Notes
+
+- Slash commands shipped by later phases (`/basic-memory:setup`,
+  `:remember`, `:status`) will be **plugin-namespaced** — Claude Code namespaces
+  all plugin skills as `/<plugin>:<skill>`.
+- Requires `basic-memory >= 0.19.0` (for `metadata_filters` / structured recall).
+
 ## 0.3.13
 
 ### Fixed

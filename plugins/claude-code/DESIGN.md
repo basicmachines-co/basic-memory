@@ -434,19 +434,58 @@ Verified 2026-05-28 against Claude Code v2.1.153 and basic-memory 0.21.5, via a 
 - [x] `schema_validate` cost (Q8 — single-note cheap; batch → routine)
 - [x] Findings recorded in §11
 
-### Phase 1: The spine (1 week)
-- [ ] Delete deprecated artifacts (six skills, agent, write_note hooks, config-note pattern)
-- [ ] Write `schemas/session.md`, `schemas/decision.md`, `schemas/task.md` (picoschema, `validation: warn`, aligned with SPEC-55 shapes)
-- [ ] Validate the three schemas with `schema_validate(identifier=…)` against hand-written sample notes
-- [ ] Write `hooks/session-start.sh` — plain-stdout brief (<10k chars, shell-profile-safe); parallel **structured** metadata queries (`type`+`status` filters) + recent-activity sweep; reads `MEMORY.md` from disk; recall prompt; first-run sentinel nudge
-- [ ] Write `hooks/pre-compact.sh` — **summarized** checkpoint (LLM pass within 600s budget) conforming to `session` schema; write-early/enrich-after; optional single-note `schema_validate`
-- [ ] Write `output-styles/basic-memory.md` — reflex prompt targeting typed/schema-conforming writes; references stored placement conventions
-- [ ] ~~Write `rules/basic-memory.md`~~ — **cut** (Q5: path-scoped rules don't load). Placement conventions live in `basicMemory` settings + SessionStart brief instead.
-- [ ] Write `settings.example.json` (incl. `preCompactCapture: "summarized"`, `placementConventions`)
-- [ ] Update `.claude-plugin/plugin.json` for v0.4 (confirm `name: basic-memory` → namespacing)
-- [ ] Update root `marketplace.json`
-- [ ] Update `update_versions.py` if new manifests need lockstep bumping
-- [ ] Add `basic-memory >= 0.19.0` to plugin prerequisites (Q7 margin)
+### Phase 1: The spine — ✅ DONE (2026-05-28)
+
+**Build decisions (user calls):** *minimal-first vertical slice* (one fast query at
+SessionStart, extractive PreCompact — prove the loop, enrich later) and *hard-delete*
+the old surfaces (no coverage audit, clean break). Hooks implemented in **bash +
+python3** (python is a guaranteed BM dependency; the multi-query Python single-session
+helper is the enrich step). `preCompactCapture` ships as `"extractive"` even though the
+eventual default is `"summarized"` — the LLM pass is the first enrich step.
+
+- [x] Delete deprecated artifacts — six skills, `basic-memory-manager` agent, both
+  `write_note` hooks, `PLUGIN.md`, config-note convention
+- [x] Write `schemas/{session,decision,task}.md` (picoschema, `validation: warn`;
+  `task` mirrors `memory-tasks`)
+- [x] Validate the three schemas — confirmed they parse through BM's exact path
+  (`frontmatter.loads` → `parse_schema_note` → `parse_picoschema`). **Found + fixed an
+  enum-syntax bug**: enum descriptions must go *inside* the parens
+  (`status?(enum, desc): [a,b]`), not after the `[...]` value — the latter is invalid
+  YAML. (Same latent bug exists in the canonical `memory-tasks` schema → flagged as a
+  separate task.)
+- [x] Write `hooks/session-start.sh` — plain-stdout brief, single `type: task` /
+  `status: active` query, recall prompt; works against the default project (pin via
+  `primaryProject`); silent if BM absent. Tested end-to-end.
+- [x] Write `hooks/pre-compact.sh` — **extractive** checkpoint conforming to the
+  `session` schema; only writes when `primaryProject` is set; silent/no-op otherwise.
+  Tested end-to-end (note written + queryable by `--type session`).
+- [x] Write `output-styles/basic-memory.md` — reflexes; `keep-coding-instructions: true`
+  so it composes with dev work.
+- [x] ~~Write `rules/basic-memory.md`~~ — **cut** (Q5). Conventions go in `basicMemory`
+  settings + the brief.
+- [x] Write `settings.example.json` (ships `preCompactCapture: "extractive"` for parity
+  with the implemented hook; `placementConventions` reserved)
+- [x] Update `.claude-plugin/plugin.json` + both `marketplace.json` descriptions (bridge
+  framing; `name: basic-memory` confirmed for namespacing). Version left to release tooling.
+- [x] Rewrite `scripts/validate_claude_plugin.py` for the new layout (hooks +
+  output-style + schemas; agent dropped; skills optional). Passes `ci-check` and
+  `claude plugin validate . --strict`.
+- [x] Update plugin `CHANGELOG.md` + the `AGENTS.md` package-check description
+- [x] Add `basic-memory >= 0.19.0` to prerequisites (Q7 margin)
+- [ ] `update_versions.py` — no change needed (no new *versioned* manifests; hooks /
+  schemas / output-style / settings carry no version)
+
+**Carried into later phases (not part of the minimal cut):** the first-run *sentinel
+nudge* moves to Phase 3 (it should point at `/basic-memory:setup`, which doesn't exist
+yet); the multi-query parallel brief and the LLM-summarized PreCompact are the enrich
+steps.
+
+**Implementation finding for Phase 3 bootstrap:** the CLI `write-note` cannot set
+`note_type`/`metadata`, so it does **not** index a schema note's `entity`/`schema` into
+the DB — `schema_validate` then can't resolve it. Bootstrap must seed schemas via the
+**MCP `write_note(note_type="schema", metadata={entity, schema, settings})`** path, or
+by writing the files and letting the BM file watcher index them. (Recall via
+`metadata_filters` on `type`/`status` is unaffected — that works regardless.)
 
 ### Phase 2: Deliberate gestures (3 days)
 - [ ] Write `skills/remember/SKILL.md` → `/basic-memory:remember`
@@ -466,7 +505,8 @@ Verified 2026-05-28 against Claude Code v2.1.153 and basic-memory 0.21.5, via a 
 - [ ] Document the share-vs-capture distinction in README
 
 ### Phase 5: Docs + dogfood (1 week)
-- [ ] Rewrite `README.md` around the bridge story (replaces 314-line PLUGIN.md)
+- [x] Rewrite `README.md` around the bridge story (done in Phase 1 — the old README
+  referenced deleted skills; replaced `PLUGIN.md`). May refine after dogfood.
 - [ ] Migration guide: what changed from v0.3.x, how to upgrade
 - [ ] Internal dogfood — full team uses v0.4 for one week of normal work
 - [ ] File bugs against rough edges

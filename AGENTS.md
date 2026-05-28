@@ -68,7 +68,7 @@ If testmon is “cold,” the first run may be long. Subsequent runs get much fa
 The monorepo ships several host-native packages alongside the Python core. Use the root justfile as the canonical entry point:
 
 - `just package-check` — validates every copied package and generated bundle path.
-- `just package-check-claude-code` — validates the root and plugin-local Claude marketplace manifests, bundled Claude Code skills, hooks, `basic-memory-manager` agent, and runs `claude plugin validate . --strict`.
+- `just package-check-claude-code` — validates the root and plugin-local Claude marketplace manifests, the SessionStart/PreCompact hooks, the bundled output style, and the seed schemas, then runs `claude plugin validate . --strict`.
 - `just package-check-skills` — validates every top-level `skills/memory-*/SKILL.md` frontmatter block.
 - `just package-check-hermes` — validates `integrations/hermes/plugin.yaml`, the Hermes provider entrypoint, bundled skill, and runs the hermetic unit suite.
 - `just package-check-openclaw` — runs the OpenClaw package install, copies top-level skills into the generated bundle, typechecks, lints, builds `dist/`, runs Bun tests, and performs `npm pack --dry-run`.
