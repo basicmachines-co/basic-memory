@@ -12,6 +12,8 @@ type ProviderCacheKey = tuple[
     int | None,
     int,
     int,
+    str | None,
+    str | None,
     str,
     int | None,
     int | None,
@@ -88,6 +90,8 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         app_config.semantic_embedding_dimensions,
         app_config.semantic_embedding_batch_size,
         app_config.semantic_embedding_request_concurrency,
+        app_config.semantic_embedding_document_input_type,
+        app_config.semantic_embedding_query_input_type,
         _resolve_cache_dir(app_config),
         resolved_threads,
         resolved_parallel,
@@ -161,6 +165,8 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             model_name=model_name,
             batch_size=app_config.semantic_embedding_batch_size,
             request_concurrency=app_config.semantic_embedding_request_concurrency,
+            document_input_type=app_config.semantic_embedding_document_input_type,
+            query_input_type=app_config.semantic_embedding_query_input_type,
             **extra_kwargs,
         )
     else:

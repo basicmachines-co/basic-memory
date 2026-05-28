@@ -99,10 +99,12 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | Config Field | Env Var | Default | Description |
 |---|---|---|---|
 | `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto (`true` when semantic deps are available) | Enable semantic search. Required before vector/hybrid modes work. |
-| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local) or `"openai"` (API). |
+| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
-| `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Auto-detected | Vector dimensions. 384 for FastEmbed, 1536 for OpenAI. Override only if using a non-default model. |
-| `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `64` | Number of texts to embed per batch. |
+| `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Auto-detected | Vector dimensions. 384 for FastEmbed, 1536 for OpenAI/LiteLLM OpenAI. Override when using a non-default model. |
+| `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
+| `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
+| `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for search queries. |
 | `semantic_vector_k` | `BASIC_MEMORY_SEMANTIC_VECTOR_K` | `100` | Candidate count for vector nearest-neighbour retrieval. Higher values improve recall at the cost of latency. |
 
 ## Embedding Providers
@@ -135,7 +137,31 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 ```
 
-When switching from FastEmbed to OpenAI (or vice versa), you must rebuild embeddings since the vector dimensions differ:
+### LiteLLM
+
+Uses the LiteLLM SDK to call embedding models from providers such as OpenAI, Cohere, Azure, Bedrock, NVIDIA NIM, and other LiteLLM-supported backends. Requires the provider's API credentials.
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=cohere/embed-english-v3.0
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=1024
+export COHERE_API_KEY=...
+```
+
+Some retrieval models are asymmetric: indexed passages and search queries must be embedded with different provider parameters. Basic Memory automatically sets LiteLLM `input_type` for known asymmetric model families:
+
+- Cohere v3: documents use `search_document`, queries use `search_query`
+- NVIDIA NIM retrieval models: documents use `passage`, queries use `query`
+
+For other asymmetric LiteLLM models, set the input types explicitly:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE=passage
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE=query
+```
+
+When switching providers, models, dimensions, or LiteLLM document/query input types, rebuild embeddings:
 
 ```bash
 bm reindex --embeddings
@@ -203,9 +229,10 @@ bm reindex -p my-project
 
 - **Upgrade note**: Migration now performs a one-time automatic embedding backfill on upgrade.
 - **Manual enable case**: If you explicitly had `semantic_search_enabled=false` and then turn it on
-- **Provider change**: After switching between `fastembed` and `openai`
+- **Provider change**: After switching between `fastembed`, `openai`, and `litellm`
 - **Model change**: After changing `semantic_embedding_model`
 - **Dimension change**: After changing `semantic_embedding_dimensions`
+- **LiteLLM role change**: After changing `semantic_embedding_document_input_type` or `semantic_embedding_query_input_type`
 
 The reindex command shows progress with embedded/skipped/error counts:
 

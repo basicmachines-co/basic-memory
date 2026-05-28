@@ -21,6 +21,30 @@ from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
+def _default_input_types(model_name: str) -> tuple[str | None, str | None]:
+    """Return role-specific LiteLLM input_type defaults for known asymmetric models."""
+    normalized = model_name.strip().lower()
+
+    # Cohere v3 embeddings require search_document/search_query to distinguish
+    # index-time passages from retrieval-time queries. LiteLLM supports both
+    # direct Cohere model names and provider-prefixed forms.
+    cohere_v3 = (
+        normalized.startswith("cohere/")
+        or normalized.startswith("bedrock/cohere.")
+        or normalized.startswith("cohere.")
+        or normalized.startswith("embed-")
+    ) and "-v3" in normalized
+    if cohere_v3:
+        return "search_document", "search_query"
+
+    # NVIDIA retrieval embeddings use passage/query roles. The provider prefix
+    # is part of LiteLLM's model routing, so this stays narrowly scoped.
+    if normalized.startswith("nvidia_nim/"):
+        return "passage", "query"
+
+    return None, None
+
+
 class LiteLLMEmbeddingProvider(EmbeddingProvider):
     """Embedding provider backed by the litellm SDK."""
 
@@ -33,6 +57,8 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         dimensions: int = 1536,
         api_key: str | None = None,
         timeout: float = 30.0,
+        document_input_type: str | None = None,
+        query_input_type: str | None = None,
     ) -> None:
         self.model_name = model_name
         self.dimensions = dimensions
@@ -40,15 +66,23 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         self.request_concurrency = request_concurrency
         self._api_key = api_key
         self._timeout = timeout
+        default_document_input_type, default_query_input_type = _default_input_types(model_name)
+        self.document_input_type = document_input_type or default_document_input_type
+        self.query_input_type = query_input_type or default_query_input_type
 
-    def runtime_log_attrs(self) -> dict[str, int]:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         """Return provider-specific runtime settings suitable for startup logs."""
-        return {
+        attrs: dict[str, Any] = {
             "provider_batch_size": self.batch_size,
             "request_concurrency": self.request_concurrency,
         }
+        if self.document_input_type:
+            attrs["document_input_type"] = self.document_input_type
+        if self.query_input_type:
+            attrs["query_input_type"] = self.query_input_type
+        return attrs
 
-    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    async def _embed(self, texts: list[str], *, input_type: str | None) -> list[list[float]]:
         if not texts:
             return []
 
@@ -76,6 +110,8 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
                 }
                 if self._api_key:
                     params["api_key"] = self._api_key
+                if input_type:
+                    params["input_type"] = input_type
 
                 response = await litellm.aembedding(**params)
 
@@ -129,6 +165,9 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
             )
         return normalized
 
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed(texts, input_type=self.document_input_type)
+
     async def embed_query(self, text: str) -> list[float]:
-        vectors = await self.embed_documents([text])
+        vectors = await self._embed([text], input_type=self.query_input_type)
         return vectors[0] if vectors else [0.0] * self.dimensions

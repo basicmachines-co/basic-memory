@@ -263,6 +263,20 @@ class BasicMemoryConfig(BaseSettings):
         description="Maximum number of concurrent provider requests for batched embedding generation when the active provider supports request-level concurrency.",
         gt=0,
     )
+    semantic_embedding_document_input_type: str | None = Field(
+        default=None,
+        description=(
+            "Optional LiteLLM input_type for indexed document/passages. "
+            "Use with asymmetric embedding models such as Cohere or NVIDIA retrieval models."
+        ),
+    )
+    semantic_embedding_query_input_type: str | None = Field(
+        default=None,
+        description=(
+            "Optional LiteLLM input_type for search queries. "
+            "Use with asymmetric embedding models such as Cohere or NVIDIA retrieval models."
+        ),
+    )
     semantic_embedding_sync_batch_size: int = Field(
         default=2,
         description="Batch size for vector sync orchestration flushes.",

@@ -131,6 +131,42 @@ async def test_litellm_provider_drop_params_always_set(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_litellm_provider_uses_cohere_document_and_query_input_types(monkeypatch):
+    """Cohere v3 embeddings require different input_type values per embedding role."""
+    calls = _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="cohere/embed-english-v3.0",
+        batch_size=2,
+        dimensions=3,
+    )
+
+    await provider.embed_documents(["indexed passage"])
+    await provider.embed_query("retrieval query")
+
+    assert calls[0]["input_type"] == "search_document"
+    assert calls[1]["input_type"] == "search_query"
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_uses_explicit_document_and_query_input_types(monkeypatch):
+    """Explicit input_type overrides should support asymmetric providers beyond Cohere."""
+    calls = _install_litellm_stub(monkeypatch)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="nvidia_nim/nvidia/embed-qa-4",
+        batch_size=2,
+        dimensions=3,
+        document_input_type="passage",
+        query_input_type="query",
+    )
+
+    await provider.embed_documents(["indexed passage"])
+    await provider.embed_query("retrieval query")
+
+    assert calls[0]["input_type"] == "passage"
+    assert calls[1]["input_type"] == "query"
+
+
+@pytest.mark.asyncio
 async def test_litellm_provider_dimension_mismatch_raises_error(monkeypatch):
     """Provider should fail fast when response dimensions differ from configured."""
     _install_litellm_stub(monkeypatch, dim=3)
@@ -209,6 +245,25 @@ def test_factory_maps_default_model_for_litellm():
     provider = create_embedding_provider(config)
     assert isinstance(provider, LiteLLMEmbeddingProvider)
     assert provider.model_name == "openai/text-embedding-3-small"
+
+
+def test_factory_forwards_litellm_document_and_query_input_types():
+    """Factory should pass role-specific LiteLLM input_type config to the provider."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="nvidia_nim/nvidia/embed-qa-4",
+        semantic_embedding_document_input_type="passage",
+        semantic_embedding_query_input_type="query",
+    )
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider.document_input_type == "passage"
+    assert provider.query_input_type == "query"
 
 
 def test_runtime_log_attrs():
