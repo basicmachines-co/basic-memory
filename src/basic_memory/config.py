@@ -245,7 +245,11 @@ class BasicMemoryConfig(BaseSettings):
     )
     semantic_embedding_dimensions: int | None = Field(
         default=None,
-        description="Embedding vector dimensions. Auto-detected from provider if not set (384 for FastEmbed, 1536 for OpenAI).",
+        description=(
+            "Embedding vector dimensions. Uses provider defaults when unset "
+            "(384 for FastEmbed, 1536 for OpenAI and LiteLLM OpenAI default); "
+            "required for custom LiteLLM models."
+        ),
     )
     # Trigger: full local rebuilds spend most of their time waiting behind shared
     # embed flushes, not constructing vectors themselves.

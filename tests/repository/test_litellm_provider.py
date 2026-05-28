@@ -2,6 +2,7 @@
 
 import builtins
 import math
+import os
 import sys
 from types import SimpleNamespace
 
@@ -194,6 +195,47 @@ async def test_litellm_provider_missing_dependency_raises_actionable_error(monke
 
 
 @pytest.mark.asyncio
+async def test_litellm_provider_sets_production_mode_before_import(monkeypatch):
+    """Unset LiteLLM mode should not let LiteLLM import load cwd .env files."""
+    monkeypatch.delitem(sys.modules, "litellm", raising=False)
+    monkeypatch.delenv("LITELLM_MODE", raising=False)
+    observed_modes: list[str | None] = []
+    original_import = builtins.__import__
+
+    async def _aembedding(**kwargs):
+        return _make_embedding_response(kwargs["input"])
+
+    def _observing_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "litellm":
+            observed_modes.append(os.environ.get("LITELLM_MODE"))
+            module = type(sys)("litellm")
+            setattr(module, "aembedding", _aembedding)
+            monkeypatch.setitem(sys.modules, "litellm", module)
+            return module
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _observing_import)
+
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    await provider.embed_query("test")
+
+    assert observed_modes == ["PRODUCTION"]
+    assert os.environ["LITELLM_MODE"] == "PRODUCTION"
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_preserves_explicit_litellm_mode(monkeypatch):
+    """An explicit LiteLLM mode should stay under the caller's control."""
+    monkeypatch.setenv("LITELLM_MODE", "CUSTOM")
+    _install_litellm_stub(monkeypatch)
+
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    await provider.embed_query("test")
+
+    assert os.environ["LITELLM_MODE"] == "CUSTOM"
+
+
+@pytest.mark.asyncio
 async def test_litellm_provider_output_ordering(monkeypatch):
     """Vectors should be returned in the same order as input texts.
 
@@ -256,14 +298,31 @@ def test_factory_forwards_litellm_document_and_query_input_types():
         semantic_search_enabled=True,
         semantic_embedding_provider="litellm",
         semantic_embedding_model="nvidia_nim/nvidia/embed-qa-4",
+        semantic_embedding_dimensions=1024,
         semantic_embedding_document_input_type="passage",
         semantic_embedding_query_input_type="query",
     )
     provider = create_embedding_provider(config)
 
     assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider.dimensions == 1024
     assert provider.document_input_type == "passage"
     assert provider.query_input_type == "query"
+
+
+def test_factory_requires_litellm_dimensions_for_custom_models():
+    """Custom LiteLLM models need explicit dimensions before vector tables are created."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="cohere/embed-english-v3.0",
+    )
+
+    with pytest.raises(ValueError, match="semantic_embedding_dimensions"):
+        create_embedding_provider(config)
 
 
 def test_runtime_log_attrs():

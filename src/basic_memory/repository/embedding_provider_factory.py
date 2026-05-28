@@ -107,8 +107,11 @@ def reset_embedding_provider_cache() -> None:
 def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvider:
     """Create an embedding provider based on semantic config.
 
-    When semantic_embedding_dimensions is set in config, it overrides
-    the provider's default dimensions (384 for FastEmbed, 1536 for OpenAI).
+    When semantic_embedding_dimensions is set in config, it overrides the
+    provider's default dimensions (384 for FastEmbed, 1536 for OpenAI and
+    the LiteLLM OpenAI default). Custom LiteLLM models require an explicit
+    dimension because the vector table schema is created before the first
+    embedding response is available.
     """
     cache_key = _provider_cache_key(app_config)
     with _EMBEDDING_PROVIDER_CACHE_LOCK:
@@ -161,6 +164,15 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         model_name = app_config.semantic_embedding_model or "openai/text-embedding-3-small"
         if model_name == "bge-small-en-v1.5":
             model_name = "openai/text-embedding-3-small"
+        if (
+            app_config.semantic_embedding_dimensions is None
+            and model_name != "openai/text-embedding-3-small"
+        ):
+            raise ValueError(
+                "semantic_embedding_dimensions must be set when "
+                "semantic_embedding_provider='litellm' uses a non-default model. "
+                f"Configured model: {model_name!r}."
+            )
         provider = LiteLLMEmbeddingProvider(
             model_name=model_name,
             batch_size=app_config.semantic_embedding_batch_size,

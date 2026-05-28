@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from typing import Any
 
 from basic_memory.repository.embedding_provider import EmbeddingProvider
@@ -43,6 +44,24 @@ def _default_input_types(model_name: str) -> tuple[str | None, str | None]:
         return "passage", "query"
 
     return None, None
+
+
+def _import_litellm() -> Any:
+    """Import LiteLLM without letting its import-time dotenv hook read cwd secrets."""
+    # Constraint: LiteLLM 1.85.0 loads .env files at import time when
+    # LITELLM_MODE defaults to DEV. Basic Memory intentionally does not load
+    # arbitrary cwd .env files, so set the production mode before importing
+    # unless the caller already made an explicit LiteLLM choice.
+    os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
+
+    try:
+        import litellm
+    except ImportError as exc:
+        raise SemanticDependenciesMissingError(
+            "litellm dependency is missing. Install with: pip install litellm"
+        ) from exc
+
+    return litellm
 
 
 class LiteLLMEmbeddingProvider(EmbeddingProvider):
@@ -86,12 +105,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         if not texts:
             return []
 
-        try:
-            import litellm
-        except ImportError as exc:
-            raise SemanticDependenciesMissingError(
-                "litellm dependency is missing. Install with: pip install litellm"
-            ) from exc
+        litellm = _import_litellm()
 
         batches = [
             texts[start : start + self.batch_size]
