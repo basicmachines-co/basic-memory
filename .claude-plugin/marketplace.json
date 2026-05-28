@@ -1,0 +1,23 @@
+{
+  "name": "basicmachines-co",
+  "owner": {
+    "name": "Basic Machines",
+    "email": "hello@basicmachines.co"
+  },
+  "metadata": {
+    "description": "Official Basic Memory plugins from the canonical basic-memory repository",
+    "version": "0.3.13"
+  },
+  "plugins": [
+    {
+      "name": "basic-memory",
+      "source": "./plugins/claude-code",
+      "description": "Skills, agents, and hooks for Basic Memory MCP — placement-aware note writing and knowledge graph workflows",
+      "version": "0.3.13",
+      "author": {
+        "name": "Basic Machines"
+      },
+      "keywords": ["memory", "knowledge", "mcp", "specs", "context"]
+    }
+  ]
+}

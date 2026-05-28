@@ -1,0 +1,36 @@
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  semantic-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Conventional-commit types we accept in PR titles + commit subjects.
+          types: |
+            feat
+            fix
+            chore
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+          # Single-file plugin — no real submodule structure. We don't require
+          # a scope, but if a contributor uses one we accept these:
+          scopes: |
+            core
+            tests
+            ci
+            docs
+            deps
+          requireScope: false
+          requireScopeForBreakingChange: true

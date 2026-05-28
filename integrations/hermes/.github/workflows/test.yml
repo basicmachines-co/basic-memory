@@ -1,0 +1,39 @@
+name: tests
+
+# Cancel an in-progress run when a new commit lands on the same branch — the
+# latest result is the one we care about.
+concurrency:
+  group: hbm-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  # Branch pushes already cover PRs (the PR branch tip is what's being tested),
+  # so we don't run the matrix twice for the same commit on push + pull_request.
+  push:
+
+jobs:
+  unit:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the runtime Hermes itself ships on today; 3.12-3.14 cover
+        # forward-compat for whenever Hermes upgrades.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        # No `enable-cache: true` — the action's default cache key globs for
+        # `uv.lock`, which we don't ship (we use `uv run --with` instead of
+        # `uv sync`). Without a lock file the cache step errors out.
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Run unit tests
+        run: uv run --with pytest --python ${{ matrix.python-version }} pytest -q

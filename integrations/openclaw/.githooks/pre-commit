@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bun is required to run pre-commit checks." >&2
+  exit 1
+fi
+
+echo "Running pre-commit checks..."
+bun run lint
+bun run check-types

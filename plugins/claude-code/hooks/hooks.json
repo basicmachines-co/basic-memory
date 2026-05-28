@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*__write_note",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"permissionDecision\":\"allow\",\"additionalContext\":\"Before saving this note: invoke the placement skill (basic-memory:placement) to determine the correct directory parameter — unless placement was already settled for this write via the skill, basic-memory.md config, or explicit user instruction. The hook is advisory; this tool call is allowed regardless.\"}'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*__write_note",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '✓ Note saved to Basic Memory'"
+          }
+        ]
+      }
+    ]
+  }
+}

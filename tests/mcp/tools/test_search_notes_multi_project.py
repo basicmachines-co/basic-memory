@@ -287,9 +287,7 @@ async def test_search_notes_search_all_projects_continues_after_project_failure(
 
 
 @pytest.mark.asyncio
-async def test_search_notes_search_all_projects_local_omits_project_id(
-    monkeypatch, local_routing
-):
+async def test_search_notes_search_all_projects_local_omits_project_id(monkeypatch, local_routing):
     """Without a cloud route, fan-out must address each project by name only.
 
     project_id (external UUID) routes through the cloud v2 API path, which

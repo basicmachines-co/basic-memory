@@ -1,0 +1,110 @@
+{
+  "id": "openclaw-basic-memory",
+  "kind": "memory",
+  "contracts": {
+    "tools": [
+      "build_context",
+      "delete_note",
+      "edit_note",
+      "list_memory_projects",
+      "list_workspaces",
+      "memory_get",
+      "memory_search",
+      "move_note",
+      "read_note",
+      "schema_diff",
+      "schema_infer",
+      "schema_validate",
+      "search_notes",
+      "write_note"
+    ]
+  },
+  "skills": [
+    "skills/memory-defrag",
+    "skills/memory-ingest",
+    "skills/memory-lifecycle",
+    "skills/memory-literary-analysis",
+    "skills/memory-metadata-search",
+    "skills/memory-notes",
+    "skills/memory-reflect",
+    "skills/memory-research",
+    "skills/memory-schema",
+    "skills/memory-tasks"
+  ],
+  "uiHints": {
+    "project": {
+      "label": "Project Name",
+      "placeholder": "my-agent",
+      "help": "Basic Memory project name. Created automatically if it doesn't exist."
+    },
+    "memoryDir": {
+      "label": "Memory Directory",
+      "placeholder": "memory/",
+      "help": "Directory to index into the knowledge graph (relative to workspace)"
+    },
+    "memoryFile": {
+      "label": "Memory File",
+      "placeholder": "MEMORY.md",
+      "help": "Working memory file (searched but not indexed into BM)"
+    },
+    "bmPath": {
+      "label": "BM CLI Path",
+      "placeholder": "bm",
+      "help": "Path to the basic-memory CLI binary (default: 'bm')",
+      "advanced": true
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically index conversation content after each turn"
+    },
+    "captureMinChars": {
+      "label": "Capture Min Characters",
+      "placeholder": "10",
+      "help": "Minimum user/assistant text length before auto-capture indexes a turn",
+      "advanced": true
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically load relevant Basic Memory context when a session starts"
+    },
+    "recallPrompt": {
+      "label": "Recall Prompt",
+      "placeholder": "Check for active tasks and recent activity...",
+      "help": "Prompt used to gather initial Basic Memory context",
+      "advanced": true
+    },
+    "debug": {
+      "label": "Debug Logging",
+      "help": "Enable verbose debug logs",
+      "advanced": true
+    },
+    "projectPath": {
+      "label": "Project Path",
+      "placeholder": ".",
+      "help": "Filesystem path for Basic Memory project data (defaults to workspace root; relative paths resolve from workspace)",
+      "advanced": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "project": { "type": "string" },
+      "memoryDir": { "type": "string" },
+      "memory_dir": { "type": "string" },
+      "memoryFile": { "type": "string" },
+      "memory_file": { "type": "string" },
+      "bmPath": { "type": "string" },
+      "autoCapture": { "type": "boolean" },
+      "captureMinChars": { "type": "number", "minimum": 0 },
+      "capture_min_chars": { "type": "number", "minimum": 0 },
+      "autoRecall": { "type": "boolean" },
+      "auto_recall": { "type": "boolean" },
+      "recallPrompt": { "type": "string" },
+      "recall_prompt": { "type": "string" },
+      "debug": { "type": "boolean" },
+      "projectPath": { "type": "string" }
+    },
+    "required": []
+  }
+}

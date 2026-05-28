@@ -64,8 +64,7 @@ async def _load_sqlite_vec_on_session(session) -> bool:
         await session.execute(text("SELECT vec_version()"))
     except Exception as exc:
         logger.warning(
-            "Failed to load sqlite-vec for project delete cleanup; "
-            "skipping embeddings purge: {}",
+            "Failed to load sqlite-vec for project delete cleanup; skipping embeddings purge: {}",
             exc,
         )
         return False

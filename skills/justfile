@@ -1,0 +1,14 @@
+# Basic Memory skills checks
+
+repo_root := ".."
+
+# Validate every memory-* SKILL.md has required frontmatter.
+validate:
+    python3 {{repo_root}}/scripts/validate_skills.py .
+
+# Skills are markdown-only, so validation is the build check.
+check: validate
+
+# Show available recipes
+default:
+    @just --list

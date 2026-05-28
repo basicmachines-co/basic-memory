@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump (`patch`, `minor`, `major`) or explicit semver (`0.2.0`)"
+        required: true
+        default: "patch"
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.8"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Fetch skills
+        run: bun scripts/fetch-skills.ts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release checks
+        run: bun run release:check
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and create tag
+        id: bump
+        run: |
+          set -euo pipefail
+
+          VERSION_INPUT="${{ github.event.inputs.version }}"
+
+          if [[ "$VERSION_INPUT" =~ ^(patch|minor|major)$ ]]; then
+            npm version "$VERSION_INPUT" -m "chore(release): %s"
+          elif [[ "$VERSION_INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
+            npm version "$VERSION_INPUT" -m "chore(release): %s"
+          else
+            echo "Unsupported version input: $VERSION_INPUT" >&2
+            echo "Use patch|minor|major or explicit semver like 0.2.0 or 0.2.0-alpha.1" >&2
+            exit 1
+          fi
+
+          TAG="$(git describe --tags --abbrev=0)"
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Push commit and tag
+        run: |
+          set -euo pipefail
+          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Publish to npm
+        run: |
+          VERSION="${{ steps.bump.outputs.version }}"
+          if [[ "$VERSION" == *-* ]]; then
+            DIST_TAG="${VERSION##*-}"   # e.g. alpha.6 -> alpha
+            DIST_TAG="${DIST_TAG%%.*}"  # strip .N suffix
+            npm publish --provenance --access public --tag "$DIST_TAG"
+          else
+            npm publish --provenance --access public
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: ${{ steps.bump.outputs.tag }}
+          generate_release_notes: true

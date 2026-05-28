@@ -1,0 +1,48 @@
+name: integration
+
+# Heavier than test.yml — installs the real `basic-memory` CLI via uv, runs
+# every bm_* tool against a live `bm mcp` subprocess. Catches BM-API drift
+# (e.g., a bm release renaming a tool argument) before our users see it.
+concurrency:
+  group: hbm-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  integration:
+    name: Integration tests (real bm + mcp)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        # No cache (no uv.lock to key off — see test.yml comment).
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python 3.12
+        # basic-memory itself requires 3.12+; the bm install needs that.
+        # Hermes-runtime compatibility (3.11) is covered by test.yml.
+        run: uv python install 3.12
+
+      - name: Install basic-memory CLI via uv
+        run: |
+          uv tool install basic-memory
+          # uv puts entry-point shims under ~/.local/bin
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify bm is on PATH
+        run: |
+          which bm
+          bm --version
+
+      - name: Run integration tests
+        env:
+          BM_INTEGRATION: "1"
+        run: |
+          uv run --with pytest --with mcp --python 3.12 pytest tests/test_integration.py -v

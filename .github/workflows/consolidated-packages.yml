@@ -1,0 +1,110 @@
+name: Consolidated Packages
+
+on:
+  pull_request:
+    paths:
+      - ".claude-plugin/**"
+      - "plugins/**"
+      - "skills/**"
+      - "integrations/**"
+      - "scripts/update_versions.py"
+      - "scripts/validate_*.py"
+      - "justfile"
+      - ".github/workflows/consolidated-packages.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".claude-plugin/**"
+      - "plugins/**"
+      - "skills/**"
+      - "integrations/**"
+      - "scripts/update_versions.py"
+      - "scripts/validate_*.py"
+      - "justfile"
+      - ".github/workflows/consolidated-packages.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  claude-code:
+    name: Claude Code marketplace
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v4
+
+      - name: Validate manifests, agent, and bundled skills
+        run: just --justfile plugins/claude-code/justfile --working-directory plugins/claude-code ci-check
+
+      - name: Verify shared version dry run
+        run: just release-dry-run v0.99.0
+
+  skills:
+    name: Shared skills
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v4
+
+      - name: Validate SKILL.md source
+        run: just --justfile skills/justfile --working-directory skills check
+
+  hermes:
+    name: Hermes unit tests
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/hermes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Validate manifest and run unit tests
+        run: just check
+
+  openclaw:
+    name: OpenClaw package
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/openclaw
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.8"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Release readiness
+        run: just release-check

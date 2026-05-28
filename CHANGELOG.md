@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## Unreleased
+
+### Core
+
+- Consolidated the Basic Memory satellite repositories into the main
+  `basic-memory` tree as the canonical source, discovery, documentation,
+  issue, and release home.
+- Added root marketplace/package validation for the consolidated repository
+  layout while keeping Phase 1 focused on parity.
+- Added root and package-local justfile targets so Claude Code, skills,
+  Hermes, and OpenClaw builds can be verified from the monorepo.
+
+### Skills
+
+- Added the shared Basic Memory `SKILL.md` collection under top-level
+  `skills/`.
+- Updated skills documentation to point at `basicmachines-co/basic-memory`
+  and document manual copy as the temporary fallback when subpath installs are
+  unavailable.
+
+### Claude Code
+
+- Added the Claude Code plugin under `plugins/claude-code/` with its native
+  `.claude-plugin`, hooks, skills, agent, changelog, and docs.
+- Added the root Claude marketplace manifest pointing `basic-memory` to
+  `./plugins/claude-code`.
+
+### Hermes
+
+- Added the Hermes memory provider plugin under `integrations/hermes/` with
+  its native Python module, `plugin.yaml`, skill, tests, docs, and release
+  metadata.
+- Updated Hermes install and development docs for monorepo subpath usage.
+
+### OpenClaw
+
+- Added the OpenClaw plugin under `integrations/openclaw/` with its native
+  npm/TypeScript package shape, tests, docs, and release metadata.
+- Updated OpenClaw package metadata to point at the monorepo subdirectory and
+  changed skill bundling to copy from the top-level `skills/` source.
+
 ## v0.21.5 (2026-05-26)
 
 Workspace/project routing fixes for MCP, plus a SQLite vector reindex stability fix.

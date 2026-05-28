@@ -265,9 +265,39 @@ check: lint format typecheck test
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
 
+# Validate every consolidated agent package (Claude Code, skills, Hermes, OpenClaw)
+package-check: package-check-claude-code package-check-skills package-check-hermes package-check-openclaw
+
+# Alias for plugin/package validation during consolidation work
+plugins-check: package-check
+
+# Validate the host-native agent harnesses
+agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw
+
+# Claude Code plugin: manifests, bundled skills, bundled agent, and strict plugin validation
+package-check-claude-code:
+    just --justfile plugins/claude-code/justfile --working-directory plugins/claude-code check
+
+# Shared top-level SKILL.md source
+package-check-skills:
+    just --justfile skills/justfile --working-directory skills check
+
+# Hermes plugin: native manifest plus hermetic unit test suite
+package-check-hermes:
+    just --justfile integrations/hermes/justfile --working-directory integrations/hermes check
+
+# OpenClaw plugin: install deps, copy skills, typecheck, lint, build, test, and npm pack dry-run
+package-check-openclaw:
+    just --justfile integrations/openclaw/justfile --working-directory integrations/openclaw install
+    just --justfile integrations/openclaw/justfile --working-directory integrations/openclaw release-check
+
 # Generate Alembic migration with descriptive message
 migration message:
     cd src/basic_memory/alembic && alembic revision --autogenerate -m "{{message}}"
+
+# Preview the consolidated manifest version update without changing files
+release-dry-run version:
+    python3 scripts/update_versions.py "{{version}}" --dry-run
 
 # Create a stable release (e.g., just release v0.13.2)
 release version:
@@ -308,19 +338,21 @@ release version:
     just lint
     just typecheck
     
-    # Update version in __init__.py
-    echo "📝 Updating version in __init__.py..."
-    sed -i.bak "s/__version__ = \".*\"/__version__ = \"$VERSION_NUM\"/" src/basic_memory/__init__.py
-    rm -f src/basic_memory/__init__.py.bak
-
-    # Update version in server.json (MCP registry metadata)
-    echo "📝 Updating version in server.json..."
-    sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION_NUM\"/g" server.json
-    rm -f server.json.bak
+    # Update all package manifests to the one Basic Memory product version.
+    echo "📝 Updating consolidated package versions..."
+    python3 scripts/update_versions.py "{{version}}"
 
     # Commit version update
-    git add src/basic_memory/__init__.py server.json
-    git commit -m "chore: update version to $VERSION_NUM for {{version}} release"
+    git add \
+        src/basic_memory/__init__.py \
+        server.json \
+        .claude-plugin/marketplace.json \
+        plugins/claude-code/.claude-plugin/plugin.json \
+        plugins/claude-code/.claude-plugin/marketplace.json \
+        integrations/hermes/plugin.yaml \
+        integrations/hermes/__init__.py \
+        integrations/openclaw/package.json
+    git commit -s -m "chore: update version to $VERSION_NUM for {{version}} release"
     
     # Create and push tag
     echo "🏷️  Creating tag {{version}}..."
@@ -379,19 +411,21 @@ beta version:
     just lint
     just typecheck
     
-    # Update version in __init__.py
-    echo "📝 Updating version in __init__.py..."
-    sed -i.bak "s/__version__ = \".*\"/__version__ = \"$VERSION_NUM\"/" src/basic_memory/__init__.py
-    rm -f src/basic_memory/__init__.py.bak
-
-    # Update version in server.json (MCP registry metadata)
-    echo "📝 Updating version in server.json..."
-    sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION_NUM\"/g" server.json
-    rm -f server.json.bak
+    # Update all package manifests to the one Basic Memory product version.
+    echo "📝 Updating consolidated package versions..."
+    python3 scripts/update_versions.py "{{version}}"
 
     # Commit version update
-    git add src/basic_memory/__init__.py server.json
-    git commit -m "chore: update version to $VERSION_NUM for {{version}} beta release"
+    git add \
+        src/basic_memory/__init__.py \
+        server.json \
+        .claude-plugin/marketplace.json \
+        plugins/claude-code/.claude-plugin/plugin.json \
+        plugins/claude-code/.claude-plugin/marketplace.json \
+        integrations/hermes/plugin.yaml \
+        integrations/hermes/__init__.py \
+        integrations/openclaw/package.json
+    git commit -s -m "chore: update version to $VERSION_NUM for {{version}} beta release"
     
     # Create and push tag
     echo "🏷️  Creating tag {{version}}..."

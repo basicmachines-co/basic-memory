@@ -1,0 +1,96 @@
+{
+  "name": "@basicmemory/openclaw-basic-memory",
+  "version": "0.2.4",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "description": "Basic Memory plugin for OpenClaw — local-first knowledge graph for agent memory",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/basicmachines-co/basic-memory.git",
+    "directory": "integrations/openclaw"
+  },
+  "files": [
+    "index.ts",
+    "bm-client.ts",
+    "context-engine/basic-memory-context-engine.ts",
+    "config.ts",
+    "logger.ts",
+    "commands/cli.ts",
+    "commands/skills.ts",
+    "commands/slash.ts",
+    "hooks/capture.ts",
+    "hooks/recall.ts",
+    "tools/build-context.ts",
+    "tools/delete-note.ts",
+    "tools/edit-note.ts",
+    "tools/list-memory-projects.ts",
+    "tools/list-workspaces.ts",
+    "tools/memory-provider.ts",
+    "tools/move-note.ts",
+    "tools/read-note.ts",
+    "tools/schema-diff.ts",
+    "tools/schema-infer.ts",
+    "tools/schema-validate.ts",
+    "tools/search-notes.ts",
+    "tools/write-note.ts",
+    "schema/task-schema.ts",
+    "schema/conversation-schema.ts",
+    "skills/",
+    "dist/",
+    "scripts/fetch-skills.ts",
+    "scripts/setup-bm.sh",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@sinclair/typebox": "0.34.47"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.5.2"
+  },
+  "scripts": {
+    "postinstall": "bash scripts/setup-bm.sh || true",
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc --noEmit",
+    "lint": "bunx @biomejs/biome ci .",
+    "lint:fix": "bunx @biomejs/biome check --write .",
+    "fetch-skills": "bun scripts/fetch-skills.ts",
+    "prepack": "bun run fetch-skills && bun run build",
+    "test": "bun test",
+    "test:int": "BM_INTEGRATION=1 BM_BIN=${BM_BIN:-./scripts/bm-local.sh} bun test integration --timeout 120000",
+    "test:coverage": "bun test --coverage",
+    "release:check": "bun run fetch-skills && bun run check-types && bun run lint && bun run build && bun test && npm pack --dry-run"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.2",
+      "minGatewayVersion": "2026.5.2"
+    },
+    "build": {
+      "openclawVersion": "2026.5.4",
+      "pluginSdkVersion": "2026.5.4"
+    },
+    "install": {
+      "minHostVersion": ">=2026.5.2"
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
+    "@types/node": "^20.0.0",
+    "openclaw": "^2026.5.4",
+    "typescript": "^5.9.3"
+  }
+}

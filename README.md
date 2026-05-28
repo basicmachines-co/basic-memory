@@ -169,6 +169,72 @@ lock-in either way — flip between them when your needs change.
 | [Obsidian](#obsidian) | — | Reads/writes the same Markdown directly |
 | Anything MCP | stdio/https | If it speaks MCP, it works |
 
+## Official agent packages
+
+This repository is also the canonical home for Basic Memory's host-native
+agent packages. The core Python package, Claude Code plugin, shared skills,
+Hermes plugin, and OpenClaw plugin all ship from the same source tree.
+
+Maintainers can verify the whole consolidated surface from the repo root:
+
+```bash
+just package-check
+```
+
+Package-local justfiles are also available when working inside one host:
+
+```bash
+just package-check-claude-code
+just package-check-skills
+just package-check-hermes
+just package-check-openclaw
+```
+
+### Claude Code plugin
+
+The Claude Code plugin bundles Basic Memory-aware skills, hooks, and an agent:
+
+```bash
+claude plugin marketplace add basicmachines-co/basic-memory \
+  --sparse .claude-plugin plugins/claude-code
+claude plugin install basic-memory@basicmachines-co
+```
+
+Source: [`plugins/claude-code`](plugins/claude-code).
+
+### Shared skills
+
+Framework-agnostic `SKILL.md` files live in [`skills/`](skills). If your
+Skills CLI supports subpath installs:
+
+```bash
+npx skills add basicmachines-co/basic-memory --path skills
+```
+
+If it does not, copy the `memory-*` directories from `skills/` into your
+agent's skills directory as a temporary Phase 1 install path.
+
+### Hermes
+
+Hermes keeps its native plugin shape under [`integrations/hermes`](integrations/hermes):
+
+```bash
+hermes plugins install basicmachines-co/basic-memory --path integrations/hermes
+```
+
+If your Hermes build lacks subpath installs, use the final deprecated
+`basicmachines-co/hermes-basic-memory` pointer release until host support
+lands.
+
+### OpenClaw
+
+OpenClaw stays package-native and publishes from
+[`integrations/openclaw`](integrations/openclaw):
+
+```bash
+openclaw plugins install @basicmemory/openclaw-basic-memory
+```
+
 ## Pick up where you left off
 
 https://github.com/user-attachments/assets/a55d8238-8dd0-454a-be4c-8860dbbd0ddc
@@ -523,8 +589,9 @@ just install          # Install with dev dependencies
 just test-sqlite      # All tests, SQLite
 just test-postgres    # All tests, Postgres (testcontainers)
 just test             # Both backends
-just fast-check       # fix/format/typecheck + impacted tests + smoke
+just fast-check       # fix/format/typecheck + impacted tests
 just doctor           # File <-> DB consistency check (temp config)
+just package-check    # Claude Code, skills, Hermes, OpenClaw package checks
 just lint
 just typecheck        # Pyright (primary)
 just typecheck-ty     # ty (supplemental)

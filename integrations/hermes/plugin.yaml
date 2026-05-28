@@ -1,0 +1,11 @@
+name: basic-memory
+version: 0.3.2
+description: "Basic Memory — persistent knowledge graph backed by the basic-memory MCP server"
+pip_dependencies:
+  - mcp
+hooks:
+  - prefetch
+  - queue_prefetch
+  - sync_turn
+  - on_session_end
+  - shutdown

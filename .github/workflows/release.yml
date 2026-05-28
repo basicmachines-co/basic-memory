@@ -56,6 +56,46 @@ jobs:
         with:
           password: ${{ secrets.PYPI_TOKEN }}
 
+  openclaw:
+    name: Publish OpenClaw npm Package
+    needs: release
+    # npm publishes only for stable product tags. Pre-release Python tags use
+    # versions like 0.21.3b1, which are not valid npm pre-release semver.
+    if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: integrations/openclaw
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: extractions/setup-just@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.8"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Release readiness
+        run: just release-check
+
+      - name: Publish to npm
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   homebrew:
     name: Update Homebrew Formula
     needs: release

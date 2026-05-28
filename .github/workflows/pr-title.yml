@@ -40,5 +40,8 @@ jobs:
             ui
             deps
             installer
+            plugins
+            skills
+            integrations
           # Allow breaking changes (needs "!" after type/scope)
           requireScopeForBreakingChange: true

@@ -58,3 +58,9 @@ claude-output
 .mcpregistry_*
 /.testmondata
 .benchmarks/
+
+# Consolidated package build artifacts
+/integrations/openclaw/node_modules/
+/integrations/openclaw/dist/
+/integrations/openclaw/skills/
+/integrations/openclaw/*.tgz

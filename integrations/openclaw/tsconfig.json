@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "*.ts",
+    "tools/*.ts",
+    "hooks/*.ts",
+    "commands/*.ts",
+    "mode-b/*.ts",
+    "types/*.d.ts"
+  ],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

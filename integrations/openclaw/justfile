@@ -1,0 +1,68 @@
+# OpenClaw Basic Memory Plugin
+
+# Copy skills from the monorepo top-level skills/ source
+fetch-skills:
+    bun scripts/fetch-skills.ts
+
+# Install dependencies (bun + basic-memory CLI)
+install:
+    bun install --frozen-lockfile
+    bun scripts/fetch-skills.ts
+
+# Setup Basic Memory project
+setup:
+    bm project add openclaw ~/.basic-memory/openclaw/
+
+# Type check
+check-types:
+    bun run check-types
+
+# Build runtime dist/
+build:
+    bun run build
+
+# Lint
+lint:
+    bun run lint
+
+# Lint fix (safe + unsafe)
+lint-fix:
+    bun run lint:fix
+
+# Format and fix
+fix:
+    bun run lint:fix
+
+# Run tests
+test:
+    bun test
+
+# Run all checks
+check: fetch-skills check-types lint build test
+
+# Release readiness checks
+release-check:
+    bun run fetch-skills
+    bun run check-types
+    bun run lint
+    bun run build
+    bun test
+    npm pack --dry-run
+
+# Show exactly what would be published to npm
+release-pack:
+    npm pack --dry-run
+
+# Publish current version to npm (requires npm auth)
+release-publish:
+    npm publish
+
+# Bump version, publish, and push commit+tag
+release version:
+    npm version {{version}}
+    npm publish
+    git push origin main --follow-tags
+
+# Clean build artifacts and node_modules
+clean:
+    rm -rf dist skills node_modules

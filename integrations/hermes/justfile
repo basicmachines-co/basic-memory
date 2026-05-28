@@ -1,0 +1,22 @@
+# Basic Memory Hermes plugin checks
+
+repo_root := "../.."
+
+# Validate plugin.yaml, module entrypoint, bundled skill, and test layout.
+manifest-check:
+    python3 {{repo_root}}/scripts/validate_hermes_plugin.py .
+
+# Unit tests are hermetic and do not require a Hermes install.
+test:
+    uv run --no-project --with pytest --with pytest-cov --python 3.12 pytest -q --cov=. --cov-report=term-missing
+
+# Gated integration test against a real bm MCP server.
+test-int:
+    BM_INTEGRATION=1 uv run --no-project --with pytest --with mcp --python 3.12 pytest tests/test_integration.py -q
+
+# Full local check.
+check: manifest-check test
+
+# Show available recipes
+default:
+    @just --list

@@ -1,0 +1,9 @@
+{
+  "name": "basic-memory",
+  "description": "Claude Code skills, agents, and hooks for Basic Memory — placement-aware note writing and knowledge graph workflows",
+  "version": "0.3.13",
+  "author": {
+    "name": "Basic Machines"
+  },
+  "repository": "https://github.com/basicmachines-co/basic-memory/tree/main/plugins/claude-code"
+}
