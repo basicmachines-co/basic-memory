@@ -1,6 +1,7 @@
 """Write note tool for Basic Memory MCP server."""
 
 import textwrap
+from pathlib import Path
 from typing import Annotated, List, Union, Optional, Literal
 
 import logfire
@@ -269,7 +270,19 @@ async def write_note(
                             raise ValueError(
                                 "Entity permalink is required for updates"
                             )  # pragma: no cover
-                        entity_id = await knowledge_client.resolve_entity(entity.permalink)
+                        # Resolve the conflicting entity by file_path with strict=True.
+                        # The 409 came from a file_service.exists(file_path) check, so this
+                        # file_path is the authoritative key for the canonical row. Resolving
+                        # by permalink with fuzzy fallback (the previous behavior) could pick
+                        # an orphan with a similar permalink — especially in workspace-prefixed
+                        # palaces where the client-built permalink omits the workspace slug —
+                        # causing the update to write to the wrong row and the next call to
+                        # mint a -1/-2 suffix on the canonical entity.
+                        # POSIX-normalize so Windows clients send the same form the server stores.
+                        file_path_identifier = Path(entity.file_path).as_posix()
+                        entity_id = await knowledge_client.resolve_entity(
+                            file_path_identifier, strict=True
+                        )
                         result = await knowledge_client.update_entity(
                             entity_id, entity.model_dump()
                         )

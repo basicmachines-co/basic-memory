@@ -1311,3 +1311,76 @@ class TestWriteNoteOverwriteGuard:
         assert "# Created note" in result
         assert f"project: {test_project.name}" in result
         assert "file_path: guard/Brand New Note.md" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_overwrite_resolves_by_file_path_strictly(
+        self, app, test_project, entity_repository, monkeypatch
+    ):
+        """Regression: overwrite=True must resolve the conflicting entity by
+        file_path with strict=True, not by permalink with fuzzy fallback.
+
+        Bug shape: in workspace-prefixed palaces the client-built permalink
+        omits the workspace slug, so resolve_entity(permalink) with the default
+        strict=False would fall through to fuzzy search and could pick an
+        orphan row sharing tokens with the canonical permalink. The update
+        then wrote to the orphan, the canonical row stayed stale, and the
+        next overwrite minted a -1/-2 suffix because the permalink uniqueness
+        check found duplicate rows.
+
+        The 409 we catch came from a file_service.exists(file_path) check,
+        so file_path is the authoritative key — strict resolution against it
+        is safe even when permalinks are workspace-prefixed elsewhere.
+        """
+        # Spy on the resolve_entity call to assert the identifier and strict flag.
+        from basic_memory.mcp.clients import knowledge as knowledge_mod
+
+        original_resolve = knowledge_mod.KnowledgeClient.resolve_entity
+        captured: dict[str, Any] = {}
+
+        async def spy_resolve(self, identifier, *, strict=False):
+            captured["identifier"] = identifier
+            captured["strict"] = strict
+            return await original_resolve(self, identifier, strict=strict)
+
+        monkeypatch.setattr(knowledge_mod.KnowledgeClient, "resolve_entity", spy_resolve)
+
+        # Create then overwrite the canonical note.
+        await write_note(
+            project=test_project.name,
+            title="Overview",
+            directory="features/foo",
+            content="# Overview\n\nVersion A",
+        )
+        canonical_permalink = f"{test_project.name}/features/foo/overview"
+        canonical = await entity_repository.get_by_permalink(canonical_permalink)
+        assert canonical is not None
+        canonical_id = canonical.id
+
+        result = await write_note(
+            project=test_project.name,
+            title="Overview",
+            directory="features/foo",
+            content="# Overview\n\nVersion B",
+            overwrite=True,
+        )
+        assert "# Updated note" in result
+
+        # The overwrite path resolved by file_path with strict=True — not by
+        # permalink with the default fuzzy fallback.
+        assert captured.get("identifier") == "features/foo/Overview.md"
+        assert captured.get("strict") is True
+
+        # And the canonical row was updated in place — no duplicate -1/-2 row.
+        canonical_after = await entity_repository.get_by_permalink(canonical_permalink)
+        assert canonical_after is not None
+        assert canonical_after.id == canonical_id
+
+        content = await read_note(canonical_permalink, project=test_project.name)
+        assert "Version B" in content
+        assert "Version A" not in content
+
+        for suffix in ("-1", "-2"):
+            stray = await entity_repository.get_by_permalink(f"{canonical_permalink}{suffix}")
+            assert stray is None, (
+                f"overwrite=True minted a stray '{suffix}' suffix on the canonical permalink"
+            )
