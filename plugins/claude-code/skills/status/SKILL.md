@@ -18,6 +18,8 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
 2. **Configuration.** Read `.claude/settings.json` (and `.claude/settings.local.json`
    if present) and report from the `basicMemory` block:
    - `primaryProject` — or note that none is pinned (the default project is used)
+   - `secondaryProjects` — team/shared projects read for recall (read-only), if any
+   - `teamProjects` — share targets for `/basic-memory:share`, if any
    - `captureFolder` (default `sessions`) and `rememberFolder` (default `bm-remember`)
    - whether `outputStyle` is `basic-memory` (capture reflexes on/off)
    - `preCompactCapture` mode (default `extractive`)
@@ -39,6 +41,8 @@ you couldn't determine, rather than failing the whole report):
 
 - CLI:               basic-memory <version>
 - Project:           <primaryProject, or "default project (not pinned)">
+- Reads from (team): <secondaryProjects joined, or "none">
+- Share targets:     <teamProjects keys joined, or "none">
 - Capture folder:    <captureFolder>
 - Remember folder:   <rememberFolder>
 - Output style:      <enabled | not enabled>

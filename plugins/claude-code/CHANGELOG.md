@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v0.4 bridge redesign (Phases 1–3)
+## Unreleased — v0.4 bridge redesign (Phases 1–4)
 
 The plugin is reframed as the **bridge between Claude's working memory and Basic
 Memory's durable graph**, rather than a memory layer of its own. See
@@ -8,6 +8,18 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Added
 
+- **Team workspace support** (Phase 4). SessionStart now reads **across** the primary
+  project plus configured shared/team projects — `secondaryProjects` (read-only recall
+  sources) and `teamProjects` (share targets) — querying open decisions from each in
+  parallel and folding them into the brief. Team refs use workspace-qualified names
+  (`my-team/notes`) or `external_id` UUIDs, since project names collide across
+  workspaces. Reads route over the user's OAuth session; capture **never** writes to a
+  shared project.
+- **`/basic-memory:share <note>`** (`skills/share/`) — the deliberate personal→team
+  write: copies a note from the primary project into a configured `teamProjects`
+  target's `promoteFolder`, with `shared_from` attribution and a confirmation step.
+  Preserves the note's type so shared decisions stay findable in the team's structured
+  recall. (Phase 4)
 - **`/basic-memory:setup`** (`skills/setup/`) — a short guided interview that
   configures the project for the plugin: maps it to a Basic Memory project (picking
   an existing one or creating a new one), seeds the `session`/`decision`/`task`

@@ -35,10 +35,22 @@ Ask only what you can't infer. Cover:
      (default: `~/basic-memory/<name>/`), then create it with
      `create_memory_project`.
 
-3. **Cloud / teams** (skip if there are no cloud workspaces). If the user is on a
-   cloud workspace with team projects, ask whether to also *read* from a team
-   project for recall — `secondaryProjects` are read-only by default. Never set a
-   team project to auto-write without an explicit yes (`teamProjects.<name>.autoWrite`).
+3. **Cloud / teams** (skip if there are no extra workspaces). Run
+   `list_workspaces`. If the user belongs to more than one workspace, they likely
+   have a **team** workspace alongside their personal/default one. Use
+   `list_memory_projects` to see the projects in each (note: project names collide
+   across workspaces, so always use the **workspace-qualified name**, e.g.
+   `my-team-2/notes`, or the `external_id` UUID — never a bare name).
+   - **Read from the team** (recommended): ask which team projects to pull into the
+     session brief for recall. Store their qualified names in `secondaryProjects`.
+     These are **read-only** — recall reads across them; nothing is written to them.
+   - **Share target** (optional): if the user wants a place to *publish* notes to the
+     team via `/basic-memory:share`, add it to `teamProjects` as
+     `"<qualified-name>": { "promoteFolder": "shared" }`. Sharing is always a manual
+     gesture — auto-capture never writes to a team project.
+
+   Keep `primaryProject` a project the user owns for their *own* capture; team
+   projects are for reading and deliberate sharing only.
 
 4. **Chattiness.** "How active should I be?"
    - **light** (default) — session brief on start, checkpoint before compaction,

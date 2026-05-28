@@ -6,13 +6,15 @@
 # the durable knowledge graph in front of Claude before the first prompt, so the
 # session starts oriented instead of cold.
 #
-# Phase 1 is the *minimal* cut (see DESIGN.md): a single structured query for
-# active tasks, plus the always-on recall prompt. The richer multi-query brief
-# (open decisions, recent sessions, team projects) is the "enrich later" step.
+# Reads (all structured, all best-effort):
+#   - the primary project's active tasks + open decisions
+#   - open decisions from each configured shared/team project (secondaryProjects +
+#     teamProjects), queried in parallel — this is the Phase 4 "recall reads across
+#     the team" capability. Reads only; capture never touches a shared project.
 #
-# Contract: this hook is advisory and must NEVER disrupt a session. Every failure
-# path exits 0 with no output. SessionStart adds plain stdout to Claude's context
-# (verified — Q4), and output is capped at 10,000 chars, so we keep it small.
+# Contract: advisory, must NEVER disrupt a session. Every failure path exits 0 with
+# no output. SessionStart adds plain stdout to Claude's context (verified — Q4),
+# capped at 10,000 chars, so the brief stays small and bounded.
 
 set -u
 
@@ -28,17 +30,28 @@ input="$(cat 2>/dev/null || true)"
 BM="$(command -v basic-memory || command -v bm || true)"
 [ -z "$BM" ] && exit 0
 
-# Everything else runs in one Python pass: parse config, run the query, format
+# Everything else runs in one Python pass: parse config, run the queries, format
 # the brief. Python is a guaranteed dependency (basic-memory requires it) and
 # avoids brittle shell JSON wrangling. The payload and binary path cross over via
 # the environment to sidestep argument-quoting issues.
 BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
+import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 bm = os.environ.get("BM_BIN", "basic-memory")
+
+# Cloud project refs come in two unambiguous forms (names collide across
+# workspaces, so a bare name won't route): a workspace-qualified name like
+# "my-team-2/notes", or an external_id UUID. Detect the UUID to pick the flag.
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+# Cap how many shared projects we read per session — bounds latency and output.
+MAX_SHARED = 6
 
 # --- Resolve the working directory from the payload ---
 try:
@@ -50,11 +63,9 @@ cwd = payload.get("cwd") or os.getcwd()
 
 # --- Load plugin config from .claude settings (local overrides committed) ---
 # Precedence: settings.local.json (per-user) wins over settings.json (team).
-# Bare defaults apply when neither sets a key.
+# `found` is True if either file declared a basicMemory block at all — its
+# presence is the first-run sentinel (setup writing it stops the nudge below).
 def load_settings(directory):
-    # Returns (merged basicMemory block, found) where `found` is True if either
-    # settings file declared a basicMemory block at all — that presence is the
-    # first-run sentinel (setup writing the block is what stops the nudge below).
     merged = {}
     found = False
     for name in ("settings.json", "settings.local.json"):
@@ -85,20 +96,50 @@ default_prompt = (
 )
 recall_prompt = cfg.get("recallPrompt") or default_prompt
 
+# --- Resolve the shared/team read set ---
+# secondaryProjects (read-only recall sources) + teamProjects keys (share targets,
+# also read for recall). Dedup, preserve order, cap. These are read only — the
+# capture hooks never write to them.
+shared_refs = []
+secondary = cfg.get("secondaryProjects") or []
+team = cfg.get("teamProjects") or {}
+for ref in list(secondary) + (list(team.keys()) if isinstance(team, dict) else []):
+    if isinstance(ref, str) and ref.strip() and ref.strip() != primary_project:
+        if ref.strip() not in shared_refs:
+            shared_refs.append(ref.strip())
+shared_capped = len(shared_refs) > MAX_SHARED
+shared_refs = shared_refs[:MAX_SHARED]
 
-# --- Query the graph (single call, best-effort) ---
-# Filter-only search for active work. --project is passed only when pinned;
-# otherwise the CLI routes to the user's default project, so the hook is useful
-# out of the box with zero config.
-def search(args):
-    cmd = [bm, "tool", "search-notes", *args, "--page-size", "5"]
-    if primary_project:
-        cmd += ["--project", primary_project]
-    out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-    if out.returncode != 0:
+
+# --- Structured query helper (best-effort, per-call timeout) ---
+# project_ref=None routes to the user's default project (zero-config usefulness).
+# A UUID ref routes via --project-id; a qualified name via --project.
+def search(filters, project_ref=None, timeout=10):
+    cmd = [bm, "tool", "search-notes", *filters, "--page-size", "5"]
+    if project_ref:
+        cmd += (["--project-id", project_ref] if UUID_RE.match(project_ref) else ["--project", project_ref])
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if out.returncode != 0:
+            return None
+        return json.loads(out.stdout)
+    except Exception:
         return None
-    return json.loads(out.stdout)
 
+
+ACTIVE_TASKS = ["--type", "task", "--status", "active"]
+OPEN_DECISIONS = ["--type", "decision", "--status", "open"]
+
+# --- Run everything concurrently ---
+# Cloud reads cost a network round-trip each; parallelism keeps total wall-clock at
+# ~one query instead of the sum. Each call is independently best-effort.
+with ThreadPoolExecutor(max_workers=8) as pool:
+    fut_tasks = pool.submit(search, ACTIVE_TASKS, primary_project or None)
+    fut_decisions = pool.submit(search, OPEN_DECISIONS, primary_project or None)
+    fut_shared = {ref: pool.submit(search, OPEN_DECISIONS, ref) for ref in shared_refs}
+    primary_tasks = fut_tasks.result()
+    primary_decisions = fut_decisions.result()
+    shared_results = {ref: fut.result() for ref, fut in fut_shared.items()}
 
 # The first-run nudge — shown until setup writes a basicMemory config block.
 setup_nudge = (
@@ -106,16 +147,11 @@ setup_nudge = (
     "`/basic-memory:setup` (~2 min) to configure session briefings and checkpoints._"
 )
 
-try:
-    tasks = search(["--type", "task", "--status", "active"])
-except Exception:
-    tasks = None
-
-# Trigger: the task query couldn't run (no default project yet, transient error).
-# Why: a broken query must never error the session — but a genuine first-run user
-#      (no config, nothing to brief) should still be pointed at setup.
+# Trigger: the primary queries couldn't run at all (no default project, transient
+# error). Why: a broken query must never error the session — but a genuine first-run
+# user (no config, nothing to brief) should still be pointed at setup.
 # Outcome: first-run → nudge only; already-configured → silent no-op.
-if tasks is None:
+if primary_tasks is None and primary_decisions is None:
     if not configured:
         print("# Basic Memory\n\n" + setup_nudge)
     sys.exit(0)
@@ -127,35 +163,56 @@ def label(result):
     return f"- {name}" + (f" — {ref}" if ref else "")
 
 
+def readable(ref):
+    # Qualified names ("my-team-2/notes") read fine as-is; UUIDs get shortened.
+    return f"shared project {ref[:8]}…" if UUID_RE.match(ref) else ref
+
+
+def rows(result):
+    return (result or {}).get("results") or []
+
+
 # --- Assemble the brief (plain stdout → Claude's context) ---
 lines = ["# Basic Memory — session context", ""]
-project_label = primary_project or "default project"
-results = tasks.get("results") or []
+header = f"**Project:** {primary_project or 'default project'}"
+if shared_refs:
+    header += f" · reading {len(shared_refs)} shared project(s)"
+lines.append(header)
 
-if results:
-    lines.append(f"**Project:** {project_label}")
-    lines.append("")
-    lines.append(f"## Active tasks ({len(results)})")
-    lines.extend(label(r) for r in results)
-else:
-    lines.append(f"**Project:** {project_label} · no active tasks tracked")
+task_rows = rows(primary_tasks)
+decision_rows = rows(primary_decisions)
+if task_rows:
+    lines += ["", f"## Active tasks ({len(task_rows)})", *[label(r) for r in task_rows]]
+if decision_rows:
+    lines += ["", f"## Open decisions ({len(decision_rows)})", *[label(r) for r in decision_rows]]
+if not task_rows and not decision_rows:
+    lines += ["", "_No active tasks or open decisions tracked in this project._"]
 
-# Trigger: no basicMemory config block in either settings file (first run).
-# Why: point the user at the one-time setup so the plugin is wired up properly.
-# Outcome: a single nudge line; once setup writes the block, this stops firing.
+# --- Shared/team context (read-only) ---
+shared_sections = [(ref, rows(shared_results.get(ref))) for ref in shared_refs]
+shared_sections = [(ref, items) for ref, items in shared_sections if items]
+if shared_sections:
+    lines += ["", "## From shared projects (read-only)"]
+    for ref, items in shared_sections:
+        lines += [f"### {readable(ref)} — open decisions", *[label(r) for r in items]]
+    lines += [
+        "",
+        "_Shared-project context is read-only. Your captures stay in this project; "
+        "use `/basic-memory:share` to deliberately promote a note to the team._",
+    ]
+if shared_capped:
+    lines += ["", f"_(reading the first {MAX_SHARED} shared projects; more are configured.)_"]
+
+# --- First-run / config nudges ---
 if not configured:
-    lines.append("")
-    lines.append(setup_nudge)
+    lines += ["", setup_nudge]
 elif not primary_project:
-    lines.append("")
-    lines.append(
+    lines += [
+        "",
         "_Tip: set `basicMemory.primaryProject` in `.claude/settings.json` to "
-        "pin this project (see the plugin's settings.example.json)._"
-    )
+        "pin this project (see the plugin's settings.example.json)._",
+    ]
 
-lines.append("")
-lines.append("---")
-lines.append(recall_prompt)
-
+lines += ["", "---", recall_prompt]
 print("\n".join(lines))
 PY

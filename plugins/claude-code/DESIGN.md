@@ -295,33 +295,53 @@ For most thinker-persona users, one repo ↔ one BM project is natural. For deve
 
 ## 6. Team / shared workspaces
 
-Basic Memory Cloud has workspaces (Personal, Team-X, Org-Y), each containing projects. Some users contribute to *shared* projects where their writes are visible to teammates. This requires deliberate design.
+Basic Memory Cloud has **workspaces** (each an org or personal space) containing
+**projects**. Some users contribute to *shared* projects visible to teammates. This
+needs deliberate, safe-by-default design.
+
+**Routing reality (verified against a real two-workspace account):** project names
+**collide across workspaces** — e.g. `main` and `getting-started` exist in more than
+one. A bare name won't route. Every cross-workspace ref in config must therefore be a
+**workspace-qualified name** (`<workspace-slug>/<project>`, e.g. `my-team-2/notes`,
+from the `qualified_name` field) or an **`external_id` UUID** (most stable — survives
+renames). The CLI accepts these via `--project` / `--project-id`; the hook detects a
+UUID and routes accordingly. Cross-workspace reads route over the user's OAuth session
+(no API key needed) — confirmed working for both structured search and recent-activity.
 
 ### 6.1 Defaults — safe by design
 
-- **Auto-capture defaults to personal.** SessionNotes, PreCompact checkpoints, `/basic-memory:remember` quick captures all land in a *personal* project. Never auto-write to a team workspace without explicit user opt-in.
-- **Recall reads across.** SessionStart can query team projects for context (this is high-value — team memory compounds). Reads don't disclose anything; writes do.
-- **Sharing is a deliberate gesture.** `/basic-memory:share <permalink>` (future skill) copies a personal note to a team project with attribution. Makes the personal→team boundary visible.
+- **Auto-capture defaults to personal.** SessionNotes, PreCompact checkpoints, and
+  `/basic-memory:remember` quick captures **only ever** land in `primaryProject`. The
+  capture hooks never write to a shared project — full stop, no opt-in flag in v0.4.
+- **Recall reads across.** SessionStart queries the shared projects in parallel for
+  open decisions and folds them into the brief (read-only — discloses nothing).
+- **Sharing is a deliberate gesture.** `/basic-memory:share` copies a personal note
+  into a configured team project with attribution, after explicit confirmation. The
+  personal→team boundary is always a visible, manual action.
 
 ### 6.2 Configuration shape
 
 ```json
 {
   "basicMemory": {
-    "primaryProject": "personal/my-app",
-    "secondaryProjects": ["team/engineering"],
+    "primaryProject": "basic-memory-7020…/main",
+    "secondaryProjects": ["my-team-2/main", "my-team-2/notes"],
     "teamProjects": {
-      "team/engineering": {
-        "read": true,
-        "autoWrite": false,
-        "promoteFolder": "shared"
-      }
+      "my-team-2/notes": { "promoteFolder": "shared" }
     }
   }
 }
 ```
 
-`autoWrite: true` opts in to auto-capture writing to a team project — for users who *want* shared session memory. Not the default.
+- `secondaryProjects` — workspace-qualified refs (or UUIDs) read for recall. Read-only.
+- `teamProjects` — share targets for `/basic-memory:share`; each carries a
+  `promoteFolder` (default `shared`). Also read for recall (SessionStart reads the
+  union of `secondaryProjects` and `teamProjects` keys, capped at 6 per session).
+
+**`autoWrite` is deferred.** An earlier draft proposed `teamProjects.<name>.autoWrite`
+to let auto-capture write to a team project. v0.4 does **not** implement it — auto-capture
+stays personal and sharing is always manual. Revisit only if a team explicitly wants
+shared session memory; until then we don't ship a flag we don't enforce.
 
 ### 6.3 What this unlocks
 
@@ -539,10 +559,29 @@ using its MCP tools). Verified the whole loop end-to-end against throwaway proje
   skill's presence + frontmatter, enforced by `validate_claude_plugin.py`'s
   `REQUIRED_SKILLS` (now `setup`, `remember`, `status`). Real validation is dogfooding.
 
-### Phase 4: Team workspace support (3 days)
-- [ ] Extend SessionStart to query secondary/team projects in parallel
-- [ ] Add `teamProjects` config schema validation
-- [ ] Document the share-vs-capture distinction in README
+### Phase 4: Team workspace support — ✅ DONE (2026-05-28)
+
+Grounded in a real two-workspace BM Cloud account (verified name-collision routing,
+OAuth cross-workspace reads). Pulled `/basic-memory:share` forward from future-work
+since team usage needs a safe write path.
+
+- [x] Extend SessionStart to read primary + shared projects **in parallel** —
+  `ThreadPoolExecutor` over structured queries (primary: active tasks + open
+  decisions; each shared project: open decisions). Routes by qualified name or UUID,
+  per-call timeout, capped at 6 shared projects, graceful on any failure. Verified
+  against the real `my-team-2` workspace and with local fixtures.
+- [x] Add `/basic-memory:share` (`skills/share/`) — the deliberate personal→team
+  write: reads a note from `primaryProject`, confirms, and copies it to a configured
+  `teamProjects` target's `promoteFolder` with `shared_from` attribution. Preserves
+  the note's type so shared decisions stay findable in the team's structured recall.
+- [x] Config: `secondaryProjects` (read sources) + `teamProjects` (share targets with
+  `promoteFolder`). Documented in `settings.example.json` with the qualified-name
+  requirement. `autoWrite` deliberately **not** shipped (see §6.2). `REQUIRED_SKILLS`
+  now includes `share`.
+- [x] `status` reports team read-sources + share targets; `setup` interview step 3
+  now configures them via `list_workspaces` + qualified names.
+- [x] Document the share-vs-capture distinction (README "Teams" section + the
+  read-only note in the SessionStart brief itself).
 
 ### Phase 5: Docs + dogfood (1 week)
 - [x] Rewrite `README.md` around the bridge story (done in Phase 1 — the old README
@@ -561,7 +600,9 @@ using its MCP tools). Verified the whole loop end-to-end against throwaway proje
 ## 13. Future work (post-v0.4)
 
 - **Routines integration** — three routine templates (nightly hygiene, weekly digest, daily reflection). Separate design doc. The nightly hygiene routine is the natural home for `schema_diff` drift detection and the deferred LLM-summary pass over the day's extractive SessionNotes.
-- **`/basic-memory:share`** — promote personal note → team project with attribution.
+- ~~**`/basic-memory:share`** — promote personal note → team project~~ — shipped in Phase 4.
+- **Team `autoWrite`** — opt-in for auto-capture (PreCompact/remember) to write to a
+  team project, for teams that want shared session memory. Deferred from Phase 4 (§6.2).
 - **`/basic-memory:blame <sha>`** — code archaeology, builder add-on.
 - **Commit-hook integration** — PostToolUse on `Bash(git commit *)` writes CommitNote linking SHA to session's BM writes.
 - **Subagent memory bundling** — explore `memory: project|user` on dedicated BM subagents.

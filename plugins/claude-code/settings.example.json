@@ -1,8 +1,8 @@
 {
-  "$comment": "Example Basic Memory plugin settings. Copy the basicMemory block (and optionally outputStyle) into your project's .claude/settings.json, then set primaryProject. Every field is optional except primaryProject, which the hooks need to know where to read briefs from and write checkpoints to. See DESIGN.md for the full schema.",
+  "$comment": "Example Basic Memory plugin settings. Copy the basicMemory block (and optionally outputStyle) into your project's .claude/settings.json, then set primaryProject. The easiest way to fill this in is /basic-memory:setup. Team projects (secondaryProjects, teamProjects) must use workspace-qualified names like 'my-team/notes' or external_id UUIDs — bare names are ambiguous across workspaces. See DESIGN.md for the full schema.",
   "basicMemory": {
     "primaryProject": "my-project",
-    "secondaryProjects": [],
+    "secondaryProjects": ["my-team/main", "my-team/notes"],
     "captureFolder": "sessions",
     "rememberFolder": "bm-remember",
     "recallTimeframe": "3d",
@@ -10,7 +10,9 @@
     "captureChattyness": "light",
     "preCompactCapture": "extractive",
     "placementConventions": null,
-    "teamProjects": {}
+    "teamProjects": {
+      "my-team/notes": { "promoteFolder": "shared" }
+    }
   },
   "outputStyle": "basic-memory"
 }
