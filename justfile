@@ -295,9 +295,25 @@ package-check-openclaw:
 migration message:
     cd src/basic_memory/alembic && alembic revision --autogenerate -m "{{message}}"
 
+# Set the Basic Memory version across release manifests (scope: all | core | packages)
+set-version version scope="all":
+    python3 scripts/update_versions.py "{{version}}" --scope "{{scope}}"
+
+# Preview a version update without writing (scope: all | core | packages)
+set-version-dry-run version scope="all":
+    python3 scripts/update_versions.py "{{version}}" --scope "{{scope}}" --dry-run
+
+# Set the version for just the plugin/agent artifacts (plugin, marketplaces, Hermes, OpenClaw)
+set-packages-version version:
+    just set-version "{{version}}" packages
+
+# Preview a plugin/agent-artifact version update without writing
+set-packages-version-dry-run version:
+    just set-version-dry-run "{{version}}" packages
+
 # Preview the consolidated manifest version update without changing files
 release-dry-run version:
-    python3 scripts/update_versions.py "{{version}}" --dry-run
+    just set-version-dry-run "{{version}}"
 
 # Create a stable release (e.g., just release v0.13.2)
 release version:
@@ -340,7 +356,7 @@ release version:
     
     # Update all package manifests to the one Basic Memory product version.
     echo "📝 Updating consolidated package versions..."
-    python3 scripts/update_versions.py "{{version}}"
+    just set-version "{{version}}"
 
     # Commit version update
     git add \
@@ -413,7 +429,7 @@ beta version:
     
     # Update all package manifests to the one Basic Memory product version.
     echo "📝 Updating consolidated package versions..."
-    python3 scripts/update_versions.py "{{version}}"
+    just set-version "{{version}}"
 
     # Commit version update
     git add \

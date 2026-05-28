@@ -96,10 +96,15 @@ def set_package_version(data: dict[str, Any], version: str) -> None:
     data["version"] = version
 
 
-def update_versions(raw_version: str, *, dry_run: bool) -> None:
-    version = parse_version(raw_version)
-    print(f"{'preview' if dry_run else 'writing'} Basic Memory version {version}")
+# Version scopes. The two groups map to the two distribution tracks:
+#   core     — the Python package and its MCP registry manifest
+#   packages — the host-native agent artifacts (Claude Code plugin + marketplaces,
+#              Hermes, OpenClaw). These are the "plugin/agent artifacts."
+# `all` writes both. Lockstep releases use `all`; targeted fixes can use one group.
+SCOPES = ("all", "core", "packages")
 
+
+def _update_core(version: str, *, dry_run: bool) -> None:
     update_text(
         "src/basic_memory/__init__.py",
         r'^__version__ = ".*"$',
@@ -111,6 +116,9 @@ def update_versions(raw_version: str, *, dry_run: bool) -> None:
         lambda data: set_server_version(data, version),
         dry_run=dry_run,
     )
+
+
+def _update_packages(version: str, *, dry_run: bool) -> None:
     update_json(
         ".claude-plugin/marketplace.json",
         lambda data: set_claude_marketplace_version(data, version),
@@ -145,12 +153,32 @@ def update_versions(raw_version: str, *, dry_run: bool) -> None:
     )
 
 
+def update_versions(raw_version: str, *, scope: str = "all", dry_run: bool) -> None:
+    if scope not in SCOPES:
+        raise SystemExit(f"Invalid scope {scope!r}. Choose one of: {', '.join(SCOPES)}")
+
+    version = parse_version(raw_version)
+    print(f"{'preview' if dry_run else 'writing'} Basic Memory version {version} (scope: {scope})")
+
+    if scope in ("all", "core"):
+        _update_core(version, dry_run=dry_run)
+    if scope in ("all", "packages"):
+        _update_packages(version, dry_run=dry_run)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("version", help="Release version, with or without the leading v")
+    parser.add_argument(
+        "--scope",
+        choices=SCOPES,
+        default="all",
+        help="Which artifacts to update: all (default), core (Python + server.json), "
+        "or packages (Claude Code plugin, marketplaces, Hermes, OpenClaw)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     args = parser.parse_args()
-    update_versions(args.version, dry_run=args.dry_run)
+    update_versions(args.version, scope=args.scope, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

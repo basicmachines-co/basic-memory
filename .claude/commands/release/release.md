@@ -42,7 +42,7 @@ The justfile target handles:
 - ✅ Version format validation
 - ✅ Git status and branch checks
 - ✅ Quality checks (`just check` - lint, format, type-check, tests)
-- ✅ Version update in `src/basic_memory/__init__.py`
+- ✅ Version update across all consolidated manifests via `just set-version` (Python package + Claude Code plugin/marketplaces + Hermes + OpenClaw)
 - ✅ Automatic commit with proper message
 - ✅ Tag creation and pushing to GitHub
 - ✅ Release workflow trigger (automatic on tag push)
@@ -191,7 +191,13 @@ Users can now upgrade:
 - This creates production releases used by end users
 - Must pass all quality gates before proceeding
 - Uses the automated justfile target for consistency
-- Version is automatically updated in `__init__.py` and `server.json`
+- Version is automatically updated across **all** consolidated manifests via
+  `just set-version <version>` (which calls `scripts/update_versions.py`): the
+  Python package (`__init__.py`, `server.json`) **and** the plugin/agent artifacts
+  (Claude Code `plugin.json` + root/local marketplaces, Hermes `plugin.yaml` +
+  `__init__.py`, OpenClaw `package.json`). To bump only the plugin/agent artifacts
+  out of band, use `just set-packages-version <version>` (preview with
+  `just set-packages-version-dry-run <version>`).
 - Triggers automated GitHub release with changelog
 - Package is published to PyPI for `pip` and `uv` users
 - Homebrew formula is automatically updated for stable releases
