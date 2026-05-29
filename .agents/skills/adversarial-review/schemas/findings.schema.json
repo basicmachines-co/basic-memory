@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AdversarialReviewFindings",
+  "description": "Structured output for one reviewer's pass over a diff.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "file", "line", "severity", "category", "claim", "why", "suggested_fix"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Short stable slug for this finding, e.g. 'swallowed-exc-sync-service'."
+          },
+          "file": {
+            "type": "string",
+            "description": "Path relative to repo root."
+          },
+          "line": {
+            "type": "integer",
+            "description": "Best line number in the new file, or 0 if not line-specific."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low"]
+          },
+          "category": {
+            "type": "string",
+            "enum": ["correctness", "security", "house-rule", "performance", "maintainability"]
+          },
+          "claim": {
+            "type": "string",
+            "description": "One sentence: what is wrong."
+          },
+          "why": {
+            "type": "string",
+            "description": "Concrete reasoning + the specific code that triggers it. Must be falsifiable, not vibes."
+          },
+          "suggested_fix": {
+            "type": ["string", "null"],
+            "description": "The smallest change that resolves it, or null if none is obvious."
+          }
+        }
+      }
+    }
+  }
+}

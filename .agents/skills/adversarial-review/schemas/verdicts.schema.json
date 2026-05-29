@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AdversarialReviewVerdicts",
+  "description": "One reviewer's attempt to refute another reviewer's findings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdicts"],
+  "properties": {
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "verdict", "reasoning", "corrected_severity"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The id of the finding being judged (must match the input finding's id)."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["upheld", "refuted", "partial"],
+            "description": "upheld = the finding is real; refuted = it is wrong or a non-issue; partial = real but mis-scoped/wrong-severity."
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Why. For refuted, cite the specific code or fact that disproves the claim."
+          },
+          "corrected_severity": {
+            "type": ["string", "null"],
+            "enum": ["critical", "high", "medium", "low", null],
+            "description": "Set only when verdict is 'partial' and severity should change; otherwise null."
+          }
+        }
+      }
+    }
+  }
+}
