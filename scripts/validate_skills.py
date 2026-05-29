@@ -8,6 +8,15 @@ from pathlib import Path
 
 
 def parse_frontmatter(path: Path) -> dict[str, str]:
+    """Extract top-level frontmatter keys from a Markdown file.
+
+    A deliberately minimal parser (no PyYAML — this runs under bare `python3` in
+    CI). It only captures **top-level** `key: value` lines. Indented lines are
+    skipped, so nested blocks (a schema note's `schema:`/`settings:` children) can't
+    overwrite a top-level key like `type` or `entity` via last-write-wins. It does
+    not interpret block scalars or multi-line values; callers rely on single-line
+    top-level fields (name, description, type, entity).
+    """
     lines = path.read_text().splitlines()
     if not lines or lines[0] != "---":
         raise SystemExit(f"{path}: missing YAML frontmatter")
@@ -16,6 +25,8 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
     for line in lines[1:]:
         if line == "---":
             break
+        if line[:1] in (" ", "\t"):  # nested key — not a top-level field
+            continue
         if ":" not in line:
             continue
         key, value = line.split(":", 1)

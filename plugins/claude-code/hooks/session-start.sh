@@ -101,9 +101,13 @@ recall_prompt = cfg.get("recallPrompt") or default_prompt
 # also read for recall). Dedup, preserve order, cap. These are read only — the
 # capture hooks never write to them.
 shared_refs = []
-secondary = cfg.get("secondaryProjects") or []
-team = cfg.get("teamProjects") or {}
-for ref in list(secondary) + (list(team.keys()) if isinstance(team, dict) else []):
+# Guard the JSON types: a misconfigured string would otherwise be iterated
+# character-by-character, firing a bogus per-character query for each one.
+secondary = cfg.get("secondaryProjects")
+secondary = secondary if isinstance(secondary, list) else []
+team = cfg.get("teamProjects")
+team = team if isinstance(team, dict) else {}
+for ref in list(secondary) + list(team.keys()):
     if isinstance(ref, str) and ref.strip() and ref.strip() != primary_project:
         if ref.strip() not in shared_refs:
             shared_refs.append(ref.strip())
@@ -129,6 +133,10 @@ def search(filters, project_ref=None, timeout=10):
 
 ACTIVE_TASKS = ["--type", "task", "--status", "active"]
 OPEN_DECISIONS = ["--type", "decision", "--status", "open"]
+# Recent session checkpoints carry the resume cursor. This is the one query the
+# `recallTimeframe` window applies to — tasks and decisions are status-scoped (an
+# old open decision is still open), but "recent sessions" is inherently time-scoped.
+RECENT_SESSIONS = ["--type", "session", "--after_date", recall_timeframe]
 
 # --- Run everything concurrently ---
 # Cloud reads cost a network round-trip each; parallelism keeps total wall-clock at
@@ -136,9 +144,11 @@ OPEN_DECISIONS = ["--type", "decision", "--status", "open"]
 with ThreadPoolExecutor(max_workers=8) as pool:
     fut_tasks = pool.submit(search, ACTIVE_TASKS, primary_project or None)
     fut_decisions = pool.submit(search, OPEN_DECISIONS, primary_project or None)
+    fut_sessions = pool.submit(search, RECENT_SESSIONS, primary_project or None)
     fut_shared = {ref: pool.submit(search, OPEN_DECISIONS, ref) for ref in shared_refs}
     primary_tasks = fut_tasks.result()
     primary_decisions = fut_decisions.result()
+    primary_sessions = fut_sessions.result()
     shared_results = {ref: fut.result() for ref, fut in fut_shared.items()}
 
 # The first-run nudge — shown until setup writes a basicMemory config block.
@@ -147,13 +157,21 @@ setup_nudge = (
     "`/basic-memory:setup` (~2 min) to configure session briefings and checkpoints._"
 )
 
-# Trigger: the primary queries couldn't run at all (no default project, transient
-# error). Why: a broken query must never error the session — but a genuine first-run
-# user (no config, nothing to brief) should still be pointed at setup.
-# Outcome: first-run → nudge only; already-configured → silent no-op.
-if primary_tasks is None and primary_decisions is None:
+# Trigger: every primary query failed (no default project, misnamed project,
+# unreachable cloud, transient error). Why: a broken query must never error the
+# session, but it must not silently look like "nothing tracked" either.
+# Outcome: first-run → setup nudge; configured-but-broken → a one-line signal so
+# the user can tell a typo'd/unreachable project from an empty one.
+if primary_tasks is None and primary_decisions is None and primary_sessions is None:
     if not configured:
         print("# Basic Memory\n\n" + setup_nudge)
+    else:
+        proj = primary_project or "the default project"
+        print(
+            "# Basic Memory\n\n"
+            f"_Couldn't read from `{proj}` — it may be misnamed or unreachable. "
+            "Run `/basic-memory:status` to check._"
+        )
     sys.exit(0)
 
 
@@ -181,12 +199,19 @@ lines.append(header)
 
 task_rows = rows(primary_tasks)
 decision_rows = rows(primary_decisions)
+session_rows = rows(primary_sessions)
 if task_rows:
     lines += ["", f"## Active tasks ({len(task_rows)})", *[label(r) for r in task_rows]]
 if decision_rows:
     lines += ["", f"## Open decisions ({len(decision_rows)})", *[label(r) for r in decision_rows]]
-if not task_rows and not decision_rows:
-    lines += ["", "_No active tasks or open decisions tracked in this project._"]
+if session_rows:
+    lines += [
+        "",
+        f"## Recent sessions ({len(session_rows)}) — where you left off",
+        *[label(r) for r in session_rows],
+    ]
+if not (task_rows or decision_rows or session_rows):
+    lines += ["", "_No active tasks, open decisions, or recent sessions in this project._"]
 
 # --- Shared/team context (read-only) ---
 shared_sections = [(ref, rows(shared_results.get(ref))) for ref in shared_refs]

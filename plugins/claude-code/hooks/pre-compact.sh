@@ -25,7 +25,6 @@ BM="$(command -v basic-memory || command -v bm || true)"
 BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime
@@ -97,13 +96,21 @@ def turns(path):
                     obj = json.loads(line)
                 except Exception:
                     continue
+                # Skip injected/meta frames and tool results — only real human
+                # input and assistant prose count. Claude Code marks tool results
+                # with a `toolUseResult` field and injected/meta turns (command
+                # wrappers, system reminders, auto-continuations) with `isMeta`.
+                # Filtering on those flags — not a "<" content prefix — avoids both
+                # dropping legitimate messages that start with "<" and capturing
+                # tool-result noise.
+                if obj.get("isMeta") or obj.get("toolUseResult") is not None:
+                    continue
                 msg = obj.get("message") if isinstance(obj.get("message"), dict) else obj
                 role = msg.get("role") or obj.get("type")
                 if role not in ("user", "assistant"):
                     continue
                 text = text_of(msg.get("content")).strip()
-                # Skip tool-result noise and empty frames.
-                if not text or text.startswith("<"):
+                if not text:
                     continue
                 collected.append((role, text))
     except Exception:
@@ -113,10 +120,11 @@ def turns(path):
 
 conversation = turns(transcript_path)
 
-# Trigger: nothing usable in the transcript.
-# Why: an empty checkpoint is worse than none — it clutters the graph.
+# Trigger: nothing usable in the transcript, or no real human turn in it.
+# Why: an empty or human-less checkpoint is worse than none — it would write a
+#      note with a dangling title and no opening request. Require a user turn.
 # Outcome: silent no-op.
-if not conversation:
+if not conversation or not any(role == "user" for role, _ in conversation):
     sys.exit(0)
 
 user_msgs = [t for r, t in conversation if r == "user"]
@@ -134,10 +142,11 @@ def clip(s, n):
 # find it with metadata filters. BM merges a leading frontmatter block from the
 # content into the note's frontmatter (verified empirically).
 now = datetime.now()
-stamp = now.strftime("%Y-%m-%d-%H%M%S")
 iso = now.strftime("%Y-%m-%dT%H:%M")
-slug = re.sub(r"[^a-z0-9]+", "-", clip(opening, 50).lower()).strip("-") or "session"
-title = f"Session {now.strftime('%Y-%m-%d %H:%M')} — {clip(opening, 40)}"
+# Second precision keeps the title — and therefore the note's permalink — unique
+# across rapid compactions within the same minute (otherwise the second write
+# would collide with the first and be dropped or overwrite it).
+title = f"Session {now.strftime('%Y-%m-%d %H:%M:%S')} — {clip(opening, 40)}"
 
 frontmatter = [
     "---",
