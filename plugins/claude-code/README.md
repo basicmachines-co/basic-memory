@@ -38,7 +38,7 @@ Plugin skills are namespaced under the plugin name:
 
 | Command | What it does |
 |---------|--------------|
-| `/basic-memory:setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
+| `/basic-memory:setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, installs the shared `memory-*` skills, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
 | `/basic-memory:remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
 | `/basic-memory:share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
 | `/basic-memory:status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, output-style state, recent session checkpoints, and active-task count. |

@@ -23,8 +23,11 @@ Memory's durable graph**, rather than a memory layer of its own. See
 - **`/basic-memory:setup`** (`skills/setup/`) — a short guided interview that
   configures the project for the plugin: maps it to a Basic Memory project (picking
   an existing one or creating a new one), seeds the `session`/`decision`/`task`
-  schemas into the project, optionally learns the project's placement conventions,
-  and enables the capture reflexes. Writes the `basicMemory` block to
+  schemas into the project, installs the shared `memory-*` skills via
+  `npx skills add basicmachines-co/basic-memory --path skills` (the plugin doesn't
+  vendor its own copies — `skills/` is the single source of truth, shared with
+  OpenClaw), optionally learns the project's placement conventions, and enables the
+  capture reflexes. Writes the `basicMemory` block to
   `.claude/settings.json` (or `settings.local.json`). The SessionStart hook nudges
   toward this on first run; running it (writing the config) stops the nudge. (Phase 3)
 - **`/basic-memory:remember <text>`** (`skills/remember/`) — quick deliberate

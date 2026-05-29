@@ -44,6 +44,8 @@ It's a short interview. It will:
 - map this project to a Basic Memory project (pick an existing one or create a new one),
 - seed the `session` / `decision` / `task` schemas so notes are findable by structured
   search,
+- install the shared `memory-*` skills (`npx skills add …`) — the plugin ships only the
+  Claude-Code-specific glue and pulls the canonical skills on demand,
 - optionally learn your existing folder/naming conventions,
 - enable the capture reflexes (output style),
 - write a `basicMemory` block to `.claude/settings.json`.

@@ -75,6 +75,13 @@ Ask only what you can't infer. Cover:
    capture decisions as typed notes, cite permalinks)" → sets
    `outputStyle: "basic-memory"`. Default yes for standard/heavy, ask for light.
 
+8. **Shared skills** (optional, default yes). "Want the full Basic Memory toolkit —
+   the shared `memory-*` skills (`memory-notes`, `memory-tasks`, `memory-research`,
+   `memory-schema`, `memory-defrag`, …)? I can install them alongside this plugin."
+   These are the canonical, framework-agnostic skills (the same set OpenClaw bundles).
+   This plugin ships only the Claude-Code-specific glue and pulls the shared set on
+   demand — it doesn't vendor its own copies. (See "Install the shared skills" below.)
+
 ## Apply (after confirming the plan)
 
 ### 1. Seed the schemas
@@ -93,7 +100,19 @@ For each one:
   note's frontmatter, so the `type: schema` + `entity` + `schema` definition land
   intact and become resolvable by `schema_validate`), `project` = `primaryProject`.
 
-### 2. Write settings
+### 2. Install the shared skills (if the user opted in)
+Run, from the project root:
+
+```
+npx skills add basicmachines-co/basic-memory --path skills
+```
+
+This installs the canonical `memory-*` skills into the user's skills directory — the
+single source of truth, shared with OpenClaw. The plugin does **not** vendor copies;
+it relies on this shared set. If `npx` / the `skills` CLI isn't available, point the
+user at the manual install in the top-level [`skills/README.md`](../../../../skills/README.md).
+
+### 3. Write settings
 Build the `basicMemory` block from the interview:
 
 ```json
