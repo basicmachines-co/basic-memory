@@ -47,14 +47,14 @@ Use `(enum)` with a list of allowed values:
 
 ```yaml
 schema:
-  status(enum): [active, blocked, done, abandoned], current state
+  status(enum, current state): [active, blocked, done, abandoned]
 ```
 
 Optional enum:
 
 ```yaml
 schema:
-  priority?(enum): [low, medium, high, critical], task priority
+  priority?(enum, task priority): [low, medium, high, critical]
 ```
 
 ### Arrays
@@ -100,7 +100,7 @@ schema:
   attendees?(array): Person, who attended
   decisions?(array): string, decisions made
   action_items?(array): string, follow-up tasks
-  status?(enum): [scheduled, completed, cancelled], meeting state
+  status?(enum, meeting state): [scheduled, completed, cancelled]
 settings:
   validation: warn
 ---
