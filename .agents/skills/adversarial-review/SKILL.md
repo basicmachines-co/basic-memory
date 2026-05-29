@@ -129,7 +129,7 @@ Each model tries to refute the *other's* findings, per `prompts/refute.md`
 - **The other model** refutes *your* findings — invoke it again the same way (swap
   `prompts/review.md` for `prompts/refute.md`, append your findings JSON **and `$DIFF_STR`**
   so it judges against the right base and scope, and for Codex use
-  `--output-schema schemas/verdicts.schema.json`).
+  `--output-schema "$SKILL_DIR/schemas/verdicts.schema.json"`).
 
 Match verdicts to findings by `id`.
 
