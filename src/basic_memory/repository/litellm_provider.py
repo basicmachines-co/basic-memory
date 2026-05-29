@@ -46,8 +46,11 @@ def _default_input_types(model_name: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _supports_dimension_parameter(model_name: str) -> bool:
+def _should_forward_dimensions(model_name: str, forward_dimensions: bool | None) -> bool:
     """Return whether configured dimensions should be sent to LiteLLM."""
+    if forward_dimensions is not None:
+        return forward_dimensions
+
     normalized = model_name.strip().lower()
 
     # Trigger: `dimensions` is both the Basic Memory vector schema size and a
@@ -93,6 +96,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         timeout: float = 30.0,
         document_input_type: str | None = None,
         query_input_type: str | None = None,
+        forward_dimensions: bool | None = None,
     ) -> None:
         self.model_name = model_name
         self.dimensions = dimensions
@@ -103,6 +107,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         default_document_input_type, default_query_input_type = _default_input_types(model_name)
         self.document_input_type = document_input_type or default_document_input_type
         self.query_input_type = query_input_type or default_query_input_type
+        self.forward_dimensions = forward_dimensions
 
     def runtime_log_attrs(self) -> dict[str, Any]:
         """Return provider-specific runtime settings suitable for startup logs."""
@@ -114,6 +119,8 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
             attrs["document_input_type"] = self.document_input_type
         if self.query_input_type:
             attrs["query_input_type"] = self.query_input_type
+        if self.forward_dimensions is not None:
+            attrs["forward_dimensions"] = self.forward_dimensions
         return attrs
 
     async def _embed(self, texts: list[str], *, input_type: str | None) -> list[list[float]]:
@@ -137,7 +144,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
                     "drop_params": True,
                     "timeout": self._timeout,
                 }
-                if _supports_dimension_parameter(self.model_name):
+                if _should_forward_dimensions(self.model_name, self.forward_dimensions):
                     params["dimensions"] = self.dimensions
                 if self._api_key:
                     params["api_key"] = self._api_key

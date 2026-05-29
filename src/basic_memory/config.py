@@ -251,6 +251,14 @@ class BasicMemoryConfig(BaseSettings):
             "required for custom LiteLLM models."
         ),
     )
+    semantic_embedding_forward_dimensions: bool | None = Field(
+        default=None,
+        description=(
+            "LiteLLM-only override for sending semantic_embedding_dimensions as a "
+            "provider-side output-size request parameter. When unset, Basic Memory "
+            "auto-detects model strings such as text-embedding-3."
+        ),
+    )
     # Trigger: full local rebuilds spend most of their time waiting behind shared
     # embed flushes, not constructing vectors themselves.
     # Why: smaller FastEmbed batches cut queue wait far more than they increase

@@ -146,6 +146,21 @@ async def test_litellm_provider_forwards_configured_dimensions(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_litellm_provider_forwards_dimensions_when_explicitly_enabled(monkeypatch):
+    """Arbitrary Azure/OpenAI deployments can opt in to provider-side dimensions."""
+    calls = _install_litellm_stub(monkeypatch, dim=768)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="azure/basic-memory-embedding",
+        dimensions=768,
+        forward_dimensions=True,
+    )
+
+    await provider.embed_query("test")
+
+    assert calls[0]["dimensions"] == 768
+
+
+@pytest.mark.asyncio
 async def test_litellm_provider_uses_cohere_document_and_query_input_types(monkeypatch):
     """Cohere v3 embeddings require different input_type values per embedding role."""
     calls = _install_litellm_stub(monkeypatch)
@@ -337,6 +352,24 @@ def test_factory_forwards_litellm_document_and_query_input_types():
     assert provider.dimensions == 1024
     assert provider.document_input_type == "passage"
     assert provider.query_input_type == "query"
+
+
+def test_factory_forwards_litellm_dimension_forwarding_flag():
+    """Factory should pass explicit LiteLLM dimension forwarding config to the provider."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="azure/basic-memory-embedding",
+        semantic_embedding_dimensions=768,
+        semantic_embedding_forward_dimensions=True,
+    )
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider.forward_dimensions is True
 
 
 def test_factory_requires_litellm_dimensions_for_custom_models():

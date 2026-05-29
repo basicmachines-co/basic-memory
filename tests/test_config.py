@@ -1015,6 +1015,16 @@ class TestSemanticSearchConfig:
         config = BasicMemoryConfig(semantic_embedding_dimensions=1536)
         assert config.semantic_embedding_dimensions == 1536
 
+    def test_semantic_embedding_forward_dimensions_defaults_to_none(self):
+        """Dimension forwarding should default to provider auto-detection."""
+        config = BasicMemoryConfig()
+        assert config.semantic_embedding_forward_dimensions is None
+
+    def test_semantic_embedding_forward_dimensions_can_be_set(self):
+        """Explicit LiteLLM dimension forwarding should be stored on the config object."""
+        config = BasicMemoryConfig(semantic_embedding_forward_dimensions=True)
+        assert config.semantic_embedding_forward_dimensions is True
+
     def test_semantic_postgres_prepare_concurrency_defaults_to_4(self):
         """Postgres prepare concurrency should default to a conservative window of 4."""
         config = BasicMemoryConfig()

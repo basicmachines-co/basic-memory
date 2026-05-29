@@ -39,6 +39,7 @@ class LiteLLMLiveCase:
     api_key_env: str | None = None
     document_input_type: str | None = None
     query_input_type: str | None = None
+    forward_dimensions: bool | None = None
 
 
 def _custom_cases() -> list[LiteLLMLiveCase]:
@@ -64,6 +65,7 @@ def _custom_cases() -> list[LiteLLMLiveCase]:
                 api_key_env=case_data.get("api_key_env"),
                 document_input_type=case_data.get("document_input_type"),
                 query_input_type=case_data.get("query_input_type"),
+                forward_dimensions=case_data.get("forward_dimensions"),
             )
         )
     return cases
@@ -147,6 +149,7 @@ async def test_litellm_live_model_embeds_documents_and_queries(
         timeout=60.0,
         document_input_type=case.document_input_type,
         query_input_type=case.query_input_type,
+        forward_dimensions=case.forward_dimensions,
     )
 
     documents = [

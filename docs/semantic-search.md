@@ -102,6 +102,7 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
 | `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. 384 for FastEmbed, 1536 for OpenAI/LiteLLM OpenAI. Required when using a non-default LiteLLM model. |
+| `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | LiteLLM-only override for whether configured dimensions are sent as a provider-side output-size request. |
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
 | `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for search queries. |
@@ -152,8 +153,11 @@ export COHERE_API_KEY=...
 Basic Memory creates vector tables before the first embedding call, so non-default LiteLLM models must set `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS`. The LiteLLM OpenAI default (`openai/text-embedding-3-small`) uses 1536 dimensions automatically.
 
 For fixed-size LiteLLM models, dimensions are used as Basic Memory's local vector schema and
-validation size. Basic Memory only sends dimensions as a provider-side output-size request for
-`text-embedding-3` model strings, where LiteLLM/OpenAI support reduced output dimensions.
+validation size. Basic Memory automatically sends dimensions as a provider-side output-size
+request for `text-embedding-3` model strings, where LiteLLM/OpenAI support reduced output
+dimensions. If an Azure/OpenAI deployment uses an arbitrary LiteLLM model string such as
+`azure/<deployment-name>` and the underlying model supports reduced dimensions, set
+`BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS=true`.
 
 Some retrieval models are asymmetric: indexed passages and search queries must be embedded with different provider parameters. Basic Memory automatically sets LiteLLM `input_type` for known asymmetric model families:
 
