@@ -115,6 +115,10 @@ test-semantic-report:
     BASIC_MEMORY_ENV=test BASIC_MEMORY_BENCHMARK_OUTPUT=.benchmarks/semantic-quality.jsonl uv run pytest -p pytest_mock -v -s --no-cov -m semantic test-int/semantic/
     uv run python test-int/semantic/report.py .benchmarks/semantic-quality.jsonl
 
+# Run opt-in live LiteLLM provider checks against configured external APIs
+test-litellm-live *args:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_LITELLM_INTEGRATION=1 PYTHONPATH=test-int:src uv run python -m semantic.litellm_live_harness {{args}}
+
 # Run semantic benchmarks (Postgres combos only)
 test-semantic-postgres:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m semantic -k postgres test-int/semantic/

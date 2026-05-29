@@ -171,6 +171,77 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE=passage
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE=query
 ```
 
+#### Live LiteLLM Validation
+
+Provider APIs differ in subtle ways: some accept `dimensions`, some require separate
+document/query roles, and some route through deployment aliases that do not reveal the
+underlying model name. Before adding or changing LiteLLM model support, run the opt-in live
+evaluation harness:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export COHERE_API_KEY=...
+just test-litellm-live
+```
+
+The built-in live cases cover:
+
+| Case | Required key | What it validates |
+|---|---|---|
+| `openai/text-embedding-3-small` | `OPENAI_API_KEY` | Standard LiteLLM OpenAI embedding calls and normalized 1536-dimensional output. |
+| `cohere/embed-english-v3.0` | `COHERE_API_KEY` | Cohere v3 asymmetric `search_document` / `search_query` handling and fixed 1024-dimensional output. |
+
+The harness embeds two documents and one query, checks vector dimensions and normalization,
+then verifies the authentication query ranks the authentication document above the distractor.
+It prints a table with per-model scores, norms, latency, role settings, and dimension-forwarding
+mode.
+
+To validate provider aliases or additional LiteLLM backends, save custom JSON cases:
+
+```bash
+export AZURE_API_KEY=...
+export AZURE_API_BASE=https://example.openai.azure.com
+export AZURE_API_VERSION=2024-02-01
+
+cat > /tmp/litellm-azure-cases.json <<'JSON'
+[
+  {
+    "name": "azure-text-embedding-3-small-512",
+    "model": "azure/<deployment-name>",
+    "dimensions": 512,
+    "api_key_env": "AZURE_API_KEY",
+    "forward_dimensions": true
+  }
+]
+JSON
+
+just test-litellm-live --cases-file /tmp/litellm-azure-cases.json
+```
+
+NVIDIA NIM retrieval models can be checked the same way:
+
+```bash
+export NVIDIA_NIM_API_KEY=...
+
+cat > /tmp/litellm-nvidia-cases.json <<'JSON'
+[
+  {
+    "name": "nvidia-embed-qa-4",
+    "model": "nvidia_nim/nvidia/embed-qa-4",
+    "dimensions": 1024,
+    "api_key_env": "NVIDIA_NIM_API_KEY",
+    "document_input_type": "passage",
+    "query_input_type": "query"
+  }
+]
+JSON
+
+just test-litellm-live --cases-file /tmp/litellm-nvidia-cases.json
+```
+
+For repeatable local runs, put the same JSON array in a file and pass
+`just test-litellm-live --cases-file path/to/litellm-cases.json`.
+
 When switching providers, models, dimensions, or LiteLLM document/query input types, rebuild embeddings:
 
 ```bash
