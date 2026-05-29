@@ -163,6 +163,21 @@ async def test_litellm_provider_uses_cohere_document_and_query_input_types(monke
 
 
 @pytest.mark.asyncio
+async def test_litellm_provider_does_not_forward_dimensions_to_cohere_v3(monkeypatch):
+    """Cohere v3 uses configured dimensions only for schema validation."""
+    calls = _install_litellm_stub(monkeypatch, dim=1024)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="cohere/embed-english-v3.0",
+        dimensions=1024,
+    )
+
+    await provider.embed_documents(["indexed passage"])
+
+    assert "dimensions" not in calls[0]
+    assert calls[0]["input_type"] == "search_document"
+
+
+@pytest.mark.asyncio
 async def test_litellm_provider_uses_explicit_document_and_query_input_types(monkeypatch):
     """Explicit input_type overrides should support asymmetric providers beyond Cohere."""
     calls = _install_litellm_stub(monkeypatch)

@@ -151,6 +151,10 @@ export COHERE_API_KEY=...
 
 Basic Memory creates vector tables before the first embedding call, so non-default LiteLLM models must set `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS`. The LiteLLM OpenAI default (`openai/text-embedding-3-small`) uses 1536 dimensions automatically.
 
+For fixed-size LiteLLM models, dimensions are used as Basic Memory's local vector schema and
+validation size. Basic Memory only sends dimensions as a provider-side output-size request for
+`text-embedding-3` model strings, where LiteLLM/OpenAI support reduced output dimensions.
+
 Some retrieval models are asymmetric: indexed passages and search queries must be embedded with different provider parameters. Basic Memory automatically sets LiteLLM `input_type` for known asymmetric model families:
 
 - Cohere v3: documents use `search_document`, queries use `search_query`

@@ -46,6 +46,21 @@ def _default_input_types(model_name: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _supports_dimension_parameter(model_name: str) -> bool:
+    """Return whether configured dimensions should be sent to LiteLLM."""
+    normalized = model_name.strip().lower()
+
+    # Trigger: `dimensions` is both the Basic Memory vector schema size and a
+    # provider-side output-size request parameter in LiteLLM.
+    # Why: fixed-size models such as Cohere v3 still need the schema value for
+    # validation, but LiteLLM maps the request parameter to provider fields they
+    # reject. Only send it for model families that clearly support output-size
+    # control.
+    # Outcome: OpenAI/Azure text-embedding-3 reductions work, while fixed-size
+    # providers keep dimensions local to Basic Memory.
+    return "text-embedding-3" in normalized
+
+
 def _import_litellm() -> Any:
     """Import LiteLLM without letting its import-time dotenv hook read cwd secrets."""
     # Constraint: LiteLLM 1.85.0 loads .env files at import time when
@@ -119,10 +134,11 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
                 params: dict[str, Any] = {
                     "model": self.model_name,
                     "input": batch,
-                    "dimensions": self.dimensions,
                     "drop_params": True,
                     "timeout": self._timeout,
                 }
+                if _supports_dimension_parameter(self.model_name):
+                    params["dimensions"] = self.dimensions
                 if self._api_key:
                     params["api_key"] = self._api_key
                 if input_type:
