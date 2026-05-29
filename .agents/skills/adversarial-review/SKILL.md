@@ -101,8 +101,11 @@ claude -p --permission-mode plan --output-format json \
 Review the diff: $DIFF
 Return ONLY a JSON object matching this schema:
 $(cat "$SKILL_DIR/schemas/findings.schema.json")" </dev/null > "$RUN/other_raw.json"
-# claude --output-format json emits a JSON ARRAY of events. Extract the element with
-# type=='result', read its .result string, strip the ```json fence, and parse that.
+# claude --output-format json output shape varies by CLI version: it may be a JSON ARRAY
+# of event objects, OR a single result object. Normalize before reading: if it's an array,
+# take the element with type=='result'; otherwise use the object as-is. Then read its
+# .result string, strip the ```json fence if present, and parse that.
+# (Verified empirically: the CLI in this environment emits the array form.)
 ```
 
 > Runtime note for Codex orchestrating: `claude -p` needs network access, which Codex's
