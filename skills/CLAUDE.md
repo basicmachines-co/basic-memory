@@ -23,6 +23,9 @@ memory-lifecycle/SKILL.md       # Entity status transitions and folder-based arc
 memory-ingest/SKILL.md          # Process external input into structured entities
 memory-research/SKILL.md        # Web research synthesized into Basic Memory entities
 memory-literary-analysis/SKILL.md # Literary analysis knowledge graph pipeline
+memory-curate/SKILL.md          # Knowledge-graph curation: orphans, relations, tags, hub notes
+memory-continue/SKILL.md        # Resume prior work by rebuilding context from the graph
+memory-capture/SKILL.md         # Capture a thread's current state into one coherent note
 ```
 
 There is no code to compile — this is a pure markdown project. Run `just check`

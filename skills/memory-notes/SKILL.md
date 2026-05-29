@@ -276,25 +276,41 @@ Basic Memory auto-generates frontmatter (including the permalink and memory URL)
 
 ### Editing an Existing Note
 
-Use `edit_note` to append, prepend, or find-and-replace within a note:
+Use `edit_note` to update a note in place — four operations:
 
 ```python
-# Append new observations
+# append / prepend — add to the end or start (use for time-ordered logs)
 edit_note(
   identifier="API Design Decisions",
   operation="append",
   section="Observations",
   content="- [decision] Use OpenAPI 3.1 for spec generation #api"
 )
-
-# Add a new relation
 edit_note(
   identifier="API Design Decisions",
-  operation="append",
-  section="Relations",
-  content="- depends_on [[Rate Limiter]]"
+  operation="prepend",
+  content="> Updated 2026-05-28: auth approach finalized.\n"
+)
+
+# replace_section — rewrite a named section (use for living content that stays current)
+edit_note(
+  identifier="API Design Decisions",
+  operation="replace_section",
+  section="Summary",
+  content="Concise, current summary of the decision and its rationale."
+)
+
+# find_replace — swap specific text
+edit_note(
+  identifier="API Design Decisions",
+  operation="find_replace",
+  find_text="OpenAPI 3.0",
+  content="OpenAPI 3.1"
 )
 ```
+
+When an edit is destructive (`replace_section`, `find_replace`), it's good practice to
+read the note first and confirm the change before applying it.
 
 ### Moving a Note
 
