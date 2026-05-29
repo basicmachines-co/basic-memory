@@ -132,6 +132,20 @@ async def test_litellm_provider_drop_params_always_set(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_litellm_provider_forwards_configured_dimensions(monkeypatch):
+    """Configured output dimensions should be sent to LiteLLM."""
+    calls = _install_litellm_stub(monkeypatch, dim=4)
+    provider = LiteLLMEmbeddingProvider(
+        model_name="openai/text-embedding-3-small",
+        dimensions=4,
+    )
+
+    await provider.embed_query("test")
+
+    assert calls[0]["dimensions"] == 4
+
+
+@pytest.mark.asyncio
 async def test_litellm_provider_uses_cohere_document_and_query_input_types(monkeypatch):
     """Cohere v3 embeddings require different input_type values per embedding role."""
     calls = _install_litellm_stub(monkeypatch)

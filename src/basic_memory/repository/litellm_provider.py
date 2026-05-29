@@ -119,6 +119,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
                 params: dict[str, Any] = {
                     "model": self.model_name,
                     "input": batch,
+                    "dimensions": self.dimensions,
                     "drop_params": True,
                     "timeout": self._timeout,
                 }
