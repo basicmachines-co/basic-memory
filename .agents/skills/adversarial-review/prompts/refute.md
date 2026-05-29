@@ -1,7 +1,8 @@
 # Refute the other reviewer
 
 A different reviewer (a different model family) produced the findings below against the
-same diff (`git diff main...HEAD`). Your job is to try to **refute** each one.
+same diff under review (the exact `git diff` command is provided with the findings). Your
+job is to try to **refute** each one.
 
 Default to skepticism: assume a finding is wrong until the code proves it right. A finding
 that survives a genuine attempt to disprove it is worth far more than one nobody checked.

@@ -106,7 +106,8 @@ Each model tries to refute the *other's* findings, per `prompts/refute.md`
 
 - **You** refute the other model's findings natively.
 - **The other model** refutes *your* findings — invoke it again the same way (swap
-  `prompts/review.md` for `prompts/refute.md`, append your findings JSON, and for Codex use
+  `prompts/review.md` for `prompts/refute.md`, append your findings JSON **and the
+  `git diff $BASE...HEAD` command** so it judges against the right base, and for Codex use
   `--output-schema schemas/verdicts.schema.json`).
 
 Match verdicts to findings by `id`.
