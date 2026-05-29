@@ -33,8 +33,20 @@ below relative to **this skill's own directory** (where this SKILL.md lives).
 
 ## Inputs
 
-- Optional arg: a git ref to diff against (default `main`), or a path to scope the review.
-  `BASE=${ARG:-main}`. Work the diff `git diff $BASE...HEAD`.
+Two independent, optional inputs:
+
+- `BASE` — the ref to diff against. Default `main`.
+- `SCOPE` — a pathspec to narrow the review (e.g. `src/basic_memory`). Default: none (whole diff).
+
+These are separate: a ref and a pathspec are not interchangeable. Build the **canonical diff
+command** once in preflight and reuse it everywhere below as `$DIFF` — never re-spell the diff
+inline (the scattered, inconsistent spelling is what broke earlier):
+
+```bash
+BASE="${BASE:-main}"
+DIFF="git diff $BASE...HEAD"
+[ -n "$SCOPE" ] && DIFF="$DIFF -- $SCOPE"
+```
 
 ## Preflight
 
@@ -45,7 +57,8 @@ below relative to **this skill's own directory** (where this SKILL.md lives).
 1. Confirm the *other* model's CLI is on PATH (`codex` if you're Claude, `claude` if you're
    Codex). If it's missing, tell the user the panel falls back to single-model (which loses
    the cross-vendor benefit) and ask whether to proceed or stop.
-2. `git diff $BASE...HEAD --stat`. If empty, report "nothing to review against $BASE" and stop.
+2. Run `$DIFF`. If it prints nothing, report "nothing to review against $BASE" (mention
+   `$SCOPE` if set) and stop.
 3. `RUN=$(mktemp -d)` — scratch dir for the other model's output. Transient, never committed.
    No persisted artifacts, no state file.
 
@@ -62,7 +75,7 @@ model findings):
 ## Phase 1 — Independent review (you + the other model, concurrently)
 
 Both reviewers get the same brief: `prompts/review.md` + the repo's `CLAUDE.md` house rules,
-reviewing `git diff $BASE...HEAD`. Both emit findings matching `schemas/findings.schema.json`.
+reviewing `$DIFF`. Both emit findings matching `schemas/findings.schema.json`.
 
 **Your native pass:** review as yourself, following `prompts/review.md`. Hold your findings
 as that JSON shape.
@@ -79,13 +92,13 @@ codex exec -s read-only \
   -o "$RUN/other_findings.json" \
   "$(cat "$SKILL_DIR/prompts/review.md")
 
-Review the diff: git diff $BASE...HEAD" </dev/null
+Review the diff: $DIFF" </dev/null
 
 # You are Codex → run Claude (read-only via plan mode; parse the JSON block it returns):
 claude -p --permission-mode plan --output-format json \
   "$(cat "$SKILL_DIR/prompts/review.md")
 
-Review the diff: git diff $BASE...HEAD
+Review the diff: $DIFF
 Return ONLY a JSON object matching this schema:
 $(cat "$SKILL_DIR/schemas/findings.schema.json")" </dev/null > "$RUN/other_raw.json"
 # claude --output-format json emits a JSON ARRAY of events. Extract the element with
@@ -106,8 +119,8 @@ Each model tries to refute the *other's* findings, per `prompts/refute.md`
 
 - **You** refute the other model's findings natively.
 - **The other model** refutes *your* findings — invoke it again the same way (swap
-  `prompts/review.md` for `prompts/refute.md`, append your findings JSON **and the
-  `git diff $BASE...HEAD` command** so it judges against the right base, and for Codex use
+  `prompts/review.md` for `prompts/refute.md`, append your findings JSON **and the `$DIFF`
+  command** so it judges against the right base and scope, and for Codex use
   `--output-schema schemas/verdicts.schema.json`).
 
 Match verdicts to findings by `id`.
