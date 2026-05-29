@@ -39,14 +39,19 @@ Two independent, optional inputs:
 - `SCOPE` — a pathspec to narrow the review (e.g. `src/basic_memory`). Default: none (whole diff).
 
 These are separate: a ref and a pathspec are not interchangeable. Build the **canonical diff
-command** once in preflight and reuse it everywhere below as `$DIFF` — never re-spell the diff
-inline (the scattered, inconsistent spelling is what broke earlier):
+command** once in preflight and reuse it everywhere below — never re-spell the diff inline
+(the scattered, inconsistent spelling is what broke earlier). Build it as an **argv array**,
+not a string, so a `$SCOPE` containing spaces or glob characters survives intact:
 
 ```bash
 BASE="${BASE:-main}"
-DIFF="git diff $BASE...HEAD"
-[ -n "$SCOPE" ] && DIFF="$DIFF -- $SCOPE"
+DIFF=(git diff "$BASE...HEAD")          # argv array — never a scalar string
+[ -n "$SCOPE" ] && DIFF+=(-- "$SCOPE")  # pathspec stays one argument even with spaces
+DIFF_STR=$(printf '%q ' "${DIFF[@]}")   # shell-quoted rendering, for embedding in a prompt
 ```
+
+To **run** it, use `"${DIFF[@]}"` (quoted, no word-splitting). To **embed** it as text inside
+a subprocess prompt, use `$DIFF_STR`.
 
 ## Preflight
 
@@ -57,8 +62,8 @@ DIFF="git diff $BASE...HEAD"
 1. Confirm the *other* model's CLI is on PATH (`codex` if you're Claude, `claude` if you're
    Codex). If it's missing, tell the user the panel falls back to single-model (which loses
    the cross-vendor benefit) and ask whether to proceed or stop.
-2. Run `$DIFF`. If it prints nothing, report "nothing to review against $BASE" (mention
-   `$SCOPE` if set) and stop.
+2. Run `"${DIFF[@]}"`. If it prints nothing, report "nothing to review against $BASE"
+   (mention `$SCOPE` if set) and stop.
 3. `RUN=$(mktemp -d)` — scratch dir for the other model's output. Transient, never committed.
    No persisted artifacts, no state file.
 
@@ -75,7 +80,7 @@ model findings):
 ## Phase 1 — Independent review (you + the other model, concurrently)
 
 Both reviewers get the same brief: `prompts/review.md` + the repo's `CLAUDE.md` house rules,
-reviewing `$DIFF`. Both emit findings matching `schemas/findings.schema.json`.
+reviewing the diff from `"${DIFF[@]}"`. Both emit findings matching `schemas/findings.schema.json`.
 
 **Your native pass:** review as yourself, following `prompts/review.md`. Hold your findings
 as that JSON shape.
@@ -92,13 +97,13 @@ codex exec -s read-only \
   -o "$RUN/other_findings.json" \
   "$(cat "$SKILL_DIR/prompts/review.md")
 
-Review the diff: $DIFF" </dev/null
+Review the diff: $DIFF_STR" </dev/null
 
 # You are Codex → run Claude (read-only via plan mode; parse the JSON block it returns):
 claude -p --permission-mode plan --output-format json \
   "$(cat "$SKILL_DIR/prompts/review.md")
 
-Review the diff: $DIFF
+Review the diff: $DIFF_STR
 Return ONLY a JSON object matching this schema:
 $(cat "$SKILL_DIR/schemas/findings.schema.json")" </dev/null > "$RUN/other_raw.json"
 # claude --output-format json output shape varies by CLI version: it may be a JSON ARRAY
@@ -122,8 +127,8 @@ Each model tries to refute the *other's* findings, per `prompts/refute.md`
 
 - **You** refute the other model's findings natively.
 - **The other model** refutes *your* findings — invoke it again the same way (swap
-  `prompts/review.md` for `prompts/refute.md`, append your findings JSON **and the `$DIFF`
-  command** so it judges against the right base and scope, and for Codex use
+  `prompts/review.md` for `prompts/refute.md`, append your findings JSON **and `$DIFF_STR`**
+  so it judges against the right base and scope, and for Codex use
   `--output-schema schemas/verdicts.schema.json`).
 
 Match verdicts to findings by `id`.
