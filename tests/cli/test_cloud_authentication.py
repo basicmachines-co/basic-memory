@@ -184,6 +184,43 @@ class TestLoginCommand:
         assert "Cloud authentication successful" in result.stdout
         assert "Cloud host ready: https://cloud.example.com" in result.stdout
 
+    def test_login_health_check_error_shows_clean_message(self, monkeypatch):
+        """Regression for #863: a non-subscription error from the post-login
+        /proxy/health check must produce a clean message, not a raw traceback.
+
+        OAuth has already succeeded at this point; the tenant instance may still
+        be provisioning (5xx) or return some other non-subscription_required error.
+        """
+        runner = CliRunner()
+
+        monkeypatch.setattr(
+            "basic_memory.cli.commands.cloud.core_commands.CLIAuth",
+            lambda **_kwargs: _StubAuth(login_ok=True),
+        )
+        monkeypatch.setattr(
+            "basic_memory.cli.commands.cloud.core_commands.get_cloud_config",
+            lambda: ("client_id", "domain", "https://cloud.example.com"),
+        )
+
+        async def fake_make_api_request(*_args, **_kwargs):
+            # e.g. tenant instance not ready yet -> proxy returns 503
+            raise CloudAPIError("API request failed: 503 Service Unavailable", status_code=503)
+
+        monkeypatch.setattr(
+            "basic_memory.cli.commands.cloud.core_commands.make_api_request",
+            fake_make_api_request,
+        )
+
+        result = runner.invoke(app, ["cloud", "login"])
+        # Clean exit, no traceback leaking the exception class.
+        assert result.exit_code == 1
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        # Collapse Rich's line-wrapping before matching multi-word phrases.
+        output = " ".join(result.stdout.split())
+        assert "couldn't verify cloud access" in output
+        assert "bm cloud status" in output
+        assert "Traceback" not in output
+
     def test_login_authentication_failure(self, monkeypatch):
         runner = CliRunner()
 

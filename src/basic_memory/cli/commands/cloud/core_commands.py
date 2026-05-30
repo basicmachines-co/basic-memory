@@ -71,6 +71,29 @@ def login():
             )
             raise typer.Exit(1)
 
+        # Trigger: the subscription-check call (/proxy/health) returned any error
+        #   that is NOT a recognized subscription_required 403 — e.g. a 5xx while the
+        #   tenant instance is still provisioning, a 403/401 whose body doesn't match
+        #   the subscription_required shape, or a connection failure.
+        # Why: OAuth already succeeded and tokens are saved at this point, so a raw
+        #   traceback (the old behavior) misleads users into thinking login itself
+        #   failed. See #863.
+        # Outcome: surface a clean, actionable message and exit non-zero instead of
+        #   crashing. make_api_request wraps every httpx error (status + transport)
+        #   in CloudAPIError, so this single handler covers them all.
+        except CloudAPIError as e:
+            console.print("\n[yellow]Authenticated, but couldn't verify cloud access.[/yellow]\n")
+            console.print(f"[dim]{e}[/dim]\n")
+            console.print(
+                "Your workspace may still be provisioning. Wait a moment, then check with "
+                "[bold]bm cloud status[/bold] or retry [bold]bm cloud login[/bold].\n"
+            )
+            console.print(
+                "[dim]If this persists, contact support at "
+                "[blue underline]https://basicmemory.com[/blue underline].[/dim]"
+            )
+            raise typer.Exit(1)
+
     run_with_cleanup(_login())
 
 
