@@ -449,6 +449,9 @@ def _extract_mcp_text(result: Any) -> str:
     Returns a JSON string for the agent. If the result is itself JSON, returns it
     as-is. Otherwise wraps the text in `{"text": "..."}` for downstream parsing.
     """
+    # The `mcp` SDK is an unpinned dependency (see plugin.yaml), and its result
+    # shapes (CallToolResult, content blocks) have shifted across versions — read
+    # these fields defensively with getattr rather than direct attribute access.
     is_error = bool(getattr(result, "isError", False))
     parts: list[str] = []
     for c in getattr(result, "content", None) or []:
@@ -594,6 +597,9 @@ class _BmMcpActor:
                     self._stop_future = asyncio.get_running_loop().create_future()
                     try:
                         listing = await session.list_tools()
+                        # Same unpinned-`mcp`-SDK reason as parse_result above:
+                        # ListToolsResult / Tool field shapes vary across SDK versions,
+                        # so read them defensively rather than by direct attribute access.
                         self._tools_cache = [
                             {
                                 "name": getattr(t, "name", ""),
