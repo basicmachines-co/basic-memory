@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Set up the Basic Memory plugin for this project — a short guided interview that configures the project mapping, seeds note schemas, optionally learns the project's conventions, and enables capture reflexes. Use when the user runs /basic-memory:setup, says "set up basic memory", or asks to configure/bootstrap the plugin.
+description: Set up the Basic Memory plugin for this project — a short guided interview that configures the project mapping, seeds note schemas, learns or suggests placement conventions, and enables capture reflexes. Use when the user runs /basic-memory:setup, says "set up basic memory", or asks to configure/bootstrap the plugin.
 argument-hint: (no arguments — runs an interactive interview)
 ---
 
@@ -32,8 +32,13 @@ it succeeds.
 
 Ask only what you can't infer. Cover:
 
-1. **Focus.** "What's this project mostly about — code, writing, research, planning,
-   or a mix?" (Shapes folder suggestions later; one quick question.)
+1. **Focus / how you'll use it.** "What will this project mostly be — code/dev,
+   research, writing, knowledge capture, planning, or a mix?" This answer is
+   **load-bearing**, not small talk: it drives the folder structure you suggest
+   (step 4) and is stored so the SessionStart brief can surface it, keeping capture
+   matched to the use-case. Don't let it evaporate — if you infer it from context
+   instead of asking, still say the use-case you assumed and the structure it
+   implies, and let the user correct it in one word.
 
 2. **Project mapping.** "Do you already have a Basic Memory project for this, or
    should I create one?"
@@ -60,14 +65,23 @@ Ask only what you can't infer. Cover:
    Keep `primaryProject` a project the user owns for their *own* capture; team
    projects are for reading and deliberate sharing only.
 
-4. **Learn conventions** (optional). "Want me to look at your existing notes and
-   note your conventions so I place new notes consistently?" If yes, inspect the
-   project: `list_directory` for the folder layout, sample a few notes per folder
-   (and, where a folder holds recurring typed notes, you may run `schema_infer` to
-   see their shape). Summarize what you find — folder-by-topic conventions, naming
-   style, the observation categories they favor — into 3-6 short lines and store
-   that string as `placementConventions`. Infer from their *real* notes; don't
-   impose a structure.
+4. **Placement — learn or suggest** (depends on the project's state). The goal is a
+   short `placementConventions` string (3-6 lines) telling you where new notes go.
+   How you get it depends on whether the project already has notes:
+   - **Existing project with notes** → *learn*. Inspect it: `list_directory` for the
+     folder layout, sample a few notes per folder (and, where a folder holds
+     recurring typed notes, you may run `schema_infer` to see their shape).
+     Summarize the *real* conventions — folder-by-topic layout, naming style, the
+     observation categories they favor. Infer from their actual notes; don't impose.
+   - **New or empty project** → *suggest* (there's nothing to learn yet). Propose a
+     **light** structure that fits the focus from step 1 — 3-5 optional top-level
+     folders, no deep taxonomy — and be explicit that it's a starting point, not a
+     scaffold: notes work fine without it and structure can stay emergent. Don't
+     create empty folders; folders appear as notes land in them. Let the user edit
+     or decline in one word.
+   Either way, keep it short and store the result as `placementConventions`. The
+   SessionStart brief surfaces it (alongside `captureFolder`), so this is what makes
+   your captures land where the user expects — without it, placement is guesswork.
 
 5. **Schemas.** "I'll add schemas for session checkpoints, decisions, and tasks so
    I can find them precisely later — okay?" (See "Seed the schemas" below.)
@@ -99,12 +113,21 @@ For each one:
   (`search_notes` with `metadata_filters={"type": "schema"}`, or try
   `read_note("schemas/<name>")`). **If it exists, skip it** — never overwrite a
   schema the user may have customized.
-- Otherwise write it with `write_note`: `directory="schemas"`,
-  `title` = the schema's title (Session / Decision / Task), `content` = the file's
-  full contents (including its `---` frontmatter — Basic Memory merges that into the
-  note's frontmatter, so the `type: schema` + `entity` + `schema` definition land
-  intact and become resolvable by `schema_validate`), routed to `primaryProject`
-  (pass it as `project`, or as `project_id` if it's an `external_id` UUID).
+- Otherwise write it with `write_note`, routed to `primaryProject` (pass it as
+  `project`, or as `project_id` if it's an `external_id` UUID):
+  - `directory="schemas"`, `note_type="schema"`, `title` = the schema's title
+    (Session / Decision / Task).
+  - `content` = the markdown **body only** — everything *after* the `---`
+    frontmatter block (the `# Session` heading and the prose).
+  - `metadata` = the schema's structured frontmatter as a **nested dict**: `entity`,
+    `version`, the full `schema` map, and `settings` (keep its nested `frontmatter`,
+    and pass enum values as JSON arrays, e.g. `["open","resumed","closed"]`).
+  - **Do not** put the schema's `---` frontmatter inside `content`. On the cloud
+    write path that nested YAML is silently coerced to the string `'[object Object]'`
+    (basic-memory-cloud#1000), corrupting `schema`/`settings`. The `metadata` param
+    round-trips correctly on both local and cloud. After seeding, verify one note
+    with `read_note(..., output_format="json", include_frontmatter=true)` —
+    `schema`/`settings` must come back as nested objects, not strings.
 
 ### 2. Install the shared skills (if the user opted in)
 Run, from the project root:
@@ -130,7 +153,7 @@ Build the `basicMemory` block from the interview:
     "rememberFolder": "bm-remember",
     "recallTimeframe": "3d",
     "preCompactCapture": "extractive",
-    "placementConventions": "<inferred summary, or null>",
+    "placementConventions": "<learned or suggested summary, or null>",
     "teamProjects": {}
   },
   "outputStyle": "basic-memory"
@@ -145,10 +168,36 @@ valid JSON.
 Writing the `basicMemory` block is also what stops the SessionStart hook's first-run
 nudge — the config's presence is the signal that setup has run.
 
+### 4. Smoke-test the wiring
+Before you close, prove recall actually resolves — this catches a misnamed project,
+missing cloud credentials, or a ref that doesn't route, while the user is still here
+to fix it. Run the same structured query the SessionStart hook runs, via the CLI it
+uses (`basic-memory` / `bm` / `uvx basic-memory`):
+
+- **Primary:** `… tool search-notes --type schema --page-size 5` against
+  `primaryProject` — use `--project-id <uuid>` for a UUID, `--project <ref>`
+  otherwise. It should return the three schemas you just seeded.
+- **One shared project** (only if `secondaryProjects` is non-empty): a
+  `--type decision --status open` query against the first ref. It just needs to
+  return *cleanly* — `0 results` is fine; an **error** means the ref doesn't route.
+
+If a query errors, or the primary returns nothing, surface it and fix the project
+ref before closing — don't let the next session's brief come up empty.
+
 ## Close
 
 Confirm what you did in a few lines: the project mapping, which schemas were seeded
-vs. already present, whether conventions were learned, and whether the output style
-is on. End with: *"Done — I'll use this from the next message. Run
-`/basic-memory:status` anytime to see what I'm tracking."* Note that the output
-style (if enabled) takes effect on the next session, since it's fixed at startup.
+vs. already present, whether placement was learned or suggested, the smoke-test
+result, and whether the output style is on.
+
+Then handle activation based on the output style:
+- **Output style enabled** → it's fixed at session start, so the full capture
+  reflexes only take effect next session. Prompt the user to **restart the session**
+  (start a new Claude Code session) to activate them. Be precise so it doesn't read
+  as "nothing works yet": recall is already live this session (the SessionStart
+  hook's prompt ran), and the PreCompact checkpoint works now too — only the
+  proactive-capture reflexes wait for the restart.
+- **Output style off** → no restart needed; the hooks already run.
+
+End with: *"Done — I'll use this from the next message. Run `/basic-memory:status`
+anytime to see what I'm tracking."*

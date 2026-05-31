@@ -109,6 +109,11 @@ default_prompt = (
     "Cite permalinks when referencing prior work."
 )
 recall_prompt = cfg.get("recallPrompt") or default_prompt
+# Placement guidance — surfaced in the brief below so the output style's "follow the
+# project's stored placement conventions" reflex has something concrete to follow.
+# Without this, setup writes them but they never reach Claude (dead config).
+placement_conventions = (cfg.get("placementConventions") or "").strip()
+capture_folder = (cfg.get("captureFolder") or "sessions").strip()
 
 # --- Resolve the shared/team read set ---
 # secondaryProjects (read-only recall sources) + teamProjects keys (share targets,
@@ -245,6 +250,19 @@ if shared_sections:
     ]
 if shared_capped:
     lines += ["", f"_(reading the first {MAX_SHARED} shared projects; more are configured.)_"]
+
+# --- Where to write (placement guidance) ---
+# Trigger: a primaryProject is set (so capture is actually active — pre-compact and
+# proactive writes land somewhere intentional). Why: the output style tells Claude to
+# follow the project's placement conventions, but nothing else surfaces them.
+# Outcome: Claude sees the capture folder + any stored conventions, so writes land
+# where the user expects instead of being guesswork. Bounded — conventions are a
+# short string by design.
+if primary_project:
+    placement = ["", "## Where to write", f"- Auto-capture and checkpoints go to `{capture_folder}/`."]
+    if placement_conventions:
+        placement.append(f"- Placement conventions: {placement_conventions}")
+    lines += placement
 
 # --- First-run / config nudges ---
 if not configured:
