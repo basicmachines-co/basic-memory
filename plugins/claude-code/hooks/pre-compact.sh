@@ -19,18 +19,33 @@ set -u
 
 input="$(cat 2>/dev/null || true)"
 
-BM="$(command -v basic-memory || command -v bm || true)"
-[ -z "$BM" ] && exit 0
+# Resolve how to invoke the Basic Memory CLI — prefer a binary on PATH, fall back to
+# uvx / uv so checkpointing still works when BM was connected only as an ephemeral
+# `uvx basic-memory mcp` server (no persistent CLI). Silent no-op if none available.
+if command -v basic-memory >/dev/null 2>&1; then
+    BM="basic-memory"
+elif command -v bm >/dev/null 2>&1; then
+    BM="bm"
+elif command -v uvx >/dev/null 2>&1; then
+    BM="uvx basic-memory"
+elif command -v uv >/dev/null 2>&1; then
+    BM="uv tool run basic-memory"
+else
+    exit 0
+fi
 
 BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from datetime import datetime
 
-bm = os.environ.get("BM_BIN", "basic-memory")
+# May be a single binary ("basic-memory") or a multi-token launcher
+# ("uvx basic-memory"); split so it prepends cleanly onto the write command.
+bm_cmd = shlex.split(os.environ.get("BM_BIN") or "basic-memory")
 
 # A project ref can be a workspace-qualified name (route via --project) or an
 # external_id UUID (route via --project-id) — names collide across workspaces, so
@@ -200,7 +215,7 @@ project_flag = "--project-id" if UUID_RE.match(primary_project) else "--project"
 try:
     subprocess.run(
         [
-            bm, "tool", "write-note",
+            *bm_cmd, "tool", "write-note",
             "--title", title,
             "--folder", capture_folder,
             project_flag, primary_project,

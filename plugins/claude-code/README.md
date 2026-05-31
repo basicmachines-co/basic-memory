@@ -46,7 +46,10 @@ Plugin skills are namespaced under the plugin name:
 ## Requirements
 
 - [Basic Memory](https://github.com/basicmachines-co/basic-memory) `>= 0.19.0`
-  installed and configured as an MCP server (`uv tool install basic-memory`).
+  connected as an MCP server. `uv tool install basic-memory` is recommended (it puts
+  a `basic-memory` binary on PATH, which the hooks call directly). A `uvx
+  basic-memory mcp`-only setup also works — the hooks fall back to `uvx`/`uv` when no
+  binary is on PATH.
 - Claude Code.
 
 ## Installation

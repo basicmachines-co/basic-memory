@@ -22,13 +22,24 @@ set -u
 # stdin can only be consumed once; capture it before anything else touches it.
 input="$(cat 2>/dev/null || true)"
 
-# --- Locate the Basic Memory CLI ---
-# Trigger: bm not installed / not on PATH.
-# Why: the plugin is useful on its own merits to BM users; for everyone else it
-#      must be invisible. No binary → no brief, no error.
-# Outcome: silent no-op.
-BM="$(command -v basic-memory || command -v bm || true)"
-[ -z "$BM" ] && exit 0
+# --- Resolve how to invoke the Basic Memory CLI ---
+# Prefer a binary on PATH (fast — no per-call env resolution). Fall back to uvx / uv
+# so the hook still works when Basic Memory was connected only as an ephemeral
+# `uvx basic-memory mcp` server (the MCP setup our README recommends) with no
+# persistent CLI installed — the uv cache is already warm from running the server.
+# Trigger: none of basic-memory / bm / uvx / uv on PATH → BM isn't usable here.
+# Outcome: silent no-op (the plugin must be invisible to non-BM users).
+if command -v basic-memory >/dev/null 2>&1; then
+    BM="basic-memory"
+elif command -v bm >/dev/null 2>&1; then
+    BM="bm"
+elif command -v uvx >/dev/null 2>&1; then
+    BM="uvx basic-memory"
+elif command -v uv >/dev/null 2>&1; then
+    BM="uv tool run basic-memory"
+else
+    exit 0
+fi
 
 # Everything else runs in one Python pass: parse config, run the queries, format
 # the brief. Python is a guaranteed dependency (basic-memory requires it) and
@@ -38,11 +49,14 @@ BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-bm = os.environ.get("BM_BIN", "basic-memory")
+# May be a single binary ("basic-memory") or a multi-token launcher
+# ("uvx basic-memory"); split so it prepends cleanly onto each command list.
+bm_cmd = shlex.split(os.environ.get("BM_BIN") or "basic-memory")
 
 # Cloud project refs come in two unambiguous forms (names collide across
 # workspaces, so a bare name won't route): a workspace-qualified name like
@@ -119,7 +133,7 @@ shared_refs = shared_refs[:MAX_SHARED]
 # project_ref=None routes to the user's default project (zero-config usefulness).
 # A UUID ref routes via --project-id; a qualified name via --project.
 def search(filters, project_ref=None, timeout=10):
-    cmd = [bm, "tool", "search-notes", *filters, "--page-size", "5"]
+    cmd = [*bm_cmd, "tool", "search-notes", *filters, "--page-size", "5"]
     if project_ref:
         flag = "--project-id" if UUID_RE.match(project_ref) else "--project"
         cmd += [flag, project_ref]
