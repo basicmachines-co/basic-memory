@@ -15,10 +15,18 @@ the interview is done and you've confirmed the plan.
 
 ## Prerequisite check
 
-First confirm Basic Memory is reachable (`list_memory_projects`). If it isn't
-installed/configured as an MCP server, say so and stop — point the user at
-`uv tool install basic-memory` and connecting it to Claude Code. Everything below
-needs it.
+First confirm the **Basic Memory MCP server is connected** — call
+`list_memory_projects`. If that tool isn't available or errors, Basic Memory isn't
+wired into Claude Code yet. **Stop and walk the user through it first** (everything
+below depends on it):
+
+1. Install it: `uv tool install basic-memory` (or `pip install basic-memory`),
+   version `>= 0.19.0`.
+2. Connect it: `claude mcp add basic-memory -- uvx basic-memory mcp`, then restart
+   the session so the MCP server loads.
+
+Re-check `list_memory_projects` before continuing — don't start the interview until
+it succeeds.
 
 ## Interview
 

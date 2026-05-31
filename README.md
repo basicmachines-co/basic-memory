@@ -199,7 +199,11 @@ just package-check-openclaw
 
 The Claude Code plugin is the bridge between Claude's working memory and Basic
 Memory — session-start briefings, pre-compaction checkpoints, an opt-in capture
-output style, and `/basic-memory:setup` · `:remember` · `:share` · `:status`:
+output style, and `/basic-memory:setup` · `:remember` · `:share` · `:status`.
+
+**Connect the Basic Memory MCP server first** — see [Connect your AI
+client](#connect-your-ai-client). The plugin's hooks and skills call it, so it's a
+hard prerequisite. Then add the marketplace and install:
 
 ```bash
 claude plugin marketplace add basicmachines-co/basic-memory \
@@ -276,6 +280,10 @@ Restart Claude Desktop. Notes live in `~/basic-memory` by default.
 ```bash
 claude mcp add basic-memory -- uvx basic-memory mcp
 ```
+
+For the full memory bridge — session briefings, pre-compaction checkpoints, and
+the `/basic-memory:*` commands — also install the [Claude Code
+plugin](#claude-code-plugin) on top of this.
 
 ### Codex CLI
 
