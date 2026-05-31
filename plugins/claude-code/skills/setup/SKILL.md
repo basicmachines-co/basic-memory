@@ -52,14 +52,7 @@ Ask only what you can't infer. Cover:
    Keep `primaryProject` a project the user owns for their *own* capture; team
    projects are for reading and deliberate sharing only.
 
-4. **Chattiness.** "How active should I be?"
-   - **light** (default) — session brief on start, checkpoint before compaction,
-     `/basic-memory:remember` on demand.
-   - **standard** — also capture material decisions inline (enable the output style).
-   - **heavy** — also write a session checkpoint even without compaction.
-   Map the answer to `captureChattyness`.
-
-5. **Learn conventions** (optional). "Want me to look at your existing notes and
+4. **Learn conventions** (optional). "Want me to look at your existing notes and
    note your conventions so I place new notes consistently?" If yes, inspect the
    project: `list_directory` for the folder layout, sample a few notes per folder
    (and, where a folder holds recurring typed notes, you may run `schema_infer` to
@@ -68,14 +61,18 @@ Ask only what you can't infer. Cover:
    that string as `placementConventions`. Infer from their *real* notes; don't
    impose a structure.
 
-6. **Schemas.** "I'll add schemas for session checkpoints, decisions, and tasks so
+5. **Schemas.** "I'll add schemas for session checkpoints, decisions, and tasks so
    I can find them precisely later — okay?" (See "Seed the schemas" below.)
 
-7. **Output style.** "Enable the capture reflexes now? (search before recalling,
-   capture decisions as typed notes, cite permalinks)" → sets
-   `outputStyle: "basic-memory"`. Default yes for standard/heavy, ask for light.
+6. **How active should I be? (output style)** "Want me to proactively capture —
+   search the graph before recalling, write material decisions as typed notes, and
+   cite permalinks? Or keep it quiet (just the session brief, the PreCompact
+   checkpoint, and `/basic-memory:remember` on demand)?" Enabling it sets
+   `outputStyle: "basic-memory"`. Default to enabled; leave it off for a recall-only,
+   low-noise setup. (This is the single knob for how proactive the assistant is —
+   the hooks always run regardless.)
 
-8. **Shared skills** (optional, default yes). "Want the full Basic Memory toolkit —
+7. **Shared skills** (optional, default yes). "Want the full Basic Memory toolkit —
    the shared `memory-*` skills (`memory-notes`, `memory-tasks`, `memory-research`,
    `memory-schema`, `memory-defrag`, …)? I can install them alongside this plugin."
    These are the canonical, framework-agnostic skills (the same set OpenClaw bundles).
@@ -123,7 +120,6 @@ Build the `basicMemory` block from the interview:
     "captureFolder": "sessions",
     "rememberFolder": "bm-remember",
     "recallTimeframe": "3d",
-    "captureChattyness": "<light|standard|heavy>",
     "preCompactCapture": "extractive",
     "placementConventions": "<inferred summary, or null>",
     "teamProjects": {}

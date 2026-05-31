@@ -392,7 +392,6 @@ Users get overwhelmed starting from zero. The plugin opens with a guided intervi
     "rememberFolder": "bm-remember",
     "recallTimeframe": "3d",
     "recallPrompt": "You have Basic Memory available. Search before answering recall questions. Capture material decisions inline. Cite permalinks when referencing prior work.",
-    "captureChattyness": "light",
     "preCompactCapture": "summarized",
     "placementConventions": null,
     "teamProjects": {}

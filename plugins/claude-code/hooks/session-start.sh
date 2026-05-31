@@ -141,7 +141,10 @@ RECENT_SESSIONS = ["--type", "session", "--after_date", recall_timeframe]
 # --- Run everything concurrently ---
 # Cloud reads cost a network round-trip each; parallelism keeps total wall-clock at
 # ~one query instead of the sum. Each call is independently best-effort.
-with ThreadPoolExecutor(max_workers=8) as pool:
+# Size the pool to cover every submitted search (3 primary + up to MAX_SHARED),
+# so none queues — a queued call could otherwise serialize behind a slow one and
+# push the hook past Claude Code's SessionStart timeout before the brief prints.
+with ThreadPoolExecutor(max_workers=3 + MAX_SHARED) as pool:
     fut_tasks = pool.submit(search, ACTIVE_TASKS, primary_project or None)
     fut_decisions = pool.submit(search, OPEN_DECISIONS, primary_project or None)
     fut_sessions = pool.submit(search, RECENT_SESSIONS, primary_project or None)
