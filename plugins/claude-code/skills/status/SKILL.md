@@ -32,6 +32,9 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
 4. **Active tasks.** `search_notes` with
    `metadata_filters={"type": "task", "status": "active"}` — report just the count.
 
+When scoping these queries to `primaryProject`, pass it as `project`, or as
+`project_id` if it's an `external_id` UUID (a bare UUID in `project` won't route).
+
 ## Present
 
 Lay it out like this (fill in real values; write "—" or a short note for anything

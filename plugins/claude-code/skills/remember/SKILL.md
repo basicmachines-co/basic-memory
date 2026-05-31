@@ -32,7 +32,9 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
    - `directory` = the resolved `rememberFolder`
    - `content` = the text
    - `tags` = `["manual-capture"]`
-   - `project` = `primaryProject` if set; otherwise omit it
+   - Route to `primaryProject` if set: pass it as `project`, or as `project_id` if
+     it's an `external_id` UUID (a bare UUID in `project` won't route). Omit both if
+     `primaryProject` isn't set.
    Don't overwrite an existing note unless the user explicitly asks.
 
 4. **Confirm** in one line: what was saved and its permalink —

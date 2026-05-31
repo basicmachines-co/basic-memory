@@ -103,7 +103,8 @@ For each one:
   `title` = the schema's title (Session / Decision / Task), `content` = the file's
   full contents (including its `---` frontmatter — Basic Memory merges that into the
   note's frontmatter, so the `type: schema` + `entity` + `schema` definition land
-  intact and become resolvable by `schema_validate`), `project` = `primaryProject`.
+  intact and become resolvable by `schema_validate`), routed to `primaryProject`
+  (pass it as `project`, or as `project_id` if it's an `external_id` UUID).
 
 ### 2. Install the shared skills (if the user opted in)
 Run, from the project root:
