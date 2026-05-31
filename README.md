@@ -197,7 +197,9 @@ just package-check-openclaw
 
 ### Claude Code plugin
 
-The Claude Code plugin bundles Basic Memory-aware skills, hooks, and an agent:
+The Claude Code plugin is the bridge between Claude's working memory and Basic
+Memory — session-start briefings, pre-compaction checkpoints, an opt-in capture
+output style, and `/basic-memory:setup` · `:remember` · `:share` · `:status`:
 
 ```bash
 claude plugin marketplace add basicmachines-co/basic-memory \
