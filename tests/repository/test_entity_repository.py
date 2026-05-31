@@ -1070,6 +1070,41 @@ async def test_find_by_ids_for_hydration_skips_eager_load_options(
 
 
 @pytest.mark.asyncio
+async def test_find_by_ids_for_hydration_can_include_cross_project_entities(
+    entity_repository: EntityRepository, sample_entity: Entity, session_maker
+):
+    """Context hydration can opt into IDs reached through explicit graph edges."""
+    async with db.scoped_session(session_maker) as session:
+        other_project = Project(name="other-project", path="/other")
+        session.add(other_project)
+        await session.flush()
+
+        other_entity = Entity(
+            project_id=other_project.id,
+            title="Other Project Entity",
+            note_type="test",
+            permalink="other-project/entity",
+            file_path="other-project/entity.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(other_entity)
+        await session.flush()
+        other_entity_id = other_entity.id
+
+    project_scoped = await entity_repository.find_by_ids_for_hydration(
+        [sample_entity.id, other_entity_id]
+    )
+    cross_project = await entity_repository.find_by_ids_for_hydration(
+        [sample_entity.id, other_entity_id], include_cross_project=True
+    )
+
+    assert {entity.id for entity in project_scoped} == {sample_entity.id}
+    assert {entity.id for entity in cross_project} == {sample_entity.id, other_entity_id}
+
+
+@pytest.mark.asyncio
 async def test_get_permalink_to_file_path_map(entity_repository: EntityRepository, session_maker):
     """Test getting permalink -> file_path mapping for bulk operations."""
     async with db.scoped_session(session_maker) as session:

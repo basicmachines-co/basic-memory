@@ -340,6 +340,227 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
 
 
 @pytest.mark.asyncio
+async def test_find_related_expands_cross_project_relation_targets(session_maker, app_config):
+    """Explicit cross-project links should expand without exposing unrelated incoming links."""
+    from basic_memory.repository.entity_repository import EntityRepository
+    from basic_memory.repository.observation_repository import ObservationRepository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+    from basic_memory.config import DatabaseBackend
+    from basic_memory import db
+
+    async with db.scoped_session(session_maker) as db_session:
+        project1 = Project(name="project1", path="/test1")
+        project2 = Project(name="project2", path="/test2")
+        project3 = Project(name="project3", path="/test3")
+        db_session.add_all([project1, project2, project3])
+        await db_session.flush()
+
+        now = datetime.now(UTC)
+        source = Entity(
+            title="Source",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project1.id,
+            permalink="project1/source",
+            file_path="project1/source.md",
+            created_at=now,
+            updated_at=now,
+        )
+        target = Entity(
+            title="Company Standards",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project2.id,
+            permalink="project2/company-standards",
+            file_path="project2/company-standards.md",
+            created_at=now,
+            updated_at=now,
+        )
+        target_child = Entity(
+            title="Review Checklist",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project2.id,
+            permalink="project2/review-checklist",
+            file_path="project2/review-checklist.md",
+            created_at=now,
+            updated_at=now,
+        )
+        unrelated_source = Entity(
+            title="Unrelated Source",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project3.id,
+            permalink="project3/unrelated-source",
+            file_path="project3/unrelated-source.md",
+            created_at=now,
+            updated_at=now,
+        )
+        db_session.add_all([source, target, target_child, unrelated_source])
+        await db_session.flush()
+
+        cross_project_relation = Relation(
+            project_id=project1.id,
+            from_id=source.id,
+            to_id=target.id,
+            to_name="Company Standards",
+            relation_type="links_to",
+        )
+        target_relation = Relation(
+            project_id=project2.id,
+            from_id=target.id,
+            to_id=target_child.id,
+            to_name="Review Checklist",
+            relation_type="links_to",
+        )
+        unrelated_incoming_relation = Relation(
+            project_id=project3.id,
+            from_id=unrelated_source.id,
+            to_id=target.id,
+            to_name="Company Standards",
+            relation_type="links_to",
+        )
+        db_session.add_all([cross_project_relation, target_relation, unrelated_incoming_relation])
+        await db_session.commit()
+
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        search_repo_p1 = PostgresSearchRepository(session_maker, project1.id)
+    else:
+        search_repo_p1 = SQLiteSearchRepository(session_maker, project1.id)
+
+    entity_repo_p1 = EntityRepository(session_maker, project1.id)
+    obs_repo_p1 = ObservationRepository(session_maker, project1.id)
+    context_service_p1 = ContextService(search_repo_p1, entity_repo_p1, obs_repo_p1)
+
+    await search_repo_p1.index_item(
+        SearchIndexRow(
+            project_id=project1.id,
+            id=source.id,
+            title=source.title,
+            content_snippet="Source content",
+            permalink=source.permalink,
+            file_path=source.file_path,
+            type=SearchItemType.ENTITY,
+            metadata={"created_at": now.isoformat()},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    context = await context_service_p1.build_context(
+        memory_url.validate_strings("memory://project1/source"),
+        depth=2,
+        max_related=100,
+    )
+    assert len(context.results) == 1
+
+    context_related_entity_ids = {
+        row.id for row in context.results[0].related_results if row.type == "entity"
+    }
+    context_related_relation_ids = {
+        row.id for row in context.results[0].related_results if row.type == "relation"
+    }
+
+    assert target.id in context_related_entity_ids
+    assert target_child.id in context_related_entity_ids
+    assert unrelated_source.id not in context_related_entity_ids
+    assert cross_project_relation.id in context_related_relation_ids
+    assert target_relation.id in context_related_relation_ids
+    assert unrelated_incoming_relation.id not in context_related_relation_ids
+
+    related = await context_service_p1.find_related(
+        [("entity", source.id)], max_depth=2, max_results=100
+    )
+
+    related_entity_ids = {row.id for row in related if row.type == "entity"}
+    related_relation_ids = {row.id for row in related if row.type == "relation"}
+
+    assert target.id in related_entity_ids
+    assert target_child.id in related_entity_ids
+    assert unrelated_source.id not in related_entity_ids
+    assert cross_project_relation.id in related_relation_ids
+    assert target_relation.id in related_relation_ids
+    assert unrelated_incoming_relation.id not in related_relation_ids
+
+
+@pytest.mark.asyncio
+async def test_find_related_does_not_revisit_entities_in_cycles(session_maker, app_config):
+    """Recursive graph expansion should stop when a path loops back to a visited entity."""
+    from basic_memory.repository.entity_repository import EntityRepository
+    from basic_memory.repository.observation_repository import ObservationRepository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+    from basic_memory.config import DatabaseBackend
+    from basic_memory import db
+
+    async with db.scoped_session(session_maker) as db_session:
+        project = Project(name="cycle-project", path="/cycle")
+        db_session.add(project)
+        await db_session.flush()
+
+        now = datetime.now(UTC)
+        root = Entity(
+            title="Root",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project.id,
+            permalink="cycle/root",
+            file_path="cycle/root.md",
+            created_at=now,
+            updated_at=now,
+        )
+        connected = Entity(
+            title="Connected",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project.id,
+            permalink="cycle/connected",
+            file_path="cycle/connected.md",
+            created_at=now,
+            updated_at=now,
+        )
+        db_session.add_all([root, connected])
+        await db_session.flush()
+
+        root_to_connected = Relation(
+            project_id=project.id,
+            from_id=root.id,
+            to_id=connected.id,
+            to_name="Connected",
+            relation_type="links_to",
+        )
+        connected_to_root = Relation(
+            project_id=project.id,
+            from_id=connected.id,
+            to_id=root.id,
+            to_name="Root",
+            relation_type="links_to",
+        )
+        db_session.add_all([root_to_connected, connected_to_root])
+        await db_session.commit()
+
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        search_repo = PostgresSearchRepository(session_maker, project.id)
+    else:
+        search_repo = SQLiteSearchRepository(session_maker, project.id)
+
+    entity_repo = EntityRepository(session_maker, project.id)
+    obs_repo = ObservationRepository(session_maker, project.id)
+    context_service = ContextService(search_repo, entity_repo, obs_repo)
+
+    related = await context_service.find_related(
+        [("entity", root.id)], max_depth=4, max_results=100
+    )
+
+    related_entity_ids = [row.id for row in related if row.type == "entity"]
+    related_relation_ids = {row.id for row in related if row.type == "relation"}
+
+    assert related_entity_ids == [connected.id]
+    assert related_relation_ids == {root_to_connected.id, connected_to_root.id}
+
+
+@pytest.mark.asyncio
 async def test_build_context_fallback_via_link_resolver(context_service, test_graph):
     """Test that build_context falls back to LinkResolver when exact permalink fails.
 

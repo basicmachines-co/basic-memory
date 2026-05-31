@@ -178,21 +178,31 @@ class EntityRepository(Repository[Entity]):
         result = await self.execute_query(query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def find_by_ids_for_hydration(self, ids: List[int]) -> Sequence[Entity]:
+    async def find_by_ids_for_hydration(
+        self, ids: List[int], *, include_cross_project: bool = False
+    ) -> Sequence[Entity]:
         """Fetch minimal entity fields needed for context hydration.
 
         Context hydration only needs an entity's primary key, title, and external
         UUID. Keeping this separate from find_by_ids avoids the relationship eager
         loads that are useful for full entity reads but expensive for response shaping.
+
+        Args:
+            ids: Entity IDs to hydrate.
+            include_cross_project: Include IDs outside this repository's project scope.
+                Use only for IDs already reached through validated graph traversal.
         """
         if not ids:
             return []
 
         query = (
-            self.select()
+            select(Entity)
             .where(Entity.id.in_(ids))
             .options(load_only(Entity.id, Entity.title, Entity.external_id))
         )
+        if not include_cross_project:
+            query = self._add_project_filter(query)
+
         result = await self.execute_query(query, use_query_options=False)
         return list(result.scalars().all())
 

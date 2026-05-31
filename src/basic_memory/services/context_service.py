@@ -333,9 +333,14 @@ class ContextService:
             relation_date_filter = ""
             timeframe_condition = ""
 
-        # Add project filtering for security - ensure all entities and relations belong to the same project
-        project_filter = "AND e.project_id = :project_id"
-        relation_project_filter = "AND e_from.project_id = :project_id"
+        # Trigger: build_context starts from a project-scoped search result.
+        # Why: the seed entity must belong to the requested project, but an
+        # explicit relation edge may point at another project.
+        # Outcome: traversal follows only project-owned edges from reached
+        # entities, instead of forcing every reached entity into the seed project.
+        seed_project_filter = "AND e.project_id = :project_id"
+        connected_entity_project_filter = ""
+        relation_project_filter = "AND e_from.project_id = r.project_id"
 
         # Use a CTE that operates directly on entity and relation tables
         # This avoids the overhead of the search_index virtual table
@@ -351,7 +356,8 @@ class ContextService:
             query = self._build_postgres_query(
                 entity_id_values,
                 date_filter,
-                project_filter,
+                seed_project_filter,
+                connected_entity_project_filter,
                 relation_date_filter,
                 relation_project_filter,
                 timeframe_condition,
@@ -362,7 +368,8 @@ class ContextService:
             query = self._build_sqlite_query(
                 entity_id_values,
                 date_filter,
-                project_filter,
+                seed_project_filter,
+                connected_entity_project_filter,
                 relation_date_filter,
                 relation_project_filter,
                 timeframe_condition,
@@ -397,7 +404,8 @@ class ContextService:
         self,
         entity_id_values: str,
         date_filter: str,
-        project_filter: str,
+        seed_project_filter: str,
+        connected_entity_project_filter: str,
         relation_date_filter: str,
         relation_project_filter: str,
         timeframe_condition: str,
@@ -421,11 +429,13 @@ class ContextService:
                 0 as depth,
                 e.id as root_id,
                 e.created_at,
-                e.created_at as relation_date
+                e.created_at as relation_date,
+                e.project_id as project_id,
+                ',' || e.id::text || ',' as entity_path
             FROM entity e
             WHERE e.id IN ({entity_id_values})
             {date_filter}
-            {project_filter}
+            {seed_project_filter}
 
             UNION ALL
 
@@ -477,15 +487,25 @@ class ContextService:
                 CASE
                     WHEN step_type = 1 THEN e_from.created_at
                     ELSE eg.relation_date
-                END as relation_date
+                END as relation_date,
+                CASE
+                    WHEN step_type = 1 THEN eg.project_id
+                    ELSE e.project_id
+                END as project_id,
+                CASE
+                    WHEN step_type = 1 THEN eg.entity_path
+                    ELSE eg.entity_path || e.id::text || ','
+                END as entity_path
             FROM entity_graph eg
             CROSS JOIN LATERAL (VALUES (1), (2)) AS steps(step_type)
             JOIN relation r ON (
                 eg.type = 'entity' AND
-                (r.from_id = eg.id OR r.to_id = eg.id)
+                (r.from_id = eg.id OR r.to_id = eg.id) AND
+                r.project_id = eg.project_id
             )
             JOIN entity e_from ON (
                 r.from_id = e_from.id
+                {relation_date_filter}
                 {relation_project_filter}
             )
             LEFT JOIN entity e ON (
@@ -495,10 +515,17 @@ class ContextService:
                     ELSE r.from_id
                 END
                 {date_filter}
-                {project_filter}
+                {connected_entity_project_filter}
             )
             WHERE eg.depth < :max_depth
-            AND (step_type = 1 OR (step_type = 2 AND e.id IS NOT NULL AND e.id != eg.id))
+            AND (
+                step_type = 1 OR (
+                    step_type = 2
+                    AND e.id IS NOT NULL
+                    AND e.id != eg.id
+                    AND position(',' || e.id::text || ',' in eg.entity_path) = 0
+                )
+            )
             {timeframe_condition}
         )
         -- Materialize and filter
@@ -529,7 +556,8 @@ class ContextService:
         self,
         entity_id_values: str,
         date_filter: str,
-        project_filter: str,
+        seed_project_filter: str,
+        connected_entity_project_filter: str,
         relation_date_filter: str,
         relation_project_filter: str,
         timeframe_condition: str,
@@ -555,11 +583,13 @@ class ContextService:
                 e.id as root_id,
                 e.created_at,
                 e.created_at as relation_date,
-                0 as is_incoming
+                0 as is_incoming,
+                e.project_id as project_id,
+                ',' || e.id || ',' as entity_path
             FROM entity e
             WHERE e.id IN ({entity_id_values})
             {date_filter}
-            {project_filter}
+            {seed_project_filter}
 
             UNION ALL
 
@@ -580,11 +610,14 @@ class ContextService:
                 eg.root_id,
                 e_from.created_at,
                 e_from.created_at as relation_date,
-                CASE WHEN r.from_id = eg.id THEN 0 ELSE 1 END as is_incoming
+                CASE WHEN r.from_id = eg.id THEN 0 ELSE 1 END as is_incoming,
+                eg.project_id as project_id,
+                eg.entity_path as entity_path
             FROM entity_graph eg
             JOIN relation r ON (
                 eg.type = 'entity' AND
-                (r.from_id = eg.id OR r.to_id = eg.id)
+                (r.from_id = eg.id OR r.to_id = eg.id) AND
+                r.project_id = eg.project_id
             )
             JOIN entity e_from ON (
                 r.from_id = e_from.id
@@ -615,7 +648,9 @@ class ContextService:
                 eg.root_id,
                 e.created_at,
                 eg.relation_date,
-                eg.is_incoming
+                eg.is_incoming,
+                e.project_id as project_id,
+                eg.entity_path || e.id || ',' as entity_path
             FROM entity_graph eg
             JOIN entity e ON (
                 eg.type = 'relation' AND
@@ -624,9 +659,10 @@ class ContextService:
                     ELSE eg.from_id
                 END
                 {date_filter}
-                {project_filter}
+                {connected_entity_project_filter}
             )
             WHERE eg.depth < :max_depth
+            AND instr(eg.entity_path, ',' || e.id || ',') = 0
             {timeframe_condition}
         )
         SELECT DISTINCT
