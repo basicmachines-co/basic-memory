@@ -25,11 +25,19 @@ BM="$(command -v basic-memory || command -v bm || true)"
 BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
 
 bm = os.environ.get("BM_BIN", "basic-memory")
+
+# A project ref can be a workspace-qualified name (route via --project) or an
+# external_id UUID (route via --project-id) — names collide across workspaces, so
+# bare names won't route. Mirror session-start.sh's detection.
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
 try:
     payload = json.loads(os.environ.get("BM_HOOK_INPUT") or "{}")
@@ -186,13 +194,16 @@ body += [
 content = "\n".join(frontmatter + body)
 
 # --- Write the checkpoint (best-effort) ---
+# A UUID primaryProject must route via --project-id, not --project, or the write
+# silently fails to land in a UUID-configured project.
+project_flag = "--project-id" if UUID_RE.match(primary_project) else "--project"
 try:
     subprocess.run(
         [
             bm, "tool", "write-note",
             "--title", title,
             "--folder", capture_folder,
-            "--project", primary_project,
+            project_flag, primary_project,
             "--tags", "session",
             "--tags", "auto-capture",
         ],

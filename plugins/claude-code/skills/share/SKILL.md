@@ -37,7 +37,9 @@ project — session checkpoints and `/basic-memory:remember` always stay persona
    wait for a yes. Never share silently.
 
 5. **Write the shared copy** with `write_note`:
-   - `project` = the chosen team project ref
+   - Route to the target: if the team ref is an `external_id` UUID, pass it as
+     `project_id`; otherwise pass the workspace-qualified name as `project`. (A bare
+     UUID in `project` won't route — Basic Memory takes UUIDs only via `project_id`.)
    - `directory` = the `promoteFolder`
    - `title` = the source title
    - `content` = the source's content, with attribution added: keep its frontmatter

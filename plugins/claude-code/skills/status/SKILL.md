@@ -16,13 +16,14 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    nothing else will work without it.
 
 2. **Configuration.** Read `.claude/settings.json` (and `.claude/settings.local.json`
-   if present) and report from the `basicMemory` block:
-   - `primaryProject` — or note that none is pinned (the default project is used)
-   - `secondaryProjects` — team/shared projects read for recall (read-only), if any
-   - `teamProjects` — share targets for `/basic-memory:share`, if any
-   - `captureFolder` (default `sessions`) and `rememberFolder` (default `bm-remember`)
-   - whether `outputStyle` is `basic-memory` (capture reflexes on/off)
-   - `preCompactCapture` mode (default `extractive`)
+   if present) and report:
+   - From the `basicMemory` block: `primaryProject` (or note none is pinned — the
+     default project is used), `secondaryProjects` (team/shared read sources),
+     `teamProjects` (share targets for `/basic-memory:share`), `captureFolder`
+     (default `sessions`), `rememberFolder` (default `bm-remember`), and
+     `preCompactCapture` mode (default `extractive`).
+   - From the **root** settings object (not `basicMemory`): whether `outputStyle` is
+     `basic-memory` — i.e. whether the capture reflexes are on.
 
 3. **Recent checkpoints.** `search_notes` with
    `metadata_filters={"type": "session"}`, `page_size` 5, scoped to `primaryProject`

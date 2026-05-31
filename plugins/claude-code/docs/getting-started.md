@@ -93,9 +93,9 @@ repeat across workspaces, team projects use **workspace-qualified names**
   "basicMemory": {
     "primaryProject": "my-org/main",
     "secondaryProjects": ["my-team/main", "my-team/notes"],
-    "teamProjects": { "my-team/notes": { "promoteFolder": "shared" } },
-    "outputStyle": "basic-memory"
-  }
+    "teamProjects": { "my-team/notes": { "promoteFolder": "shared" } }
+  },
+  "outputStyle": "basic-memory"
 }
 ```
 

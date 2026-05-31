@@ -121,7 +121,8 @@ shared_refs = shared_refs[:MAX_SHARED]
 def search(filters, project_ref=None, timeout=10):
     cmd = [bm, "tool", "search-notes", *filters, "--page-size", "5"]
     if project_ref:
-        cmd += (["--project-id", project_ref] if UUID_RE.match(project_ref) else ["--project", project_ref])
+        flag = "--project-id" if UUID_RE.match(project_ref) else "--project"
+        cmd += [flag, project_ref]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if out.returncode != 0:
