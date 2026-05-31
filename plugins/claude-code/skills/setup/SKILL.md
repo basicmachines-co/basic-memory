@@ -150,7 +150,7 @@ copy with published versions. In that case **skip the install** and tell the use
 the skills are already present as source; don't run the command. Quick check:
 
 ```
-git ls-files skills/ | grep -q memory- && echo "source repo — skip install"
+git ls-files skills/ | grep -q memory- && echo "source repo - skip install"
 ```
 
 Otherwise, run from the project root:

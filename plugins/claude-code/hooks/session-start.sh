@@ -255,13 +255,27 @@ if shared_capped:
 # Trigger: a primaryProject is set (so capture is actually active — pre-compact and
 # proactive writes land somewhere intentional). Why: the output style tells Claude to
 # follow the project's placement conventions, but nothing else surfaces them.
-# Outcome: Claude sees the capture folder + any stored conventions, so writes land
-# where the user expects instead of being guesswork. Bounded — conventions are a
-# short string by design.
+# Outcome: Claude sees that session checkpoints go to captureFolder while decisions/
+# tasks/notes follow the stored conventions — so it doesn't dump everything into the
+# checkpoint folder. Bounded — conventions are a short string by design.
 if primary_project:
-    placement = ["", "## Where to write", f"- Auto-capture and checkpoints go to `{capture_folder}/`."]
+    # captureFolder is the PreCompact *checkpoint* folder only; proactive captures
+    # (decisions, tasks, notes) follow placementConventions, not this folder.
+    placement = [
+        "",
+        "## Where to write",
+        f"- Session checkpoints (the PreCompact auto-capture) go to `{capture_folder}/`.",
+    ]
     if placement_conventions:
-        placement.append(f"- Placement conventions: {placement_conventions}")
+        placement.append(
+            "- Decisions, tasks, and other notes follow these placement "
+            f"conventions: {placement_conventions}"
+        )
+    else:
+        placement.append(
+            "- Place decisions, tasks, and notes in folders that fit their topic, "
+            "not the checkpoint folder."
+        )
     lines += placement
 
 # --- First-run / config nudges ---
