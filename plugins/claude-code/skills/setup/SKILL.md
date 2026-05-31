@@ -44,9 +44,18 @@ Ask only what you can't infer. Cover:
    should I create one?"
    - Existing → show `list_memory_projects()` and let them pick. That name becomes
      `primaryProject`.
-   - New → propose a name (default: this repo's directory name) and a path
-     (default: `~/basic-memory/<name>/`), then create it with
+   - New → propose a name (default: this repo's directory name) and create it with
      `create_memory_project`.
+     - *Local project* (default): path defaults to `~/basic-memory/<name>/`; any
+       connected Basic Memory server can create it.
+     - *Cloud project* (the user wants capture in a cloud workspace): pass the
+       `workspace` selector (a slug from `list_workspaces`) and a cloud-style path
+       like `/<name>`, and create it with a **cloud-connected** MCP server. A purely
+       local server (`uvx basic-memory mcp`) treats the path as a local directory and
+       fails to create it (e.g. read-only `/`). When both a local and a cloud server
+       are connected, route creation *and* the schema seeding through the cloud one,
+       and pin `primaryProject` to the new project's `external_id` UUID
+       (collision-proof across workspaces).
 
 3. **Cloud / teams** (skip if there are no extra workspaces). Run
    `list_workspaces`. If the user belongs to more than one workspace, they likely
@@ -57,6 +66,10 @@ Ask only what you can't infer. Cover:
    - **Read from the team** (recommended): ask which team projects to pull into the
      session brief for recall. Store their qualified names in `secondaryProjects`.
      These are **read-only** — recall reads across them; nothing is written to them.
+     **Cap:** the SessionStart brief reads only the first **6** shared projects per
+     session (a latency/output bound), in list order. If the user wants more than
+     six, order the most relevant first and tell them the rest are configured but
+     not read each session.
    - **Share target** (optional): if the user wants a place to *publish* notes to the
      team via `/basic-memory:share`, add it to `teamProjects` as
      `"<qualified-name>": { "promoteFolder": "shared" }`. Sharing is always a manual
@@ -130,7 +143,17 @@ For each one:
     `schema`/`settings` must come back as nested objects, not strings.
 
 ### 2. Install the shared skills (if the user opted in)
-Run, from the project root:
+**First, guard against clobbering a source checkout.** If `./skills` already exists,
+is tracked in git, and holds `memory-*` directories, you're inside the skills' own
+source repo (e.g. `basic-memory` itself) — the install would overwrite the working
+copy with published versions. In that case **skip the install** and tell the user
+the skills are already present as source; don't run the command. Quick check:
+
+```
+git ls-files skills/ | grep -q memory- && echo "source repo — skip install"
+```
+
+Otherwise, run from the project root:
 
 ```
 npx skills add basicmachines-co/basic-memory --path skills
