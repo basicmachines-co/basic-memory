@@ -38,7 +38,7 @@ flowchart TB
         OS["output-style<br/>→ search-first / capture / cite reflexes"]
     end
     subgraph Deliberate["Deliberate (slash commands)"]
-        SK["/basic-memory:bm-setup · remember · share · status"]
+        SK["/basic-memory:bm-setup · bm-remember · bm-share · bm-status"]
     end
 
     Ambient --> MCP["Basic Memory MCP server"]
@@ -160,7 +160,7 @@ project names collide across workspaces. Reads route over the user's OAuth sessi
 | `hooks/session-start.sh`, `hooks/pre-compact.sh` | the ambient bridge (read / write) |
 | `hooks/hooks.json` | registers the hooks |
 | `output-styles/basic-memory.md` | the capture reflexes |
-| `skills/{setup,remember,share,status}/` | the deliberate slash commands |
+| `skills/{bm-setup,bm-remember,bm-share,bm-status}/` | the deliberate slash commands |
 | `schemas/{session,decision,task}.md` | picoschema seeds (copied into your project at setup) |
 | `.claude/settings.json` → `basicMemory` | per-project configuration |
 | your Basic Memory projects | all actual content |
