@@ -199,7 +199,7 @@ just package-check-openclaw
 
 The Claude Code plugin is the bridge between Claude's working memory and Basic
 Memory — session-start briefings, pre-compaction checkpoints, an opt-in capture
-output style, and `/basic-memory:setup` · `:remember` · `:share` · `:status`.
+output style, and `/basic-memory:bm-setup` · `:remember` · `:share` · `:status`.
 
 **Connect the Basic Memory MCP server first** — see [Connect your AI
 client](#connect-your-ai-client). The plugin's hooks and skills call it, so it's a

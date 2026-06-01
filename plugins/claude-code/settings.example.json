@@ -1,5 +1,5 @@
 {
-  "$comment": "Example Basic Memory plugin settings. Copy the basicMemory block (and optionally outputStyle) into your project's .claude/settings.json, then set primaryProject. The easiest way to fill this in is /basic-memory:setup. Team projects (secondaryProjects, teamProjects) must use workspace-qualified names like 'my-team/notes' or external_id UUIDs — bare names are ambiguous across workspaces. See DESIGN.md for the full schema.",
+  "$comment": "Example Basic Memory plugin settings. Copy the basicMemory block (and optionally outputStyle) into your project's .claude/settings.json, then set primaryProject. The easiest way to fill this in is /basic-memory:bm-setup. Team projects (secondaryProjects, teamProjects) must use workspace-qualified names like 'my-team/notes' or external_id UUIDs — bare names are ambiguous across workspaces. See DESIGN.md for the full schema.",
   "basicMemory": {
     "primaryProject": "my-project",
     "secondaryProjects": ["my-team/main", "my-team/notes"],

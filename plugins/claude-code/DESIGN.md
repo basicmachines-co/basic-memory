@@ -69,9 +69,9 @@ plugins/claude-code/
 │   └── basic-memory.md         # reflexes: search first, capture decisions
 │                               # NOTE: rules/ deferred — path-scoped rules don't load yet (Q5)
 ├── skills/
-│   ├── setup/SKILL.md          # /basic-memory:setup — bootstrap interview (first-run)
-│   ├── remember/SKILL.md       # /basic-memory:remember <text> — quick deliberate capture
-│   └── status/SKILL.md         # /basic-memory:status — show plugin state
+│   ├── bm-setup/SKILL.md          # /basic-memory:bm-setup — bootstrap interview (first-run)
+│   ├── bm-remember/SKILL.md       # /basic-memory:bm-remember <text> — quick deliberate capture
+│   └── bm-status/SKILL.md         # /basic-memory:bm-status — show plugin state
 ├── schemas/                    # picoschema seeds, copied into the user's BM project at bootstrap
 │   ├── session.md              # type: session — resume checkpoints
 │   ├── decision.md             # type: decision — durable choices + rationale
@@ -87,7 +87,7 @@ Three layers, matching what Hermes and OpenClaw converged on:
 | ----------- | ---------------------------------- | ------------------------------------------ | ------------------------------------- |
 | Ambient     | `hooks/`, `rules/`                 | Lifecycle events, file context             | Brief Claude, checkpoint, guide placement |
 | Background  | `output-styles/basic-memory.md`    | System prompt, every turn                  | Reflexes — search first, capture inline |
-| Deliberate  | `skills/{setup,remember,status}/`  | User invokes (`/basic-memory:setup`, `/basic-memory:remember`) | One-shot user gestures                 |
+| Deliberate  | `skills/{bm-setup,bm-remember,bm-status}/`  | User invokes (`/basic-memory:bm-setup`, `/basic-memory:bm-remember`) | One-shot user gestures                 |
 
 ## 4. The core flows
 
@@ -191,13 +191,13 @@ If/when path-scoped rules start working *and* support out-of-tree globs, we can 
 
 Three skills only, each Claude-Code-specific (everything else lives in top-level `skills/`).
 
-> **Verified (Q3) — slash commands are always plugin-namespaced.** A skill folder `skills/remember/` in a plugin whose `plugin.json` name is `basic-memory` is invoked as **`/basic-memory:remember`**, not `/remember` — namespacing is mandatory and can't be shortened. Consequence: we drop the redundant `bm-` prefix from skill folder names (the namespace already says `basic-memory`). So the folders are `setup/`, `remember/`, `status/`, surfacing as `/basic-memory:setup`, `/basic-memory:remember`, `/basic-memory:status`. Skills are auto-discovered on install — no extra registration.
+> **Verified (Q3) — slash commands are always plugin-namespaced.** A skill folder `skills/bm-remember/` in a plugin whose `plugin.json` name is `basic-memory` is invoked as **`/basic-memory:bm-remember`**, not `/remember` — namespacing is mandatory and can't be shortened. Consequence: we drop the redundant `bm-` prefix from skill folder names (the namespace already says `basic-memory`). So the folders are `setup/`, `remember/`, `status/`, surfacing as `/basic-memory:bm-setup`, `/basic-memory:bm-remember`, `/basic-memory:bm-status`. Skills are auto-discovered on install — no extra registration.
 
-**`/basic-memory:setup`** — bootstrap interview (§7). Run after install and any time the user wants to reconfigure.
+**`/basic-memory:bm-setup`** — bootstrap interview (§7). Run after install and any time the user wants to reconfigure.
 
-**`/basic-memory:remember <text>`** — quick capture. Writes to a `bm-remember/` folder, separated from auto-captures. First line becomes title (truncated to 80 chars), tagged `manual-capture`. Optional `--project` flag for cross-project.
+**`/basic-memory:bm-remember <text>`** — quick capture. Writes to a `bm-remember/` folder, separated from auto-captures. First line becomes title (truncated to 80 chars), tagged `manual-capture`. Optional `--project` flag for cross-project.
 
-**`/basic-memory:status`** — show plugin state: active BM project, capture folders, recent SessionNotes, sync status, last successful BM call. Trust-building UI.
+**`/basic-memory:bm-status`** — show plugin state: active BM project, capture folders, recent SessionNotes, sync status, last successful BM call. Trust-building UI.
 
 ### 4.5 The schema layer — why our note types are contracts, not conventions
 
@@ -207,8 +207,8 @@ Basic Memory ships a [schema system](https://docs.basicmemory.com/raw/concepts/s
 
 | Note type | `type:` | Written by | Purpose |
 | --------- | ------- | ---------- | ------- |
-| Session   | `session`  | PreCompact hook, `/basic-memory:handoff` (future) | Resume cursor — what we were doing, what's next |
-| Decision  | `decision` | output-style reflex, `/basic-memory:decide` (future) | Durable record of choices + rationale |
+| Session   | `session`  | PreCompact hook, `/basic-memory:bm-handoff` (future) | Resume cursor — what we were doing, what's next |
+| Decision  | `decision` | output-style reflex, `/basic-memory:bm-decide` (future) | Durable record of choices + rationale |
 | Task      | `task`     | user + Claude | Active work tracking (aligns with `skills/memory-tasks`) |
 
 These conform to the SessionNote / DecisionNote picoschema shapes defined in SPEC-55, so when the SPEC-55 Writer SDK and async pipeline land, validation Just Works and nothing has to change in user-facing behavior.
@@ -264,7 +264,7 @@ These are orthogonal concepts that the plugin must explicitly map.
 ### 5.1 Mapping model
 
 Each Claude Code project has:
-- **One primary BM project** — destination for SessionStart context + PreCompact checkpoints + `/basic-memory:remember`. Required.
+- **One primary BM project** — destination for SessionStart context + PreCompact checkpoints + `/basic-memory:bm-remember`. Required.
 - **Zero or more secondary BM projects** — read-only by default for recall (SessionStart can query them); writes require explicit user gesture.
 
 Mapping is configured in `.claude/settings.json`:
@@ -311,11 +311,11 @@ UUID and routes accordingly. Cross-workspace reads route over the user's OAuth s
 ### 6.1 Defaults — safe by design
 
 - **Auto-capture defaults to personal.** SessionNotes, PreCompact checkpoints, and
-  `/basic-memory:remember` quick captures **only ever** land in `primaryProject`. The
+  `/basic-memory:bm-remember` quick captures **only ever** land in `primaryProject`. The
   capture hooks never write to a shared project — full stop, no opt-in flag in v0.4.
 - **Recall reads across.** SessionStart queries the shared projects in parallel for
   open decisions and folds them into the brief (read-only — discloses nothing).
-- **Sharing is a deliberate gesture.** `/basic-memory:share` copies a personal note
+- **Sharing is a deliberate gesture.** `/basic-memory:bm-share` copies a personal note
   into a configured team project with attribution, after explicit confirmation. The
   personal→team boundary is always a visible, manual action.
 
@@ -334,7 +334,7 @@ UUID and routes accordingly. Cross-workspace reads route over the user's OAuth s
 ```
 
 - `secondaryProjects` — workspace-qualified refs (or UUIDs) read for recall. Read-only.
-- `teamProjects` — share targets for `/basic-memory:share`; each carries a
+- `teamProjects` — share targets for `/basic-memory:bm-share`; each carries a
   `promoteFolder` (default `shared`). Also read for recall (SessionStart reads the
   union of `secondaryProjects` and `teamProjects` keys, capped at 6 per session).
 
@@ -349,15 +349,15 @@ shared session memory; until then we don't ship a flag we don't enforce.
 - New team members get instant context — first SessionStart pulls the team graph and they're already oriented.
 - Cross-pollination — operator running a strategy session sees recent technical decisions from builders.
 
-## 7. Bootstrap — `/basic-memory:setup` interview
+## 7. Bootstrap — `/basic-memory:bm-setup` interview
 
 Users get overwhelmed starting from zero. The plugin opens with a guided interview that establishes opinionated defaults from a short conversation.
 
-> **Verified (Q6) — there is no install hook.** Claude Code has no PostInstall/PreInstall lifecycle event (feature request [#11240](https://github.com/anthropics/claude-code/issues/11240) was closed as duplicate). We can't auto-run setup the moment the plugin installs. The workaround is the **SessionStart hook detecting first-run**: it checks for a sentinel (e.g. `${CLAUDE_PLUGIN_DATA}/.bootstrapped` or the absence of a `basicMemory` config) and, if missing, injects a one-line nudge — *"Basic Memory isn't configured yet. Run `/basic-memory:setup` (≈3 min) to wire it up."* A bonus verified capability: SessionStart can return `{"reloadSkills": true}` to re-scan skills mid-session, useful if setup writes new skills/config that should activate without a restart.
+> **Verified (Q6) — there is no install hook.** Claude Code has no PostInstall/PreInstall lifecycle event (feature request [#11240](https://github.com/anthropics/claude-code/issues/11240) was closed as duplicate). We can't auto-run setup the moment the plugin installs. The workaround is the **SessionStart hook detecting first-run**: it checks for a sentinel (e.g. `${CLAUDE_PLUGIN_DATA}/.bootstrapped` or the absence of a `basicMemory` config) and, if missing, injects a one-line nudge — *"Basic Memory isn't configured yet. Run `/basic-memory:bm-setup` (≈3 min) to wire it up."* A bonus verified capability: SessionStart can return `{"reloadSkills": true}` to re-scan skills mid-session, useful if setup writes new skills/config that should activate without a restart.
 
 **Trigger paths:**
-1. SessionStart detects no `basicMemory` config and no `basic-memory` note → inject the one-line nudge suggesting `/basic-memory:setup` (we cannot run it automatically)
-2. User runs `/basic-memory:setup` explicitly (anytime, including for reconfiguration)
+1. SessionStart detects no `basicMemory` config and no `basic-memory` note → inject the one-line nudge suggesting `/basic-memory:bm-setup` (we cannot run it automatically)
+2. User runs `/basic-memory:bm-setup` explicitly (anytime, including for reconfiguration)
 
 **Interview script** (Claude executes it; SKILL.md provides the structure):
 
@@ -368,14 +368,14 @@ Users get overwhelmed starting from zero. The plugin opens with a guided intervi
 3. *"Are you using Basic Memory Cloud or local-only?"*
    - If cloud + team workspace exists: *"You're on the `<team>` workspace. Want me to also read from team projects for recall? (read-only by default; we can opt-in to writes later)"*
 4. *"How chatty should I be?"*
-   - **Light** (default): SessionStart brief on each session, PreCompact checkpoint, `/basic-memory:remember` on demand
+   - **Light** (default): SessionStart brief on each session, PreCompact checkpoint, `/basic-memory:bm-remember` on demand
    - **Standard**: above + capture decisions inline via output-style
    - **Heavy**: above + every-session SessionNote even without compaction
 5. *"Should I look at your existing notes and suggest some placement conventions?"* (yes → runs `schema_infer` on the existing notes, summarizes the patterns it found, and stores them in the `basicMemory` settings block — see §4.3, since path-scoped rules don't load yet — from the user's *real* conventions rather than imposed ones)
 6. *"I'll set up schemas for session checkpoints and decisions so I can find them precisely later — okay?"* (yes → writes `schemas/session.md`, `schemas/decision.md`, `schemas/task.md` into the primary project, skipping any that already exist; validation mode `warn`)
 7. *"Want me to enable the `basic-memory` output style now?"* (yes → adds `outputStyle: basic-memory` to settings)
 
-**Output:** writes `.claude/settings.json` (with prompt to commit or keep local) including any inferred conventions, writes the three schema notes, optionally creates the BM project, and drops the bootstrap sentinel so SessionStart stops nudging. Closes with: *"Done. I'll start using this on the next message. Try `/basic-memory:status` anytime to see what I'm tracking."*
+**Output:** writes `.claude/settings.json` (with prompt to commit or keep local) including any inferred conventions, writes the three schema notes, optionally creates the BM project, and drops the bootstrap sentinel so SessionStart stops nudging. Closes with: *"Done. I'll start using this on the next message. Try `/basic-memory:bm-status` anytime to see what I'm tracking."*
 
 **Why an interview, not a config form:** the interview is *adaptive* — it skips questions when context is obvious (e.g., it sees you're on cloud and on a team; doesn't ask about local), suggests reasonable defaults the user can accept with a single word, and produces a meaningful starting point in under 3 minutes. A config form makes the user own every decision.
 
@@ -431,10 +431,10 @@ Verified 2026-05-28 against Claude Code v2.1.153 and basic-memory 0.21.5, via a 
 |---|----------|---------|--------|--------------------|
 | **Q1** | Does SessionStart fire before/after auto-memory loads? Can the hook use auto-memory as input? | **uncertain** | Firing order vs `MEMORY.md` load is **not documented**. The often-cited "SessionStart fires before CLAUDE.md loads" phrasing isn't in current docs. What *is* certain: the hook can read `MEMORY.md` from disk anytime. | Don't assume auto-memory is in context at SessionStart. If the brief wants it, **read the file from disk** (§4.1). Don't build anything that depends on context-load ordering. |
 | **Q2** | Does PreCompact block synchronously? Timeout? Can it do multi-second/LLM work? | **confirmed** | Blocks synchronously; **600s default timeout** (configurable). MCP/LLM calls fit easily. On timeout the hook is killed and compaction proceeds. (To *block* compaction you'd return exit 2 / `decision:block` before the timeout — we don't.) | **Upgraded the design.** `preCompactCapture` default is now `"summarized"` (real LLM pass), not extractive (§4.2, §8). Write the note early, enrich after, in case of kill. |
-| **Q3** | Do plugin skills/commands appear in the `/` menu, and as what? | **confirmed** | Auto-discovered on install, but **always namespaced** as `/<plugin-name>:<skill>`. Can't be shortened. No sparse/subdir caveats. | Drop the `bm-` prefix; folders become `setup/`, `remember/`, `status/` → `/basic-memory:setup` etc. (§4.4). README must show the namespaced form. |
+| **Q3** | Do plugin skills/commands appear in the `/` menu, and as what? | **confirmed** | Auto-discovered on install, but **always namespaced** as `/<plugin-name>:<skill>`. Can't be shortened. No sparse/subdir caveats. | Drop the `bm-` prefix; folders become `setup/`, `remember/`, `status/` → `/basic-memory:bm-setup` etc. (§4.4). README must show the namespaced form. |
 | **Q4** | How does SessionStart inject context? Size limit? | **confirmed** | Plain stdout (added to context, no JSON needed) **or** JSON `hookSpecificOutput.additionalContext`. **10,000-char cap** per string; overflow spills to a file. Shell-profile echoes corrupt output. | Use plain stdout. Keep the brief well under 10k — cap each section's item count, prefer permalinks over previews. Guard against shell-profile noise (§4.1). |
 | **Q5** | Do path-scoped `rules/` with `paths:` load for BM files (incl. outside the git tree)? | **refuted** | Path-scoped rules **don't load automatically at all** — open bug [#16853](https://github.com/anthropics/claude-code/issues/16853) ("never worked"). Even when fixed they're repo-relative (won't match `~/basic-memory/`, [#25562](https://github.com/anthropics/claude-code/issues/25562)). | **Dropped `rules/` from the plugin.** Placement/format conventions move to the `basicMemory` settings block + SessionStart brief + output-style (§4.3). Revisit if the platform bug is fixed *and* out-of-tree globs are supported. |
-| **Q6** | Is there a run-on-install hook for bootstrap? | **confirmed** | No PostInstall/PreInstall lifecycle event ([#11240](https://github.com/anthropics/claude-code/issues/11240) closed as dup). Only SessionStart + explicit Setup. Bonus: SessionStart can return `{"reloadSkills": true}`. | Bootstrap can't auto-run. SessionStart detects first-run via a **sentinel file** and nudges the user to run `/basic-memory:setup` (§7). |
+| **Q6** | Is there a run-on-install hook for bootstrap? | **confirmed** | No PostInstall/PreInstall lifecycle event ([#11240](https://github.com/anthropics/claude-code/issues/11240) closed as dup). Only SessionStart + explicit Setup. Bonus: SessionStart can return `{"reloadSkills": true}`. | Bootstrap can't auto-run. SessionStart detects first-run via a **sentinel file** and nudges the user to run `/basic-memory:bm-setup` (§7). |
 | **Q7** | Does `search_notes` support `metadata_filters` + `after_date` in 0.21.5? Min version? | **confirmed** | Both present and working in 0.21.5. Full operator set: `$in`, `$gt/$gte/$lt/$lte`, `$between`, array-contains, equality, dot-notation (`schema.confidence`). On `search_notes` since **v0.18.1** (verify corrected the first pass's "v0.19.0"). | Structured recall is safe as a **baseline** — no fallback path needed for the 0.21.5 target. Pin a minimum `basic-memory >= 0.19.0` in prerequisites for margin. Use `tags`/`status` shorthands for common cases (§4.1). |
 | **Q8** | Is `schema_validate` cheap enough for PreCompact? Are the schema tools in 0.21.5? | **confirmed** | All three (`validate`/`infer`/`diff`) present since v0.19.0. `schema_validate(identifier=…)` = **cheap single-note**. `schema_validate(note_type=…)` = **batch, O(N)** with per-note file I/O. | PreCompact validates only the note it just wrote via the **identifier path** (§4.2). Batch validation + `schema_diff` go to the nightly hygiene routine (§13). |
 
@@ -495,7 +495,7 @@ eventual default is `"summarized"` — the LLM pass is the first enrich step.
   schemas / output-style / settings carry no version)
 
 **Carried into later phases (not part of the minimal cut):** the first-run *sentinel
-nudge* moves to Phase 3 (it should point at `/basic-memory:setup`, which doesn't exist
+nudge* moves to Phase 3 (it should point at `/basic-memory:bm-setup`, which doesn't exist
 yet); the multi-query parallel brief and the LLM-summarized PreCompact are the enrich
 steps.
 
@@ -517,10 +517,10 @@ bash-injection scripts — avoids shell-quoting fragility on arbitrary user text
 the `${CLAUDE_SKILL_DIR}` path uncertainty, and works regardless of the MCP server's
 tool-name prefix.
 
-- [x] Write `skills/remember/SKILL.md` → `/basic-memory:remember` — model-invocable
+- [x] Write `skills/bm-remember/SKILL.md` → `/basic-memory:bm-remember` — model-invocable
   ("remember that…"); writes verbatim to `rememberFolder` with a first-line title and
   `manual-capture` tag via `write_note`.
-- [x] Write `skills/status/SKILL.md` → `/basic-memory:status` — `disable-model-invocation`
+- [x] Write `skills/bm-status/SKILL.md` → `/basic-memory:bm-status` — `disable-model-invocation`
   (user-only diagnostic); reports project, folders, output-style, recent checkpoints,
   active-task count.
 - [x] Test slash-command discovery end-to-end — installed from a local marketplace and
@@ -534,7 +534,7 @@ tool-name prefix.
 Implemented as a **prose skill** (the interview is conversational; Claude runs it
 using its MCP tools). Verified the whole loop end-to-end against throwaway projects.
 
-- [x] Write `skills/setup/SKILL.md` → `/basic-memory:setup` — adaptive interview that
+- [x] Write `skills/bm-setup/SKILL.md` → `/basic-memory:bm-setup` — adaptive interview that
   maps the project, seeds schemas, optionally learns conventions, writes settings, and
   enables the output style. Model-invocable ("set up basic memory") + user-invocable.
 - [x] Wire `schema_infer`/`list_directory` into the bootstrap — the skill inspects the
@@ -546,7 +546,7 @@ using its MCP tools). Verified the whole loop end-to-end against throwaway proje
   `schema_validate` (`entity=Session/Decision/Task`). This corrects the earlier Phase 1
   finding — schema seeding is a plain content copy; the previous "must use
   `note_type`/`metadata`" conclusion was confounded by the enum YAML bug.
-- [x] First-run detection in SessionStart — nudges toward `/basic-memory:setup` when no
+- [x] First-run detection in SessionStart — nudges toward `/basic-memory:bm-setup` when no
   `basicMemory` config block exists (config presence is the sentinel; no separate file).
   The nudge survives a failed/empty task query. Verified across all three config states
   (no config → nudge; block without project → pin tip; project pinned → silent).
@@ -561,7 +561,7 @@ using its MCP tools). Verified the whole loop end-to-end against throwaway proje
 ### Phase 4: Team workspace support — ✅ DONE (2026-05-28)
 
 Grounded in a real two-workspace BM Cloud account (verified name-collision routing,
-OAuth cross-workspace reads). Pulled `/basic-memory:share` forward from future-work
+OAuth cross-workspace reads). Pulled `/basic-memory:bm-share` forward from future-work
 since team usage needs a safe write path.
 
 - [x] Extend SessionStart to read primary + shared projects **in parallel** —
@@ -569,7 +569,7 @@ since team usage needs a safe write path.
   decisions; each shared project: open decisions). Routes by qualified name or UUID,
   per-call timeout, capped at 6 shared projects, graceful on any failure. Verified
   against the real `my-team-2` workspace and with local fixtures.
-- [x] Add `/basic-memory:share` (`skills/share/`) — the deliberate personal→team
+- [x] Add `/basic-memory:bm-share` (`skills/bm-share/`) — the deliberate personal→team
   write: reads a note from `primaryProject`, confirms, and copies it to a configured
   `teamProjects` target's `promoteFolder` with `shared_from` attribution. Preserves
   the note's type so shared decisions stay findable in the team's structured recall.
@@ -611,11 +611,11 @@ Docs done 2026-05-28; dogfood is the remaining (human) step.
 ## 13. Future work (post-v0.4)
 
 - **Routines integration** — three routine templates (nightly hygiene, weekly digest, daily reflection). Separate design doc. The nightly hygiene routine is the natural home for `schema_diff` drift detection and the deferred LLM-summary pass over the day's extractive SessionNotes.
-- ~~**`/basic-memory:share`** — promote personal note → team project~~ — shipped in Phase 4.
+- ~~**`/basic-memory:bm-share`** — promote personal note → team project~~ — shipped in Phase 4.
 - **Team `autoWrite`** — opt-in for auto-capture (PreCompact/remember) to write to a
   team project, for teams that want shared session memory. Deferred from Phase 4 (§6.2).
-- **`/basic-memory:blame <sha>`** — code archaeology, builder add-on.
+- **`/basic-memory:bm-blame <sha>`** — code archaeology, builder add-on.
 - **Commit-hook integration** — PostToolUse on `Bash(git commit *)` writes CommitNote linking SHA to session's BM writes.
 - **Subagent memory bundling** — explore `memory: project|user` on dedicated BM subagents.
 - **Statusline** — small visible presence (active project, last write).
-- **`/basic-memory:promote`** — review auto-memory MEMORY.md, graduate observations into BM with proper schema.
+- **`/basic-memory:bm-promote`** — review auto-memory MEMORY.md, graduate observations into BM with proper schema.

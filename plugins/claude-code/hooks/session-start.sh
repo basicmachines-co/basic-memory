@@ -177,7 +177,7 @@ with ThreadPoolExecutor(max_workers=3 + MAX_SHARED) as pool:
 # The first-run nudge — shown until setup writes a basicMemory config block.
 setup_nudge = (
     "_Basic Memory isn't set up for this project yet. Run "
-    "`/basic-memory:setup` (~2 min) to configure session briefings and checkpoints._"
+    "`/basic-memory:bm-setup` (~2 min) to configure session briefings and checkpoints._"
 )
 
 # Trigger: every primary query failed (no default project, misnamed project,
@@ -193,7 +193,7 @@ if primary_tasks is None and primary_decisions is None and primary_sessions is N
         print(
             "# Basic Memory\n\n"
             f"_Couldn't read from `{proj}` — it may be misnamed or unreachable. "
-            "Run `/basic-memory:status` to check._"
+            "Run `/basic-memory:bm-status` to check._"
         )
     sys.exit(0)
 
@@ -246,7 +246,7 @@ if shared_sections:
     lines += [
         "",
         "_Shared-project context is read-only. Your captures stay in this project; "
-        "use `/basic-memory:share` to deliberately promote a note to the team._",
+        "use `/basic-memory:bm-share` to deliberately promote a note to the team._",
     ]
 if shared_capped:
     lines += ["", f"_(reading the first {MAX_SHARED} shared projects; more are configured.)_"]

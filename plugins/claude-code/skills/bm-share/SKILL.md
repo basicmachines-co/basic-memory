@@ -1,6 +1,6 @@
 ---
-name: share
-description: Promote a note from your personal Basic Memory project to a shared team project, with attribution. Use when the user says "share this with the team", "publish this decision", or runs /basic-memory:share. This is the deliberate way to write to a team workspace — auto-capture never does.
+name: bm-share
+description: Promote a note from your personal Basic Memory project to a shared team project, with attribution. Use when the user says "share this with the team", "publish this decision", or runs /basic-memory:bm-share. This is the deliberate way to write to a team workspace — auto-capture never does.
 argument-hint: <note title or permalink to share>
 ---
 
@@ -8,7 +8,7 @@ argument-hint: <note title or permalink to share>
 
 Copy a note from the personal/primary project into a configured **team project** so
 teammates can see it. This is the *only* path by which the plugin writes to a shared
-project — session checkpoints and `/basic-memory:remember` always stay personal.
+project — session checkpoints and `/basic-memory:bm-remember` always stay personal.
 
 ## Steps
 
@@ -19,7 +19,7 @@ project — session checkpoints and `/basic-memory:remember` always stay persona
    - `primaryProject` — the source project notes are read from.
 
    If `teamProjects` is empty, tell the user there's no share target configured and
-   suggest adding one (or running `/basic-memory:setup`), then stop. Don't invent a
+   suggest adding one (or running `/basic-memory:bm-setup`), then stop. Don't invent a
    target.
 
 2. **Find the source note.** From `$ARGUMENTS` (a title, permalink, or `memory://`

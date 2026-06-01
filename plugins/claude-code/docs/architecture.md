@@ -38,7 +38,7 @@ flowchart TB
         OS["output-style<br/>→ search-first / capture / cite reflexes"]
     end
     subgraph Deliberate["Deliberate (slash commands)"]
-        SK["/basic-memory:setup · remember · share · status"]
+        SK["/basic-memory:bm-setup · remember · share · status"]
     end
 
     Ambient --> MCP["Basic Memory MCP server"]
@@ -85,7 +85,7 @@ Key properties:
   is ~one query, not the sum.
 - **Best-effort.** No Basic Memory, no config, or a slow cloud read never blocks or
   errors the session — the worst case is a missing or partial brief.
-- **First-run aware.** With no config it nudges toward `/basic-memory:setup`.
+- **First-run aware.** With no config it nudges toward `/basic-memory:bm-setup`.
 
 ## PreCompact — the checkpoint
 
@@ -145,7 +145,7 @@ flowchart TB
 
     T1 -- "read-only<br/>(SessionStart)" --> P
     T2 -- "read-only<br/>(SessionStart)" --> P
-    P -- "/basic-memory:share<br/>(deliberate, confirmed)" --> T2
+    P -- "/basic-memory:bm-share<br/>(deliberate, confirmed)" --> T2
 
     note["Auto-capture (checkpoints, /remember)<br/>writes ONLY to primaryProject"]
 ```

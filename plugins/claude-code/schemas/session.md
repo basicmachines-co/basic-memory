@@ -25,7 +25,7 @@ settings:
 # Session
 
 A **SessionNote** is a resume checkpoint written by the Basic Memory plugin's
-PreCompact hook (and, later, the `/basic-memory:handoff` command) right before
+PreCompact hook (and, later, the `/basic-memory:bm-handoff` command) right before
 Claude Code compacts the context window. It records what the session was doing
 so the next session can pick up where this one left off.
 

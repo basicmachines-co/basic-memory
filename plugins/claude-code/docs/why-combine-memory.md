@@ -72,18 +72,18 @@ often on a **team**.
 > team's recent open decisions. You're oriented before you ask a single question.
 
 **Wins:** no context bleeding between projects; team memory that compounds across
-people; sharing a decision to the team in one gesture (`/basic-memory:share`).
+people; sharing a decision to the team in one gesture (`/basic-memory:bm-share`).
 
 ## What you actually get
 
-Once installed and set up (`/basic-memory:setup`):
+Once installed and set up (`/basic-memory:bm-setup`):
 
 - **Session briefings** — start each session knowing your active tasks, open decisions,
   and (if on a team) recent team context.
 - **Checkpoints that survive compaction** — long sessions don't lose their thread.
 - **Capture reflexes** — Claude searches before answering recall questions and writes
   down real decisions as it goes, citing permalinks.
-- **Quick capture** — `/basic-memory:remember` for a fast note without breaking flow.
+- **Quick capture** — `/basic-memory:bm-remember` for a fast note without breaking flow.
 - **Team memory** — read across shared projects; publish back deliberately.
 
 All of it in plain Markdown files you own, in projects you control — local, cloud, or

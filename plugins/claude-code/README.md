@@ -38,10 +38,10 @@ Plugin skills are namespaced under the plugin name:
 
 | Command | What it does |
 |---------|--------------|
-| `/basic-memory:setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, installs the shared `memory-*` skills, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
-| `/basic-memory:remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
-| `/basic-memory:share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
-| `/basic-memory:status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, output-style state, recent session checkpoints, and active-task count. |
+| `/basic-memory:bm-setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, installs the shared `memory-*` skills, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
+| `/basic-memory:bm-remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
+| `/basic-memory:bm-share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
+| `/basic-memory:bm-status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, output-style state, recent session checkpoints, and active-task count. |
 
 ## Requirements
 
@@ -61,7 +61,7 @@ claude plugin install basic-memory@basicmachines-co
 
 ## Configuration
 
-The fastest path is **`/basic-memory:setup`** — a ~2-minute interview that writes
+The fastest path is **`/basic-memory:bm-setup`** — a ~2-minute interview that writes
 the config, seeds the schemas, and turns on the capture reflexes. The SessionStart
 hook nudges you toward it on first run.
 
@@ -103,14 +103,14 @@ ever auto-writing to the shared graph.**
 - **Read across** — add team projects to `secondaryProjects`. SessionStart pulls their
   open decisions into your brief (in parallel, read-only), so you start oriented on
   what the team has decided.
-- **Capture stays personal** — session checkpoints and `/basic-memory:remember` only
+- **Capture stays personal** — session checkpoints and `/basic-memory:bm-remember` only
   ever write to your `primaryProject`. Nothing lands in a team project automatically.
-- **Share deliberately** — `/basic-memory:share` copies a chosen note into a
+- **Share deliberately** — `/basic-memory:bm-share` copies a chosen note into a
   `teamProjects` target (with attribution and a confirmation step). That's the only
   path to a shared write.
 
 Because project names repeat across workspaces, team refs must be **workspace-qualified**
-(`my-team/notes`) or `external_id` UUIDs — `/basic-memory:setup` fills these in for you
+(`my-team/notes`) or `external_id` UUIDs — `/basic-memory:bm-setup` fills these in for you
 from `list_workspaces`.
 
 ## Documentation

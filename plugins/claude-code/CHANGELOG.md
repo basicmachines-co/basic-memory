@@ -15,12 +15,12 @@ Memory's durable graph**, rather than a memory layer of its own. See
   (`my-team/notes`) or `external_id` UUIDs, since project names collide across
   workspaces. Reads route over the user's OAuth session; capture **never** writes to a
   shared project.
-- **`/basic-memory:share <note>`** (`skills/share/`) — the deliberate personal→team
+- **`/basic-memory:bm-share <note>`** (`skills/bm-share/`) — the deliberate personal→team
   write: copies a note from the primary project into a configured `teamProjects`
   target's `promoteFolder`, with `shared_from` attribution and a confirmation step.
   Preserves the note's type so shared decisions stay findable in the team's structured
   recall. (Phase 4)
-- **`/basic-memory:setup`** (`skills/setup/`) — a short guided interview that
+- **`/basic-memory:bm-setup`** (`skills/bm-setup/`) — a short guided interview that
   configures the project for the plugin: maps it to a Basic Memory project (picking
   an existing one or creating a new one), seeds the `session`/`decision`/`task`
   schemas into the project, installs the shared `memory-*` skills via
@@ -30,11 +30,11 @@ Memory's durable graph**, rather than a memory layer of its own. See
   capture reflexes. Writes the `basicMemory` block to
   `.claude/settings.json` (or `settings.local.json`). The SessionStart hook nudges
   toward this on first run; running it (writing the config) stops the nudge. (Phase 3)
-- **`/basic-memory:remember <text>`** (`skills/remember/`) — quick deliberate
+- **`/basic-memory:bm-remember <text>`** (`skills/bm-remember/`) — quick deliberate
   capture. Writes the text verbatim to the `rememberFolder` (default `bm-remember`)
   with a first-line title and a `manual-capture` tag, via the connected Basic Memory
   MCP server. Also fires when the user says "remember that…". (Phase 2)
-- **`/basic-memory:status`** (`skills/status/`) — diagnostic that reports the active
+- **`/basic-memory:bm-status`** (`skills/bm-status/`) — diagnostic that reports the active
   project, capture/remember folders, output-style state, recent session checkpoints,
   and active-task count. User-invoked only (`disable-model-invocation`). (Phase 2)
 
@@ -62,7 +62,7 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Changed
 
-- **SessionStart hook now nudges toward `/basic-memory:setup` on first run** — when
+- **SessionStart hook now nudges toward `/basic-memory:bm-setup` on first run** — when
   no `basicMemory` config block is present in either settings file. The nudge
   survives a failed/empty task query (so a brand-new user with no project yet still
   sees it), and stops once setup writes the config. (Phase 3)
@@ -84,7 +84,7 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Notes
 
-- Slash commands shipped by later phases (`/basic-memory:setup`,
+- Slash commands shipped by later phases (`/basic-memory:bm-setup`,
   `:remember`, `:status`) will be **plugin-namespaced** — Claude Code namespaces
   all plugin skills as `/<plugin>:<skill>`.
 - Requires `basic-memory >= 0.19.0` (for `metadata_filters` / structured recall).

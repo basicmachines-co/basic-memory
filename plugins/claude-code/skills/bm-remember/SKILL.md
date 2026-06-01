@@ -1,6 +1,6 @@
 ---
-name: remember
-description: Quickly capture a thought, fact, or reminder into Basic Memory as a lightweight note. Use when the user says "remember that…", "note this", "save this to memory", or runs /basic-memory:remember. For quick deliberate capture — not full decision or session records.
+name: bm-remember
+description: Quickly capture a thought, fact, or reminder into Basic Memory as a lightweight note. Use when the user says "remember that…", "note this", "save this to memory", or runs /basic-memory:bm-remember. For quick deliberate capture — not full decision or session records.
 argument-hint: <text to remember>
 ---
 

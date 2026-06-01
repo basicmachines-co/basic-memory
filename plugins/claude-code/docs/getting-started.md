@@ -37,7 +37,7 @@ SessionStart, PreCompact**.
 In a project (repo) where you want memory, run:
 
 ```
-/basic-memory:setup
+/basic-memory:bm-setup
 ```
 
 It's a short interview. It will:
@@ -57,7 +57,7 @@ It's a short interview. It will:
 When it finishes, run:
 
 ```
-/basic-memory:status
+/basic-memory:bm-status
 ```
 
 to see exactly what the plugin is tracking.
@@ -67,7 +67,7 @@ to see exactly what the plugin is tracking.
 1. **Capture a decision.** In normal conversation, make a decision — e.g. *"Let's use
    Postgres, not SQLite, because we need concurrent writers."* With the output style on,
    Claude writes a `type: decision` note and tells you the permalink.
-2. **Quick-capture something.** `/basic-memory:remember switch the staging job to the
+2. **Quick-capture something.** `/basic-memory:bm-remember switch the staging job to the
    new image after the rebase lands` → saved to `bm-remember/`.
 3. **Start a fresh session.** Open a new Claude Code session in the same project. The
    **SessionStart brief** appears first thing, showing your active tasks and the open
@@ -83,7 +83,7 @@ graph accumulates.
 On Basic Memory Cloud with a team workspace, you can read team context into your brief
 and publish back deliberately.
 
-Re-run `/basic-memory:setup` (or edit `.claude/settings.json`). Because project names
+Re-run `/basic-memory:bm-setup` (or edit `.claude/settings.json`). Because project names
 repeat across workspaces, team projects use **workspace-qualified names**
 (`my-team/notes`) or `external_id` UUIDs — setup finds these for you via
 `list_workspaces`.
@@ -102,7 +102,7 @@ repeat across workspaces, team projects use **workspace-qualified names**
 Now:
 - SessionStart folds the team's **open decisions** into your brief (read-only).
 - Your captures still go **only** to `primaryProject` — never to the team.
-- `/basic-memory:share <note>` publishes a chosen note to `my-team/notes/shared`, with
+- `/basic-memory:bm-share <note>` publishes a chosen note to `my-team/notes/shared`, with
   attribution and a confirmation step.
 
 Tip: a team brief is only as rich as the team's typed notes. Share an existing decision
@@ -116,9 +116,9 @@ Everything is in the `basicMemory` block of `.claude/settings.json`. Common knob
 |-----|---------|--------------|
 | `primaryProject` | (default project) | where briefs read from and captures write to |
 | `secondaryProjects` | `[]` | team/shared projects read for recall (read-only) |
-| `teamProjects` | `{}` | share targets for `/basic-memory:share` |
+| `teamProjects` | `{}` | share targets for `/basic-memory:bm-share` |
 | `captureFolder` | `sessions` | folder for PreCompact checkpoints |
-| `rememberFolder` | `bm-remember` | folder for `/basic-memory:remember` |
+| `rememberFolder` | `bm-remember` | folder for `/basic-memory:bm-remember` |
 | `recallTimeframe` | `3d` | recency window for the brief |
 | `preCompactCapture` | `extractive` | how checkpoints are produced |
 
@@ -126,7 +126,7 @@ See [settings.example.json](../settings.example.json) for the full shape.
 
 ## Troubleshooting
 
-- **No brief at session start?** Confirm Basic Memory is connected (`/basic-memory:status`).
+- **No brief at session start?** Confirm Basic Memory is connected (`/basic-memory:bm-status`).
   The hooks are silent if `basic-memory` isn't on PATH.
 - **Checkpoints aren't being written?** A `primaryProject` must be set — the PreCompact
   hook never writes to an un-pinned/default project on its own.

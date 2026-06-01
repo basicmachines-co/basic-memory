@@ -27,7 +27,7 @@ REQUIRED_HOOK_SCRIPTS = ("hooks/session-start.sh", "hooks/pre-compact.sh")
 # project at bootstrap). Each must be a parseable schema note.
 REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
 # Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
-REQUIRED_SKILLS = ("setup", "remember", "status", "share")
+REQUIRED_SKILLS = ("bm-setup", "bm-remember", "bm-status", "bm-share")
 
 
 def read_json(path: Path) -> dict:

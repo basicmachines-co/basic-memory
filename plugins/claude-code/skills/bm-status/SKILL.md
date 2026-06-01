@@ -1,5 +1,5 @@
 ---
-name: status
+name: bm-status
 description: Show the Basic Memory plugin's current state for this project — active project, capture folders, output style, recent session checkpoints, and whether Basic Memory is reachable.
 disable-model-invocation: true
 ---
@@ -19,7 +19,7 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    if present) and report:
    - From the `basicMemory` block: `primaryProject` (or note none is pinned — the
      default project is used), `secondaryProjects` (team/shared read sources),
-     `teamProjects` (share targets for `/basic-memory:share`), `captureFolder`
+     `teamProjects` (share targets for `/basic-memory:bm-share`), `captureFolder`
      (default `sessions`), `rememberFolder` (default `bm-remember`), and
      `preCompactCapture` mode (default `extractive`).
    - From the **root** settings object (not `basicMemory`): whether `outputStyle` is

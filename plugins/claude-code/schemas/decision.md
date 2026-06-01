@@ -24,7 +24,7 @@ settings:
 A **DecisionNote** is a durable record of a real choice — one with alternatives
 and a rationale, not a passing preference. The Basic Memory plugin's output-style
 prompts Claude to capture these inline as decisions are made, and the future
-`/basic-memory:decide` command captures them explicitly.
+`/basic-memory:bm-decide` command captures them explicitly.
 
 Decisions are found by structured recall:
 `search_notes(metadata_filters={"type": "decision", "status": "open"})`.

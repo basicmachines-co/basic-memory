@@ -1,6 +1,6 @@
 ---
-name: setup
-description: Set up the Basic Memory plugin for this project — a short guided interview that configures the project mapping, seeds note schemas, learns or suggests placement conventions, and enables capture reflexes. Use when the user runs /basic-memory:setup, says "set up basic memory", or asks to configure/bootstrap the plugin.
+name: bm-setup
+description: Set up the Basic Memory plugin for this project — a short guided interview that configures the project mapping, seeds note schemas, learns or suggests placement conventions, and enables capture reflexes. Use when the user runs /basic-memory:bm-setup, says "set up basic memory", or asks to configure/bootstrap the plugin.
 argument-hint: (no arguments — runs an interactive interview)
 ---
 
@@ -71,7 +71,7 @@ Ask only what you can't infer. Cover:
      six, order the most relevant first and tell them the rest are configured but
      not read each session.
    - **Share target** (optional): if the user wants a place to *publish* notes to the
-     team via `/basic-memory:share`, add it to `teamProjects` as
+     team via `/basic-memory:bm-share`, add it to `teamProjects` as
      `"<qualified-name>": { "promoteFolder": "shared" }`. Sharing is always a manual
      gesture — auto-capture never writes to a team project.
 
@@ -102,7 +102,7 @@ Ask only what you can't infer. Cover:
 6. **How active should I be? (output style)** "Want me to proactively capture —
    search the graph before recalling, write material decisions as typed notes, and
    cite permalinks? Or keep it quiet (just the session brief, the PreCompact
-   checkpoint, and `/basic-memory:remember` on demand)?" Enabling it sets
+   checkpoint, and `/basic-memory:bm-remember` on demand)?" Enabling it sets
    `outputStyle: "basic-memory"`. Default to enabled; leave it off for a recall-only,
    low-noise setup. (This is the single knob for how proactive the assistant is —
    the hooks always run regardless.)
@@ -119,7 +119,7 @@ Ask only what you can't infer. Cover:
 ### 1. Seed the schemas
 The plugin ships seed schemas at `<plugin>/schemas/` — that's **two directories up
 from this skill's directory, then `schemas/`** (this skill is at
-`<plugin>/skills/setup/`). Read `session.md`, `decision.md`, and `task.md` there.
+`<plugin>/skills/bm-setup/`). Read `session.md`, `decision.md`, and `task.md` there.
 
 For each one:
 - Check whether the chosen project already has a schema for that type
@@ -222,5 +222,5 @@ Then handle activation based on the output style:
   proactive-capture reflexes wait for the restart.
 - **Output style off** → no restart needed; the hooks already run.
 
-End with: *"Done — I'll use this from the next message. Run `/basic-memory:status`
+End with: *"Done — I'll use this from the next message. Run `/basic-memory:bm-status`
 anytime to see what I'm tracking."*
