@@ -1,11 +1,14 @@
 """Tests for V2 knowledge graph API routes (ID-based endpoints)."""
 
+from datetime import datetime, timezone
 import uuid
 
 import pytest
 from httpx import AsyncClient
 
-from basic_memory.models import Project
+from basic_memory.models import Entity as EntityModel, Project
+from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
@@ -40,8 +43,53 @@ async def test_resolve_identifier_by_permalink(
     assert response.status_code == 200
     resolved = EntityResolveResponse.model_validate(response.json())
     assert resolved.entity_id == entity_id
+    assert resolved.project_external_id == test_project.external_id
     assert resolved.permalink == created_entity.permalink
     assert resolved.resolution_method == "permalink"
+
+
+@pytest.mark.asyncio
+async def test_resolve_identifier_returns_target_project_external_id_for_cross_project_link(
+    client: AsyncClient,
+    session_maker,
+    tmp_path,
+    v2_project_url,
+):
+    """Cross-project resolves should expose the owning project external ID."""
+    project_repository = ProjectRepository(session_maker)
+    other_project = await project_repository.create(
+        {
+            "name": "other-project",
+            "description": "Secondary project",
+            "path": str(tmp_path / "other-project"),
+            "is_active": True,
+            "is_default": False,
+        }
+    )
+    now = datetime.now(timezone.utc)
+    other_entity_repository = EntityRepository(session_maker, project_id=other_project.id)
+    target = await other_entity_repository.add(
+        EntityModel(
+            title="Cross Project Note",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="docs/Cross Project Note.md",
+            permalink=f"{other_project.permalink}/docs/cross-project-note",
+            created_at=now,
+            updated_at=now,
+            project_id=other_project.id,
+        )
+    )
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/resolve",
+        json={"identifier": "other-project::Cross Project Note", "strict": True},
+    )
+
+    assert response.status_code == 200
+    resolved = EntityResolveResponse.model_validate(response.json())
+    assert resolved.entity_id == target.id
+    assert resolved.project_external_id == other_project.external_id
 
 
 @pytest.mark.asyncio

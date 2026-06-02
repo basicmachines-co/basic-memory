@@ -18,6 +18,7 @@ from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
     LinkResolverV2ExternalDep,
+    ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
     AppConfigDep,
     EntityRepositoryV2ExternalDep,
@@ -152,6 +153,7 @@ async def resolve_identifier(
     data: EntityResolveRequest,
     link_resolver: LinkResolverV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    project_repository: ProjectRepositoryDep,
 ) -> EntityResolveResponse:
     """Resolve a string identifier (external_id, permalink, title, or path) to entity info.
 
@@ -175,6 +177,7 @@ async def resolve_identifier(
         {
             "external_id": "550e8400-e29b-41d4-a716-446655440000",
             "entity_id": 123,
+            "project_external_id": "4b9b7a10-7a63-48d2-ae3f-0d6a2c69313f",
             "permalink": "specs/search",
             "file_path": "specs/search.md",
             "title": "Search Specification",
@@ -209,9 +212,17 @@ async def resolve_identifier(
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity not found: '{data.identifier}'")
 
+        owner_project = await project_repository.get_by_id(entity.project_id)
+        if not owner_project:  # pragma: no cover
+            raise HTTPException(
+                status_code=500,
+                detail="Resolved entity references an unknown project",
+            )
+
         result = EntityResolveResponse(
             external_id=entity.external_id,
             entity_id=entity.id,
+            project_external_id=owner_project.external_id,
             permalink=entity.permalink,
             file_path=entity.file_path,
             title=entity.title,

@@ -45,6 +45,7 @@ class EntityResolveResponse(BaseModel):
 
     external_id: str = Field(..., description="External UUID (primary API identifier)")
     entity_id: int = Field(..., description="Numeric entity ID (internal identifier)")
+    project_external_id: str = Field(..., description="External UUID of the owning project")
     permalink: Optional[str] = Field(None, description="Entity permalink")
     file_path: str = Field(..., description="Relative file path")
     title: str = Field(..., description="Entity title")
