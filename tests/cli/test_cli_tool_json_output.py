@@ -321,6 +321,33 @@ def test_delete_note_error_response(mock_mcp_delete: AsyncMock) -> None:
 @patch(
     "basic_memory.cli.commands.tool.mcp_delete_note",
     new_callable=AsyncMock,
+    return_value={
+        "deleted": False,
+        "is_directory": True,
+        "identifier": "notes/archive",
+        "total_files": 3,
+        "successful_deletes": 2,
+        "failed_deletes": 1,
+        "errors": [{"path": "notes/archive/locked.md", "error": "permission denied"}],
+    },
+)
+def test_delete_note_directory_partial_failure_exits_nonzero(
+    mock_mcp_delete: AsyncMock,
+) -> None:
+    """delete-note --is-directory exits 1 when any directory file remains undeleted."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "notes/archive", "--is-directory"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: Directory delete incomplete: 1 file(s) failed" in result.output
+    assert mock_mcp_delete.call_args.kwargs["output_format"] == "json"
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_delete_note",
+    new_callable=AsyncMock,
     return_value=DELETE_NOTE_RESULT,
 )
 def test_delete_note_project_id_passthrough(mock_mcp_delete: AsyncMock) -> None:

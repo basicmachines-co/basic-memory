@@ -18,6 +18,7 @@ from basic_memory.mcp.tools import (
     recent_activity,
     write_note,
 )
+from basic_memory.schemas.response import DirectoryDeleteError, DirectoryDeleteResult
 
 
 @pytest.mark.asyncio
@@ -324,6 +325,40 @@ async def test_delete_directory_json_mode_returns_structured_error_on_failure(
     assert json_delete["is_directory"] is True
     assert json_delete["identifier"] == "mode-tests"
     assert "simulated directory delete failure" in json_delete["error"]
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_json_mode_reports_partial_delete_failure(
+    app, test_project, monkeypatch
+):
+    async def mock_delete_directory(self, directory: str):
+        return DirectoryDeleteResult(
+            total_files=2,
+            successful_deletes=1,
+            failed_deletes=1,
+            deleted_files=["mode-tests/deleted.md"],
+            errors=[
+                DirectoryDeleteError(
+                    path="mode-tests/locked.md",
+                    error="permission denied",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(KnowledgeClient, "delete_directory", mock_delete_directory)
+
+    json_delete = await delete_note(
+        identifier="mode-tests",
+        is_directory=True,
+        project=test_project.name,
+        output_format="json",
+    )
+    assert isinstance(json_delete, dict)
+    assert json_delete["deleted"] is False
+    assert json_delete["failed_deletes"] == 1
+    assert json_delete["deleted_files"] == ["mode-tests/deleted.md"]
+    assert json_delete["errors"] == [{"path": "mode-tests/locked.md", "error": "permission denied"}]
+    assert "Directory delete incomplete" in json_delete["error"]
 
 
 @pytest.mark.asyncio

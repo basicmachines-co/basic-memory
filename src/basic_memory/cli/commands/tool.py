@@ -41,6 +41,26 @@ def _print_json(result: Any) -> None:
     print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
 
 
+def _delete_note_failure_message(result: dict[str, Any]) -> str | None:
+    """Return the CLI failure message for delete-note JSON results, if any."""
+    error = result.get("error")
+    if error:
+        return str(error)
+
+    failed_deletes = result.get("failed_deletes")
+    # Trigger: directory deletion can partially fail without raising from the service.
+    # Why: cleanup scripts need a non-zero exit when files remain undeleted.
+    # Outcome: the CLI fails even if older MCP JSON did not include an error field.
+    if (
+        result.get("is_directory") is True
+        and isinstance(failed_deletes, int)
+        and failed_deletes > 0
+    ):
+        return f"Directory delete incomplete: {failed_deletes} file(s) failed"
+
+    return None
+
+
 # --- Commands ---
 
 
@@ -222,9 +242,11 @@ def delete_note(
                 )
             )
 
-        if isinstance(result, dict) and result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
-            raise typer.Exit(1)
+        if isinstance(result, dict):
+            failure_message = _delete_note_failure_message(result)
+            if failure_message:
+                typer.echo(f"Error: {failure_message}", err=True)
+                raise typer.Exit(1)
 
         _print_json(result)
     except ValueError as e:
