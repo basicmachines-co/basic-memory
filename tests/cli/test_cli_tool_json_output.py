@@ -39,6 +39,21 @@ EDIT_NOTE_RESULT = {
     "operation": "append",
 }
 
+DELETE_NOTE_RESULT = {
+    "deleted": True,
+    "is_directory": False,
+    "title": "Test Note",
+    "permalink": "notes/test-note",
+    "file_path": "notes/Test Note.md",
+}
+
+DELETE_DIRECTORY_RESULT = {
+    "deleted": True,
+    "is_directory": True,
+    "directory": "notes/archive",
+    "deleted_count": 3,
+}
+
 BUILD_CONTEXT_RESULT = {
     "results": [],
     "metadata": {"uri": "test/topic", "depth": 1},
@@ -213,6 +228,111 @@ def test_read_note_include_frontmatter(mock_mcp_read):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert mock_mcp_read.call_args.kwargs["include_frontmatter"] is True
+
+
+# --- delete-note ---
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_delete_note",
+    new_callable=AsyncMock,
+    return_value=DELETE_NOTE_RESULT,
+)
+def test_delete_note_json_output(mock_mcp_delete: AsyncMock) -> None:
+    """delete-note outputs valid JSON from MCP tool."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "test-note"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["deleted"] is True
+    assert data["permalink"] == "notes/test-note"
+    mock_mcp_delete.assert_called_once()
+    assert mock_mcp_delete.call_args.kwargs["output_format"] == "json"
+    assert mock_mcp_delete.call_args.kwargs["is_directory"] is False
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_delete_note",
+    new_callable=AsyncMock,
+    return_value=DELETE_DIRECTORY_RESULT,
+)
+def test_delete_note_directory_flag(mock_mcp_delete: AsyncMock) -> None:
+    """delete-note --is-directory passes directory mode to MCP."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "notes/archive", "--is-directory"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["is_directory"] is True
+    assert mock_mcp_delete.call_args.kwargs["is_directory"] is True
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_delete_note",
+    new_callable=AsyncMock,
+    return_value={
+        "deleted": False,
+        "is_directory": False,
+        "identifier": "missing-note",
+        "error": None,
+    },
+)
+def test_delete_note_not_found_outputs_json(mock_mcp_delete: AsyncMock) -> None:
+    """delete-note treats not-found JSON without an error as a successful command."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "missing-note"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["deleted"] is False
+    assert data["identifier"] == "missing-note"
+    assert mock_mcp_delete.call_args.kwargs["output_format"] == "json"
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_delete_note",
+    new_callable=AsyncMock,
+    return_value={
+        "deleted": False,
+        "is_directory": False,
+        "identifier": "test-note",
+        "error": "Delete failed",
+    },
+)
+def test_delete_note_error_response(mock_mcp_delete: AsyncMock) -> None:
+    """delete-note exits with code 1 when MCP tool returns an error field."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "test-note"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: Delete failed" in result.output
+    assert mock_mcp_delete.call_args.kwargs["output_format"] == "json"
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_delete_note",
+    new_callable=AsyncMock,
+    return_value=DELETE_NOTE_RESULT,
+)
+def test_delete_note_project_id_passthrough(mock_mcp_delete: AsyncMock) -> None:
+    """--project-id forwards to the MCP tool's project_id parameter."""
+    uuid = "11111111-1111-1111-1111-111111111111"
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "test-note", "--project-id", uuid],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert mock_mcp_delete.call_args.kwargs["project_id"] == uuid
 
 
 # --- edit-note ---

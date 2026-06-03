@@ -15,6 +15,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.mcp.tools import build_context as mcp_build_context
+from basic_memory.mcp.tools import delete_note as mcp_delete_note
 from basic_memory.mcp.tools import edit_note as mcp_edit_note
 from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
 from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
@@ -174,6 +175,64 @@ def read_note(
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during read_note: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("delete-note")
+def delete_note(
+    identifier: str,
+    is_directory: bool = typer.Option(
+        False, "--is-directory", help="Delete a directory instead of a single note"
+    ),
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
+        ),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+) -> None:
+    """Delete a note or directory from the knowledge base.
+
+    Examples:
+
+    bm tool delete-note notes/old-draft
+    bm tool delete-note docs/archive --is-directory
+    """
+    try:
+        validate_routing_flags(local, cloud)
+
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_delete_note(
+                    identifier=identifier,
+                    is_directory=is_directory,
+                    project=project,
+                    project_id=project_id,
+                    output_format="json",
+                )
+            )
+
+        if isinstance(result, dict) and result.get("error"):
+            typer.echo(f"Error: {result['error']}", err=True)
+            raise typer.Exit(1)
+
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during delete_note: {e}", err=True)
             raise typer.Exit(1)
         raise
 
