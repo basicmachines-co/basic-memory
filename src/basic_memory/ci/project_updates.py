@@ -430,22 +430,23 @@ def _extend_list_section(sections: list[str], title: str, values: list[str]) -> 
 
 def render_agent_synthesis_schema() -> str:
     """Render the optional Codex structured-output schema guardrail."""
+    properties = {
+        "summary": {"type": "string", "minLength": 1},
+        "why_it_matters": {"type": "string", "minLength": 1},
+        "user_facing_changes": {"type": "array", "items": {"type": "string"}},
+        "internal_changes": {"type": "array", "items": {"type": "string"}},
+        "verification": {"type": "array", "items": {"type": "string"}},
+        "follow_ups": {"type": "array", "items": {"type": "string"}},
+        "decision_candidates": {"type": "array", "items": {"type": "string"}},
+        "task_candidates": {"type": "array", "items": {"type": "string"}},
+    }
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "AgentSynthesis",
         "type": "object",
         "additionalProperties": False,
-        "required": ["summary", "why_it_matters"],
-        "properties": {
-            "summary": {"type": "string", "minLength": 1},
-            "why_it_matters": {"type": "string", "minLength": 1},
-            "user_facing_changes": {"type": "array", "items": {"type": "string"}},
-            "internal_changes": {"type": "array", "items": {"type": "string"}},
-            "verification": {"type": "array", "items": {"type": "string"}},
-            "follow_ups": {"type": "array", "items": {"type": "string"}},
-            "decision_candidates": {"type": "array", "items": {"type": "string"}},
-            "task_candidates": {"type": "array", "items": {"type": "string"}},
-        },
+        "required": list(properties),
+        "properties": properties,
     }
     return json.dumps(schema, indent=2, sort_keys=True) + "\n"
 

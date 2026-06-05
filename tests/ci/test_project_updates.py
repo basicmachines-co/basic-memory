@@ -423,6 +423,7 @@ def test_render_agent_synthesis_schema_is_ci_guardrail_not_domain_schema() -> No
     assert schema["title"] == "AgentSynthesis"
     assert "summary" in schema["required"]
     assert "why_it_matters" in schema["required"]
+    assert set(schema["required"]) == set(schema["properties"])
     assert "project_update" not in json.dumps(schema)
 
 
