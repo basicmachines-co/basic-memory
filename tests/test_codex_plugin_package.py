@@ -25,13 +25,25 @@ def test_codex_plugin_mcp_config_is_tracked_and_not_ignored() -> None:
 
 def test_codex_plugin_hooks_use_clear_portable_runtime_patterns() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    pre_compact = (repo_root / "plugins/codex/hooks/pre-compact.sh").read_text(encoding="utf-8")
-    session_start = (repo_root / "plugins/codex/hooks/session-start.sh").read_text(encoding="utf-8")
+    pre_compact_sh = (repo_root / "plugins/codex/hooks/pre-compact.sh").read_text(encoding="utf-8")
+    pre_compact_py = (repo_root / "plugins/codex/hooks/pre-compact.py").read_text(encoding="utf-8")
+    session_start_sh = (repo_root / "plugins/codex/hooks/session-start.sh").read_text(
+        encoding="utf-8"
+    )
+    session_start_py = (repo_root / "plugins/codex/hooks/session-start.py").read_text(
+        encoding="utf-8"
+    )
 
-    assert "from datetime import datetime, timezone" in pre_compact
-    assert "datetime.now(timezone.utc)" in pre_compact
-    assert 'now.isoformat(timespec="seconds")' in pre_compact
-    assert "if r not in codex_rows" not in session_start
+    assert "python3 <<'PY'" not in pre_compact_sh
+    assert "python3 <<'PY'" not in session_start_sh
+    assert 'uv run --script "$script_dir/pre-compact.py"' in pre_compact_sh
+    assert 'uv run --script "$script_dir/session-start.py"' in session_start_sh
+    assert pre_compact_py.startswith("#!/usr/bin/env -S uv run --script\n")
+    assert session_start_py.startswith("#!/usr/bin/env -S uv run --script\n")
+    assert "from datetime import datetime, timezone" in pre_compact_py
+    assert "datetime.now(timezone.utc)" in pre_compact_py
+    assert 'now.isoformat(timespec="seconds")' in pre_compact_py
+    assert "if r not in codex_rows" not in session_start_py
 
 
 def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:

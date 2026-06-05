@@ -23,7 +23,12 @@ REQUIRED_SKILLS = (
 )
 REQUIRED_SCHEMAS = ("codex-session.md", "decision.md", "task.md")
 REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
-REQUIRED_HOOK_SCRIPTS = ("hooks/session-start.sh", "hooks/pre-compact.sh")
+REQUIRED_HOOK_SCRIPTS = (
+    "hooks/session-start.sh",
+    "hooks/session-start.py",
+    "hooks/pre-compact.sh",
+    "hooks/pre-compact.py",
+)
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {
     "composerIcon": "assets/app-icon.png",

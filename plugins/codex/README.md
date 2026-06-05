@@ -29,8 +29,10 @@ verification, decision capture, and resumable checkpoints.
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
 | `hooks/hooks.json` | SessionStart and PreCompact hook registration |
-| `hooks/session-start.sh` | Injects a compact memory brief at thread start |
-| `hooks/pre-compact.sh` | Writes an automatic Codex checkpoint before compaction |
+| `hooks/session-start.sh` | Launches the SessionStart uv script |
+| `hooks/session-start.py` | Injects a compact memory brief at thread start |
+| `hooks/pre-compact.sh` | Launches the PreCompact uv script |
+| `hooks/pre-compact.py` | Writes an automatic Codex checkpoint before compaction |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
