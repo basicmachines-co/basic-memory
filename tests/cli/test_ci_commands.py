@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from basic_memory.cli.commands.ci import seed_project_update_schemas
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
@@ -99,7 +100,44 @@ def test_setup_writes_workflow_config_and_prompt(
         project="team-memory",
         project_id=None,
         workspace=None,
+        refresh=False,
     )
+
+
+@patch("basic_memory.cli.commands.ci.seed_project_update_schemas", new_callable=AsyncMock)
+def test_setup_refreshes_or_updates_existing_schema_notes_when_requested(
+    mock_seed: AsyncMock,
+    tmp_path: Path,
+) -> None:
+    for flag in ("--refresh", "--update-schemas"):
+        repo_path = tmp_path / flag.removeprefix("--")
+        repo_path.mkdir()
+        _init_github_repo(repo_path)
+
+        result = runner.invoke(
+            cli_app,
+            [
+                "ci",
+                "setup",
+                "--project",
+                "team-memory",
+                "--repo-root",
+                str(repo_path),
+                flag,
+                "--yes",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+    assert mock_seed.await_count == 2
+    for seed_call in mock_seed.await_args_list:
+        assert seed_call.kwargs == {
+            "project": "team-memory",
+            "project_id": None,
+            "workspace": None,
+            "refresh": True,
+        }
 
 
 @patch("basic_memory.cli.commands.ci.seed_project_update_schemas", new_callable=AsyncMock)
@@ -130,6 +168,47 @@ def test_setup_does_not_partially_write_generated_files_when_target_exists(
     assert not (tmp_path / ".github/workflows/basic-memory.yml").exists()
     assert not (tmp_path / ".github/basic-memory/memory-ci-capture.md").exists()
     mock_seed.assert_not_awaited()
+
+
+@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
+@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+async def test_seed_project_update_schemas_skips_existing_notes_by_default(
+    mock_write: AsyncMock,
+    mock_search: AsyncMock,
+) -> None:
+    mock_search.return_value = {
+        "results": [{"title": "ProjectUpdate", "file_path": "schemas/ProjectUpdate.md"}]
+    }
+
+    seeded = await seed_project_update_schemas(project="team-memory")
+
+    assert seeded == []
+    mock_write.assert_not_awaited()
+
+
+@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
+@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+async def test_seed_project_update_schemas_refreshes_existing_notes(
+    mock_write: AsyncMock,
+    mock_search: AsyncMock,
+) -> None:
+    mock_search.return_value = {
+        "results": [{"title": "Custom ProjectUpdate", "file_path": "custom/schemas/update.md"}]
+    }
+    mock_write.return_value = {"action": "updated"}
+
+    seeded = await seed_project_update_schemas(project="team-memory", refresh=True)
+
+    assert seeded == [
+        "ProjectUpdate",
+        "GitHubPullRequestUpdate",
+        "GitHubProductionDeployUpdate",
+    ]
+    assert mock_write.await_count == 3
+    first_call = mock_write.await_args_list[0].kwargs
+    assert first_call["title"] == "Custom ProjectUpdate"
+    assert first_call["directory"] == "custom/schemas"
+    assert first_call["overwrite"] is True
 
 
 def test_setup_rejects_non_github_repo(tmp_path: Path) -> None:

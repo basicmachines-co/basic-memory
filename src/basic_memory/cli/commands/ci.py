@@ -68,6 +68,14 @@ def setup(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompts"),
     local: bool = typer.Option(False, "--local", help="Force local API routing for schema seeding"),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing for schema seeding"),
+    refresh_schemas: bool = typer.Option(
+        False,
+        "--refresh-schemas",
+        "--update-schemas",
+        "--refresh",
+        "--update",
+        help="Update existing Auto BM schema notes instead of only seeding missing ones",
+    ),
 ) -> None:
     """Install the GitHub Actions workflow and seed project update schemas."""
     try:
@@ -97,6 +105,7 @@ def setup(
                     project=project,
                     project_id=project_id,
                     workspace=workspace,
+                    refresh=refresh_schemas,
                 )
             )
 
@@ -104,7 +113,8 @@ def setup(
         console.print(f"Repository: {owner}/{repo}")
         console.print(f"Project: {project}")
         if seeded:
-            console.print(f"Seeded schemas: {', '.join(seeded)}")
+            verb = "Updated" if refresh_schemas else "Seeded"
+            console.print(f"{verb} schemas: {', '.join(seeded)}")
         else:
             console.print("Schema notes already exist; nothing seeded")
         console.print("\nAdd these GitHub secrets before enabling the workflow:")
@@ -227,6 +237,7 @@ async def seed_project_update_schemas(
     project: str | None,
     project_id: str | None = None,
     workspace: str | None = None,
+    refresh: bool = False,
 ) -> list[str]:
     """Seed Auto BM schema notes without overwriting customized schemas."""
     seeded: list[str] = []
@@ -240,18 +251,25 @@ async def seed_project_update_schemas(
             output_format="json",
             page_size=1,
         )
-        if _search_results(existing):
+        existing_results = _search_results(existing)
+        if existing_results and not refresh:
             continue
 
+        title, directory = _note_write_target(
+            existing,
+            default_title=spec.title,
+            default_directory="schemas",
+        )
+
         await mcp_write_note(
-            title=spec.title,
+            title=title,
             content=spec.content,
-            directory="schemas",
+            directory=directory,
             project=routed_project,
             project_id=project_id,
             note_type="schema",
             metadata=spec.metadata,
-            overwrite=False,
+            overwrite=bool(existing_results) and refresh,
             output_format="json",
         )
         seeded.append(spec.entity)

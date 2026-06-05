@@ -10,6 +10,11 @@ fix solved it, what changed in the system, what complexity or cleanup came with
 it, and why future humans or agents should care. The Basic Memory CLI owns
 authentication, schema guidance, idempotency, and publishing.
 
+This follows the same product thread as semantic commit messages for temporal
+knowledge queries: keep the source event factual and immutable, then add a
+human-readable semantic layer that future searches can use to understand how the
+project changed over time.
+
 The product voice is:
 
 > GitHub records the mechanics. Basic Memory remembers what changed and why.
@@ -52,6 +57,18 @@ than one workspace:
 ```bash
 bm ci setup --project <project-name> --project-id <project-external-id> --cloud --yes
 ```
+
+Setup does not overwrite existing schema notes by default. After upgrading Auto
+BM, refresh the installed schema guidance with either spelling:
+
+```bash
+bm ci setup --project <project-name> --workspace <workspace-slug-or-id> --cloud --yes --refresh-schemas
+bm ci setup --project <project-name> --workspace <workspace-slug-or-id> --cloud --yes --update-schemas
+```
+
+The shorter aliases `--refresh` and `--update` are also accepted. Refresh keeps
+custom schema note paths when it finds existing notes, and only writes the
+canonical Auto BM schema content.
 
 Then review and commit the generated files:
 
@@ -122,6 +139,9 @@ exist:
 - `ProjectUpdate`
 - `GitHubPullRequestUpdate`
 - `GitHubProductionDeployUpdate`
+
+Use `--refresh-schemas` or `--update-schemas` when you want setup to update
+those schema notes instead of only creating missing ones.
 
 `bm ci collect`
 
