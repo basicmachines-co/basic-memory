@@ -38,5 +38,8 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     readme = (repo_root / "plugins/codex/README.md").read_text(encoding="utf-8")
 
+    assert "## Install" in readme
+    assert 'codex plugin marketplace add "$(git rev-parse --show-toplevel)"' in readme
+    assert "codex plugin add codex@basic-memory-local" in readme
     assert "Plugin installation is user-level in Codex" in readme
-    assert "The `.codex/basic-memory.json` file is still per repository" in readme
+    assert "Each repository still needs its own `.codex/basic-memory.json`" in readme

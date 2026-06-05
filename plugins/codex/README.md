@@ -34,12 +34,24 @@ verification, decision capture, and resumable checkpoints.
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
-## Configuration
+## Install
 
-Plugin installation is user-level in Codex. Install `codex@basic-memory-local`
-once and Codex can load the plugin across projects on the same machine.
-The `.codex/basic-memory.json` file is still per repository: it maps that
-checkout to the Basic Memory project and folders the hooks should use.
+Install the plugin once from the Basic Memory repository root:
+
+```bash
+codex plugin marketplace add "$(git rev-parse --show-toplevel)"
+codex plugin add codex@basic-memory-local
+```
+
+Plugin installation is user-level in Codex, so one install makes the plugin
+available across projects on the same machine. Start a new Codex thread after
+installing so Codex can load the plugin skills, MCP configuration, and hooks.
+
+Each repository still needs its own `.codex/basic-memory.json` so the plugin
+knows which Basic Memory project and folders to use for that checkout. Run the
+setup skill in each repo, or create the config file shown below.
+
+## Configuration
 
 Run the setup skill, or create `.codex/basic-memory.json` in a repo:
 
