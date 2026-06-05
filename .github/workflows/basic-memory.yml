@@ -31,6 +31,8 @@ jobs:
 
       - name: Collect project update context
         id: collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           bm ci collect \
             --config .github/basic-memory/config.yml \

@@ -43,6 +43,32 @@ def _write_pr_event(path: Path) -> Path:
     return path
 
 
+def _synthesis_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "summary": "Auto BM records project updates.",
+        "story": (
+            "GitHub delivery moments were not leaving durable project memory. "
+            "Auto BM collects source facts, asks the agent for the delivery story, "
+            "and publishes an idempotent note."
+        ),
+        "problem_addressed": "GitHub delivery context was lost after merge.",
+        "solution": "Publish an idempotent Basic Memory project update from CI.",
+        "system_impact": "Future agents can recover the project delivery narrative.",
+        "why_it_matters": "Future agents can recover project context.",
+        "components_changed": ["basic_memory.ci.project_updates"],
+        "complexity_introduced": [],
+        "refactors_or_removals": [],
+        "user_facing_changes": [],
+        "internal_changes": [],
+        "verification": [],
+        "follow_ups": [],
+        "decision_candidates": [],
+        "task_candidates": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
 @patch("basic_memory.cli.commands.ci.seed_project_update_schemas", new_callable=AsyncMock)
 def test_setup_writes_workflow_config_and_prompt(
     mock_seed: AsyncMock,
@@ -210,11 +236,9 @@ def test_publish_command_upserts_project_update_note(
     assert collect_result.exit_code == 0, collect_result.output
     synthesis_path.write_text(
         json.dumps(
-            {
-                "summary": "Auto BM records project updates.",
-                "why_it_matters": "Future agents can recover project context.",
-                "repo": "evil/repo",
-            }
+            _synthesis_payload(
+                repo="evil/repo",
+            )
         ),
         encoding="utf-8",
     )
@@ -288,12 +312,7 @@ def test_publish_command_preserves_existing_note_path_for_idempotency_match(
     )
     assert collect_result.exit_code == 0, collect_result.output
     synthesis_path.write_text(
-        json.dumps(
-            {
-                "summary": "Auto BM records project updates.",
-                "why_it_matters": "Future agents can recover project context.",
-            }
-        ),
+        json.dumps(_synthesis_payload()),
         encoding="utf-8",
     )
 
@@ -352,12 +371,7 @@ def test_publish_command_uses_project_id_without_workspace_qualifying_project(
     )
     assert collect_result.exit_code == 0, collect_result.output
     synthesis_path.write_text(
-        json.dumps(
-            {
-                "summary": "Auto BM records project updates.",
-                "why_it_matters": "Future agents can recover project context.",
-            }
-        ),
+        json.dumps(_synthesis_payload()),
         encoding="utf-8",
     )
 

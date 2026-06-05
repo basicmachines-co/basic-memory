@@ -4,9 +4,11 @@ Basic Memory CI turns meaningful GitHub delivery moments into durable
 `project_update` notes in Basic Memory.
 
 GitHub records the mechanics: pull requests, workflow runs, SHAs, URLs, labels,
-and timestamps. The agent reads those facts and writes a short synthesis of what
-changed and why it matters. The Basic Memory CLI owns authentication, schema
-guidance, idempotency, and publishing.
+changed files, commits, linked issues, and timestamps. The agent reads those
+facts and writes the delivery story: what problem was being addressed, why the
+fix solved it, what changed in the system, what complexity or cleanup came with
+it, and why future humans or agents should care. The Basic Memory CLI owns
+authentication, schema guidance, idempotency, and publishing.
 
 The product voice is:
 
@@ -127,15 +129,22 @@ Reads the current GitHub event payload and normalizes it into
 `ProjectUpdateContext`. This command decides whether the event is eligible.
 Merged pull requests and configured successful production deploy workflow runs
 are eligible. Routine CI runs, failed deploys, and unmerged PR closures are
-no-ops. In v0, collection is intentionally limited to the GitHub event payload;
-GitHub API enrichment for file lists, checks, reviews, or commit lists can be
-added later without changing the publishing boundary.
+no-ops.
+
+For merged pull requests, the generated workflow passes `GITHUB_TOKEN` to
+`bm ci collect` so the context can include changed files, commit messages, and
+linked issue details. If `GITHUB_TOKEN` is unavailable, local collection still
+uses the event payload fields. If the token is present and GitHub API enrichment
+fails, the Auto BM workflow fails fast instead of publishing a weak note.
 
 `bm ci agent-schema`
 
 Writes the optional `AgentSynthesis` JSON schema used by the generated workflow
 as a CI guardrail. This schema is not a Basic Memory domain schema and is not
-committed by setup.
+committed by setup. The schema intentionally requires narrative fields such as
+`story`, `problem_addressed`, `solution`, `system_impact`,
+`components_changed`, `complexity_introduced`, and `refactors_or_removals` so
+the agent does more than fill out shallow buckets.
 
 `bm ci publish`
 
@@ -180,7 +189,7 @@ project-updates/github/<owner>/<repo>/
 
 - `ProjectUpdateConfig`: non-secret repo configuration.
 - `ProjectUpdateContext`: normalized immutable GitHub facts.
-- `AgentSynthesis`: agent-authored summary fields.
+- `AgentSynthesis`: agent-authored narrative fields.
 - `ProjectUpdateNote`: final Basic Memory note payload.
 - workflow, prompt, and schema-note seed rendering.
 

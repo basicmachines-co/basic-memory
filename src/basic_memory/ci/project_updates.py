@@ -7,8 +7,11 @@ layer, and Basic Memory as the durable project-memory layer.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Literal
 
@@ -46,6 +49,34 @@ class ProjectUpdateConfig(BaseModel):
         return cleaned
 
 
+class ChangedFile(BaseModel):
+    """A GitHub pull request file summary."""
+
+    filename: str
+    status: str | None = None
+    additions: int | None = None
+    deletions: int | None = None
+    changes: int | None = None
+
+
+class CommitSummary(BaseModel):
+    """A compact GitHub pull request commit summary."""
+
+    sha: str | None = None
+    message: str | None = None
+    author: str | None = None
+
+
+class LinkedIssueDetail(BaseModel):
+    """GitHub issue context referenced by a pull request."""
+
+    number: int
+    title: str | None = None
+    body_excerpt: str | None = None
+    state: str | None = None
+    url: str | None = None
+
+
 class ProjectUpdateContext(BaseModel):
     """Normalized facts collected from a GitHub event payload."""
 
@@ -67,7 +98,10 @@ class ProjectUpdateContext(BaseModel):
     author: str | None = None
     labels: list[str] = Field(default_factory=list)
     linked_issues: list[str] = Field(default_factory=list)
+    linked_issue_details: list[LinkedIssueDetail] = Field(default_factory=list)
+    changed_files: list[ChangedFile] = Field(default_factory=list)
     changed_files_count: int | None = None
+    commits: list[CommitSummary] = Field(default_factory=list)
 
 
 class AgentSynthesis(BaseModel):
@@ -76,7 +110,14 @@ class AgentSynthesis(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     summary: str
+    story: str
+    problem_addressed: str
+    solution: str
+    system_impact: str
     why_it_matters: str
+    components_changed: list[str] = Field(default_factory=list)
+    complexity_introduced: list[str] = Field(default_factory=list)
+    refactors_or_removals: list[str] = Field(default_factory=list)
     user_facing_changes: list[str] = Field(default_factory=list)
     internal_changes: list[str] = Field(default_factory=list)
     verification: list[str] = Field(default_factory=list)
@@ -86,6 +127,10 @@ class AgentSynthesis(BaseModel):
 
     @field_validator(
         "summary",
+        "story",
+        "problem_addressed",
+        "solution",
+        "system_impact",
         "why_it_matters",
     )
     @classmethod
@@ -226,6 +271,148 @@ def _linked_issues(*texts: str | None) -> list[str]:
     return issues
 
 
+def _github_api_get(path: str, token: str) -> list[Any] | dict[str, Any]:
+    request = urllib.request.Request(
+        f"https://api.github.com{path}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "basic-memory-ci",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise ValueError(f"GitHub API request failed ({exc.code}) for {path}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"GitHub API request failed for {path}: {exc.reason}") from exc
+    if not isinstance(payload, (list, dict)):
+        raise ValueError(f"GitHub API response for {path} must be a JSON object or array")
+    return payload
+
+
+def _github_api_get_list(path: str, token: str) -> list[Any]:
+    items: list[Any] = []
+    page = 1
+    while True:
+        separator = "&" if "?" in path else "?"
+        payload = _github_api_get(f"{path}{separator}per_page=100&page={page}", token)
+        if not isinstance(payload, list):
+            raise ValueError(f"GitHub API response for {path} must be a JSON array")
+        items.extend(payload)
+        if len(payload) < 100:
+            return items
+        page += 1
+
+
+def _text_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _body_excerpt(value: Any, *, limit: int = 2000) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[: limit - 15].rstrip() + "... [truncated]"
+
+
+def _changed_file_from_github(raw: Any) -> ChangedFile | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get("filename"), str):
+        return None
+    return ChangedFile(
+        filename=raw["filename"],
+        status=_text_or_none(raw.get("status")),
+        additions=_int_or_none(raw.get("additions")),
+        deletions=_int_or_none(raw.get("deletions")),
+        changes=_int_or_none(raw.get("changes")),
+    )
+
+
+def _commit_summary_from_github(raw: Any) -> CommitSummary | None:
+    if not isinstance(raw, dict):
+        return None
+    commit = raw.get("commit")
+    if not isinstance(commit, dict):
+        return None
+    author = commit.get("author")
+    return CommitSummary(
+        sha=_text_or_none(raw.get("sha")),
+        message=_text_or_none(commit.get("message")),
+        author=_text_or_none(author.get("name")) if isinstance(author, dict) else None,
+    )
+
+
+def _issue_number(issue: str) -> int | None:
+    match = re.fullmatch(r"#(?P<number>\d+)", issue)
+    return int(match.group("number")) if match else None
+
+
+def _issue_detail_from_github(raw: Any) -> LinkedIssueDetail | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get("number"), int):
+        return None
+    return LinkedIssueDetail(
+        number=raw["number"],
+        title=_text_or_none(raw.get("title")),
+        body_excerpt=_body_excerpt(raw.get("body")),
+        state=_text_or_none(raw.get("state")),
+        url=_text_or_none(raw.get("html_url")),
+    )
+
+
+def _enrich_pull_request_context(context: ProjectUpdateContext) -> ProjectUpdateContext:
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token or not context.repo or context.pr_number is None:
+        return context
+
+    files = [
+        file
+        for file in (
+            _changed_file_from_github(raw)
+            for raw in _github_api_get_list(
+                f"/repos/{context.repo}/pulls/{context.pr_number}/files", token
+            )
+        )
+        if file is not None
+    ]
+    commits = [
+        commit
+        for commit in (
+            _commit_summary_from_github(raw)
+            for raw in _github_api_get_list(
+                f"/repos/{context.repo}/pulls/{context.pr_number}/commits", token
+            )
+        )
+        if commit is not None
+    ]
+    issue_details: list[LinkedIssueDetail] = []
+    for issue in context.linked_issues:
+        number = _issue_number(issue)
+        if number is None:
+            continue
+        detail = _issue_detail_from_github(
+            _github_api_get(f"/repos/{context.repo}/issues/{number}", token)
+        )
+        if detail is not None:
+            issue_details.append(detail)
+
+    return context.model_copy(
+        update={
+            "changed_files": files,
+            "commits": commits,
+            "linked_issue_details": issue_details,
+        }
+    )
+
+
 def _collect_pull_request_context(payload: dict[str, Any]) -> ProjectUpdateContext:
     pr = payload.get("pull_request")
     if not isinstance(pr, dict):
@@ -258,7 +445,7 @@ def _collect_pull_request_context(payload: dict[str, Any]) -> ProjectUpdateConte
     if repo and isinstance(number, int):
         idempotency_key = f"github:{repo}:{PULL_REQUEST_MERGED}:{number}"
 
-    return ProjectUpdateContext(
+    context = ProjectUpdateContext(
         eligible=True,
         source_event=PULL_REQUEST_MERGED,
         repo=repo,
@@ -277,6 +464,7 @@ def _collect_pull_request_context(payload: dict[str, Any]) -> ProjectUpdateConte
             pr["changed_files"] if isinstance(pr.get("changed_files"), int) else None
         ),
     )
+    return _enrich_pull_request_context(context)
 
 
 def _collect_workflow_run_context(
@@ -386,10 +574,21 @@ def build_project_update_note(
         f"# {_note_title(context)}",
         "## Summary",
         synthesis.summary,
-        "## Why It Matters",
+        "## Story",
+        synthesis.story,
+        "## Problem Addressed",
+        synthesis.problem_addressed,
+        "## How The Change Solves It",
+        synthesis.solution,
+        "## Impact On The System",
+        synthesis.system_impact,
+        "## Project Memory",
         synthesis.why_it_matters,
     ]
 
+    _extend_list_section(sections, "Components Changed", synthesis.components_changed)
+    _extend_list_section(sections, "Complexity Introduced", synthesis.complexity_introduced)
+    _extend_list_section(sections, "Refactors Or Removals", synthesis.refactors_or_removals)
     _extend_list_section(sections, "User-Facing Changes", synthesis.user_facing_changes)
     _extend_list_section(sections, "Internal Changes", synthesis.internal_changes)
     _extend_list_section(sections, "Verification", synthesis.verification)
@@ -409,6 +608,7 @@ def build_project_update_note(
 
     observations = [
         f"- [summary] {synthesis.summary}",
+        f"- [impact] {synthesis.system_impact}",
         f"- [source] GitHub {context.source_event} in {context.repo}",
     ]
     sections.extend(["## Observations", *observations])
@@ -432,7 +632,14 @@ def render_agent_synthesis_schema() -> str:
     """Render the optional Codex structured-output schema guardrail."""
     properties = {
         "summary": {"type": "string", "minLength": 1},
+        "story": {"type": "string", "minLength": 1},
+        "problem_addressed": {"type": "string", "minLength": 1},
+        "solution": {"type": "string", "minLength": 1},
+        "system_impact": {"type": "string", "minLength": 1},
         "why_it_matters": {"type": "string", "minLength": 1},
+        "components_changed": {"type": "array", "items": {"type": "string"}},
+        "complexity_introduced": {"type": "array", "items": {"type": "string"}},
+        "refactors_or_removals": {"type": "array", "items": {"type": "string"}},
         "user_facing_changes": {"type": "array", "items": {"type": "string"}},
         "internal_changes": {"type": "array", "items": {"type": "string"}},
         "verification": {"type": "array", "items": {"type": "string"}},
@@ -455,22 +662,46 @@ def render_capture_prompt() -> str:
     """Render the prompt contract used by the generated workflow."""
     return """# Memory CI Capture
 
-You turn GitHub delivery context into a concise project update synthesis for
-Basic Memory. GitHub records the mechanics. Basic Memory remembers what changed
-and why.
+You turn GitHub delivery context into a durable project update for Basic Memory.
+GitHub records the mechanics. Basic Memory remembers what changed and why.
 
 ## Inputs
 
 - Read `.github/basic-memory/project-update-context.json`.
+- Read the PR diff before writing when a SHA is available. Useful commands:
+  `git show --stat --name-only <sha>` and `git show --format=fuller --no-patch <sha>`.
+- Use linked issue details, changed files, commit messages, PR body, labels, and
+  source links as evidence.
 - Treat GitHub payload fields as immutable facts.
 - Do not invent tests, deployment status, issues, or user impact.
+
+## Writing Standard
+
+Do not write a fill-in-the-blanks note. Tell the story from the PR:
+problem -> solution -> impact.
+
+Explain what problem was being addressed. If linked issue details are present,
+use them. If they are absent, ground the problem in the PR body, title, commits,
+and diff, and say when the original problem statement is unavailable.
+
+Explain why the fix solves the problem, what complexity it introduced, what it
+refactored or removed, which components changed, and how the system is different
+after the merge. Prefer specific component names, file paths, modules, commands,
+and behavior over generic phrases.
 
 ## Output
 
 Return only JSON that matches the provided AgentSynthesis schema:
 
-- `summary`: what changed.
-- `why_it_matters`: why this project update matters for future humans and agents.
+- `summary`: one concise sentence; do not merely repeat the PR title.
+- `story`: 2-4 sentences that connect problem -> solution -> impact.
+- `problem_addressed`: the concrete problem, bug, missing capability, or delivery need.
+- `solution`: why this change solves the problem.
+- `system_impact`: how the system, workflow, or architecture changed after the merge.
+- `why_it_matters`: durable project-memory context for future humans and agents.
+- `components_changed`: modules, workflows, commands, schemas, docs, or services touched.
+- `complexity_introduced`: tradeoffs, new moving parts, operational costs, or edge cases.
+- `refactors_or_removals`: cleanup, simplification, deleted paths, or "none found".
 - `user_facing_changes`: visible behavior or product changes.
 - `internal_changes`: implementation, infrastructure, or operational changes.
 - `verification`: checks, tests, deploy evidence, or explicit unknowns.
@@ -478,8 +709,8 @@ Return only JSON that matches the provided AgentSynthesis schema:
 - `decision_candidates`: explicit product or architecture decisions only.
 - `task_candidates`: concrete future tasks only.
 
-Prefer source links and grounded phrasing. This is project memory, not marketing
-copy and not a commit-by-commit changelog.
+Use empty arrays only when a list truly has no grounded entries. This is project
+memory, not marketing copy and not a commit-by-commit changelog.
 """
 
 
@@ -521,6 +752,8 @@ jobs:
 
       - name: Collect project update context
         id: collect
+        env:
+          GITHUB_TOKEN: ${{{{ github.token }}}}
         run: |
           bm ci collect \\
             --config {DEFAULT_CONFIG_PATH} \\
@@ -572,7 +805,14 @@ def schema_seed_specs() -> list[SchemaSeedSpec]:
             entity="ProjectUpdate",
             schema={
                 "summary": "string, concise account of what changed",
-                "why_it_matters": "string, why this update matters",
+                "story": "string, narrative connecting problem -> solution -> impact",
+                "problem_addressed": "string, concrete problem or delivery need",
+                "solution": "string, why the change solves the problem",
+                "system_impact": "string, impact on system behavior or architecture",
+                "why_it_matters": "string, durable context for future humans and agents",
+                "components_changed": "array, modules, workflows, commands, or services touched",
+                "complexity_introduced": "array, tradeoffs or new moving parts",
+                "refactors_or_removals": "array, cleanup, simplification, or deleted paths",
                 "source": "string, source system such as github",
                 "source_event": ("string, pull_request_merged or production_deploy_succeeded"),
                 "repo": "string, owner/repository",
@@ -585,8 +825,12 @@ def schema_seed_specs() -> list[SchemaSeedSpec]:
                 "environment?": "string, deployment environment",
             },
             body=(
-                "A ProjectUpdate preserves what changed in a project and why it matters. "
-                "GitHub records mechanics; Basic Memory keeps the durable narrative."
+                "A ProjectUpdate preserves what changed in a project and the durable "
+                "context future readers need. "
+                "It should tell the delivery story: the problem, why the solution worked, "
+                "what components changed, what complexity or cleanup followed, and the "
+                "impact on the system. GitHub records mechanics; Basic Memory keeps the "
+                "durable narrative."
             ),
         ),
         _schema_seed(
@@ -594,15 +838,22 @@ def schema_seed_specs() -> list[SchemaSeedSpec]:
             entity="GitHubPullRequestUpdate",
             schema={
                 "intent": "string, purpose of the merged pull request",
+                "problem_addressed": "string, issue, bug, missing capability, or workflow pain",
+                "solution": "string, why this implementation solves the problem",
+                "system_impact": "string, behavior, architecture, or workflow impact",
                 "changed_area?(array)": "string, product or implementation areas touched",
+                "components_changed?(array)": "string, modules, workflows, commands, or docs touched",
+                "complexity_introduced?(array)": "string, tradeoffs or new moving parts",
+                "refactors_or_removals?(array)": "string, cleanup, simplification, or deleted paths",
                 "linked_issue?(array)": "string, issues closed or advanced",
                 "verification?(array)": "string, checks and tests observed",
                 "follow_up?(array)": "string, concrete remaining work",
             },
             body=(
-                "Guidance for pull request project updates: preserve intent, changed "
-                "behavior, review tradeoffs, issue links, and verification. Do not "
-                "summarize commit by commit unless that is the clearest explanation."
+                "Guidance for pull request project updates: preserve the story behind "
+                "the PR, not just the title. Explain the problem, the fix, why it works, "
+                "changed components, tradeoffs, cleanup, issue links, and verification. "
+                "Do not summarize commit by commit unless that is the clearest explanation."
             ),
         ),
         _schema_seed(
@@ -612,13 +863,18 @@ def schema_seed_specs() -> list[SchemaSeedSpec]:
                 "deployed_sha": "string, deployed commit SHA",
                 "environment": "string, production environment",
                 "workflow_run_id": "string, GitHub Actions workflow run id",
+                "story": "string, what changed since the previous production deploy",
+                "system_impact": "string, production impact on behavior or operations",
+                "components_changed?(array)": "string, deployed modules, services, or workflows",
+                "complexity_introduced?(array)": "string, operational tradeoffs or new moving parts",
                 "verification?(array)": "string, deploy evidence and smoke checks",
                 "user_impact?(array)": "string, user-facing impact since previous deploy",
                 "rollback_note?": "string, rollback or mitigation note when known",
             },
             body=(
                 "Guidance for production deploy project updates: preserve what actually "
-                "reached production, the deployed SHA, environment, workflow run, and "
+                "reached production, the durable context, the deployed SHA, environment, "
+                "workflow run, changed components, operational complexity, and "
                 "verification evidence. Do not overclaim beyond the source facts."
             ),
         ),

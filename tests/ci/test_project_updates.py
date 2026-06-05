@@ -49,6 +49,32 @@ def _pr_payload(*, merged: bool = True) -> dict:
     }
 
 
+def _synthesis_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "summary": "Auto BM now records project updates.",
+        "story": (
+            "GitHub delivery events were losing their useful narrative after merge. "
+            "Auto BM collects source facts, lets the agent explain the change, and "
+            "publishes the result as durable project memory."
+        ),
+        "problem_addressed": "Project delivery context was not preserved after GitHub events.",
+        "solution": "Collect GitHub facts and publish an idempotent Basic Memory note.",
+        "system_impact": "Future humans and agents can recover the delivery narrative.",
+        "why_it_matters": "Future agents can recover project context.",
+        "components_changed": ["basic_memory.ci.project_updates"],
+        "complexity_introduced": [],
+        "refactors_or_removals": [],
+        "user_facing_changes": [],
+        "internal_changes": [],
+        "verification": [],
+        "follow_ups": [],
+        "decision_candidates": [],
+        "task_candidates": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_collect_merged_pull_request_context(tmp_path: Path) -> None:
     event_path = _write_json(tmp_path / "event.json", _pr_payload())
 
@@ -67,6 +93,62 @@ def test_collect_merged_pull_request_context(tmp_path: Path) -> None:
     assert context.labels == ["feature", "ci"]
     assert context.linked_issues == ["#77"]
     assert context.source_url == "https://github.com/basicmachines-co/basic-memory/pull/123"
+
+
+def test_collect_enriches_pull_request_context_from_github_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_github_api_get(path: str, token: str) -> list[dict] | dict:
+        assert token == "github-token"
+        if path.startswith("/repos/basicmachines-co/basic-memory/pulls/123/files"):
+            return [
+                {
+                    "filename": "src/basic_memory/ci/project_updates.py",
+                    "status": "modified",
+                    "additions": 42,
+                    "deletions": 7,
+                    "changes": 49,
+                }
+            ]
+        if path.startswith("/repos/basicmachines-co/basic-memory/pulls/123/commits"):
+            return [
+                {
+                    "sha": "abc123def456",
+                    "commit": {
+                        "message": "fix ci synthesis schema\n\nRequire all fields.",
+                        "author": {"name": "Pat"},
+                    },
+                }
+            ]
+        if path == "/repos/basicmachines-co/basic-memory/issues/77":
+            return {
+                "number": 77,
+                "title": "Codex structured output rejects optional schema fields",
+                "body": "Auto BM failed before publish when optional fields were omitted.",
+                "html_url": "https://github.com/basicmachines-co/basic-memory/issues/77",
+                "state": "closed",
+            }
+        raise AssertionError(f"unexpected GitHub API path: {path}")
+
+    monkeypatch.setenv("GITHUB_TOKEN", "github-token")
+    monkeypatch.setattr(project_updates, "_github_api_get", fake_github_api_get, raising=False)
+    event_path = _write_json(tmp_path / "event.json", _pr_payload())
+
+    context = collect_project_update_context(
+        event_name="pull_request",
+        event_path=event_path,
+        config=ProjectUpdateConfig(project="team-memory"),
+    )
+
+    assert context.changed_files[0].filename == "src/basic_memory/ci/project_updates.py"
+    assert context.changed_files[0].status == "modified"
+    assert context.commits[0].message == "fix ci synthesis schema\n\nRequire all fields."
+    assert context.linked_issue_details[0].number == 77
+    assert (
+        context.linked_issue_details[0].title
+        == "Codex structured output rejects optional schema fields"
+    )
 
 
 def test_collect_handles_sparse_pull_request_payload(tmp_path: Path) -> None:
@@ -282,13 +364,12 @@ def test_build_project_update_note_uses_deterministic_identity_fields(tmp_path: 
         config=ProjectUpdateConfig(project="team-memory"),
     )
     synthesis = AgentSynthesis.model_validate(
-        {
-            "summary": "Auto BM now records project updates.",
-            "why_it_matters": "Future agents can recover the delivery narrative.",
-            "repo": "evil/repo",
-            "source_event": "production_deploy_succeeded",
-            "verification": ["Unit tests cover event normalization."],
-        }
+        _synthesis_payload(
+            why_it_matters="Future agents can recover the delivery narrative.",
+            repo="evil/repo",
+            source_event="production_deploy_succeeded",
+            verification=["Unit tests cover event normalization."],
+        )
     )
 
     note = build_project_update_note(context=context, synthesis=synthesis)
@@ -299,6 +380,48 @@ def test_build_project_update_note_uses_deterministic_identity_fields(tmp_path: 
     assert note.metadata["source_event"] == "pull_request_merged"
     assert note.metadata["idempotency_key"] == context.idempotency_key
     assert "evil/repo" not in note.content
+
+
+def test_build_project_update_note_renders_story_sections(tmp_path: Path) -> None:
+    event_path = _write_json(tmp_path / "event.json", _pr_payload())
+    context = collect_project_update_context(
+        event_name="pull_request",
+        event_path=event_path,
+        config=ProjectUpdateConfig(project="team-memory"),
+    )
+    synthesis = AgentSynthesis.model_validate(
+        {
+            "summary": "Auto BM now publishes durable project updates.",
+            "story": (
+                "Auto BM needed to preserve the delivery narrative, not just the mechanics. "
+                "The change adds a CI handoff where Codex synthesizes context and bm publishes it."
+            ),
+            "problem_addressed": "Project context was lost after meaningful GitHub delivery events.",
+            "solution": "Collect GitHub facts, let Codex synthesize intent, then publish idempotently.",
+            "system_impact": "Merges now leave durable memory for future humans and agents.",
+            "why_it_matters": "Future work can recover why the delivery happened.",
+            "components_changed": [
+                "basic_memory.ci.project_updates",
+                "basic_memory.cli.commands.ci",
+            ],
+            "complexity_introduced": ["Adds a CI-only agent synthesis boundary."],
+            "refactors_or_removals": ["Keeps Basic Memory auth out of the agent step."],
+            "verification": ["Unit tests cover collect and publish behavior."],
+        }
+    )
+
+    note = build_project_update_note(context=context, synthesis=synthesis)
+
+    assert "## Story" in note.content
+    assert "## Problem Addressed" in note.content
+    assert "## How The Change Solves It" in note.content
+    assert "## Impact On The System" in note.content
+    assert "## Project Memory" in note.content
+    assert "## Why It Matters" not in note.content
+    assert "## Components Changed" in note.content
+    assert "basic_memory.ci.project_updates" in note.content
+    assert "## Complexity Introduced" in note.content
+    assert "## Refactors Or Removals" in note.content
 
 
 def test_build_project_update_note_for_production_deploy(tmp_path: Path) -> None:
@@ -326,9 +449,18 @@ def test_build_project_update_note_for_production_deploy(tmp_path: Path) -> None
             production_environments=["production"],
         ),
     )
-    synthesis = AgentSynthesis(
-        summary="Production deploy completed.",
-        why_it_matters="The latest project update reached users.",
+    synthesis = AgentSynthesis.model_validate(
+        _synthesis_payload(
+            summary="Production deploy completed.",
+            story=(
+                "A configured production workflow completed successfully. "
+                "The deploy SHA is now recorded as durable project memory."
+            ),
+            problem_addressed="Production delivery needed a durable deployment record.",
+            solution="Publish a project update for the successful workflow run.",
+            system_impact="The production deploy is connected to its workflow run and SHA.",
+            why_it_matters="The latest project update reached users.",
+        )
     )
 
     note = build_project_update_note(context=context, synthesis=synthesis)
@@ -342,9 +474,11 @@ def test_build_project_update_note_for_production_deploy(tmp_path: Path) -> None
 
 
 def test_build_project_update_note_rejects_invalid_context() -> None:
-    synthesis = AgentSynthesis(
-        summary="Auto BM records project updates.",
-        why_it_matters="Future agents can recover context.",
+    synthesis = AgentSynthesis.model_validate(
+        _synthesis_payload(
+            summary="Auto BM records project updates.",
+            why_it_matters="Future agents can recover context.",
+        )
     )
     with pytest.raises(ValueError, match="ineligible"):
         build_project_update_note(
@@ -364,11 +498,23 @@ def test_build_project_update_note_rejects_invalid_context() -> None:
 
 
 def test_agent_synthesis_requires_summary_and_why_it_matters() -> None:
+    missing_why = _synthesis_payload()
+    missing_why.pop("why_it_matters")
     with pytest.raises(ValidationError):
-        AgentSynthesis.model_validate({"summary": "Too thin"})
+        AgentSynthesis.model_validate(missing_why)
 
     with pytest.raises(ValidationError):
-        AgentSynthesis.model_validate({"summary": " ", "why_it_matters": "Still too thin"})
+        AgentSynthesis.model_validate(_synthesis_payload(summary=" "))
+
+
+def test_agent_synthesis_requires_delivery_narrative_fields() -> None:
+    with pytest.raises(ValidationError):
+        AgentSynthesis.model_validate(
+            {
+                "summary": "Auto BM records project updates.",
+                "why_it_matters": "Future agents can recover context.",
+            }
+        )
 
 
 def test_project_update_config_requires_non_empty_lists() -> None:
@@ -393,6 +539,7 @@ def test_render_workflow_invokes_codex_read_only_without_basic_memory_secret() -
     assert "BASIC_MEMORY_CI_CLOUD_HOST: ${{ vars.BASIC_MEMORY_CLOUD_HOST }}" in workflow
     assert 'if [ -n "$BASIC_MEMORY_CI_CLOUD_HOST" ]' in workflow
     assert "--context .github/basic-memory/project-update-context.json" in workflow
+    assert "GITHUB_TOKEN: ${{ github.token }}" in workflow
     assert "--cloud \\" in workflow
     codex_step = workflow.split("- name: Synthesize project update with Codex", 1)[1].split(
         "- name: Publish project update", 1
@@ -415,6 +562,9 @@ def test_render_capture_prompt_uses_workspace_context_path() -> None:
 
     assert ".github/basic-memory/project-update-context.json" in prompt
     assert "${{ runner.temp }}" not in prompt
+    assert "Do not write a fill-in-the-blanks note" in prompt
+    assert "Read the PR diff before writing" in prompt
+    assert "problem -> solution -> impact" in prompt
 
 
 def test_render_agent_synthesis_schema_is_ci_guardrail_not_domain_schema() -> None:
@@ -422,6 +572,11 @@ def test_render_agent_synthesis_schema_is_ci_guardrail_not_domain_schema() -> No
 
     assert schema["title"] == "AgentSynthesis"
     assert "summary" in schema["required"]
+    assert "story" in schema["required"]
+    assert "problem_addressed" in schema["required"]
+    assert "solution" in schema["required"]
+    assert "system_impact" in schema["required"]
+    assert "components_changed" in schema["required"]
     assert "why_it_matters" in schema["required"]
     assert set(schema["required"]) == set(schema["properties"])
     assert "project_update" not in json.dumps(schema)
@@ -437,6 +592,9 @@ def test_schema_seed_specs_are_basic_memory_schema_notes() -> None:
     }
     assert all(spec.metadata["type"] == "schema" for spec in specs)
     assert all(spec.metadata["settings"]["validation"] == "warn" for spec in specs)
+    project_update = next(spec for spec in specs if spec.entity == "ProjectUpdate")
+    assert "story" in project_update.metadata["schema"]
+    assert "problem_addressed" in project_update.metadata["schema"]
 
 
 def test_parse_github_remote_accepts_https_and_ssh() -> None:
