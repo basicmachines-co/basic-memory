@@ -55,6 +55,7 @@ ENV/
 claude-output
 **/.claude/settings.local.json
 .mcp.json
+!/plugins/codex/.mcp.json
 .mcpregistry_*
 /.testmondata
 .benchmarks/

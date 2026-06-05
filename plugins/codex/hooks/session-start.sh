@@ -162,7 +162,7 @@ lines.append(f"Session source: {source}")
 task_rows = rows(primary_tasks)
 decision_rows = rows(primary_decisions)
 codex_rows = rows(primary_codex)
-session_rows = [r for r in rows(primary_sessions) if r not in codex_rows]
+session_rows = rows(primary_sessions)
 
 if task_rows:
     lines += ["", f"## Active Tasks ({len(task_rows)})", *[label(r) for r in task_rows]]

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "instrumentation": {
+      "source": "pydantic/skills",
+      "sourceType": "github",
+      "computedHash": "0727bffc6a92fdeaf675ae5796ae25341e193327e8c95cd06b188dc4a0a4e62e"
+    }
+  }
+}

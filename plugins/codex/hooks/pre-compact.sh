@@ -28,7 +28,7 @@ import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 bm_cmd = shlex.split(os.environ.get("BM_BIN") or "basic-memory")
@@ -143,8 +143,8 @@ recent_user = user_messages[-3:]
 recent_assistant = assistant_messages[-2:]
 status_lines = git_status(cwd)
 
-now = datetime.now()
-iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+now = datetime.now(timezone.utc)
+iso = now.isoformat(timespec="seconds")
 title = f"Codex session {now.strftime('%Y-%m-%d %H:%M:%S')} - {clip(opening, 40)}"
 
 frontmatter = [

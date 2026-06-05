@@ -32,6 +32,10 @@ codex plugin add codex@basic-memory-local
 Start a new Codex thread after installing. New threads are the reliable boundary for picking up
 plugin skills, hooks, and MCP configuration.
 
+Plugin installation is user-level in Codex, so one install makes the plugin available across
+projects on the same machine. Repo-specific memory routing still comes from each checkout's
+`.codex/basic-memory.json`.
+
 ## Iteration Loop
 
 After changing files in `plugins/codex`, run the local checks:

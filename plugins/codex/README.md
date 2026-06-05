@@ -36,6 +36,11 @@ verification, decision capture, and resumable checkpoints.
 
 ## Configuration
 
+Plugin installation is user-level in Codex. Install `codex@basic-memory-local`
+once and Codex can load the plugin across projects on the same machine.
+The `.codex/basic-memory.json` file is still per repository: it maps that
+checkout to the Basic Memory project and folders the hooks should use.
+
 Run the setup skill, or create `.codex/basic-memory.json` in a repo:
 
 ```json
