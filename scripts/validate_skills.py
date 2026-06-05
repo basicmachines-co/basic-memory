@@ -11,6 +11,12 @@ from pathlib import Path
 PLAIN_SCALAR_MAPPING_VALUE = re.compile(r":(?:\s|$)")
 
 
+def strip_matching_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
 def validate_plain_scalar(path: Path, line_number: int, key: str, value: str) -> None:
     """Catch invalid plain-scalar YAML that Codex rejects while loading skills."""
     stripped = value.strip()
@@ -50,7 +56,7 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
         key = key.strip()
         value = value.strip()
         validate_plain_scalar(path, line_number, key, value)
-        frontmatter[key] = value.strip('"')
+        frontmatter[key] = strip_matching_quotes(value)
     else:
         raise SystemExit(f"{path}: unclosed YAML frontmatter")
 
