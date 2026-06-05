@@ -68,7 +68,9 @@ bm ci setup --project <project-name> --workspace <workspace-slug-or-id> --cloud 
 
 The shorter aliases `--refresh` and `--update` are also accepted. Refresh keeps
 custom schema note paths when it finds existing notes, and only writes the
-canonical Auto BM schema content.
+canonical Auto BM schema content. If the generated workflow/config/prompt files
+already exist, refresh leaves those files unchanged unless you also pass
+`--force`.
 
 Then review and commit the generated files:
 

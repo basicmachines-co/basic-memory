@@ -141,6 +141,48 @@ def test_setup_refreshes_or_updates_existing_schema_notes_when_requested(
 
 
 @patch("basic_memory.cli.commands.ci.seed_project_update_schemas", new_callable=AsyncMock)
+def test_setup_refreshes_schema_notes_when_generated_files_already_exist(
+    mock_seed: AsyncMock,
+    tmp_path: Path,
+) -> None:
+    _init_github_repo(tmp_path)
+    workflow_path = tmp_path / ".github/workflows/basic-memory.yml"
+    config_path = tmp_path / ".github/basic-memory/config.yml"
+    prompt_path = tmp_path / ".github/basic-memory/memory-ci-capture.md"
+    workflow_path.parent.mkdir(parents=True)
+    config_path.parent.mkdir(parents=True)
+    workflow_path.write_text("custom workflow\n", encoding="utf-8")
+    config_path.write_text("project: existing\n", encoding="utf-8")
+    prompt_path.write_text("custom prompt\n", encoding="utf-8")
+
+    result = runner.invoke(
+        cli_app,
+        [
+            "ci",
+            "setup",
+            "--project",
+            "team-memory",
+            "--repo-root",
+            str(tmp_path),
+            "--refresh-schemas",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "generated files unchanged" in result.output
+    assert workflow_path.read_text(encoding="utf-8") == "custom workflow\n"
+    assert config_path.read_text(encoding="utf-8") == "project: existing\n"
+    assert prompt_path.read_text(encoding="utf-8") == "custom prompt\n"
+    mock_seed.assert_awaited_once_with(
+        project="team-memory",
+        project_id=None,
+        workspace=None,
+        refresh=True,
+    )
+
+
+@patch("basic_memory.cli.commands.ci.seed_project_update_schemas", new_callable=AsyncMock)
 def test_setup_does_not_partially_write_generated_files_when_target_exists(
     mock_seed: AsyncMock,
     tmp_path: Path,

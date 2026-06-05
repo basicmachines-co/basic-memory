@@ -97,7 +97,12 @@ def setup(
             if not confirmed:
                 raise typer.Exit(1)
 
-        _write_generated_files(repo_root, config, force=force)
+        wrote_generated_files = _write_generated_files(
+            repo_root,
+            config,
+            force=force,
+            preserve_existing=refresh_schemas,
+        )
 
         with force_routing(local=local, cloud=cloud):
             seeded = run_with_cleanup(
@@ -109,7 +114,12 @@ def setup(
                 )
             )
 
-        console.print("[green]Auto BM GitHub workflow installed[/green]")
+        if wrote_generated_files:
+            console.print("[green]Auto BM GitHub workflow installed[/green]")
+        else:
+            console.print(
+                "[yellow]Auto BM GitHub workflow already exists; generated files unchanged[/yellow]"
+            )
         console.print(f"Repository: {owner}/{repo}")
         console.print(f"Project: {project}")
         if seeded:
@@ -342,16 +352,27 @@ def _note_write_target(
     return title, default_directory
 
 
-def _write_generated_files(repo_root: Path, config: ProjectUpdateConfig, *, force: bool) -> None:
+def _write_generated_files(
+    repo_root: Path,
+    config: ProjectUpdateConfig,
+    *,
+    force: bool,
+    preserve_existing: bool = False,
+) -> bool:
     files = {
         repo_root / DEFAULT_WORKFLOW_PATH: render_workflow(config),
         repo_root / DEFAULT_PROMPT_PATH: render_capture_prompt(),
     }
     config_path = repo_root / DEFAULT_CONFIG_PATH
-    _validate_generated_targets([*files, config_path], force=force)
+    targets = [*files, config_path]
+    if preserve_existing and not force and any(path.exists() for path in targets):
+        return False
+
+    _validate_generated_targets(targets, force=force)
     for path, content in files.items():
         _write_generated_file(path, content, force=force)
     write_project_update_config(config_path, config)
+    return True
 
 
 def _validate_generated_targets(paths: list[Path], *, force: bool) -> None:
