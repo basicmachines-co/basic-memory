@@ -1,0 +1,19 @@
+# Basic Memory Codex plugin checks
+
+repo_root := "../.."
+
+# Validate the plugin manifest, hooks, skills, schemas, and MCP config.
+manifest-check:
+    python3 {{repo_root}}/scripts/validate_codex_plugin.py .
+
+# Validate against the local Codex plugin scaffold contract.
+scaffold-check:
+    @validator="${CODEX_PLUGIN_VALIDATOR:-}"; \
+    if [ -n "$validator" ]; then \
+        cd {{repo_root}} && uv run python "$validator" plugins/codex; \
+    else \
+        echo "Skipping optional Codex scaffold validator: set CODEX_PLUGIN_VALIDATOR to enable"; \
+    fi
+
+# Run every local package check for this plugin.
+check: manifest-check scaffold-check

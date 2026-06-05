@@ -1,0 +1,7 @@
+interface:
+  display_name: "Checkpoint"
+  short_description: "Save a resumable Codex work handoff"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $bm-checkpoint to save the current Codex work state into Basic Memory."

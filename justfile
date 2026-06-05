@@ -265,8 +265,8 @@ check: lint format typecheck test
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
 
-# Validate every consolidated agent package (Claude Code, skills, Hermes, OpenClaw)
-package-check: package-check-claude-code package-check-skills package-check-hermes package-check-openclaw
+# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw)
+package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw
 
 # Alias for plugin/package validation during consolidation work
 plugins-check: package-check
@@ -277,6 +277,10 @@ agent-harness-check: package-check-claude-code package-check-hermes package-chec
 # Claude Code plugin: manifests, bundled skills, bundled agent, and strict plugin validation
 package-check-claude-code:
     just --justfile plugins/claude-code/justfile --working-directory plugins/claude-code check
+
+# Codex plugin: manifest, bundled skills, hooks, MCP config, and schemas
+package-check-codex:
+    just --justfile plugins/codex/justfile --working-directory plugins/codex check
 
 # Shared top-level SKILL.md source
 package-check-skills:

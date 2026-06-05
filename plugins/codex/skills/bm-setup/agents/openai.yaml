@@ -1,0 +1,7 @@
+interface:
+  display_name: "Setup"
+  short_description: "Map this repo to Basic Memory"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $bm-setup to map this repo to the right Basic Memory project."

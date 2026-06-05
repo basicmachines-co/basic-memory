@@ -1,0 +1,7 @@
+interface:
+  display_name: "Share"
+  short_description: "Copy notes to configured team projects"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $bm-share to share this Basic Memory note with a configured team project."

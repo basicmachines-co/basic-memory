@@ -1,0 +1,7 @@
+interface:
+  display_name: "Remember"
+  short_description: "Save small facts and preferences"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $bm-remember to save this fact or preference into Basic Memory."

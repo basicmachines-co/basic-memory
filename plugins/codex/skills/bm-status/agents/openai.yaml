@@ -1,0 +1,7 @@
+interface:
+  display_name: "Status"
+  short_description: "Check Basic Memory plugin health"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $bm-status to report the Basic Memory for Codex configuration and health."

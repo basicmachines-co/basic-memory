@@ -1,0 +1,31 @@
+{
+  "description": "Basic Memory for Codex hooks - orient from the graph on session start and checkpoint before compaction.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLUGIN_ROOT}/hooks/session-start.sh",
+            "statusMessage": "Loading Basic Memory context",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLUGIN_ROOT}/hooks/pre-compact.sh",
+            "statusMessage": "Checkpointing Codex work to Basic Memory",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

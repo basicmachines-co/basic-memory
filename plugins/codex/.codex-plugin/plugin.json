@@ -1,0 +1,46 @@
+{
+  "name": "codex",
+  "version": "0.1.0+codex.20260604201213",
+  "description": "A Codex-native bridge to Basic Memory for durable engineering context, decisions, and resumable checkpoints.",
+  "author": {
+    "name": "Basic Machines",
+    "email": "hello@basicmachines.co",
+    "url": "https://basicmemory.com"
+  },
+  "homepage": "https://docs.basicmemory.com",
+  "repository": "https://github.com/basicmachines-co/basic-memory/tree/main/plugins/codex",
+  "license": "MIT",
+  "keywords": [
+    "basic-memory",
+    "codex",
+    "memory",
+    "knowledge-graph",
+    "mcp",
+    "checkpoints"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Basic Memory for Codex",
+    "shortDescription": "Carry decisions, active work, and handoffs across Codex threads",
+    "longDescription": "Use Basic Memory for Codex to orient from your durable knowledge graph, capture engineering decisions, checkpoint long-running work, and resume with repo-backed context across Codex sessions.",
+    "developerName": "Basic Machines",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://basicmemory.com",
+    "privacyPolicyURL": "https://basicmemory.com/privacy",
+    "termsOfServiceURL": "https://basicmemory.com/terms",
+    "defaultPrompt": [
+      "Use Basic Memory to orient before changing this repo.",
+      "Checkpoint this Codex thread into Basic Memory.",
+      "Capture the decision we just made."
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/app-icon.png",
+    "logo": "./assets/logo.png"
+  }
+}
