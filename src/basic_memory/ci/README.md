@@ -90,6 +90,9 @@ The generated workflow installs `basic-memory` from PyPI. When dogfooding an
 unreleased `bm ci` change, temporarily edit the workflow install step to install
 the branch or commit that contains the CI commands.
 
+This repository's live workflow may temporarily install from the checked-out
+repository while `bm ci` is being dogfooded ahead of the next package release.
+
 After the files and secrets are in place, verify the first run by merging a test
 PR or completing a configured production deploy workflow. The Auto BM workflow
 should create or update a `project_update` note under:
