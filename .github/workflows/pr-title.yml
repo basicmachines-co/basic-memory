@@ -38,6 +38,7 @@ jobs:
             mcp
             sync
             ui
+            ci
             deps
             installer
             plugins
