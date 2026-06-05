@@ -151,6 +151,32 @@ def test_collect_enriches_pull_request_context_from_github_api(
     )
 
 
+def test_github_api_get_list_fetches_multiple_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_github_api_get(path: str, token: str) -> list[dict]:
+        assert token == "github-token"
+        calls.append(path)
+        if path.endswith("page=1"):
+            return [{"filename": f"file-{index}.py"} for index in range(100)]
+        if path.endswith("page=2"):
+            return [{"filename": "file-100.py"}]
+        raise AssertionError(f"unexpected GitHub API path: {path}")
+
+    monkeypatch.setattr(project_updates, "_github_api_get", fake_github_api_get, raising=False)
+
+    files = project_updates._github_api_get_list(
+        "/repos/basicmachines-co/basic-memory/pulls/123/files",
+        "github-token",
+    )
+
+    assert len(files) == 101
+    assert calls == [
+        "/repos/basicmachines-co/basic-memory/pulls/123/files?per_page=100&page=1",
+        "/repos/basicmachines-co/basic-memory/pulls/123/files?per_page=100&page=2",
+    ]
+
+
 def test_collect_handles_sparse_pull_request_payload(tmp_path: Path) -> None:
     payload = {
         "action": "closed",
@@ -422,6 +448,41 @@ def test_build_project_update_note_renders_story_sections(tmp_path: Path) -> Non
     assert "basic_memory.ci.project_updates" in note.content
     assert "## Complexity Introduced" in note.content
     assert "## Refactors Or Removals" in note.content
+
+
+def test_build_project_update_note_renders_linked_issue_details_as_links() -> None:
+    context = ProjectUpdateContext(
+        eligible=True,
+        source_event="pull_request_merged",
+        repo="basicmachines-co/basic-memory",
+        repo_url="https://github.com/basicmachines-co/basic-memory",
+        source_url="https://github.com/basicmachines-co/basic-memory/pull/123",
+        idempotency_key="github:basicmachines-co/basic-memory:pull_request_merged:123",
+        pr_number=123,
+        title="Remember project updates",
+        linked_issues=["#77", "#88"],
+        linked_issue_details=[
+            project_updates.LinkedIssueDetail(
+                number=77,
+                title="Codex structured output rejects optional schema fields",
+                state="closed",
+                url="https://github.com/basicmachines-co/basic-memory/issues/77",
+            )
+        ],
+    )
+    synthesis = AgentSynthesis.model_validate(_synthesis_payload())
+
+    note = build_project_update_note(context=context, synthesis=synthesis)
+
+    assert (
+        "- Linked issue: [#77 Codex structured output rejects optional schema fields "
+        "(closed)](https://github.com/basicmachines-co/basic-memory/issues/77)" in note.content
+    )
+    assert (
+        "- Linked issue: [#88](https://github.com/basicmachines-co/basic-memory/issues/88)"
+        in note.content
+    )
+    assert "- Linked issues: #77, #88" not in note.content
 
 
 def test_build_project_update_note_for_production_deploy(tmp_path: Path) -> None:

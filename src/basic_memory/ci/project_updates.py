@@ -601,8 +601,7 @@ def build_project_update_note(
         source_links.append(f"- Source: {context.source_url}")
     if context.repo_url:
         source_links.append(f"- Repository: {context.repo_url}")
-    if context.linked_issues:
-        source_links.append(f"- Linked issues: {', '.join(context.linked_issues)}")
+    source_links.extend(_linked_issue_source_links(context))
     if source_links:
         sections.extend(["## Source Links", *source_links])
 
@@ -626,6 +625,43 @@ def _extend_list_section(sections: list[str], title: str, values: list[str]) -> 
     cleaned = [value.strip() for value in values if value.strip()]
     if cleaned:
         sections.extend([f"## {title}", *[f"- {value}" for value in cleaned]])
+
+
+def _linked_issue_source_links(context: ProjectUpdateContext) -> list[str]:
+    """Render linked issue references as durable source links."""
+    details_by_number = {detail.number: detail for detail in context.linked_issue_details}
+    issue_numbers = [
+        number for number in (_issue_number(issue) for issue in context.linked_issues) if number
+    ]
+    for number in details_by_number:
+        if number not in issue_numbers:
+            issue_numbers.append(number)
+
+    links: list[str] = []
+    for number in issue_numbers:
+        detail = details_by_number.get(number)
+        label = _linked_issue_label(number, detail)
+        url = detail.url if detail and detail.url else _github_issue_url(context.repo_url, number)
+        rendered = f"[{label}]({url})" if url else label
+        links.append(f"- Linked issue: {rendered}")
+    return links
+
+
+def _linked_issue_label(number: int, detail: LinkedIssueDetail | None) -> str:
+    label = f"#{number}"
+    if detail is None:
+        return label
+    if detail.title:
+        label = f"{label} {detail.title}"
+    if detail.state:
+        label = f"{label} ({detail.state})"
+    return label
+
+
+def _github_issue_url(repo_url: str | None, number: int) -> str | None:
+    if not repo_url:
+        return None
+    return f"{repo_url.rstrip('/')}/issues/{number}"
 
 
 def render_agent_synthesis_schema() -> str:
