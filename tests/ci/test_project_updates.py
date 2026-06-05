@@ -16,6 +16,7 @@ from basic_memory.ci.project_updates import (
     parse_github_remote,
     render_agent_synthesis_schema,
     render_capture_prompt,
+    render_soul_template,
     render_workflow,
     schema_seed_specs,
 )
@@ -622,10 +623,23 @@ def test_render_capture_prompt_uses_workspace_context_path() -> None:
     prompt = render_capture_prompt()
 
     assert ".github/basic-memory/project-update-context.json" in prompt
+    assert ".github/basic-memory/SOUL.md" in prompt
     assert "${{ runner.temp }}" not in prompt
     assert "Do not write a fill-in-the-blanks note" in prompt
     assert "Read the PR diff before writing" in prompt
     assert "problem -> solution -> impact" in prompt
+    assert "It is okay to say when the code is messy" in prompt
+    assert "Ground all judgments" in prompt
+
+
+def test_render_soul_template_guides_personality_without_overriding_facts() -> None:
+    soul = render_soul_template()
+
+    assert soul.startswith("# Auto BM Soul")
+    assert "It is okay to say when code is messy" in soul
+    assert "Notice good simplifications" in soul
+    assert "Do not invent intent, impact, tests, or drama" in soul
+    assert "Keep personality in service of memory" in soul
 
 
 def test_render_agent_synthesis_schema_is_ci_guardrail_not_domain_schema() -> None:

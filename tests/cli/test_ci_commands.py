@@ -94,6 +94,10 @@ def test_setup_writes_workflow_config_and_prompt(
     assert (tmp_path / ".github/workflows/basic-memory.yml").exists()
     assert (tmp_path / ".github/basic-memory/config.yml").exists()
     assert (tmp_path / ".github/basic-memory/memory-ci-capture.md").exists()
+    assert (tmp_path / ".github/basic-memory/SOUL.md").exists()
+    assert "Keep personality in service of memory" in (
+        tmp_path / ".github/basic-memory/SOUL.md"
+    ).read_text(encoding="utf-8")
     assert "OPENAI_API_KEY" in result.output
     assert "BASIC_MEMORY_API_KEY" in result.output
     mock_seed.assert_awaited_once_with(
@@ -149,11 +153,13 @@ def test_setup_refreshes_schema_notes_when_generated_files_already_exist(
     workflow_path = tmp_path / ".github/workflows/basic-memory.yml"
     config_path = tmp_path / ".github/basic-memory/config.yml"
     prompt_path = tmp_path / ".github/basic-memory/memory-ci-capture.md"
+    soul_path = tmp_path / ".github/basic-memory/SOUL.md"
     workflow_path.parent.mkdir(parents=True)
     config_path.parent.mkdir(parents=True)
     workflow_path.write_text("custom workflow\n", encoding="utf-8")
     config_path.write_text("project: existing\n", encoding="utf-8")
     prompt_path.write_text("custom prompt\n", encoding="utf-8")
+    soul_path.write_text("custom soul\n", encoding="utf-8")
 
     result = runner.invoke(
         cli_app,
@@ -174,6 +180,7 @@ def test_setup_refreshes_schema_notes_when_generated_files_already_exist(
     assert workflow_path.read_text(encoding="utf-8") == "custom workflow\n"
     assert config_path.read_text(encoding="utf-8") == "project: existing\n"
     assert prompt_path.read_text(encoding="utf-8") == "custom prompt\n"
+    assert soul_path.read_text(encoding="utf-8") == "custom soul\n"
     mock_seed.assert_awaited_once_with(
         project="team-memory",
         project_id=None,

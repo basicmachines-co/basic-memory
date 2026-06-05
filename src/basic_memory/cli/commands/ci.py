@@ -14,6 +14,7 @@ from rich.console import Console
 from basic_memory.ci.project_updates import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_PROMPT_PATH,
+    DEFAULT_SOUL_PATH,
     DEFAULT_WORKFLOW_PATH,
     AgentSynthesis,
     ProjectUpdateConfig,
@@ -25,6 +26,7 @@ from basic_memory.ci.project_updates import (
     load_project_update_config,
     render_agent_synthesis_schema,
     render_capture_prompt,
+    render_soul_template,
     render_workflow,
     schema_seed_specs,
     write_project_update_config,
@@ -362,6 +364,7 @@ def _write_generated_files(
     files = {
         repo_root / DEFAULT_WORKFLOW_PATH: render_workflow(config),
         repo_root / DEFAULT_PROMPT_PATH: render_capture_prompt(),
+        repo_root / DEFAULT_SOUL_PATH: render_soul_template(),
     }
     config_path = repo_root / DEFAULT_CONFIG_PATH
     targets = [*files, config_path]

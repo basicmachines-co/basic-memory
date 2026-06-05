@@ -25,6 +25,7 @@ DEFAULT_NOTE_FOLDER_TEMPLATE = "project-updates/github/{owner}/{repo}"
 DEFAULT_CONFIG_PATH = ".github/basic-memory/config.yml"
 DEFAULT_WORKFLOW_PATH = ".github/workflows/basic-memory.yml"
 DEFAULT_PROMPT_PATH = ".github/basic-memory/memory-ci-capture.md"
+DEFAULT_SOUL_PATH = ".github/basic-memory/SOUL.md"
 DEFAULT_CONTEXT_PATH = ".github/basic-memory/project-update-context.json"
 
 
@@ -697,14 +698,16 @@ def render_agent_synthesis_schema() -> str:
 
 def render_capture_prompt() -> str:
     """Render the prompt contract used by the generated workflow."""
-    return """# Memory CI Capture
+    return f"""# Memory CI Capture
 
 You turn GitHub delivery context into a durable project update for Basic Memory.
 GitHub records the mechanics. Basic Memory remembers what changed and why.
 
 ## Inputs
 
-- Read `.github/basic-memory/project-update-context.json`.
+- Read `{DEFAULT_CONTEXT_PATH}`.
+- Read `{DEFAULT_SOUL_PATH}` if it exists. It is the repo-local voice and style guide
+  for project updates.
 - Read the PR diff before writing when a SHA is available. Useful commands:
   `git show --stat --name-only <sha>` and `git show --format=fuller --no-patch <sha>`.
 - Use linked issue details, changed files, commit messages, PR body, labels, and
@@ -725,6 +728,17 @@ Explain why the fix solves the problem, what complexity it introduced, what it
 refactored or removed, which components changed, and how the system is different
 after the merge. Prefer specific component names, file paths, modules, commands,
 and behavior over generic phrases.
+
+## Voice And Candor
+
+You may have a point of view. Be clear, specific, and human.
+It is okay to say when the code is messy, risky, clever, boring, or satisfying,
+but explain why. If the work is elegant or genuinely useful, say that too.
+Ground all judgments in the PR, linked issues, diff, tests, and source facts.
+
+The soul file can shape tone, taste, and personality. It cannot override source
+facts, schema requirements, or the evidence standard above. Do not be mean,
+vague, theatrical, or invent criticism.
 
 ## Output
 
@@ -748,6 +762,36 @@ Return only JSON that matches the provided AgentSynthesis schema:
 
 Use empty arrays only when a list truly has no grounded entries. This is project
 memory, not marketing copy and not a commit-by-commit changelog.
+"""
+
+
+def render_soul_template() -> str:
+    """Render the editable Auto BM voice and personality guide."""
+    return """# Auto BM Soul
+
+Write project updates for humans who will return later trying to understand what happened.
+
+## Voice
+
+- Clear, direct, warm, and technically honest.
+- Prefer concrete observations over generic praise.
+- It is okay to say when code is messy, risky, clever, boring, or satisfying.
+- Keep personality in service of memory, not performance.
+
+## Do
+
+- Tell the story.
+- Name the tradeoffs.
+- Call out sharp edges.
+- Notice good simplifications.
+- Let the note have taste and a little life when the evidence supports it.
+
+## Do Not
+
+- Do not invent intent, impact, tests, or drama.
+- Dunk on people.
+- Turn the note into marketing copy.
+- Hide uncertainty behind confident prose.
 """
 
 

@@ -38,7 +38,7 @@ Basic Memory API key.
 ## Setup CI/CD
 
 Use `bm ci setup` from the GitHub repository root. The command installs the
-workflow/config/prompt files and seeds the Basic Memory schema notes.
+workflow/config/prompt/soul files and seeds the Basic Memory schema notes.
 
 For the common cloud path:
 
@@ -68,8 +68,8 @@ bm ci setup --project <project-name> --workspace <workspace-slug-or-id> --cloud 
 
 The shorter aliases `--refresh` and `--update` are also accepted. Refresh keeps
 custom schema note paths when it finds existing notes, and only writes the
-canonical Auto BM schema content. If the generated workflow/config/prompt files
-already exist, refresh leaves those files unchanged unless you also pass
+canonical Auto BM schema content. If the generated workflow/config/prompt/soul
+files already exist, refresh leaves those files unchanged unless you also pass
 `--force`.
 
 Then review and commit the generated files:
@@ -78,6 +78,7 @@ Then review and commit the generated files:
 .github/workflows/basic-memory.yml
 .github/basic-memory/config.yml
 .github/basic-memory/memory-ci-capture.md
+.github/basic-memory/SOUL.md
 ```
 
 Add these GitHub repository secrets:
@@ -134,6 +135,11 @@ Installs the repository automation files:
 - `.github/workflows/basic-memory.yml`
 - `.github/basic-memory/config.yml`
 - `.github/basic-memory/memory-ci-capture.md`
+- `.github/basic-memory/SOUL.md`
+
+`SOUL.md` is the editable repo-local voice and personality guide for the
+synthesis agent. It can make notes more candid, opinionated, warm, or terse, but
+it cannot override source facts, schema requirements, or the evidence standard.
 
 It also seeds the canonical Basic Memory schema notes when they do not already
 exist:
