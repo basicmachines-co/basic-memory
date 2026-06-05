@@ -10,10 +10,10 @@ fix solved it, what changed in the system, what complexity or cleanup came with
 it, and why future humans or agents should care. The Basic Memory CLI owns
 authentication, schema guidance, idempotency, and publishing.
 
-This follows the same product thread as semantic commit messages for temporal
-knowledge queries: keep the source event factual and immutable, then add a
-human-readable semantic layer that future searches can use to understand how the
-project changed over time.
+The semantic layer is the point: GitHub can answer when something merged or
+deployed, but the project memory should answer later questions such as what
+problem was solved, what choices were made, what changed in the architecture,
+and what risks, cleanup, or follow-up work came with the change.
 
 The product voice is:
 
