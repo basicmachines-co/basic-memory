@@ -582,6 +582,7 @@ def build_project_update_note(
         synthesis.solution,
         "## Impact On The System",
         synthesis.system_impact,
+        # Keep the structured-output field stable while using the clearer note heading.
         "## Project Memory",
         synthesis.why_it_matters,
     ]
