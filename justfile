@@ -307,7 +307,7 @@ set-version version scope="all":
 set-version-dry-run version scope="all":
     python3 scripts/update_versions.py "{{version}}" --scope "{{scope}}" --dry-run
 
-# Set the version for just the plugin/agent artifacts (plugin, marketplaces, Hermes, OpenClaw)
+# Set the version for just the plugin/agent artifacts (plugins, marketplaces, Hermes, OpenClaw)
 set-packages-version version:
     just set-version "{{version}}" packages
 
@@ -369,6 +369,7 @@ release version:
         .claude-plugin/marketplace.json \
         plugins/claude-code/.claude-plugin/plugin.json \
         plugins/claude-code/.claude-plugin/marketplace.json \
+        plugins/codex/.codex-plugin/plugin.json \
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
@@ -442,6 +443,7 @@ beta version:
         .claude-plugin/marketplace.json \
         plugins/claude-code/.claude-plugin/plugin.json \
         plugins/claude-code/.claude-plugin/marketplace.json \
+        plugins/codex/.codex-plugin/plugin.json \
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json

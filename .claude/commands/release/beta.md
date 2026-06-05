@@ -30,7 +30,8 @@ The justfile target handles:
 - ✅ Beta version format validation (supports b1, b2, rc1, etc.)
 - ✅ Git status and branch checks
 - ✅ Quality checks (`just check` - lint, format, type-check, tests)
-- ✅ Version update in `src/basic_memory/__init__.py`
+- ✅ Version update across all consolidated manifests via `just set-version` (Python
+  package + Claude Code plugin/marketplaces + Codex plugin + Hermes + OpenClaw)
 - ✅ Automatic commit with proper message
 - ✅ Tag creation and pushing to GitHub
 - ✅ Beta release workflow trigger
@@ -90,6 +91,6 @@ Monitor release: https://github.com/basicmachines-co/basic-memory/actions
 - Beta releases are pre-releases for testing new features
 - Automatically published to PyPI with pre-release flag
 - Uses the automated justfile target for consistency
-- Version is automatically updated in `__init__.py`
+- Version is automatically updated across all consolidated manifests via `just set-version`
 - Ideal for validating changes before stable release
 - Supports both beta (b1, b2) and release candidate (rc1, rc2) versions

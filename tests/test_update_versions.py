@@ -67,6 +67,7 @@ def test_update_versions_writes_npm_semver_prerelease(
     write("integrations/hermes/plugin.yaml", "version: 0.0.0\n")
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
+    write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
 
     update_versions.update_versions("v0.21.3b1", dry_run=False)
 
@@ -76,6 +77,8 @@ def test_update_versions_writes_npm_semver_prerelease(
     )
     openclaw_package = json.loads((tmp_path / "integrations/openclaw/package.json").read_text())
     assert openclaw_package["version"] == "0.21.3-beta.1"
+    codex_plugin = json.loads((tmp_path / "plugins/codex/.codex-plugin/plugin.json").read_text())
+    assert codex_plugin["version"] == "0.21.3-beta.1"
 
 
 def _seed_repo(tmp_path: Path) -> None:
@@ -108,10 +111,16 @@ def _seed_repo(tmp_path: Path) -> None:
     write("integrations/hermes/plugin.yaml", "version: 0.0.0\n")
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
+    write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
 
 
 def _plugin_version(tmp_path: Path) -> str:
     path = tmp_path / "plugins/claude-code/.claude-plugin/plugin.json"
+    return json.loads(path.read_text())["version"]
+
+
+def _codex_plugin_version(tmp_path: Path) -> str:
+    path = tmp_path / "plugins/codex/.codex-plugin/plugin.json"
     return json.loads(path.read_text())["version"]
 
 
@@ -127,6 +136,7 @@ def test_scope_packages_leaves_core_untouched(
     assert (tmp_path / "src/basic_memory/__init__.py").read_text() == '__version__ = "0.0.0"\n'
     assert json.loads((tmp_path / "server.json").read_text())["version"] == "0.0.0"
     assert _plugin_version(tmp_path) == "0.21.6"
+    assert _codex_plugin_version(tmp_path) == "0.21.6"
 
 
 def test_scope_core_leaves_packages_untouched(
@@ -139,6 +149,7 @@ def test_scope_core_leaves_packages_untouched(
 
     assert (tmp_path / "src/basic_memory/__init__.py").read_text() == '__version__ = "0.21.6"\n'
     assert _plugin_version(tmp_path) == "0.0.0"
+    assert _codex_plugin_version(tmp_path) == "0.0.0"
 
 
 def test_invalid_scope_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
