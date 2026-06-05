@@ -4,7 +4,23 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
+
+
+PLAIN_SCALAR_MAPPING_VALUE = re.compile(r":(?:\s|$)")
+
+
+def validate_plain_scalar(path: Path, line_number: int, key: str, value: str) -> None:
+    """Catch invalid plain-scalar YAML that Codex rejects while loading skills."""
+    stripped = value.strip()
+    if not stripped or stripped[0] in {'"', "'"} or stripped in {"|", ">", "|-", ">-", "|+", ">+"}:
+        return
+    if PLAIN_SCALAR_MAPPING_VALUE.search(stripped):
+        raise SystemExit(
+            f"{path}:{line_number}: invalid YAML frontmatter for {key!r}: "
+            "unquoted ':' followed by whitespace; quote the value"
+        )
 
 
 def parse_frontmatter(path: Path) -> dict[str, str]:
@@ -15,14 +31,15 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
     skipped, so nested blocks (a schema note's `schema:`/`settings:` children) can't
     overwrite a top-level key like `type` or `entity` via last-write-wins. It does
     not interpret block scalars or multi-line values; callers rely on single-line
-    top-level fields (name, description, type, entity).
+    top-level fields (name, description, type, entity). Keep the Codex-facing YAML
+    guard here dependency-free so package checks work under bare `python3`.
     """
     lines = path.read_text().splitlines()
     if not lines or lines[0] != "---":
         raise SystemExit(f"{path}: missing YAML frontmatter")
 
     frontmatter: dict[str, str] = {}
-    for line in lines[1:]:
+    for line_number, line in enumerate(lines[1:], start=2):
         if line == "---":
             break
         if line[:1] in (" ", "\t"):  # nested key — not a top-level field
@@ -30,7 +47,10 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
-        frontmatter[key.strip()] = value.strip().strip('"')
+        key = key.strip()
+        value = value.strip()
+        validate_plain_scalar(path, line_number, key, value)
+        frontmatter[key] = value.strip('"')
     else:
         raise SystemExit(f"{path}: unclosed YAML frontmatter")
 
