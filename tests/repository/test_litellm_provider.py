@@ -445,6 +445,24 @@ async def test_litellm_provider_zero_vector_does_not_raise(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_litellm_provider_accepts_dict_response_items(monkeypatch):
+    """LiteLLM providers may return embedding data as dict items."""
+
+    async def _aembedding(**kwargs):
+        data = [{"index": i, "embedding": [1.0, 0.0, 0.0]} for i in range(len(kwargs["input"]))]
+        return SimpleNamespace(data=data)
+
+    module = type(sys)("litellm")
+    setattr(module, "aembedding", _aembedding)
+    monkeypatch.setitem(sys.modules, "litellm", module)
+
+    provider = LiteLLMEmbeddingProvider(dimensions=3)
+    result = await provider.embed_documents(["first", "second"])
+
+    assert result == [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]
+
+
+@pytest.mark.asyncio
 async def test_litellm_provider_duplicate_index_raises_error(monkeypatch):
     """A backend returning duplicate indexes is malformed and must fail fast."""
 

@@ -155,12 +155,17 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
 
             vectors_by_index: dict[int, list[float]] = {}
             for item in response.data:
-                response_index = int(item.index)
+                if isinstance(item, dict):
+                    response_index = int(item["index"])
+                    embedding = item["embedding"]
+                else:
+                    response_index = int(item.index)
+                    embedding = item.embedding
                 if response_index in vectors_by_index:
                     raise RuntimeError(
                         "LiteLLM embedding response returned duplicate vector indexes."
                     )
-                vectors_by_index[response_index] = [float(v) for v in item.embedding]
+                vectors_by_index[response_index] = [float(v) for v in embedding]
 
             ordered_vectors: list[list[float]] = []
             for index in range(len(batch)):
