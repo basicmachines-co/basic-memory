@@ -1454,13 +1454,6 @@ class SyncService:
             # the most tokens, polluting the graph with confidently-wrong edges that no
             # audit catches. Leaving such relations unresolved keeps to_id=NULL so they
             # surface as forward references and can be fixed by the producer.
-            # Use strict=True: deferred resolution should only fill in to_id when an
-            # exact permalink/title/file_path match exists. The fuzzy fallback (search-based
-            # token match) would silently resolve ambiguous links like
-            # `[[overview (state-management/session-execution)]]` to whichever entity shares
-            # the most tokens, polluting the graph with confidently-wrong edges that no
-            # audit catches. Leaving such relations unresolved keeps to_id=NULL so they
-            # surface as forward references and can be fixed by the producer.
             resolved_entity = await self.entity_service.link_resolver.resolve_link(
                 relation.to_name, strict=True
             )
