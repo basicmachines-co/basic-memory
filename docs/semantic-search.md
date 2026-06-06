@@ -141,6 +141,7 @@ export OPENAI_API_KEY=sk-...
 ### LiteLLM
 
 Uses the LiteLLM SDK to call embedding models from providers such as OpenAI, Cohere, Azure, Bedrock, NVIDIA NIM, and other LiteLLM-supported backends. Requires the provider's API credentials.
+For the full option reference, provider setup examples, and live validation harness, see [LiteLLM Provider](litellm-provider.md).
 
 ```bash
 export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true

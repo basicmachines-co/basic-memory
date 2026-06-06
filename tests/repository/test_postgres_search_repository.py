@@ -12,6 +12,7 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 import basic_memory.repository.search_repository_base as search_repository_base_module
+from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.postgres_search_repository import (
     PostgresSearchRepository,
     _strip_nul_from_row,
@@ -55,6 +56,30 @@ class StubEmbeddingProviderV2(StubEmbeddingProvider):
     """Same vectors, different model identity to force Postgres resync."""
 
     model_name = "stub-v2"
+
+
+class StubLiteLLMEmbeddingProvider(LiteLLMEmbeddingProvider):
+    """LiteLLM-shaped provider with deterministic vectors and no network calls."""
+
+    def __init__(
+        self,
+        *,
+        document_input_type: str,
+        query_input_type: str,
+    ) -> None:
+        super().__init__(
+            model_name="nvidia_nim/nvidia/embed-qa-4",
+            dimensions=4,
+            batch_size=2,
+            document_input_type=document_input_type,
+            query_input_type=query_input_type,
+        )
+
+    async def embed_query(self, text: str) -> list[float]:
+        return StubEmbeddingProvider._vectorize(text)
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [StubEmbeddingProvider._vectorize(text) for text in texts]
 
 
 def _oversized_entity_content(bullet_count: int) -> str:
@@ -563,6 +588,97 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
     assert model_changed_result.entities_skipped == 0
     assert model_changed_result.chunks_skipped == 0
     assert model_changed_result.embedding_jobs_total == model_changed_result.chunks_total
+
+
+@pytest.mark.asyncio
+async def test_postgres_litellm_role_change_reembeds_existing_chunks(session_maker, test_project):
+    """LiteLLM role changes must invalidate existing Postgres vector chunks."""
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubLiteLLMEmbeddingProvider(
+            document_input_type="passage",
+            query_input_type="query",
+        ),
+    )
+    await repo.init_search_index()
+
+    now = datetime.now(timezone.utc)
+    content = "# Retrieval Roles\n- auth token rotation\n- database schema migration planning"
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=431,
+            title="LiteLLM Retrieval Roles",
+            content_stems=content,
+            content_snippet=content,
+            permalink="specs/litellm-retrieval-roles",
+            file_path="specs/litellm-retrieval-roles.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=431,
+            metadata={"note_type": "spec"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    initial_result = await repo.sync_entity_vectors_batch([431])
+    assert initial_result.entities_synced == 1
+    assert initial_result.entities_skipped == 0
+    assert initial_result.chunks_total >= 2
+    assert initial_result.chunks_skipped == 0
+    assert initial_result.embedding_jobs_total == initial_result.chunks_total
+
+    unchanged_result = await repo.sync_entity_vectors_batch([431])
+    assert unchanged_result.entities_synced == 1
+    assert unchanged_result.entities_skipped == 1
+    assert unchanged_result.embedding_jobs_total == 0
+    assert unchanged_result.chunks_skipped == unchanged_result.chunks_total
+
+    role_changed_repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubLiteLLMEmbeddingProvider(
+            document_input_type="document",
+            query_input_type="query",
+        ),
+    )
+    await role_changed_repo.init_search_index()
+
+    role_changed_result = await role_changed_repo.sync_entity_vectors_batch([431])
+    assert role_changed_result.entities_synced == 1
+    assert role_changed_result.entities_skipped == 0
+    assert role_changed_result.chunks_skipped == 0
+    assert role_changed_result.embedding_jobs_total == role_changed_result.chunks_total
+
+    async with db.scoped_session(session_maker) as session:
+        stored_rows = await session.execute(
+            text(
+                "SELECT DISTINCT embedding_model "
+                "FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": test_project.id, "entity_id": 431},
+        )
+        embedding_models = {row.embedding_model for row in stored_rows.fetchall()}
+
+    assert embedding_models == {
+        "StubLiteLLMEmbeddingProvider:"
+        "nvidia_nim/nvidia/embed-qa-4:4:"
+        "document_input_type=document:"
+        "query_input_type=query:"
+        "forward_dimensions=false"
+    }
 
 
 @pytest.mark.asyncio
