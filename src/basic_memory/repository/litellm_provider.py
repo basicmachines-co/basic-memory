@@ -123,6 +123,20 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
             attrs["forward_dimensions"] = self.forward_dimensions
         return attrs
 
+    def identity_key(self) -> str:
+        """Return the embedding semantics that should invalidate stored vectors."""
+        document_input_type = self.document_input_type or "-"
+        query_input_type = self.query_input_type or "-"
+        forward_dimensions = str(
+            _should_forward_dimensions(self.model_name, self.forward_dimensions)
+        ).lower()
+        return (
+            f"{self.model_name}:{self.dimensions}:"
+            f"document_input_type={document_input_type}:"
+            f"query_input_type={query_input_type}:"
+            f"forward_dimensions={forward_dimensions}"
+        )
+
     async def _embed(self, texts: list[str], *, input_type: str | None) -> list[list[float]]:
         if not texts:
             return []

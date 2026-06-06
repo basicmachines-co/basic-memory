@@ -586,11 +586,19 @@ class SearchRepositoryBase(ABC):
     def _embedding_model_key(self) -> str:
         """Build a stable model identity for vector invalidation checks."""
         assert self._embedding_provider is not None
-        return (
-            f"{type(self._embedding_provider).__name__}:"
-            f"{self._embedding_provider.model_name}:"
-            f"{self._embedding_provider.dimensions}"
-        )
+        provider = self._embedding_provider
+
+        provider_identity = f"{provider.model_name}:{provider.dimensions}"
+        from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+
+        if isinstance(provider, LiteLLMEmbeddingProvider):
+            # Trigger: LiteLLM can change request semantics without changing model/dimensions.
+            # Why: asymmetric providers use role-specific document/query params, and
+            # dimension forwarding changes provider-side output-size behavior.
+            # Outcome: reindex treats those semantic config changes as stale vectors.
+            provider_identity = provider.identity_key()
+
+        return f"{type(provider).__name__}:{provider_identity}"
 
     def _plan_entity_vector_shard(
         self,
