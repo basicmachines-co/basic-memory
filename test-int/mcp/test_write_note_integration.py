@@ -5,14 +5,25 @@ Comprehensive tests covering all scenarios including note creation, content form
 tag handling, error conditions, and edge cases from bug reports.
 """
 
+import json
+from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
 from fastmcp import Client
 
 from basic_memory.config import ConfigManager
 from basic_memory.schemas.project_info import ProjectItem
-from pathlib import Path
+
+
+def _json_content(tool_result) -> dict[str, Any]:
+    """Parse a FastMCP tool result content block into a JSON object."""
+    assert len(tool_result.content) == 1
+    assert tool_result.content[0].type == "text"
+    payload = json.loads(tool_result.content[0].text)  # pyright: ignore [reportAttributeAccessIssue]
+    assert isinstance(payload, dict)
+    return payload
 
 
 @pytest.mark.asyncio
@@ -111,6 +122,83 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
         assert f"permalink: {test_project.name}/test/update-test" in response_text
         assert "- updated, modified" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
+
+
+@pytest.mark.asyncio
+async def test_write_note_overwrite_resolves_conflict_by_file_path_when_permalink_changes(
+    mcp_server, app, test_project, monkeypatch
+):
+    """Overwrite resolves the conflict by strict file path through the MCP client stack."""
+    from basic_memory.mcp.clients import knowledge as knowledge_mod
+
+    original_resolve = knowledge_mod.KnowledgeClient.resolve_entity
+    captured_resolve: dict[str, Any] = {}
+
+    async def spy_resolve(self, identifier: str, *, strict: bool = False) -> str:
+        captured_resolve["identifier"] = identifier
+        captured_resolve["strict"] = strict
+        return await original_resolve(self, identifier, strict=strict)
+
+    monkeypatch.setattr(knowledge_mod.KnowledgeClient, "resolve_entity", spy_resolve)
+
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Overwrite Permalink Change",
+                "directory": "overwrite-conflicts",
+                "content": "# Overwrite Permalink Change\n\nOriginal body.",
+                "output_format": "json",
+            },
+        )
+        created_payload = _json_content(created)
+        assert created_payload["permalink"] == (
+            f"{test_project.name}/overwrite-conflicts/overwrite-permalink-change"
+        )
+
+        replacement = dedent("""
+            ---
+            permalink: overwrite-conflicts/custom-overwrite-permalink
+            ---
+
+            # Overwrite Permalink Change
+
+            Replacement body.
+        """).strip()
+
+        updated = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Overwrite Permalink Change",
+                "directory": "overwrite-conflicts",
+                "content": replacement,
+                "overwrite": True,
+                "output_format": "json",
+            },
+        )
+        updated_payload = _json_content(updated)
+        assert updated_payload["action"] == "updated"
+        assert updated_payload["permalink"] == "overwrite-conflicts/custom-overwrite-permalink"
+        assert updated_payload["file_path"] == "overwrite-conflicts/Overwrite Permalink Change.md"
+        assert captured_resolve == {
+            "identifier": "overwrite-conflicts/Overwrite Permalink Change.md",
+            "strict": True,
+        }
+
+        read_updated = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "overwrite-conflicts/custom-overwrite-permalink",
+                "output_format": "json",
+            },
+        )
+        read_payload = _json_content(read_updated)
+        assert read_payload["permalink"] == "overwrite-conflicts/custom-overwrite-permalink"
+        assert "Replacement body." in read_payload["content"]
+        assert "Original body." not in read_payload["content"]
 
 
 @pytest.mark.asyncio
