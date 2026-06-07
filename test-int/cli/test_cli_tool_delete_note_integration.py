@@ -69,10 +69,19 @@ def _delete_note(
     return result.exit_code, payload, result.output
 
 
-def _search_notes(query: str, *, page_size: int = 20) -> dict[str, Any]:
+def _search_notes(
+    query: str,
+    *,
+    mode_flag: str | None = None,
+    page_size: int = 20,
+) -> dict[str, Any]:
+    args = ["tool", "search-notes", query, "--page-size", str(page_size)]
+    if mode_flag is not None:
+        args.append(mode_flag)
+
     result = runner.invoke(
         cli_app,
-        ["tool", "search-notes", query, "--page-size", str(page_size)],
+        args,
     )
     assert result.exit_code == 0, result.output
     return json.loads(result.stdout)
@@ -110,7 +119,7 @@ def test_delete_note_removes_file_database_record_and_search_result(
     assert missing["permalink"] is None
     assert missing["content"] is None
 
-    search = _search_notes("UniqueSingleDeleteToken")
+    search = _search_notes("CLI Delete Single Note", mode_flag="--title")
     assert search["total"] == 0
     assert search["results"] == []
 
@@ -231,7 +240,7 @@ def test_delete_directory_removes_nested_files_database_records_and_search_resul
     for note in notes:
         assert _read_note(note["permalink"])["title"] is None
 
-    search = _search_notes("DirectoryDeleteToken")
+    search = _search_notes("CLI Delete Directory", mode_flag="--title")
     assert search["total"] == 0
     assert search["results"] == []
 
