@@ -16,6 +16,7 @@ this path.
 """
 
 import os
+import sqlite3
 
 import pytest
 from sqlalchemy import text
@@ -54,6 +55,21 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
     # Outcome: keep the regression on the backend that can actually hit this path.
     if _is_postgres():
         pytest.skip("Real vec0 table handling is SQLite-specific.")
+
+    # Trigger: Python build without SQLite extension loading (#711 — python.org
+    # macOS / some Windows interpreters lack enable_load_extension).
+    # Why: this test creates a REAL vec0 virtual table during setup, which is
+    # impossible without loading the sqlite-vec extension.
+    # Outcome: skip the regression as an environment-capability gap; the codebase
+    # already degrades gracefully in that scenario (covered by the unit test).
+    _probe = sqlite3.connect(":memory:")
+    if not hasattr(_probe, "enable_load_extension"):
+        _probe.close()
+        pytest.skip(
+            "Python build does not support SQLite extension loading — "
+            "cannot create real vec0 tables"
+        )
+    _probe.close()
 
     _engine, session_maker = engine_factory
     project_id = test_project.id

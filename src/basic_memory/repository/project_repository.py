@@ -5,7 +5,7 @@ from typing import Optional, Sequence, Union
 
 
 from loguru import logger
-from sqlalchemy import inspect as sa_inspect, select, text
+from sqlalchemy import Executable, inspect as sa_inspect, select, text
 from sqlalchemy.exc import NoResultFound, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -258,7 +258,9 @@ class ProjectRepository(Repository[Project]):
             logger.debug(f"Deleted Project and search rows for project_id: {entity_id}")
             return True
 
-    async def scalar_vec_query(self, query, params: Optional[dict] = None) -> Optional[int]:
+    async def scalar_vec_query(
+        self, query: Executable, params: Optional[dict] = None
+    ) -> Optional[int]:
         """Run a scalar COUNT query that reads the sqlite-vec vec0 table.
 
         Extension loading is per-connection, so the bare pooled session used by
