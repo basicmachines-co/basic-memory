@@ -77,6 +77,16 @@ def write_note(
     tags: Annotated[
         Optional[List[str]], typer.Option(help="A list of tags to apply to the note")
     ] = None,
+    note_type: Annotated[
+        str,
+        typer.Option(
+            "--type",
+            help=(
+                "Note type stored in frontmatter (e.g. 'guide', 'report'). "
+                "A 'type:' in the note's own content frontmatter takes precedence."
+            ),
+        ),
+    ] = "note",
     project: Annotated[
         Optional[str],
         typer.Option(
@@ -100,6 +110,7 @@ def write_note(
     Examples:
 
     bm tool write-note --title "My Note" --folder "notes" --content "Note content"
+    bm tool write-note --title "My Guide" --folder "notes" --content "..." --type guide
     echo "content" | bm tool write-note --title "My Note" --folder "notes"
     bm tool write-note --title "My Note" --folder "notes" --local
     """
@@ -132,6 +143,7 @@ def write_note(
                     project=project,
                     project_id=project_id,
                     tags=tags,
+                    note_type=note_type,
                     output_format="json",
                 )
             )

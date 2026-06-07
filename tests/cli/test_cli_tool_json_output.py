@@ -189,6 +189,58 @@ def test_write_note_with_tags(mock_mcp_write):
     assert mock_mcp_write.call_args.kwargs["tags"] == ["python", "async"]
 
 
+@patch(
+    "basic_memory.cli.commands.tool.mcp_write_note",
+    new_callable=AsyncMock,
+    return_value=WRITE_NOTE_RESULT,
+)
+def test_write_note_type_passthrough(mock_mcp_write):
+    """--type forwards to the MCP tool's note_type parameter."""
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Test Note",
+            "--folder",
+            "notes",
+            "--content",
+            "hello",
+            "--type",
+            "guide",
+        ],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert mock_mcp_write.call_args.kwargs["note_type"] == "guide"
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_write_note",
+    new_callable=AsyncMock,
+    return_value=WRITE_NOTE_RESULT,
+)
+def test_write_note_type_defaults_to_note(mock_mcp_write):
+    """write-note defaults note_type to 'note' when --type is omitted."""
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Test Note",
+            "--folder",
+            "notes",
+            "--content",
+            "hello",
+        ],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert mock_mcp_write.call_args.kwargs["note_type"] == "note"
+
+
 # --- read-note ---
 
 
