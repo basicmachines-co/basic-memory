@@ -944,3 +944,51 @@ async def test_move_note_new_nested_folder_still_succeeds(mcp_server, app, test_
             },
         )
         assert "Valid same-project nested move" in read_result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_move_note_interior_projects_segment_still_succeeds(mcp_server, app, test_project):
+    """An interior 'projects' segment NOT at index 1 must not trip cross-boundary detection.
+
+    Regression for the false positive where any path containing an interior 'projects'
+    segment (e.g. "notes/projects/my-project/note.md") was rejected. Only the cloud
+    workspace shape "<workspace>/projects/<x>/..." (projects at index 1) is cross-project;
+    legitimate nested organization that happens to include a 'projects' folder deeper in
+    the path is a valid same-project move and must succeed.
+    """
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Interior Projects Note",
+                "directory": "source",
+                "content": "# Interior Projects Note\n\nInterior projects segment is fine.",
+            },
+        )
+
+        # Segments: team[0] / 2026[1] / projects[2] / alpha[3] / file. The "projects"
+        # segment sits at index 2, not index 1, so it is NOT the cloud workspace shape
+        # and must be treated as a normal same-project nested move.
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Interior Projects Note",
+                "destination_path": "team/2026/projects/alpha/interior-projects-note.md",
+            },
+        )
+
+        move_text = move_result.content[0].text
+        assert "✅ Note moved successfully" in move_text
+        assert "team/2026/projects/alpha/interior-projects-note.md" in move_text
+
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "team/2026/projects/alpha/interior-projects-note.md",
+            },
+        )
+        assert "Interior projects segment is fine" in read_result.content[0].text

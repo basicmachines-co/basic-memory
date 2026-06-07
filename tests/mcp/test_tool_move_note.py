@@ -36,6 +36,66 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
 
 
 @pytest.mark.asyncio
+async def test_detect_cross_project_only_flags_workspace_shape(monkeypatch):
+    """Detection 2 must flag '<workspace>/projects/<x>/...' but not interior 'projects'.
+
+    Regression: the original interior-scan loop rejected ANY path with a 'projects'
+    segment anywhere except the last, breaking legitimate nested folders like
+    'team/2026/projects/alpha/note.md'. The narrowed check fires only when 'projects'
+    is the second segment (index 1), the actual cloud workspace layout.
+    """
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    # Workspace shape: projects at index 1 -> rejected.
+    rejected = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="other-workspace/projects/x/note.md",
+        current_project="test-project",
+    )
+    assert rejected is not None
+    assert "Cross-Project Move Not Supported" in rejected
+
+    # Interior 'projects' NOT at index 1 -> allowed (no false positive).
+    allowed = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="team/2026/projects/alpha/note.md",
+        current_project="test-project",
+    )
+    assert allowed is None
+
+    # Top-level 'projects/...' (index 0) -> allowed.
+    top_level = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="projects/2025/note.md",
+        current_project="test-project",
+    )
+    assert top_level is None
+
+
+@pytest.mark.asyncio
 async def test_move_note_success(app, client, test_project):
     """Test successfully moving a note to a new location."""
     # Create initial note

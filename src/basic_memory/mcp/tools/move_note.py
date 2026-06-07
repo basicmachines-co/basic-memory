@@ -57,19 +57,20 @@ async def _detect_cross_project_move_attempt(
                 )
 
         # --- Detection 2: workspace/projects/<x> shaped destination ---
-        # Trigger: an interior segment is literally "projects" (e.g.
-        #          "other-workspace/projects/x/file.md") — the cloud workspace layout.
+        # Trigger: the destination has the exact cloud workspace layout
+        #          "<workspace>/projects/<x>/..." — a single leading workspace segment,
+        #          then literal "projects", then at least one more segment.
         # Why: this is the canonical cross-workspace routing shape from #881. It slips
         #      past name-based detection because the workspace/project names need not
         #      match any locally known project.
-        # Outcome: reject with cross-project guidance. Conservative: only matches when
-        #      "projects" is preceded AND followed by a segment, so a top-level
-        #      "projects/2025/..." folder (a legit same-project move) is not flagged.
-        for index in range(1, len(path_parts) - 1):
-            if path_parts[index] == "projects":
-                return _format_cross_project_error_response(
-                    identifier, destination_path, current_project, path_parts[0]
-                )
+        # Outcome: reject with cross-project guidance. The check is pinned to index 1 so
+        #      legitimate nested folders that merely contain a "projects" segment
+        #      (e.g. "notes/projects/my-project/note.md" or a top-level
+        #      "projects/2025/...") are NOT flagged as cross-project moves.
+        if len(path_parts) >= 3 and path_parts[1] == "projects":
+            return _format_cross_project_error_response(
+                identifier, destination_path, current_project, path_parts[0]
+            )
 
         # No other cross-project patterns detected
 
