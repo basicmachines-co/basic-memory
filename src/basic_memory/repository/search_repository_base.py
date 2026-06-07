@@ -218,6 +218,7 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        categories: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -234,6 +235,7 @@ class SearchRepositoryBase(ABC):
             note_types: Filter by note types (from metadata.note_type)
             after_date: Filter by created_at > after_date
             search_item_types: Filter by SearchItemType (ENTITY, OBSERVATION, RELATION)
+            categories: Filter observations by exact category (e.g. "requirement")
             metadata_filters: Structured frontmatter metadata filters
             limit: Maximum results to return
             offset: Number of results to skip
@@ -256,6 +258,7 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        categories: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -1785,6 +1788,7 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
+        categories: Optional[List[str]],
         metadata_filters: Optional[dict],
         retrieval_mode: SearchRetrievalMode,
         min_similarity: Optional[float] = None,
@@ -1818,6 +1822,7 @@ class SearchRepositoryBase(ABC):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                categories=categories,
                 metadata_filters=metadata_filters,
                 min_similarity=min_similarity,
                 limit=limit,
@@ -1837,6 +1842,7 @@ class SearchRepositoryBase(ABC):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                categories=categories,
                 metadata_filters=metadata_filters,
                 min_similarity=min_similarity,
                 limit=limit,
@@ -1866,6 +1872,7 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
+        categories: Optional[List[str]],
         metadata_filters: Optional[dict],
         min_similarity: Optional[float] = None,
         limit: int,
@@ -1976,6 +1983,7 @@ class SearchRepositoryBase(ABC):
                 note_types,
                 after_date,
                 search_item_types,
+                categories,
                 metadata_filters,
             ]
         )
@@ -1989,6 +1997,7 @@ class SearchRepositoryBase(ABC):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                categories=categories,
                 metadata_filters=metadata_filters,
                 retrieval_mode=SearchRetrievalMode.FTS,
                 limit=VECTOR_FILTER_SCAN_LIMIT,
@@ -2139,6 +2148,7 @@ class SearchRepositoryBase(ABC):
         note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
+        categories: Optional[List[str]],
         metadata_filters: Optional[dict],
         min_similarity: Optional[float] = None,
         limit: int,
@@ -2163,6 +2173,7 @@ class SearchRepositoryBase(ABC):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            categories=categories,
             metadata_filters=metadata_filters,
             retrieval_mode=SearchRetrievalMode.FTS,
             limit=candidate_limit,
@@ -2178,6 +2189,7 @@ class SearchRepositoryBase(ABC):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            categories=categories,
             metadata_filters=metadata_filters,
             min_similarity=min_similarity,
             limit=candidate_limit,

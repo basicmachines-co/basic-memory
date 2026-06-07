@@ -932,3 +932,72 @@ async def test_postgres_metadata_filters_path_parameterized(session_maker, test_
     # Nested path should work without SQL injection risk
     results = await repo.search(metadata_filters={"schema.confidence": {"$gt": 0.5}})
     assert isinstance(results, list)
+
+
+@pytest.mark.asyncio
+async def test_postgres_search_categories_exact_match(session_maker, test_project):
+    """categories filter matches the observation category exactly (mirror of #430).
+
+    A [decision] observation that merely mentions "requirement" must be excluded
+    when categories=["requirement"] is requested.
+    """
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+
+    await repo.bulk_index_items(
+        [
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=70101,
+                type=SearchItemType.OBSERVATION.value,
+                content_stems="the auth requirement must be enforced on every call",
+                content_snippet="the auth requirement must be enforced on every call",
+                permalink="test/obs/requirement/70101",
+                file_path="test/obs.md",
+                entity_id=1,
+                category="requirement",
+                metadata={"note_type": "note"},
+                created_at=now,
+                updated_at=now,
+            ),
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=70102,
+                type=SearchItemType.OBSERVATION.value,
+                content_stems="we deferred the auth requirement to next sprint",
+                content_snippet="we deferred the auth requirement to next sprint",
+                permalink="test/obs/decision/70102",
+                file_path="test/obs.md",
+                entity_id=1,
+                category="decision",
+                metadata={"note_type": "note"},
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+
+    # Without the category filter, a text search for "requirement" matches both.
+    text_results = await repo.search(
+        search_text="requirement",
+        search_item_types=[SearchItemType.OBSERVATION],
+    )
+    assert {r.id for r in text_results} == {70101, 70102}
+
+    # With categories=["requirement"], only the requirement observation survives.
+    filtered = await repo.search(
+        search_text="requirement",
+        search_item_types=[SearchItemType.OBSERVATION],
+        categories=["requirement"],
+    )
+    assert {r.id for r in filtered} == {70101}
+    assert filtered[0].category == "requirement"
+
+    # Standalone filter and count both honor the exact category.
+    filtered_only = await repo.search(categories=["requirement"])
+    assert {r.id for r in filtered_only} == {70101}
+    assert await repo.count(categories=["requirement"]) == 1
+
+    # Multiple categories union.
+    multi = await repo.search(categories=["requirement", "decision"])
+    assert {r.id for r in multi} == {70101, 70102}

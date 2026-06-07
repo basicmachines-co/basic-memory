@@ -705,6 +705,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict] = None,
     ) -> tuple[str, str, dict, str, str]:
         """Build Postgres FTS FROM/WHERE params shared by search and count."""
@@ -761,6 +762,20 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 params[param_name] = t.value
                 type_placeholders.append(f":{param_name}")
             conditions.append(f"search_index.type IN ({', '.join(type_placeholders)})")
+
+        # Handle observation category filter (parameterized for defense-in-depth).
+        # Trigger: caller passed `categories` to scope observation results.
+        # Why: `entity_types=["observation"]` only narrows to the observation row type;
+        #      callers expect exact-category matching, not incidental text matches.
+        # Outcome: only rows whose indexed category exactly equals a requested value
+        #          survive (entities/relations have NULL category and are excluded).
+        if categories:
+            category_placeholders = []
+            for idx, category in enumerate(categories):
+                param_name = f"category_{idx}"
+                params[param_name] = category
+                category_placeholders.append(f":{param_name}")
+            conditions.append(f"search_index.category IN ({', '.join(category_placeholders)})")
 
         # Handle note type filter using JSONB containment (parameterized)
         if note_types:
@@ -879,6 +894,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -895,6 +911,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            categories=categories,
             metadata_filters=metadata_filters,
             retrieval_mode=retrieval_mode,
             min_similarity=min_similarity,
@@ -919,6 +936,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            categories=categories,
             metadata_filters=metadata_filters,
         )
 
@@ -1008,6 +1026,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
@@ -1022,6 +1041,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
+                categories=categories,
                 metadata_filters=metadata_filters,
                 retrieval_mode=retrieval_mode,
                 min_similarity=min_similarity,
@@ -1041,6 +1061,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
+            categories=categories,
             metadata_filters=metadata_filters,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"

@@ -1044,3 +1044,83 @@ async def test_search_item_types_parameterized(search_repository):
     results = await search_repository.search(search_item_types=[SearchItemType.ENTITY])
     # Should not raise — parameterized query handles enum values safely
     assert isinstance(results, list)
+
+
+async def _index_observation(
+    search_repository,
+    *,
+    row_id: int,
+    entity_id: int,
+    category: str,
+    content: str,
+) -> None:
+    """Index a single observation row with an explicit category for filter tests."""
+    now = datetime.now(timezone.utc)
+    search_row = SearchIndexRow(
+        id=row_id,
+        type=SearchItemType.OBSERVATION.value,
+        content_stems=content,
+        content_snippet=content,
+        permalink=f"test/obs/{category}/{row_id}",
+        file_path="test/obs.md",
+        entity_id=entity_id,
+        category=category,
+        metadata={"note_type": "note"},
+        created_at=now,
+        updated_at=now,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(search_row)
+
+
+@pytest.mark.asyncio
+async def test_search_categories_exact_match(search_repository, search_entity):
+    """categories must match the observation category exactly, not by text.
+
+    Regression for #430: searching observations for "requirement" used to also
+    return a [decision] observation that merely mentions the word. The categories
+    filter scopes results to the exact indexed category.
+    """
+    await _index_observation(
+        search_repository,
+        row_id=70001,
+        entity_id=search_entity.id,
+        category="requirement",
+        content="The auth requirement must be enforced on every call",
+    )
+    # A decision observation whose text mentions "requirement" but whose category
+    # is NOT requirement — it must be excluded by an exact-category filter.
+    await _index_observation(
+        search_repository,
+        row_id=70002,
+        entity_id=search_entity.id,
+        category="decision",
+        content="We deferred the auth requirement to next sprint",
+    )
+
+    # Without the category filter, a text search for "requirement" matches both.
+    text_results = await search_repository.search(
+        search_text="requirement",
+        search_item_types=[SearchItemType.OBSERVATION],
+    )
+    assert {r.id for r in text_results} == {70001, 70002}
+
+    # With categories=["requirement"], only the requirement observation survives.
+    filtered = await search_repository.search(
+        search_text="requirement",
+        search_item_types=[SearchItemType.OBSERVATION],
+        categories=["requirement"],
+    )
+    assert {r.id for r in filtered} == {70001}
+    assert filtered[0].category == "requirement"
+
+    # categories also works as a standalone filter (no text query).
+    filtered_only = await search_repository.search(categories=["requirement"])
+    assert {r.id for r in filtered_only} == {70001}
+
+    # count mirrors the filtered search.
+    assert await search_repository.count(categories=["requirement"]) == 1
+
+    # Multiple categories union: both observations come back.
+    multi = await search_repository.search(categories=["requirement", "decision"])
+    assert {r.id for r in multi} == {70001, 70002}

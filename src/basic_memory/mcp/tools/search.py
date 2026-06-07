@@ -114,7 +114,7 @@ def _format_search_error_response(
             - Boolean NOT: `project NOT archived`
             - Grouped: `(project OR planning) AND notes`
             - Exact phrases: `"weekly standup meeting"`
-            - Content-specific: `tag:example` or `category:observation`
+            - Content-specific: `tag:example`
 
             ## Try again with:
             ```
@@ -181,7 +181,7 @@ def _format_search_error_response(
 
             6. **Try advanced search patterns**:
                - Tag search: `search_notes("{project}","tag:your-tag")`
-               - Category search: `search_notes("{project}","category:observation")`
+               - Observation category: `search_notes("{project}","{query}", entity_types=["observation"], categories=["requirement"])`
                - Pattern matching: `search_notes("{project}","*{query}*", search_type="permalink")`
 
             ## Explore what content exists:
@@ -258,7 +258,8 @@ Error searching for '{query}': {error_message}
 - **Boolean**: `term1 AND term2`, `term1 OR term2`, `term1 NOT term2`
 - **Phrases**: `"exact phrase"`
 - **Grouping**: `(term1 OR term2) AND term3`
-- **Patterns**: `tag:example`, `category:observation`"""
+- **Tags**: `tag:example`
+- **Observation categories**: `entity_types=["observation"], categories=["requirement"]`"""
 
 
 def _format_search_markdown(result: SearchResponse, project: str, query: str | None) -> str:
@@ -456,6 +457,7 @@ async def _search_all_projects(
     output_format: Literal["text", "json"],
     note_types: list[str],
     entity_types: list[str],
+    categories: list[str],
     after_date: str | None,
     metadata_filters: dict[str, Any] | None,
     tags: list[str] | None,
@@ -514,6 +516,7 @@ async def _search_all_projects(
                 output_format="json",
                 note_types=note_types or None,
                 entity_types=entity_types or None,
+                categories=categories or None,
                 after_date=after_date,
                 metadata_filters=metadata_filters,
                 tags=tags,
@@ -612,6 +615,14 @@ async def search_notes(
         "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
         "'Chapter' here — use note_types instead.",
     ] = None,
+    categories: Annotated[
+        List[str] | None,
+        BeforeValidator(coerce_list),
+        Field(default=None, validation_alias=AliasChoices("categories", "category")),
+        "Filter observation results to these exact categories (e.g. ['requirement']). "
+        "Pair with entity_types=['observation'] to return only observations whose "
+        "category matches exactly — not every row mentioning the word.",
+    ] = None,
     # Time-filter naming varies wildly across APIs.
     after_date: Annotated[
         Optional[str],
@@ -666,7 +677,8 @@ async def search_notes(
 
     ### Content-Specific Searches
     - `search_notes("research", "tag:example")` - Search within specific tags (if supported by content)
-    - `search_notes("work-project", "category:observation")` - Filter by observation categories
+    - `search_notes("work-project", "req", entity_types=["observation"], categories=["requirement"])`
+      - Return only observations whose category is exactly "requirement"
     - `search_notes("team-docs", "author:username")` - Find content by author (if metadata available)
 
     **Note:** `tag:` shorthand is automatically converted to a `tags` filter, so it works
@@ -684,6 +696,8 @@ async def search_notes(
     - `search_notes("my-project", "query", note_types=["note"])` - Search only notes
     - `search_notes("work-docs", "query", note_types=["note", "person"])` - Multiple note types
     - `search_notes("research", "query", entity_types=["observation"])` - Filter by entity type
+    - `search_notes("research", "query", entity_types=["observation"], categories=["requirement"])`
+      - Filter observations to an exact category
     - `search_notes("team-docs", "query", after_date="2024-01-01")` - Recent content only
     - `search_notes("my-project", "query", after_date="1 week")` - Relative date filtering
     - `search_notes("my-project", "query", tags=["security"])` - Filter by frontmatter tags
@@ -735,6 +749,9 @@ async def search_notes(
             "json" returns a machine-readable dictionary payload.
         note_types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
+        categories: Optional list of observation categories for exact matching (e.g.,
+                   ["requirement"]). Pair with entity_types=["observation"] to return only
+                   observations whose category matches exactly.
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
         metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"})
         tags: Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"]
@@ -812,6 +829,9 @@ async def search_notes(
     # Lowercase note_types so "Chapter" matches the stored "chapter".
     note_types = [t.lower() for t in note_types] if note_types else []
     entity_types = entity_types or []
+    # Categories are matched exactly against the indexed observation category,
+    # so preserve their original casing (unlike the lowercased note_types).
+    categories = categories or []
 
     # Parse tag:<value> shorthand at tool level so it works with all search modes.
     # Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing".
@@ -853,6 +873,7 @@ async def search_notes(
             output_format=output_format,
             note_types=note_types,
             entity_types=entity_types,
+            categories=categories,
             after_date=after_date,
             metadata_filters=metadata_filters,
             tags=tags,
@@ -876,8 +897,15 @@ async def search_notes(
         has_query=bool(query and query.strip()),
         note_type_filter_count=len(note_types),
         entity_type_filter_count=len(entity_types),
+        category_filter_count=len(categories),
         has_filters=bool(
-            metadata_filters or tags or status or note_types or entity_types or after_date
+            metadata_filters
+            or tags
+            or status
+            or note_types
+            or entity_types
+            or categories
+            or after_date
         ),
         has_tags_filter=bool(tags),
         has_status_filter=bool(status),
@@ -940,6 +968,8 @@ async def search_notes(
                 # Add optional filters if provided (empty lists are treated as no filter)
                 if entity_types:
                     search_query.entity_types = [SearchItemType(t) for t in entity_types]
+                if categories:
+                    search_query.categories = categories
                 if note_types:
                     search_query.note_types = note_types
                 if after_date:
@@ -965,7 +995,8 @@ async def search_notes(
                     return (
                         "# No Search Criteria\n\n"
                         "Please provide at least one of: `query`, `metadata_filters`, "
-                        "`tags`, `status`, `note_types`, `entity_types`, or `after_date`."
+                        "`tags`, `status`, `note_types`, `entity_types`, `categories`, "
+                        "or `after_date`."
                     )
 
                 # Default to entity-level results to avoid returning individual

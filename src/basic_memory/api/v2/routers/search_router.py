@@ -64,7 +64,9 @@ async def search(
             or query.permalink
             or query.permalink_match
         ),
-        has_filters=bool(query.note_types or query.entity_types or query.metadata_filters),
+        has_filters=bool(
+            query.note_types or query.entity_types or query.categories or query.metadata_filters
+        ),
     ):
         offset = (page - 1) * page_size
         exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS

@@ -75,6 +75,7 @@ class _PreparedSearchQuery:
     title: str | None
     note_types: list[str] | None
     search_item_types: list[SearchItemType] | None
+    categories: list[str] | None
     after_date: datetime | None
     metadata_filters: dict[str, Any] | None
     retrieval_mode: SearchRetrievalMode
@@ -194,6 +195,7 @@ class SearchService:
             title=query.title,
             note_types=query.note_types,
             search_item_types=query.entity_types,
+            categories=query.categories,
             after_date=after_date,
             metadata_filters=metadata_filters,
             retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
@@ -207,6 +209,7 @@ class SearchService:
             or prepared.title
             or prepared.note_types
             or prepared.search_item_types
+            or prepared.categories
             or prepared.after_date
             or prepared.metadata_filters
         )
@@ -221,6 +224,7 @@ class SearchService:
             prepared.metadata_filters
             or prepared.note_types
             or prepared.search_item_types
+            or prepared.categories
             or prepared.after_date
         )
 
@@ -239,6 +243,7 @@ class SearchService:
             title=prepared.title,
             note_types=prepared.note_types,
             search_item_types=prepared.search_item_types,
+            categories=prepared.categories,
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
             retrieval_mode=prepared.retrieval_mode,
@@ -260,6 +265,7 @@ class SearchService:
             title=prepared.title,
             note_types=prepared.note_types,
             search_item_types=prepared.search_item_types,
+            categories=prepared.categories,
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
             retrieval_mode=prepared.retrieval_mode,

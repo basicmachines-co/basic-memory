@@ -278,6 +278,39 @@ async def test_search_entity_type(search_service, test_graph):
 
 
 @pytest.mark.asyncio
+async def test_search_categories_filter(search_service, test_graph):
+    """categories propagates through _prepare_query/has_criteria to scope results.
+
+    The test_graph fixture indexes observations with categories "note" and "tech".
+    A categories filter must return only matching observation categories.
+    """
+    # categories alone is enough criteria to run a query (has_criteria True).
+    note_results = await search_service.search(SearchQuery(categories=["note"]))
+    assert len(note_results) > 0
+    assert all(r.type == SearchItemType.OBSERVATION for r in note_results)
+    assert all(r.category == "note" for r in note_results)
+
+    # A different category yields a disjoint, non-empty result set.
+    tech_results = await search_service.search(SearchQuery(categories=["tech"]))
+    assert len(tech_results) > 0
+    assert all(r.category == "tech" for r in tech_results)
+
+    note_ids = {r.id for r in note_results}
+    tech_ids = {r.id for r in tech_results}
+    assert note_ids.isdisjoint(tech_ids)
+
+    # count() must agree with the filtered search via the same prepared query.
+    assert await search_service.count(SearchQuery(categories=["note"])) == len(note_results)
+
+
+@pytest.mark.asyncio
+async def test_search_categories_only_is_not_no_criteria():
+    """A SearchQuery carrying only categories must not be treated as empty."""
+    assert SearchQuery(categories=["requirement"]).no_criteria() is False
+    assert SearchQuery().no_criteria() is True
+
+
+@pytest.mark.asyncio
 async def test_extract_entity_tags_exception_handling(search_service):
     """Test the _extract_entity_tags method exception handling (lines 147-151)."""
     from basic_memory.models.knowledge import Entity
