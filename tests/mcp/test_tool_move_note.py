@@ -1152,3 +1152,80 @@ class TestMoveNoteDestinationFolder:
 
             assert isinstance(result, str)
             assert "Security Validation Error" in result
+
+
+class TestMoveNoteOutcomeValidation:
+    """Test the outcome-vs-intent backstop (#881 Gap 2).
+
+    The move service stores the path verbatim relative to the project root, so a
+    divergence between the requested destination and the resulting file_path cannot
+    occur through the real stack. We inject a divergent result to exercise the backstop
+    that prevents a falsely-reported "✅ moved successfully".
+    """
+
+    @pytest.mark.asyncio
+    async def test_move_note_outcome_mismatch_reports_failure(
+        self, app, client, test_project, monkeypatch
+    ):
+        """A move whose file_path diverges from the request must NOT report success."""
+        await write_note(
+            project=test_project.name,
+            title="Outcome Mismatch Note",
+            directory="source",
+            content="# Outcome Mismatch Note\nContent.",
+        )
+
+        from basic_memory.mcp.clients import KnowledgeClient
+
+        real_move_entity = KnowledgeClient.move_entity
+
+        async def diverging_move_entity(self, entity_id, destination_path):
+            # Perform the real move, then return a result that landed elsewhere.
+            result = await real_move_entity(self, entity_id, destination_path)
+            return result.model_copy(update={"file_path": "somewhere/else/diverged.md"})
+
+        monkeypatch.setattr(KnowledgeClient, "move_entity", diverging_move_entity)
+
+        result = await move_note(
+            project=test_project.name,
+            identifier="source/outcome-mismatch-note",
+            destination_path="target/outcome-mismatch-note.md",
+        )
+
+        assert isinstance(result, str)
+        assert "✅ Note moved successfully" not in result
+        assert "Unexpected Result Location" in result
+        assert "target/outcome-mismatch-note.md" in result
+        assert "somewhere/else/diverged.md" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_outcome_mismatch_json(self, app, client, test_project, monkeypatch):
+        """JSON output for an outcome mismatch reports moved=False with the diagnostic."""
+        await write_note(
+            project=test_project.name,
+            title="Outcome Mismatch JSON",
+            directory="source",
+            content="# Outcome Mismatch JSON\nContent.",
+        )
+
+        from basic_memory.mcp.clients import KnowledgeClient
+
+        real_move_entity = KnowledgeClient.move_entity
+
+        async def diverging_move_entity(self, entity_id, destination_path):
+            result = await real_move_entity(self, entity_id, destination_path)
+            return result.model_copy(update={"file_path": "somewhere/else/diverged.md"})
+
+        monkeypatch.setattr(KnowledgeClient, "move_entity", diverging_move_entity)
+
+        result = await move_note(
+            project=test_project.name,
+            identifier="source/outcome-mismatch-json",
+            destination_path="target/outcome-mismatch-json.md",
+            output_format="json",
+        )
+
+        assert isinstance(result, dict)
+        assert result["moved"] is False
+        assert result["error"] == "MOVE_OUTCOME_MISMATCH"
+        assert result["file_path"] == "somewhere/else/diverged.md"
