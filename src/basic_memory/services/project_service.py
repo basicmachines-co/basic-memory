@@ -1047,10 +1047,27 @@ class ProjectService:
                     f"WHERE c.project_id = :project_id {chunk_entity_exists}"
                 )
 
-            embeddings_result = await self.repository.execute_query(
-                embeddings_sql, {"project_id": project_id}
-            )
-            total_embeddings = embeddings_result.scalar() or 0
+            # The embeddings/orphan JOINs read search_vector_embeddings, a vec0
+            # virtual table. On SQLite that table is only visible on a connection
+            # that loaded sqlite-vec, so route these through scalar_vec_query which
+            # loads the extension first. Postgres has no per-connection extension
+            # and uses the bare pooled session.
+            async def _vec_scalar(vec_sql) -> int:
+                if is_postgres:
+                    result = await self.repository.execute_query(
+                        vec_sql, {"project_id": project_id}
+                    )
+                    return result.scalar() or 0
+                count = await self.repository.scalar_vec_query(vec_sql, {"project_id": project_id})
+                # Trigger: sqlite-vec genuinely can't load on this Python build.
+                # Why: without the extension the vec0 JOIN can't run at all.
+                # Outcome: raise the canonical error so the except block emits the
+                # true "sqlite-vec unavailable" fallback instead of reporting 0.
+                if count is None:
+                    raise SAOperationalError(str(vec_sql), {}, Exception("no such module: vec0"))
+                return count
+
+            total_embeddings = await _vec_scalar(embeddings_sql)
 
             # Orphaned chunks (chunks without embeddings — indicates interrupted indexing)
             if is_postgres:
@@ -1065,11 +1082,7 @@ class ProjectService:
                     "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
                     f"WHERE c.project_id = :project_id AND e.rowid IS NULL {chunk_entity_exists}"
                 )
-
-            orphan_result = await self.repository.execute_query(
-                orphan_sql, {"project_id": project_id}
-            )
-            orphaned_chunks = orphan_result.scalar() or 0
+            orphaned_chunks = await _vec_scalar(orphan_sql)
         except SAOperationalError as exc:
             # Trigger: sqlite_master can list vec0 virtual tables even when sqlite-vec
             # is not loaded in the current Python runtime.

@@ -258,6 +258,26 @@ class ProjectRepository(Repository[Project]):
             logger.debug(f"Deleted Project and search rows for project_id: {entity_id}")
             return True
 
+    async def scalar_vec_query(self, query, params: Optional[dict] = None) -> Optional[int]:
+        """Run a scalar COUNT query that reads the sqlite-vec vec0 table.
+
+        Extension loading is per-connection, so the bare pooled session used by
+        `execute_query` cannot read vec0 virtual tables — SQLite raises
+        "no such module: vec0". This helper loads sqlite-vec on the session it
+        opens before running the query, reusing the same loader as project delete.
+
+        Returns None when sqlite-vec cannot be loaded on this Python build, so
+        callers can fall back to the genuinely-missing-dependency path.
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            # Trigger: query reads the vec0-backed search_vector_embeddings table.
+            # Why: vec0 modules are only visible on a connection that loaded sqlite-vec.
+            # Outcome: load the extension here, or signal absence so the caller degrades.
+            if not await _load_sqlite_vec_on_session(session):
+                return None
+            result = await session.execute(query, params)
+            return result.scalar()
+
     async def update_path(self, project_id: int, new_path: str) -> Optional[Project]:
         """Update project path.
 

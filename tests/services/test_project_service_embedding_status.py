@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError as SAOperationalError
 
 from basic_memory.schemas.project_info import EmbeddingStatus
 from basic_memory.services.project_service import ProjectService
@@ -153,20 +152,17 @@ async def test_embedding_status_orphaned_chunks(
 async def test_embedding_status_handles_sqlite_vec_unavailable(
     project_service: ProjectService, test_graph, test_project
 ):
-    """Unreadable vec0 tables should degrade to unavailable status instead of crashing."""
+    """When sqlite-vec can't load at all, degrade to unavailable status instead of crashing."""
     # Trigger: Postgres test matrix executes the same unit suite.
     # Why: sqlite-vec loading failures are specific to SQLite virtual tables, not Postgres joins.
     # Outcome: keep the regression focused on the backend that can actually hit this path.
     if _is_postgres():
         pytest.skip("sqlite-vec unavailable handling is SQLite-specific.")
 
-    original_execute_query = project_service.repository.execute_query
-
-    async def _execute_query_with_vec0_failure(query, params):
-        query_text = str(query)
-        if "JOIN search_vector_embeddings" in query_text:
-            raise SAOperationalError(query_text, params, Exception("no such module: vec0"))
-        return await original_execute_query(query, params)
+    # scalar_vec_query returns None when the extension can't be loaded on this
+    # Python build (e.g. the python.org macOS interpreter). Simulate that here.
+    async def _vec_query_unavailable(query, params=None):
+        return None
 
     with patch.object(
         type(project_service),
@@ -177,8 +173,8 @@ async def test_embedding_status_handles_sqlite_vec_unavailable(
     ):
         with patch.object(
             project_service.repository,
-            "execute_query",
-            side_effect=_execute_query_with_vec0_failure,
+            "scalar_vec_query",
+            side_effect=_vec_query_unavailable,
         ):
             status = await project_service.get_embedding_status(test_project.id)
 
