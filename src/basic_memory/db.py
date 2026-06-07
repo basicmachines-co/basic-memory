@@ -410,7 +410,14 @@ async def engine_session_factory(
 
         yield created_engine, created_session_maker
     finally:
-        await created_engine.dispose()
+        # Trigger: context-manager teardown can run while the surrounding task is
+        # being cancelled (e.g. a test aborting mid-fixture).
+        # Why: on the asyncpg backend a cancellation landing mid-dispose surfaces
+        # the "IndexError: pop from an empty deque" race (#831/#877); shield the
+        # dispose and suppress CancelledError to match the other dispose seams.
+        # Outcome: the per-context engine always disposes cleanly under cancellation.
+        with suppress(asyncio.CancelledError):
+            await asyncio.shield(created_engine.dispose())
 
         # Only clear module-level globals if they still point to this context's
         # engine/session. This avoids clobbering newer globals from other callers.
@@ -479,7 +486,11 @@ async def run_migrations(
         # Trigger: run_migrations() created a temporary engine while module-level
         # session maker was not initialized.
         # Why: temporary aiosqlite worker threads can outlive CLI command execution
-        # and block process shutdown if the engine is not disposed.
-        # Outcome: always dispose temporary engines after migration work completes.
+        # and block process shutdown if the engine is not disposed. On the asyncpg
+        # backend a cancellation landing mid-dispose surfaces the same "IndexError:
+        # pop from an empty deque" race as the other dispose seams (#831/#877), so
+        # shield the dispose and suppress CancelledError to match them.
+        # Outcome: always dispose temporary engines cleanly, even under cancellation.
         if temp_engine is not None:
-            await temp_engine.dispose()
+            with suppress(asyncio.CancelledError):
+                await asyncio.shield(temp_engine.dispose())

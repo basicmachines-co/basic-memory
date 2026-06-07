@@ -15,7 +15,11 @@ def test_bm_version_exits_cleanly():
         ["uv", "run", "bm", "--version"],
         capture_output=True,
         text=True,
-        timeout=10,
+        # `uv run` startup under full-suite load (especially on Windows runners)
+        # can exceed a tight 10s budget even though --version short-circuits
+        # before any heavy work. This test guards against hangs, not a startup
+        # performance budget, so match the looser --help timeout below.
+        timeout=20,
         cwd=Path(__file__).parent.parent.parent,  # Project root
     )
     assert result.returncode == 0
