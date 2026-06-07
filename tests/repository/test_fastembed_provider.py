@@ -278,7 +278,13 @@ class _SelfHealStubTextEmbedding:
     RESOLVED_MODEL = "stub-model"
     MODEL_FILE = "model_optimized.onnx"
 
-    def __init__(self, model_name: str, cache_dir: str | None = None, threads: int | None = None):
+    def __init__(
+        self,
+        model_name: str,
+        cache_dir: str | None = None,
+        threads: int | None = None,
+        **_kwargs,
+    ):
         type(self).construct_count += 1
         if type(self).construct_count <= type(self).fail_first_n:
             raise RuntimeError(
