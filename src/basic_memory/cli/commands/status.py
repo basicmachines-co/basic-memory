@@ -3,8 +3,7 @@
 import asyncio
 import json
 import time
-from typing import Set, Dict
-from typing import Annotated, Optional
+from typing import Annotated, Dict, Optional, Set
 
 from mcp.server.fastmcp.exceptions import ToolError
 import typer
@@ -224,6 +223,14 @@ def status(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     from basic_memory.cli.commands.command_utils import run_with_cleanup
+
+    # Trigger: --wait with a negative --timeout
+    # Why: a negative deadline times out on the very first poll, producing a confusing
+    #      "Timed out after -5s" message instead of flagging the bad input. Raised
+    #      before the try/except so typer renders a clean usage error (exit 2).
+    # Outcome: reject it up front with a clear parameter error.
+    if wait and timeout < 0:
+        raise typer.BadParameter("--timeout must be >= 0", param_hint="'--timeout'")
 
     try:
         validate_routing_flags(local, cloud)

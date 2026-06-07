@@ -295,6 +295,15 @@ def test_status_wait_times_out(mock_get_client, mock_get_active, mock_config_cls
     assert "Timed out" in result.output
 
 
+def test_status_wait_negative_timeout_is_rejected():
+    """A negative --timeout fails fast with a usage error instead of a confusing
+    'Timed out after -5s' message. The guard runs before any client I/O, no mocks needed."""
+    result = runner.invoke(cli_app, ["status", "--wait", "--timeout", "-5"])
+
+    assert result.exit_code != 0
+    assert "--timeout" in result.output
+
+
 @patch("basic_memory.cli.commands.status.asyncio.sleep", new_callable=AsyncMock)
 @patch("basic_memory.cli.commands.status.ConfigManager")
 @patch("basic_memory.cli.commands.status.get_active_project", new_callable=AsyncMock)
