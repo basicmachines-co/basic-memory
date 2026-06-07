@@ -213,7 +213,7 @@ def test_setup_does_not_partially_write_generated_files_when_target_exists(
     )
 
     assert result.exit_code == 1
-    assert "pass --force to overwrite" in result.output
+    assert "pass --force to overwrite" in " ".join(result.output.split())
     assert not (tmp_path / ".github/workflows/basic-memory.yml").exists()
     assert not (tmp_path / ".github/basic-memory/memory-ci-capture.md").exists()
     mock_seed.assert_not_awaited()
