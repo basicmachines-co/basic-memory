@@ -1004,7 +1004,17 @@ async def search_notes(
                 # Applied after no_criteria() so that the implicit default doesn't
                 # mask a truly empty search request.
                 if not search_query.entity_types:
-                    search_query.entity_types = [SearchItemType("entity")]
+                    # Trigger: a category filter was supplied without an explicit
+                    #          entity_types.
+                    # Why: categories only exist on observations — defaulting to "entity"
+                    #      (whose rows have NULL category) would AND a category filter against
+                    #      entity rows and return nothing, defeating a category-only search.
+                    # Outcome: scope the implicit default to observations so
+                    #          search_notes(categories=[...]) returns the matching bullets.
+                    if search_query.categories:
+                        search_query.entity_types = [SearchItemType("observation")]
+                    else:
+                        search_query.entity_types = [SearchItemType("entity")]
 
                 logger.debug(
                     f"Search request: project={active_project.name} "
