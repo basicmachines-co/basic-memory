@@ -67,9 +67,12 @@ async def _detect_cross_project_move_attempt(
         #      legitimate nested folders that merely contain a "projects" segment
         #      (e.g. "notes/projects/my-project/note.md" or a top-level
         #      "projects/2025/...") are NOT flagged as cross-project moves.
+        # In "<workspace>/projects/<x>/...", <x> (index 2) is the project being targeted,
+        # so report that as the target project — not the workspace at index 0 — so the
+        # guidance points the user at the real project name to write into.
         if len(path_parts) >= 3 and path_parts[1] == "projects":
             return _format_cross_project_error_response(
-                identifier, destination_path, current_project, path_parts[0]
+                identifier, destination_path, current_project, path_parts[2]
             )
 
         # No other cross-project patterns detected

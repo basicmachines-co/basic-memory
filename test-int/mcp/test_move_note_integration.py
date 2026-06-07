@@ -805,6 +805,10 @@ async def test_move_note_workspace_shaped_path_rejected(mcp_server, app, test_pr
         assert "Cross-Project Move Not Supported" in error_message
         assert "read_note" in error_message
         assert "write_note" in error_message
+        # The guidance must name the actual target project ("x" from
+        # "<workspace>/projects/<x>/..."), not the leading workspace segment — so users
+        # are pointed at the real project to write into (PR #904 review).
+        assert "**Target project:** x" in error_message
 
         # The note must remain at its original location — no nested folder created.
         read_original = await client.call_tool(
