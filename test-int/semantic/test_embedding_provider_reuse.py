@@ -11,6 +11,14 @@ These tests use the *real* composition paths — ``create_embedding_provider``, 
 ``get_search_repository`` — with a real FastEmbed provider. FastEmbed loads the
 ONNX model lazily on first embed, so constructing providers/repositories here is
 cheap and never touches the native model.
+
+They deliberately use the semantic suite's ``sqlite_engine_factory`` (not the
+parent ``engine_factory``): the parent fixture depends on ``postgres_engine``,
+which this directory overrides to spin up a Docker testcontainer gated only by a
+``docker`` binary on PATH. On Windows CI that binary exists without a usable
+daemon, so requesting the parent factory aborts these SQLite-only tests with a
+testcontainers Ryuk error (#872 follow-up). Staying on the SQLite factory keeps
+them backend-correct and Docker-free.
 """
 
 from __future__ import annotations
@@ -30,11 +38,11 @@ from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 
 
-def _semantic_config(config_home) -> BasicMemoryConfig:
-    """Build a semantic-enabled FastEmbed config rooted at the test home."""
+def _semantic_config(project_path) -> BasicMemoryConfig:
+    """Build a semantic-enabled FastEmbed config rooted at the test path."""
     return BasicMemoryConfig(
         env="test",
-        projects={"test-project": ProjectEntry(path=str(config_home))},
+        projects={"test-project": ProjectEntry(path=str(project_path))},
         default_project="test-project",
         database_backend=DatabaseBackend.SQLITE,
         semantic_search_enabled=True,
@@ -49,10 +57,13 @@ def _reset_provider_cache():
     reset_embedding_provider_cache()
 
 
-def test_factory_resolves_single_provider_across_repositories(config_home, engine_factory):
+@pytest.mark.asyncio
+async def test_factory_resolves_single_provider_across_repositories(
+    tmp_path, sqlite_engine_factory
+):
     """The factory must inject one cached provider into every search repository."""
-    _engine, session_maker = engine_factory
-    config = _semantic_config(config_home)
+    _engine, session_maker = sqlite_engine_factory
+    config = _semantic_config(tmp_path)
 
     expected_provider = create_embedding_provider(config)
     assert isinstance(expected_provider, FastEmbedEmbeddingProvider)
@@ -73,10 +84,10 @@ def test_factory_resolves_single_provider_across_repositories(config_home, engin
 
 
 @pytest.mark.asyncio
-async def test_deps_path_reuses_cached_provider(config_home, engine_factory):
+async def test_deps_path_reuses_cached_provider(tmp_path, sqlite_engine_factory):
     """The real FastAPI deps function must reuse the cached provider, not rebuild it."""
-    _engine, session_maker = engine_factory
-    config = _semantic_config(config_home)
+    _engine, session_maker = sqlite_engine_factory
+    config = _semantic_config(tmp_path)
 
     expected_provider = create_embedding_provider(config)
 
@@ -92,12 +103,13 @@ async def test_deps_path_reuses_cached_provider(config_home, engine_factory):
     assert repo._embedding_provider is expected_provider
 
 
-def test_factory_skips_provider_when_semantic_disabled(config_home, engine_factory):
+@pytest.mark.asyncio
+async def test_factory_skips_provider_when_semantic_disabled(tmp_path, sqlite_engine_factory):
     """With semantic search off, no provider is created and none is injected."""
-    _engine, session_maker = engine_factory
+    _engine, session_maker = sqlite_engine_factory
     config = BasicMemoryConfig(
         env="test",
-        projects={"test-project": ProjectEntry(path=str(config_home))},
+        projects={"test-project": ProjectEntry(path=str(tmp_path))},
         default_project="test-project",
         database_backend=DatabaseBackend.SQLITE,
         semantic_search_enabled=False,

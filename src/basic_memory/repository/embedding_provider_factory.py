@@ -125,6 +125,14 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
     embedding response is available.
     """
     cache_key = _provider_cache_key(app_config)
+    # Trigger: two threads miss the cache for the same key concurrently.
+    # Why: provider construction loads the ~2.3GB ONNX model and is slow, so we
+    # deliberately build it *outside* the lock to avoid serializing every caller
+    # behind a single cold start. This opens a by-design TOCTOU window where both
+    # threads may construct a provider.
+    # Outcome: the second check-and-set below resolves the race — the first writer
+    # wins and the loser's redundant provider is discarded, so the cache still
+    # yields a single process-wide singleton per key.
     with _EMBEDDING_PROVIDER_CACHE_LOCK:
         if cached_provider := _EMBEDDING_PROVIDER_CACHE.get(cache_key):
             return cached_provider

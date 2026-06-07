@@ -1744,7 +1744,9 @@ async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
     entity_repository = EntityRepository(session_maker, project_id=project.id)
     observation_repository = ObservationRepository(session_maker, project_id=project.id)
     relation_repository = RelationRepository(session_maker, project_id=project.id)
-    search_repository = create_search_repository(session_maker, project_id=project.id)
+    search_repository = create_search_repository(
+        session_maker, project_id=project.id, app_config=app_config
+    )
     project_repository = ProjectRepository(session_maker)
 
     # Initialize services
