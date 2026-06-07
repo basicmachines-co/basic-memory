@@ -478,6 +478,41 @@ async def test_fastembed_provider_does_not_purge_when_artifact_present(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_fastembed_provider_self_heals_when_current_revision_corrupt(monkeypatch, tmp_path):
+    """A corrupt current revision must be detected even when an older revision is complete.
+
+    HuggingFace keeps multiple revisions under one models--<repo> tree. Per-revision
+    inspection is required: a whole-tree rglob would find the OLD revision's artifact and
+    wrongly conclude the cache is healthy, leaving the broken current snapshot
+    self-perpetuating (PR #900 review).
+    """
+    _install_self_heal_stub(monkeypatch)
+
+    cache_dir = tmp_path / "fastembed_cache"
+    snapshots = cache_dir / "models--stub-org--stub-model-onnx-q" / "snapshots"
+    # Old revision: complete (has the artifact).
+    good_rev = snapshots / "rev_old"
+    good_rev.mkdir(parents=True)
+    (good_rev / "model_optimized.onnx").write_text("complete old artifact")
+    # Current revision: interrupted download — directory present, artifact missing.
+    bad_rev = snapshots / "rev_current"
+    bad_rev.mkdir(parents=True)
+    (bad_rev / "stale.partial").write_text("partial download")
+
+    provider = FastEmbedEmbeddingProvider(
+        model_name="stub-model", dimensions=4, cache_dir=str(cache_dir)
+    )
+
+    vectors = await provider.embed_documents(["recover from mixed-revision cache"])
+
+    # The corrupt-current-revision cache was detected (not masked by the old revision),
+    # purged, and the retry succeeded.
+    assert _SelfHealStubTextEmbedding.construct_count == 2
+    assert not (cache_dir / "models--stub-org--stub-model-onnx-q").exists()
+    assert len(vectors) == 1
+
+
+@pytest.mark.asyncio
 async def test_fastembed_provider_self_heals_with_case_insensitive_model_name(
     monkeypatch, tmp_path
 ):

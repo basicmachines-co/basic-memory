@@ -152,24 +152,43 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
     def _corrupt_model_subdirs(self) -> list[Path]:
         """Return cache subdirs that are POSITIVELY confirmed corrupt by filesystem state.
 
-        A subdir is corrupt when the HuggingFace snapshot dir exists on disk but the expected
-        model artifact file (e.g. ``model_optimized.onnx``) is missing from every snapshot —
-        the exact fingerprint of an interrupted download. A normal cold load (no snapshot dir
-        yet) is NOT corruption and yields no entries here, so it can never trigger a purge.
+        A model is corrupt when its HuggingFace cache dir exists on disk but at least one
+        materialized snapshot revision is missing the expected model artifact file (e.g.
+        ``model_optimized.onnx``) — the exact fingerprint of an interrupted download. A normal
+        cold load (no cache dir yet) is NOT corruption and yields no entries here, so it can
+        never trigger a purge.
+
+        Inspection is PER-REVISION on purpose: HuggingFace keeps multiple revisions under one
+        ``models--<repo>`` tree, so a corrupt current snapshot can coexist with an older
+        complete one. Checking ``rglob(model_file)`` across the whole tree would let the old
+        artifact mask the broken current revision and leave it self-perpetuating, so we
+        require every revision to carry the artifact.
         """
         corrupt: list[Path] = []
-        for snapshot_dir, model_file in self._model_cache_candidates():
-            # Trigger: the model's cache subdir does not exist at all.
+        for model_dir, model_file in self._model_cache_candidates():
+            # Trigger: the model's cache dir does not exist at all.
             # Why: this is a normal cold/first load — the model simply hasn't been
             #      downloaded yet. Purging here would be wrong and pointless.
             # Outcome: skip; not corrupt.
-            if not snapshot_dir.exists():
+            if not model_dir.exists():
                 continue
-            # The artifact lives at snapshots/<rev>/<model_file>; an interrupted download
-            # leaves the snapshot tree but no artifact. rglob covers any revision dir.
-            artifact_present = any(snapshot_dir.rglob(model_file))
-            if not artifact_present:
-                corrupt.append(snapshot_dir)
+            snapshots_root = model_dir / "snapshots"
+            revision_dirs = (
+                [d for d in snapshots_root.iterdir() if d.is_dir()]
+                if snapshots_root.is_dir()
+                else []
+            )
+            # Trigger: the cache dir exists but no snapshot revision has materialized.
+            # Why/Outcome: an interrupted download that never wrote a revision — corrupt.
+            if not revision_dirs:
+                corrupt.append(model_dir)
+                continue
+            # Trigger: any individual revision is missing the artifact (rglob covers the
+            # artifact at any depth within that revision, e.g. snapshots/<rev>/onnx/...).
+            # Why: a complete OLD revision must not mask a corrupt CURRENT one.
+            # Outcome: flag the model dir so the whole tree re-downloads cleanly.
+            if any(not any(rev.rglob(model_file)) for rev in revision_dirs):
+                corrupt.append(model_dir)
         return corrupt
 
     def _purge_model_subdirs(self, subdirs: list[Path]) -> bool:
