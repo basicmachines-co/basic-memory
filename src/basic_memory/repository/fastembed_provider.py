@@ -87,17 +87,20 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                 "pip install -U basic-memory"
             ) from exc
         resolved_model_name = self._resolved_model_name()
-        if self.cache_dir is not None and self.threads is not None:
-            return TextEmbedding(
-                model_name=resolved_model_name,
-                cache_dir=self.cache_dir,
-                threads=self.threads,
-            )
+        # Constraint: onnxruntime's CPU memory arena grows to fit peak usage and never
+        # returns that memory to the OS. If a model is ever loaded more than once in a
+        # long-running process it leaks tens of GB (#872). FastEmbed exposes
+        # enable_cpu_mem_arena via its session-option kwargs, so we disable the arena to
+        # let any transient extra load free memory.
+        model_kwargs: dict = {
+            "model_name": resolved_model_name,
+            "enable_cpu_mem_arena": False,
+        }
         if self.cache_dir is not None:
-            return TextEmbedding(model_name=resolved_model_name, cache_dir=self.cache_dir)
+            model_kwargs["cache_dir"] = self.cache_dir
         if self.threads is not None:
-            return TextEmbedding(model_name=resolved_model_name, threads=self.threads)
-        return TextEmbedding(model_name=resolved_model_name)
+            model_kwargs["threads"] = self.threads
+        return TextEmbedding(**model_kwargs)
 
     def _model_cache_candidates(self) -> list[tuple[Path, str]]:
         """Resolve ``(snapshot_dir, model_file)`` pairs for this model under ``cache_dir``.

@@ -24,13 +24,20 @@ class _StubTextEmbedding:
     last_init_kwargs: dict = {}
     last_embed_kwargs: dict = {}
 
-    def __init__(self, model_name: str, cache_dir: str | None = None, threads: int | None = None):
+    def __init__(
+        self,
+        model_name: str,
+        cache_dir: str | None = None,
+        threads: int | None = None,
+        enable_cpu_mem_arena: bool | None = None,
+    ):
         self.model_name = model_name
         self.embed_calls = 0
         _StubTextEmbedding.last_init_kwargs = {
             "model_name": model_name,
             "cache_dir": cache_dir,
             "threads": threads,
+            "enable_cpu_mem_arena": enable_cpu_mem_arena,
         }
         _StubTextEmbedding.init_count += 1
 
@@ -120,8 +127,34 @@ async def test_fastembed_provider_passes_runtime_knobs_to_fastembed(monkeypatch)
         "model_name": "stub-model",
         "cache_dir": "/tmp/fastembed-cache",
         "threads": 3,
+        # onnxruntime CPU mem arena is disabled so transient extra loads free memory (#872)
+        "enable_cpu_mem_arena": False,
     }
     assert _StubTextEmbedding.last_embed_kwargs == {"batch_size": 8, "parallel": 2}
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_disables_cpu_mem_arena_by_default(monkeypatch):
+    """Even with no cache_dir/threads set, the ONNX CPU memory arena must be disabled.
+
+    onnxruntime's CPU arena never returns memory to the OS, so a duplicate model
+    load would leak tens of GB in a long-running process (#872). The provider must
+    always pass enable_cpu_mem_arena=False to FastEmbed regardless of other knobs.
+    """
+    module = type(sys)("fastembed")
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+    _StubTextEmbedding.last_init_kwargs = {}
+
+    provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
+    await provider.embed_documents(["arena default"])
+
+    assert _StubTextEmbedding.last_init_kwargs == {
+        "model_name": "stub-model",
+        "cache_dir": None,
+        "threads": None,
+        "enable_cpu_mem_arena": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -555,3 +588,80 @@ async def test_fastembed_provider_fails_fast_without_cache_dir(monkeypatch):
         await provider.embed_documents(["no cache dir"])
 
     assert _SelfHealStubTextEmbedding.construct_count == 1
+
+@pytest.mark.asyncio
+async def test_factory_loads_native_model_once_across_repo_constructions(monkeypatch):
+    """The native ONNX model must load exactly once per process despite reuse (#872).
+
+    Counting native model loads requires a stub TextEmbedding that increments a
+    counter on construction — there is no way to observe real ONNX loads otherwise.
+    This is the justified mock: the rest of the path (factory cache, repository
+    injection) is exercised with real implementations.
+
+    The test resolves the provider several times with a *drifting* CPU budget — the
+    exact condition that previously produced a fresh cache key and a second model
+    load — then builds multiple search repositories and embeds across all of them,
+    asserting the stub was constructed only once.
+    """
+    from typing import Any, cast
+
+    from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectEntry
+    from basic_memory.repository import embedding_provider_factory as factory_module
+    from basic_memory.repository.embedding_provider_factory import (
+        create_embedding_provider,
+        reset_embedding_provider_cache,
+    )
+    from basic_memory.repository.search_repository import create_search_repository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+
+    module = type(sys)("fastembed")
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+    _StubTextEmbedding.init_count = 0
+    reset_embedding_provider_cache()
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": ProjectEntry(path="/tmp/basic-memory-test")},
+        default_project="test-project",
+        database_backend=DatabaseBackend.SQLITE,
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_model="stub-model",
+        semantic_embedding_dimensions=4,
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+
+    try:
+        # First resolution under one CPU budget.
+        monkeypatch.setattr(factory_module.os, "process_cpu_count", lambda: 8)
+        monkeypatch.setattr(factory_module.os, "cpu_count", lambda: 8)
+        provider_first = create_embedding_provider(config)
+
+        # CPU budget drifts (cgroup throttling) — used to force a second model load.
+        monkeypatch.setattr(factory_module.os, "process_cpu_count", lambda: 4)
+        monkeypatch.setattr(factory_module.os, "cpu_count", lambda: 4)
+
+        # Build several repositories the way per-request/per-sync code does. Each
+        # one is injected with the cached provider rather than deriving its own.
+        # session_maker is unused during construction and during embed_documents,
+        # so None is sufficient for this provider-identity assertion.
+        repos = [
+            cast(
+                SQLiteSearchRepository,
+                create_search_repository(cast(Any, None), project_id=project_id, app_config=config),
+            )
+            for project_id in (1, 2, 3)
+        ]
+        for repo in repos:
+            assert repo._embedding_provider is provider_first
+
+        # Embed several times to trigger lazy model loads; because every repo shares
+        # provider_first, repeated embeds must still construct the stub model once.
+        for _ in repos:
+            await provider_first.embed_documents(["auth token session"])
+
+        assert _StubTextEmbedding.init_count == 1
+    finally:
+        reset_embedding_provider_cache()

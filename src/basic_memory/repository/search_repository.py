@@ -13,6 +13,7 @@ from sqlalchemy import Result
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
+from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
@@ -120,19 +121,37 @@ def create_search_repository(
     Returns:
         SearchRepository: Backend-appropriate search repository instance
     """
-    # Prefer explicit parameter; fall back to ConfigManager for backwards compatibility
+    # Resolve config once so backend detection and the shared embedding provider
+    # come from the same source. Prefer the explicit arg; fall back to ConfigManager
+    # for backwards compatibility.
+    config = app_config or ConfigManager().config
     if database_backend is None:
-        config = app_config or ConfigManager().config
         database_backend = config.database_backend
+
+    # Trigger: every request, sync batch, and project builds its own search repo.
+    # Why: each repo __init__ would otherwise call create_embedding_provider(), and
+    # the process-wide cache can be bypassed if its key ever drifts (#872), reloading
+    # the ~2.3GB ONNX model and leaking memory in onnxruntime's CPU arena.
+    # Outcome: resolve the cached singleton here once and inject it, so the provider
+    # is the single source of truth across all callers of this factory.
+    embedding_provider = None
+    if config.semantic_search_enabled:
+        embedding_provider = create_embedding_provider(config)
 
     if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
         return PostgresSearchRepository(  # pragma: no cover
             session_maker,
             project_id=project_id,
             app_config=app_config,
+            embedding_provider=embedding_provider,
         )
     else:
-        return SQLiteSearchRepository(session_maker, project_id=project_id, app_config=app_config)
+        return SQLiteSearchRepository(
+            session_maker,
+            project_id=project_id,
+            app_config=app_config,
+            embedding_provider=embedding_provider,
+        )
 
 
 __all__ = [
