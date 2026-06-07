@@ -86,6 +86,7 @@ def app_callback(
         "reindex",
         "update",
         "watch",
+        "workspace",
     }
     if (
         not version

@@ -146,7 +146,7 @@ def _get_sync_project(
 
 @cloud_app.command("sync")
 def sync_project_command(
-    name: str = typer.Option(..., "--name", help="Project name to sync"),
+    name: str = typer.Option(..., "--name", "--project", help="Project name to sync"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
@@ -193,7 +193,7 @@ def sync_project_command(
 
 @cloud_app.command("bisync")
 def bisync_project_command(
-    name: str = typer.Option(..., "--name", help="Project name to bisync"),
+    name: str = typer.Option(..., "--name", "--project", help="Project name to bisync"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
     resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
@@ -256,7 +256,7 @@ def bisync_project_command(
 
 @cloud_app.command("check")
 def check_project_command(
-    name: str = typer.Option(..., "--name", help="Project name to check"),
+    name: str = typer.Option(..., "--name", "--project", help="Project name to check"),
     one_way: bool = typer.Option(False, "--one-way", help="Check one direction only (faster)"),
 ) -> None:
     """Verify file integrity between local and cloud.

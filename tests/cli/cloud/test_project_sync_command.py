@@ -19,6 +19,9 @@ runner = CliRunner()
     [
         ["cloud", "sync", "--name", "research"],
         ["cloud", "bisync", "--name", "research"],
+        # --project is an alias for --name (issue #817)
+        ["cloud", "sync", "--project", "research"],
+        ["cloud", "bisync", "--project", "research"],
     ],
 )
 def test_cloud_sync_commands_skip_explicit_cloud_project_sync(monkeypatch, argv, config_manager):
