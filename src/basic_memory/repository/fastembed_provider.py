@@ -17,12 +17,17 @@ if TYPE_CHECKING:
     from fastembed import TextEmbedding  # pragma: no cover
 
 
-# Substrings that identify a missing/corrupt on-disk model artifact (as opposed to a
-# config error or a genuinely offline machine). An interrupted FastEmbed download leaves
-# the HuggingFace snapshot dir present but missing ``model_optimized.onnx``; the ONNX
-# runtime then raises ``NO_SUCHFILE`` and every subsequent load repeats it until the
-# cache is cleared. Matched case-insensitively against the exception text.
-_CORRUPT_MODEL_ERROR_MARKERS = (
+# Substrings that identify the ONNX "model artifact file is missing" load failure (as
+# opposed to a config error, a download/network error, or a genuinely offline machine).
+# An interrupted FastEmbed download can leave the HuggingFace snapshot dir present but
+# missing ``model_optimized.onnx``; the ONNX runtime then raises ``NO_SUCHFILE`` and every
+# subsequent load repeats it until the cache is cleared. Matched case-insensitively.
+#
+# IMPORTANT: this text match is necessary but NOT sufficient to trigger a purge. The error
+# text alone cannot distinguish a corrupt cache from a normal cold load (model not yet
+# downloaded). Purging is gated on a positive filesystem confirmation that the snapshot dir
+# exists on disk but the model artifact file is missing — see ``_corrupt_model_subdirs``.
+_MISSING_ARTIFACT_ERROR_MARKERS = (
     "no_suchfile",
     "model_optimized.onnx",
     "file doesn't exist",
@@ -68,6 +73,10 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
         self._model: TextEmbedding | None = None
         self._model_lock = asyncio.Lock()
 
+    def _resolved_model_name(self) -> str:
+        """Return the FastEmbed model name after applying our local aliases."""
+        return self._MODEL_ALIASES.get(self.model_name, self.model_name)
+
     def _create_model(self) -> "TextEmbedding":
         try:
             from fastembed import TextEmbedding
@@ -77,7 +86,7 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                 "Install/update basic-memory to include semantic dependencies: "
                 "pip install -U basic-memory"
             ) from exc
-        resolved_model_name = self._MODEL_ALIASES.get(self.model_name, self.model_name)
+        resolved_model_name = self._resolved_model_name()
         if self.cache_dir is not None and self.threads is not None:
             return TextEmbedding(
                 model_name=resolved_model_name,
@@ -90,29 +99,47 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
             return TextEmbedding(model_name=resolved_model_name, threads=self.threads)
         return TextEmbedding(model_name=resolved_model_name)
 
-    def _model_cache_subdirs(self) -> list[Path]:
-        """Resolve the HuggingFace cache subdir(s) for this model under ``cache_dir``.
+    def _model_cache_candidates(self) -> list[tuple[Path, str]]:
+        """Resolve ``(snapshot_dir, model_file)`` pairs for this model under ``cache_dir``.
 
         FastEmbed stores each model under ``<cache_dir>/models--<org>--<repo>`` where the
         repo is the model's HuggingFace source (e.g. ``BAAI/bge-small-en-v1.5`` resolves to
-        ``models--qdrant--bge-small-en-v1.5-onnx-q``). We resolve the source from FastEmbed's
-        own model description so the deletion is scoped to exactly this model's tree — never
-        the whole cache or unrelated models.
+        ``models--qdrant--bge-small-en-v1.5-onnx-q``). We resolve the source and the expected
+        model artifact filename from FastEmbed's own model description so corruption detection
+        and deletion are scoped to exactly this model's tree — never the whole cache or
+        unrelated models.
+
+        Note: ``TextEmbedding._list_supported_models()`` is an intentional use of an
+        undocumented FastEmbed API. The broad ``except`` below is a known defensive fallback:
+        if the lookup ever changes shape we degrade to "no candidates" (so we never purge)
+        rather than crashing the load path.
         """
         if self.cache_dir is None:
             return []
 
-        resolved_model_name = self._MODEL_ALIASES.get(self.model_name, self.model_name)
-        hf_sources: set[str] = set()
+        # FastEmbed matches model names case-insensitively (model_management.py:
+        # ``model_name.lower() == model.model.lower()``). Mirror that here so a config like
+        # model="baai/bge-small-en-v1.5" still resolves to the same HF source/cache subdir.
+        resolved_model_name = self._resolved_model_name().lower()
+        candidates: list[tuple[Path, str]] = []
+        seen: set[Path] = set()
+        cache_root = Path(self.cache_dir)
         try:
             from fastembed import TextEmbedding
 
             for description in TextEmbedding._list_supported_models():
-                if description.model == resolved_model_name:
-                    hf_source = description.sources.hf
-                    if hf_source:
-                        hf_sources.add(hf_source)
-        except Exception as exc:  # pragma: no cover - defensive: never block self-heal on lookup
+                if description.model.lower() != resolved_model_name:
+                    continue
+                hf_source = description.sources.hf
+                model_file = description.model_file
+                if not hf_source or not model_file:
+                    continue
+                # HuggingFace hub names cache dirs ``models--<repo with '/' -> '--'>``.
+                snapshot_dir = cache_root / f"models--{hf_source.replace('/', '--')}"
+                if snapshot_dir not in seen:
+                    seen.add(snapshot_dir)
+                    candidates.append((snapshot_dir, model_file))
+        except Exception as exc:  # pragma: no cover - defensive: never block load on lookup
             logger.warning(
                 "Could not resolve FastEmbed model source for cache cleanup: "
                 "model_name={model_name} error={error}",
@@ -120,31 +147,62 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                 error=exc,
             )
 
-        cache_root = Path(self.cache_dir)
-        # HuggingFace hub names cache dirs ``models--<repo with '/' -> '--'>``.
-        return [cache_root / f"models--{source.replace('/', '--')}" for source in hf_sources]
+        return candidates
 
-    def _purge_corrupt_model_cache(self) -> bool:
-        """Delete this model's on-disk cache subtree so the next load re-downloads it.
+    def _corrupt_model_subdirs(self) -> list[Path]:
+        """Return cache subdirs that are POSITIVELY confirmed corrupt by filesystem state.
 
-        Returns True when at least one model cache subdir existed and was removed.
+        A subdir is corrupt when the HuggingFace snapshot dir exists on disk but the expected
+        model artifact file (e.g. ``model_optimized.onnx``) is missing from every snapshot —
+        the exact fingerprint of an interrupted download. A normal cold load (no snapshot dir
+        yet) is NOT corruption and yields no entries here, so it can never trigger a purge.
         """
-        removed = False
-        for subdir in self._model_cache_subdirs():
-            if subdir.exists():
-                logger.warning(
-                    "Removing corrupt FastEmbed model cache to force re-download: {path}",
-                    path=str(subdir),
-                )
-                shutil.rmtree(subdir, ignore_errors=True)
-                removed = True
-        return removed
+        corrupt: list[Path] = []
+        for snapshot_dir, model_file in self._model_cache_candidates():
+            # Trigger: the model's cache subdir does not exist at all.
+            # Why: this is a normal cold/first load — the model simply hasn't been
+            #      downloaded yet. Purging here would be wrong and pointless.
+            # Outcome: skip; not corrupt.
+            if not snapshot_dir.exists():
+                continue
+            # The artifact lives at snapshots/<rev>/<model_file>; an interrupted download
+            # leaves the snapshot tree but no artifact. rglob covers any revision dir.
+            artifact_present = any(snapshot_dir.rglob(model_file))
+            if not artifact_present:
+                corrupt.append(snapshot_dir)
+        return corrupt
+
+    def _purge_model_subdirs(self, subdirs: list[Path]) -> bool:
+        """Delete confirmed-corrupt cache subtrees so the next load re-downloads them.
+
+        Returns True when at least one targeted subdir is actually gone afterwards. On
+        Windows a locked file can make ``shutil.rmtree(ignore_errors=True)`` silently no-op;
+        reporting success in that case would let the caller retry against the same broken
+        cache, so each subdir only counts as removed once it has actually disappeared.
+        """
+        removed_any = False
+        for subdir in subdirs:
+            logger.warning(
+                "Removing corrupt FastEmbed model cache to force re-download: {path}",
+                path=str(subdir),
+            )
+            shutil.rmtree(subdir, ignore_errors=True)
+            # Set removed only when the subdir is truly gone — a silent rmtree no-op
+            # (e.g. a locked file on Windows) must not be reported as a successful purge.
+            if not subdir.exists():
+                removed_any = True
+        return removed_any
 
     @staticmethod
-    def _is_corrupt_model_error(exc: Exception) -> bool:
-        """Return True when the load failure looks like a missing/corrupt model artifact."""
+    def _is_missing_artifact_error(exc: Exception) -> bool:
+        """Return True when the load failure text matches the ONNX missing-artifact signature.
+
+        This is only the text-level gate; it is necessary but NOT sufficient to purge. The
+        purge additionally requires filesystem-confirmed corruption (``_corrupt_model_subdirs``)
+        so a transient/offline/"from any source" load error never deletes a valid cache.
+        """
         message = str(exc).lower()
-        return any(marker in message for marker in _CORRUPT_MODEL_ERROR_MARKERS)
+        return any(marker in message for marker in _MISSING_ARTIFACT_ERROR_MARKERS)
 
     async def _load_model(self) -> "TextEmbedding":
         if self._model is not None:
@@ -157,23 +215,31 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
             try:
                 self._model = await asyncio.to_thread(self._create_model)
             except Exception as exc:
-                # Trigger: model construction failed with a missing/corrupt-artifact error
-                #          (an interrupted download left a partial snapshot in the cache).
+                # Trigger: model construction raised the ONNX missing-artifact error AND a
+                #          filesystem check positively confirms a corrupt cache subdir (the
+                #          snapshot dir exists but the model artifact file is missing — the
+                #          fingerprint of an interrupted download).
                 # Why: the raw ONNXRuntimeError is self-perpetuating — every retry hits the
-                #      same broken snapshot until the cache is cleared. Scope the deletion to
-                #      this model's own ``models--...`` subdir and retry exactly once so a
-                #      fresh download can land. A single retry avoids an infinite re-download
-                #      loop if the failure is not actually a cache problem.
-                # Outcome: on success the user transparently recovers; on a second failure we
-                #          fail fast with the original error so the message stays actionable.
-                if not self._is_corrupt_model_error(exc):
+                #      same broken snapshot until the cache is cleared. We must NOT misread a
+                #      normal cold load (no snapshot dir, model simply not downloaded yet) or a
+                #      transient/offline "from any source" error as corruption, because purging
+                #      then breaks the happy path. Both the error-text gate and the positive
+                #      filesystem confirmation are required before we delete anything.
+                # Outcome: confirmed corruption → purge exactly this model's subdir and retry
+                #          once so a fresh download can land. Every other failure (including a
+                #          retry that still fails) re-raises the ORIGINAL exception so the
+                #          message stays actionable and we never loop.
+                if not self._is_missing_artifact_error(exc):
                     raise
-                if not self._purge_corrupt_model_cache():
+                corrupt_subdirs = self._corrupt_model_subdirs()
+                if not corrupt_subdirs:
+                    raise
+                if not self._purge_model_subdirs(corrupt_subdirs):
                     raise
                 logger.info(
                     "Retrying FastEmbed model load after clearing corrupt cache: "
                     "model_name={model_name}",
-                    model_name=self._MODEL_ALIASES.get(self.model_name, self.model_name),
+                    model_name=self._resolved_model_name(),
                 )
                 self._model = await asyncio.to_thread(self._create_model)
 
@@ -181,7 +247,7 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                 "FastEmbed model loaded: model_name={model_name} batch_size={batch_size} "
                 "threads={threads} configured_parallel={configured_parallel} "
                 "effective_parallel={effective_parallel}",
-                model_name=self._MODEL_ALIASES.get(self.model_name, self.model_name),
+                model_name=self._resolved_model_name(),
                 batch_size=self.batch_size,
                 threads=self.threads,
                 configured_parallel=self.parallel,

@@ -88,11 +88,14 @@ def _format_search_error_response(
     # Basic Memory self-heals by re-downloading on the next load, but if the user still
     # hits this, point them at the cache dir to clear manually and offer a text fallback.
     error_lower = error_message.lower()
+    # "load model from" is the exact ONNX phrasing ("Load model from <path>.onnx failed").
+    # The looser "load model" matched unrelated errors, so we keep only the specific phrase
+    # alongside the onnxruntime / no_suchfile / model_optimized.onnx fingerprints.
     if (
         "onnxruntime" in error_lower
         or "no_suchfile" in error_lower
         or "model_optimized.onnx" in error_lower
-        or "load model" in error_lower
+        or "load model from" in error_lower
     ):
         # Deferred import: keeps the repository layer out of the tool's import graph
         # (matches the SearchClient deferral below) and is only needed on this error path.

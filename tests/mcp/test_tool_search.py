@@ -500,6 +500,21 @@ class TestSearchErrorFormatting:
         # Offers full-text search as an immediate workaround.
         assert 'search_type="text"' in result
 
+    def test_format_search_error_load_model_phrase_does_not_overmatch(self):
+        """A generic error mentioning 'load model' (no 'from') must not hit the embedding branch.
+
+        The marker was tightened from the broad 'load model' to the exact ONNX phrasing
+        'load model from' so unrelated failures fall through to the generic handler.
+        """
+        result = _format_search_error_response(
+            "test-project",
+            "Failed to load model configuration for this project",
+            "test query",
+        )
+
+        assert "# Search Failed - Embedding Model Missing or Corrupt" not in result
+        assert "# Search Failed" in result
+
     def test_format_search_error_generic(self):
         """Test formatting for generic errors."""
         result = _format_search_error_response("test-project", "unknown error", "test query")

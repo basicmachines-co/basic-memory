@@ -217,9 +217,11 @@ async def test_fastembed_provider_zero_vector_does_not_raise(monkeypatch):
 # --- Self-heal of corrupt/partial model cache (#895) ---
 #
 # A real interrupted FastEmbed download is non-deterministic and offline-unfriendly, so we
-# stub TextEmbedding to (a) advertise an HF source via _list_supported_models so the provider
-# can compute the exact models--<org>--<repo> cache subdir, and (b) raise a NO_SUCHFILE-style
-# ONNX error on the first construction. This is the justified mock case called out in the task.
+# stub TextEmbedding to (a) advertise an HF source + model_file via _list_supported_models so
+# the provider can compute the exact models--<org>--<repo> cache subdir and the artifact name,
+# and (b) raise a NO_SUCHFILE-style ONNX error on the first construction. This is the justified
+# mock case called out in the task. The purge is gated on a filesystem confirmation that the
+# snapshot dir exists but the artifact is missing, so each test stages the cache accordingly.
 
 
 @dataclass
@@ -231,6 +233,7 @@ class _StubModelSource:
 class _StubModelDescription:
     model: str
     sources: _StubModelSource
+    model_file: str = "model_optimized.onnx"
 
 
 class _SelfHealStubTextEmbedding:
@@ -240,6 +243,7 @@ class _SelfHealStubTextEmbedding:
     construct_count = 0
     HF_SOURCE = "stub-org/stub-model-onnx-q"
     RESOLVED_MODEL = "stub-model"
+    MODEL_FILE = "model_optimized.onnx"
 
     def __init__(self, model_name: str, cache_dir: str | None = None, threads: int | None = None):
         type(self).construct_count += 1
@@ -257,11 +261,24 @@ class _SelfHealStubTextEmbedding:
 
     @classmethod
     def _list_supported_models(cls):
+        # Include decoys so the resolver's skip branches are exercised: a model with a
+        # different name (name-mismatch skip) and one with an empty HF source (no-source skip).
         return [
+            _StubModelDescription(
+                model="some-other-model",
+                sources=_StubModelSource(hf="other-org/other-model"),
+                model_file=cls.MODEL_FILE,
+            ),
+            _StubModelDescription(
+                model=cls.RESOLVED_MODEL,
+                sources=_StubModelSource(hf=""),
+                model_file=cls.MODEL_FILE,
+            ),
             _StubModelDescription(
                 model=cls.RESOLVED_MODEL,
                 sources=_StubModelSource(hf=cls.HF_SOURCE),
-            )
+                model_file=cls.MODEL_FILE,
+            ),
         ]
 
 
@@ -271,6 +288,7 @@ def _install_self_heal_stub(monkeypatch):
     monkeypatch.setitem(sys.modules, "fastembed", module)
     _SelfHealStubTextEmbedding.construct_count = 0
     _SelfHealStubTextEmbedding.fail_first_n = 1
+    _SelfHealStubTextEmbedding.RESOLVED_MODEL = "stub-model"
 
 
 @pytest.mark.asyncio
@@ -328,6 +346,40 @@ async def test_fastembed_provider_fails_fast_on_persistent_corrupt_cache(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_fastembed_provider_fails_fast_when_purge_silently_noops(monkeypatch, tmp_path):
+    """If rmtree silently fails (e.g. Windows locked files), do not claim success or retry.
+
+    shutil.rmtree(ignore_errors=True) can no-op when a file is locked. Treating that as a
+    successful purge would retry against the same broken cache; instead the load must fail
+    fast with the original error. We inject a no-op rmtree to simulate the locked-file case.
+    """
+    import basic_memory.repository.fastembed_provider as fastembed_provider
+
+    _install_self_heal_stub(monkeypatch)
+
+    cache_dir = tmp_path / "fastembed_cache"
+    model_subdir = cache_dir / "models--stub-org--stub-model-onnx-q"
+    model_subdir.mkdir(parents=True)
+    (model_subdir / "stale.bin").write_text("partial download")
+
+    # Simulate a deletion that silently fails to remove the directory.
+    monkeypatch.setattr(
+        fastembed_provider.shutil, "rmtree", lambda *args, **kwargs: None, raising=True
+    )
+
+    provider = FastEmbedEmbeddingProvider(
+        model_name="stub-model", dimensions=4, cache_dir=str(cache_dir)
+    )
+
+    with pytest.raises(RuntimeError, match="NO_SUCHFILE"):
+        await provider.embed_documents(["locked cache"])
+
+    # rmtree no-oped, so the subdir survives and no retry was attempted.
+    assert model_subdir.exists()
+    assert _SelfHealStubTextEmbedding.construct_count == 1
+
+
+@pytest.mark.asyncio
 async def test_fastembed_provider_does_not_purge_on_unrelated_error(monkeypatch, tmp_path):
     """A non-cache load error must propagate without deleting any cache subdir."""
 
@@ -369,13 +421,19 @@ async def test_fastembed_provider_does_not_purge_on_unrelated_error(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_fastembed_provider_fails_fast_when_no_cache_subdir_to_purge(monkeypatch, tmp_path):
-    """If the corrupt error fires but no model subdir exists, fail fast without retry."""
+async def test_fastembed_provider_cold_load_does_not_purge_or_retry(monkeypatch, tmp_path):
+    """A cold load (snapshot dir absent) must NOT be misread as corruption.
+
+    This is the CI happy-path regression: on a cold model cache the first load can fail
+    before the model is downloaded, but with no snapshot dir there is nothing corrupt to
+    purge. The original error must propagate unchanged with no retry, so a normal
+    not-yet-downloaded model is never deleted.
+    """
     _install_self_heal_stub(monkeypatch)
 
     cache_dir = tmp_path / "fastembed_cache"
     cache_dir.mkdir(parents=True)
-    # Intentionally do NOT create the model subdir, so there is nothing to purge.
+    # Intentionally do NOT create the model subdir: this is a normal cold load.
 
     provider = FastEmbedEmbeddingProvider(
         model_name="stub-model", dimensions=4, cache_dir=str(cache_dir)
@@ -384,8 +442,70 @@ async def test_fastembed_provider_fails_fast_when_no_cache_subdir_to_purge(monke
     with pytest.raises(RuntimeError, match="NO_SUCHFILE"):
         await provider.embed_documents(["nothing to purge"])
 
-    # Only the initial attempt ran — no purge means no retry.
+    # Only the initial attempt ran — no snapshot dir means no confirmed corruption, no retry.
     assert _SelfHealStubTextEmbedding.construct_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_does_not_purge_when_artifact_present(monkeypatch, tmp_path):
+    """A NO_SUCHFILE-shaped error must NOT purge when the artifact is actually on disk.
+
+    The error-text gate alone is not enough: if filesystem inspection finds the model
+    artifact present in the snapshot, the cache is not corrupt and must be left intact.
+    Re-raise the original error rather than deleting a healthy cache.
+    """
+    _install_self_heal_stub(monkeypatch)
+    # Construction keeps failing with the NO_SUCHFILE text regardless of cache state.
+    _SelfHealStubTextEmbedding.fail_first_n = 99
+
+    cache_dir = tmp_path / "fastembed_cache"
+    snapshot_dir = cache_dir / "models--stub-org--stub-model-onnx-q" / "snapshots" / "rev1"
+    snapshot_dir.mkdir(parents=True)
+    artifact = snapshot_dir / "model_optimized.onnx"
+    artifact.write_text("valid model artifact")
+
+    provider = FastEmbedEmbeddingProvider(
+        model_name="stub-model", dimensions=4, cache_dir=str(cache_dir)
+    )
+
+    with pytest.raises(RuntimeError, match="NO_SUCHFILE"):
+        await provider.embed_documents(["artifact is fine"])
+
+    # No purge and no retry: the artifact is present, so the cache is not corrupt.
+    assert _SelfHealStubTextEmbedding.construct_count == 1
+    assert artifact.exists()
+    assert artifact.read_text() == "valid model artifact"
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_self_heals_with_case_insensitive_model_name(
+    monkeypatch, tmp_path
+):
+    """A lower-cased model name must still resolve the HF cache subdir for the purge.
+
+    FastEmbed matches model names case-insensitively, so a config like
+    model="baai/bge-small-en-v1.5" is valid. The purge resolver must mirror that, otherwise
+    the corrupt subdir resolves to nothing and self-heal silently does nothing.
+    """
+    _install_self_heal_stub(monkeypatch)
+    # Advertise the model under its canonical mixed-case name.
+    _SelfHealStubTextEmbedding.RESOLVED_MODEL = "Stub-Model"
+
+    cache_dir = tmp_path / "fastembed_cache"
+    model_subdir = cache_dir / "models--stub-org--stub-model-onnx-q"
+    model_subdir.mkdir(parents=True)
+    (model_subdir / "stale.bin").write_text("partial download")
+
+    # Configure the provider with the lower-cased spelling.
+    provider = FastEmbedEmbeddingProvider(
+        model_name="stub-model", dimensions=4, cache_dir=str(cache_dir)
+    )
+
+    vectors = await provider.embed_documents(["recover with case-insensitive name"])
+
+    assert _SelfHealStubTextEmbedding.construct_count == 2
+    assert not model_subdir.exists()
+    assert len(vectors) == 1
 
 
 @pytest.mark.asyncio
@@ -393,7 +513,7 @@ async def test_fastembed_provider_fails_fast_without_cache_dir(monkeypatch):
     """Without a configured cache_dir there is nothing to purge, so fail fast."""
     _install_self_heal_stub(monkeypatch)
 
-    # cache_dir defaults to None — _model_cache_subdirs() returns no candidates.
+    # cache_dir defaults to None — _model_cache_candidates() returns no candidates.
     provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
 
     with pytest.raises(RuntimeError, match="NO_SUCHFILE"):
