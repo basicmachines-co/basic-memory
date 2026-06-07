@@ -99,7 +99,7 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | Config Field | Env Var | Default | Description |
 |---|---|---|---|
 | `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto (`true` when semantic deps are available) | Enable semantic search. Required before vector/hybrid modes work. |
-| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API). |
+| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
 | `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. 384 for FastEmbed, 1536 for OpenAI/LiteLLM OpenAI. Required when using a non-default LiteLLM model. |
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | LiteLLM-only override for whether configured dimensions are sent as a provider-side output-size request. |
@@ -139,6 +139,8 @@ export OPENAI_API_KEY=sk-...
 ```
 
 ### LiteLLM
+
+> **Experimental — advanced users only.** The LiteLLM provider is experimental and aimed at users comfortable operating remote embedding backends: paid API calls, per-model dimension and input-role configuration, and slower reindexing of large corpora. For most users, FastEmbed (local, default) is recommended. See [LiteLLM Provider](litellm-provider.md) for the caveats and tuning.
 
 Uses the LiteLLM SDK to call embedding models from providers such as OpenAI, Cohere, Azure, Bedrock, NVIDIA NIM, and other LiteLLM-supported backends. Requires the provider's API credentials.
 For the full option reference, provider setup examples, and live validation harness, see [LiteLLM Provider](litellm-provider.md).

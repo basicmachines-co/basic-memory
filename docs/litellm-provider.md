@@ -8,6 +8,14 @@ Cohere, Bedrock, NVIDIA NIM, and other LiteLLM-supported embedding providers.
 Use this page when you want to try a non-default embedding model, validate a provider,
 or tune LiteLLM-specific settings.
 
+> **Experimental — advanced users only.** The LiteLLM provider is experimental and
+> intended for users who are comfortable operating remote embedding backends. It makes
+> paid, networked API calls, requires per-model dimension and input-role configuration,
+> and reindexing a real corpus can be slow and spend provider quota (see
+> [Reindexing with a remote provider](#reindexing-with-a-remote-provider)). For most
+> users, the default local **FastEmbed** provider is the recommended choice. Use LiteLLM
+> only if you know what you're doing.
+
 ## Quick Start
 
 The default LiteLLM model is OpenAI `text-embedding-3-small` through the LiteLLM
@@ -99,6 +107,44 @@ those changes:
 
 ```bash
 bm reindex --embeddings
+```
+
+## Reindexing with a remote provider
+
+Embedding a real corpus through a network API is far slower than local FastEmbed, and
+the defaults are tuned for the local case. Two things to know before you run a full
+reindex.
+
+**Raise the sync batch size.** `semantic_embedding_sync_batch_size` defaults to `2`, and
+it — not `semantic_embedding_batch_size` — governs throughput on the sync pipeline. With
+the default, a full reindex can take tens of seconds *per note* against a remote provider.
+Raising both to a larger value turns a multi-minute (or longer) reindex into well under a
+minute for the same corpus:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_SYNC_BATCH_SIZE=32
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE=64
+```
+
+Stay within the provider's per-request size and rate limits — Cohere v3, for example,
+accepts up to 96 inputs per embedding request.
+
+**Changing dimensions requires recreating the vector table.** Basic Memory dimensions the
+vector table on first index and refuses to mix sizes. Switching to a model with a
+different dimension (for example FastEmbed 384 → OpenAI 1536 → Cohere 1024) makes a plain
+`bm reindex` raise an `Embedding dimension mismatch` error. Recreate the table with a full
+rebuild — files are the source of truth, so this re-indexes from disk and re-embeds
+everything:
+
+```bash
+bm reset --reindex
+```
+
+To trial a provider without disturbing your existing index, point Basic Memory at a
+throwaway config + database instead:
+
+```bash
+export BASIC_MEMORY_CONFIG_DIR=/tmp/bm-litellm-trial
 ```
 
 ## Provider Setup Examples
