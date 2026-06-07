@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from contextlib import suppress
 from logging.config import fileConfig
 
 # Allow nested event loops (needed for pytest-asyncio and other async contexts)
@@ -115,7 +116,15 @@ async def run_async_migrations(connectable):
     """Run migrations asynchronously with AsyncEngine."""
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
-    await connectable.dispose()
+    # Trigger: startup migrations on the asyncpg backend dispose the engine
+    # while the event loop may be tearing down around them.
+    # Why: that race surfaces "IndexError: pop from an empty deque" from
+    # base_events._run_once (#831/#877); shielding lets dispose finish atomically
+    # and suppressing CancelledError keeps a cancelled teardown from re-raising it.
+    # Outcome: the migration engine always disposes cleanly. (uvloop is the
+    # structural fix for the race; this hardens the teardown path.)
+    with suppress(asyncio.CancelledError):
+        await asyncio.shield(connectable.dispose())
 
 
 def _run_async_migrations_with_asyncio_run(connectable) -> None:

@@ -57,6 +57,14 @@ def app_callback(
     container = CliContainer.create()
     set_container(container)
 
+    # Trigger: Postgres backend resolved at CLI startup, before any asyncio.run().
+    # Why: uvloop must own the event-loop policy before the loop is created so the
+    # asyncpg engine-dispose race (#831/#877) cannot fire. No-op for SQLite.
+    # Outcome: subsequent asyncio.run() calls in CLI commands use uvloop on Postgres.
+    from basic_memory.db import maybe_install_uvloop
+
+    maybe_install_uvloop(container.config)
+
     # Trigger: first-run init confirmation before command output.
     # Why: informational "initialized" message belongs above command results, not in the upsell panel.
     # Outcome: one-time plain line printed before the subcommand runs.

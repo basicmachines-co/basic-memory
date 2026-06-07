@@ -51,6 +51,10 @@ dependencies = [
     "litellm>=1.60.0,<2.0.0",
     "logfire>=4.19.0",
     "psutil>=5.9.0",
+    # uvloop's C event loop has no self._ready.popleft() codepath, so the
+    # asyncpg engine-dispose race ("IndexError: pop from an empty deque") that
+    # crashes the Postgres backend cannot fire under it. Not available on Windows.
+    "uvloop>=0.21.0; sys_platform != 'win32'",
 ]
 
 [project.urls]

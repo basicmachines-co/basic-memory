@@ -304,6 +304,7 @@ dependencies = [
     { name = "sqlite-vec" },
     { name = "typer" },
     { name = "unidecode" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
     { name = "watchfiles" },
 ]
 
@@ -370,6 +371,7 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "typer", specifier = ">=0.9.0" },
     { name = "unidecode", specifier = ">=1.3.8" },
+    { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0" },
     { name = "watchfiles", specifier = ">=1.0.4" },
 ]
 

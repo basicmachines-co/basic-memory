@@ -98,6 +98,18 @@ def mcp(
     if transport == "stdio":
         threading.Thread(target=_run_background_auto_update, daemon=True).start()
 
+    # Trigger: MCP server startup on the Postgres backend, before the transport
+    # creates its event loop.
+    # Why: the watcher/lifespan path runs startup migrations + engine.dispose() on
+    # asyncpg, which races stdlib asyncio teardown and crashes the container loop
+    # (#831/#877). uvloop's C scheduler structurally avoids that race and must own
+    # the loop policy before the loop is created. No-op for SQLite.
+    # Outcome: `basic-memory mcp` on Postgres runs on uvloop. (The CLI callback also
+    # installs it; this keeps the server startup seam explicit and self-contained.)
+    from basic_memory.db import maybe_install_uvloop
+
+    maybe_install_uvloop(ConfigManager().config)
+
     # Run the MCP server (blocks)
     # Lifespan handles: initialization, migrations, file sync, cleanup
     logger.info(f"Starting MCP server with {transport.upper()} transport")
