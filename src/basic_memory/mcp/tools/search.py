@@ -83,6 +83,44 @@ def _format_search_error_response(
                `search_notes("{project}", "{query}", search_type="{search_type}")`
             """).strip()
 
+    # Corrupt/missing FastEmbed model cache (interrupted download leaves a partial
+    # snapshot missing model_optimized.onnx; the ONNX runtime then raises NO_SUCHFILE).
+    # Basic Memory self-heals by re-downloading on the next load, but if the user still
+    # hits this, point them at the cache dir to clear manually and offer a text fallback.
+    error_lower = error_message.lower()
+    if (
+        "onnxruntime" in error_lower
+        or "no_suchfile" in error_lower
+        or "model_optimized.onnx" in error_lower
+        or "load model" in error_lower
+    ):
+        # Deferred import: keeps the repository layer out of the tool's import graph
+        # (matches the SearchClient deferral below) and is only needed on this error path.
+        from basic_memory.repository.embedding_provider_factory import _resolve_cache_dir
+
+        try:
+            cache_dir = _resolve_cache_dir(get_container().config)
+        except RuntimeError:
+            cache_dir = _resolve_cache_dir(ConfigManager().config)
+        return dedent(f"""
+            # Search Failed - Embedding Model Missing or Corrupt
+
+            The local FastEmbed model could not be loaded for query '{query}': {error_message}
+
+            This usually means an earlier model download was interrupted and left an
+            incomplete file in the model cache.
+
+            ## How to fix
+            1. Delete the FastEmbed model cache so it re-downloads on the next search:
+               `{cache_dir}`
+            2. Run your search again (the model downloads automatically on first use):
+               `search_notes("{project}", "{query}", search_type="{search_type}")`
+
+            ## Workaround right now
+            - Use full-text search, which needs no embedding model:
+              `search_notes("{project}", "{query}", search_type="text")`
+            """).strip()
+
     # FTS5 syntax errors
     if "syntax error" in error_message.lower() or "fts5" in error_message.lower():
         clean_query = (

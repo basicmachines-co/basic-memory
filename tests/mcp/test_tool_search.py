@@ -479,6 +479,27 @@ class TestSearchErrorFormatting:
         assert "# Search Failed - Semantic Dependencies Missing" in result
         assert "pip install -U basic-memory" in result
 
+    def test_format_search_error_corrupt_embedding_model(self):
+        """Test formatting for a corrupt/missing FastEmbed model (ONNX NO_SUCHFILE)."""
+        from basic_memory.config import ConfigManager
+        from basic_memory.repository.embedding_provider_factory import _resolve_cache_dir
+
+        result = _format_search_error_response(
+            "test-project",
+            "[ONNXRuntimeError] : 3 : NO_SUCHFILE : Load model from "
+            "/home/u/.basic-memory/fastembed_cache/models--qdrant--bge-small-en-v1.5-onnx-q/"
+            "snapshots/abc/model_optimized.onnx failed. File doesn't exist",
+            "semantic query",
+            "hybrid",
+        )
+
+        expected_cache_dir = _resolve_cache_dir(ConfigManager().config)
+        assert "# Search Failed - Embedding Model Missing or Corrupt" in result
+        # Names the actual resolved cache dir so the user knows what to delete.
+        assert expected_cache_dir in result
+        # Offers full-text search as an immediate workaround.
+        assert 'search_type="text"' in result
+
     def test_format_search_error_generic(self):
         """Test formatting for generic errors."""
         result = _format_search_error_response("test-project", "unknown error", "test query")
