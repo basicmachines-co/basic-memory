@@ -47,7 +47,9 @@ def test_cli_write_note_comma_tags_split_matches_mcp(app, app_config, test_proje
     content = json.loads(read.stdout)["content"]
 
     # Correct behavior: two distinct tags (matching MCP write_note semantics).
-    assert "- alpha\n" in content and "- beta\n" in content, (
+    # splitlines() is line-ending agnostic (Windows CRLF vs POSIX LF).
+    content_lines = content.splitlines()
+    assert "- alpha" in content_lines and "- beta" in content_lines, (
         "CLI --tags 'alpha,beta' should split into two tags like MCP write_note does; "
         f"got frontmatter:\n{content}"
     )
@@ -73,6 +75,7 @@ async def test_mcp_write_note_comma_tags_split_baseline(mcp_server, app, test_pr
             {"project": test_project.name, "identifier": "MCP Comma Split"},
         )
         text = read.content[0].text
-        assert "- alpha\n" in text and "- beta\n" in text, (
+        text_lines = text.splitlines()
+        assert "- alpha" in text_lines and "- beta" in text_lines, (
             f"MCP write_note should split comma string into two tags; got:\n{text}"
         )

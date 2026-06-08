@@ -531,9 +531,12 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
         # Why: keep the CLI list path and the MCP bare-string path on a single source of truth so
         #   `--tags "a,b"`, `--tags a --tags b`, and `tags="a,b"` all converge to the same tags.
         # Outcome: flatten by splitting each element on commas before stripping '#' / whitespace.
+        # Skip None entries (e.g. a YAML `tags: [alpha, null]`) so they are not revived as
+        # the literal tag "None" by str(raw); the old list branch ignored such falsy entries.
         return [
             tag.strip().lstrip("#")
             for raw in tags
+            if raw is not None
             for tag in str(raw).split(",")
             if tag and tag.strip()
         ]

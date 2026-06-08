@@ -20,6 +20,8 @@ from basic_memory.utils import parse_tags
         # Comma inside a single list element is split (CLI `--tags "a,b"` -> ["a,b"])
         (["tag1,tag2"], ["tag1", "tag2"]),
         (["tag1, tag2", "tag3"], ["tag1", "tag2", "tag3"]),
+        # None entries (e.g. YAML `tags: [alpha, null]`) are skipped, not revived as "None"
+        (["alpha", None], ["alpha"]),
         # String inputs
         ("", []),
         ("tag1", ["tag1"]),
