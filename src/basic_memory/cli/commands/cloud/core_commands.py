@@ -247,9 +247,9 @@ def setup(
 
         # Trigger: the target rclone remote already exists.
         # Why: re-running setup mints new credentials and overwrites the remote,
-        # silently repointing it (e.g. clobbering the shared basic-memory-cloud
-        # that served another tenant) — the #922 footgun. Checked BEFORE minting
-        # so an abort wastes no credentials.
+        # which would silently repoint it — e.g. clobbering the shared
+        # basic-memory-cloud remote that served another tenant. Checked BEFORE
+        # minting so an abort wastes no credentials.
         # Outcome: stop unless the user explicitly opts in with --force.
         if rclone_remote_exists(remote_name) and not force:
             console.print(f"[red]rclone remote '{remote_name}' is already configured.[/red]")

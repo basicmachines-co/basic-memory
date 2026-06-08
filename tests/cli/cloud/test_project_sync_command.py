@@ -699,6 +699,22 @@ def test_cloud_setup_force_overwrites_existing_remote(monkeypatch):
     assert recorder.get("minted") is True
 
 
+def test_cloud_setup_default_workspace_aborts_when_remote_exists(monkeypatch):
+    """The original footgun: `bm cloud setup` (no --workspace) must not clobber
+    the shared basic-memory-cloud remote without --force."""
+    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
+    recorder: dict = {}
+    _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "setup"])  # no --workspace → basic-memory-cloud
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "'basic-memory-cloud' is already configured" in output
+    assert "minted" not in recorder  # nothing minted on abort
+    assert "remote_name" not in recorder
+
+
 async def _async_value(value):
     return value
 
