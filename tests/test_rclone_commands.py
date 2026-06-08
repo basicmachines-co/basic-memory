@@ -726,7 +726,9 @@ def test_project_copy_file_pull_copyto_renames_on_dest(tmp_path):
     cmd, _ = runner.calls[0]
     assert cmd[:2] == ["rclone", "copyto"]
     assert cmd[2] == "basic-memory-cloud:my-bucket/research/notes/dup.md"
-    assert cmd[3] == "/tmp/research/notes/dup.conflict-S.md"
+    # Compare the local dest via Path so the assertion holds on Windows, where the
+    # local root renders with backslashes (rclone accepts the mixed separators).
+    assert Path(cmd[3]) == Path("/tmp/research/notes/dup.conflict-S.md")
     # pull writes the conflict copy locally → must guard virtual-FS NUL padding
     assert "--local-no-preallocate" in cmd
 
@@ -753,7 +755,8 @@ def test_project_transfer_keep_both_copies_conflicts_then_additive(tmp_path):
     # First a copyto for the conflict file, written beside the local copy...
     first_cmd, _ = runner.calls[0]
     assert first_cmd[:2] == ["rclone", "copyto"]
-    assert first_cmd[3] == "/tmp/research/dup.conflict-S.md"
+    # Path comparison so this holds on Windows (backslash local root).
+    assert Path(first_cmd[3]) == Path("/tmp/research/dup.conflict-S.md")
     # ...then an additive (new-only) copy that won't overwrite existing local files.
     second_cmd, _ = runner.calls[1]
     assert second_cmd[:2] == ["rclone", "copy"]
