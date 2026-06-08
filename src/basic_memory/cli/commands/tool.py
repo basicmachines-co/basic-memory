@@ -100,6 +100,11 @@ def write_note(
             help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
         ),
     ] = None,
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace an existing note on conflict (matches MCP write_note overwrite=True)",
+    ),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -112,6 +117,7 @@ def write_note(
     bm tool write-note --title "My Note" --folder "notes" --content "Note content"
     bm tool write-note --title "My Guide" --folder "notes" --content "..." --type guide
     echo "content" | bm tool write-note --title "My Note" --folder "notes"
+    bm tool write-note --title "My Note" --folder "notes" --overwrite
     bm tool write-note --title "My Note" --folder "notes" --local
     """
     try:
@@ -144,9 +150,22 @@ def write_note(
                     project_id=project_id,
                     tags=tags,
                     note_type=note_type,
+                    overwrite=overwrite,
                     output_format="json",
                 )
             )
+
+        # MCP tool returns an error field on failure in JSON mode (e.g.
+        # NOTE_ALREADY_EXISTS on a blocked overwrite, SECURITY_VALIDATION_ERROR).
+        # Trigger: result carries a non-empty `error`.
+        # Why: parity with delete-note/edit-note/search-notes so exit-code-driven
+        #      scripts detect a failed/blocked write instead of seeing exit 0.
+        # Outcome: print the error to stderr and exit non-zero.
+        if isinstance(result, dict) and result.get("error"):
+            typer.echo(f"Error: {result['error']}", err=True)
+            _print_json(result)
+            raise typer.Exit(1)
+
         _print_json(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -200,6 +219,19 @@ def read_note(
                     output_format="json",
                 )
             )
+
+        # MCP tool returns an error field on failure in JSON mode (e.g.
+        # SECURITY_VALIDATION_ERROR on a path-traversal identifier). A genuine
+        # not-found returns null fields with no `error` key, so it still exits 0.
+        # Trigger: result carries a non-empty `error`.
+        # Why: parity with edit-note/delete-note/search-notes so a blocked read
+        #      surfaces a non-zero exit instead of looking like success.
+        # Outcome: print the error to stderr and exit non-zero.
+        if isinstance(result, dict) and result.get("error"):
+            typer.echo(f"Error: {result['error']}", err=True)
+            _print_json(result)
+            raise typer.Exit(1)
+
         _print_json(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -417,7 +449,9 @@ def recent_activity(
         "7d", "--timeframe", help="Timeframe filter (e.g., '7d', '1 week')"
     ),
     page: int = typer.Option(1, "--page", help="Page number for pagination"),
-    page_size: int = typer.Option(50, "--page-size", help="Number of results per page"),
+    # Match the MCP recent_activity default (page_size=10) so identical default
+    # invocations return the same number of rows from CLI and MCP.
+    page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -502,6 +536,16 @@ def search_notes(
             help="Filter by search item type: entity, observation, relation (repeatable)",
         ),
     ] = None,
+    categories: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--category",
+            help=(
+                "Filter observation results to exact categories (repeatable); "
+                "pair with --entity-type observation"
+            ),
+        ),
+    ] = None,
     meta: Annotated[
         Optional[List[str]],
         typer.Option("--meta", help="Filter by frontmatter key=value (repeatable)"),
@@ -536,6 +580,7 @@ def search_notes(
     bm tool search-notes --permalink "specs/*"
     bm tool search-notes --tag python --tag async
     bm tool search-notes --meta status=draft
+    bm tool search-notes "auth" --entity-type observation --category requirement
     """
     try:
         validate_routing_flags(local, cloud)
@@ -601,6 +646,7 @@ def search_notes(
                     page_size=page_size,
                     note_types=note_types,
                     entity_types=entity_types,
+                    categories=categories,
                     metadata_filters=metadata_filters,
                     tags=tags,
                     status=status,
