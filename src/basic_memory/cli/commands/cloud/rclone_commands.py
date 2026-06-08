@@ -11,10 +11,10 @@ Replaces tenant-wide sync with project-scoped workflows.
 
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
-from pathlib import Path
-from typing import Callable, Optional, Protocol
+from pathlib import Path, PurePosixPath
+from typing import Callable, Literal, Optional, Protocol
 
 from loguru import logger
 from rich.console import Console
@@ -42,6 +42,7 @@ TIGRIS_CONSISTENCY_HEADERS = [
 class RunResult(Protocol):
     returncode: int
     stdout: str
+    stderr: str
 
 
 RunFunc = Callable[..., RunResult]
@@ -184,6 +185,91 @@ def get_project_remote(project: SyncProject, bucket_name: str) -> str:
     return f"basic-memory-cloud:{bucket_name}/{cloud_path}"
 
 
+# --- Directional transfer primitives (push / pull) ---
+#
+# These power the Team-safe `bm cloud push` / `bm cloud pull` commands. Unlike
+# the mirror operations (`sync`/`bisync`), they use `rclone copy` so they never
+# delete on the destination, and conflicts are surfaced to the caller rather
+# than silently resolved. See issue #858 for the full design rationale.
+
+# push = local -> cloud, pull = cloud -> local.
+TransferDirection = Literal["push", "pull"]
+
+# How a directional transfer treats files that differ on both sides. "fail" is
+# the safe default: the caller is expected to abort before any transfer runs.
+ConflictStrategy = Literal["fail", "keep-local", "keep-cloud", "keep-both"]
+
+
+@dataclass
+class TransferPlan:
+    """Classification of how local and cloud differ for a directional transfer.
+
+    Built from ``rclone check --combined``. Paths are relative to the project
+    root. ``conflicts`` are files present on both sides with differing content —
+    without a sync baseline (see #862) every divergence is a conflict, because
+    we cannot tell a teammate's edit from a stale local copy.
+    """
+
+    new: list[str] = field(default_factory=list)  # only on source → safe to bring over
+    conflicts: list[str] = field(default_factory=list)  # differ on both sides
+    dest_only: list[str] = field(default_factory=list)  # only on destination → left untouched
+    errors: list[str] = field(default_factory=list)  # rclone could not read/hash
+
+
+def _transfer_endpoints(project: SyncProject, bucket_name: str) -> tuple[str, str]:
+    """Return (local_path, remote_path) strings for a project's transfer.
+
+    Raises:
+        RcloneError: If the project has no local_sync_path configured.
+    """
+    if not project.local_sync_path:
+        raise RcloneError(f"Project {project.name} has no local_sync_path configured")
+    local_path = str(Path(project.local_sync_path).expanduser())
+    remote_path = get_project_remote(project, bucket_name)
+    return local_path, remote_path
+
+
+def _build_transfer_cmd(
+    operation: str,
+    source: str,
+    dest: str,
+    *,
+    filter_path: Path,
+    dry_run: bool,
+    verbose: bool,
+    extra_flags: tuple[str, ...] = (),
+) -> list[str]:
+    """Build an rclone sync/copy command with the shared Basic Memory flags.
+
+    All directional transfers share the same tail: Tigris consistency headers,
+    the .bmignore filter, and --local-no-preallocate (a no-op when local is the
+    source, required when local is the destination on pull — see rclone#6801).
+    """
+    cmd = [
+        "rclone",
+        operation,
+        source,
+        dest,
+        *TIGRIS_CONSISTENCY_HEADERS,
+        "--filter-from",
+        str(filter_path),
+        # Prevent NUL byte padding on virtual filesystems (e.g. Google Drive File Stream)
+        # See: rclone/rclone#6801
+        "--local-no-preallocate",
+        *extra_flags,
+    ]
+
+    if verbose:
+        cmd.append("--verbose")
+    else:
+        cmd.append("--progress")
+
+    if dry_run:
+        cmd.append("--dry-run")
+
+    return cmd
+
+
 def project_sync(
     project: SyncProject,
     bucket_name: str,
@@ -219,29 +305,270 @@ def project_sync(
     remote_path = get_project_remote(project, bucket_name)
     filter_path = filter_path or get_bmignore_filter_path()
 
-    cmd = [
-        "rclone",
+    cmd = _build_transfer_cmd(
         "sync",
         str(local_path),
         remote_path,
+        filter_path=filter_path,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+
+    result = run(cmd, text=True)
+    return result.returncode == 0
+
+
+def _parse_check_combined(output: str) -> TransferPlan:
+    """Parse ``rclone check --combined`` output into a TransferPlan.
+
+    rclone emits one prefixed line per path (src is the transfer source):
+      ``=`` identical, ``+`` only on src, ``-`` only on dst, ``*`` differ,
+      ``!`` error reading/hashing. We ignore identical files.
+    """
+    plan = TransferPlan()
+    for line in output.splitlines():
+        symbol, _, path = line.partition(" ")
+        path = path.strip()
+        if not path:
+            continue
+        if symbol == "+":
+            plan.new.append(path)
+        elif symbol == "*":
+            plan.conflicts.append(path)
+        elif symbol == "-":
+            plan.dest_only.append(path)
+        elif symbol == "!":
+            plan.errors.append(path)
+        # "=" (identical) is intentionally dropped.
+    return plan
+
+
+def project_diff(
+    project: SyncProject,
+    bucket_name: str,
+    direction: TransferDirection,
+    *,
+    run: RunFunc = subprocess.run,
+    is_installed: IsInstalledFunc = is_rclone_installed,
+    filter_path: Path | None = None,
+) -> TransferPlan:
+    """Classify how local and cloud differ for a push/pull, without transferring.
+
+    Uses ``rclone check`` (content comparison) so the caller can surface
+    conflicts before any data moves. The source side depends on direction:
+    pull compares cloud→local, push compares local→cloud.
+
+    Raises:
+        RcloneError: If project has no local_sync_path configured or rclone not installed
+    """
+    check_rclone_installed(is_installed=is_installed)
+
+    local_path, remote_path = _transfer_endpoints(project, bucket_name)
+    filter_path = filter_path or get_bmignore_filter_path()
+
+    # Source/dest order matters: rclone check reports "+" for files only on the
+    # source, which is what we want to bring over.
+    source, dest = (remote_path, local_path) if direction == "pull" else (local_path, remote_path)
+
+    cmd = [
+        "rclone",
+        "check",
+        source,
+        dest,
         *TIGRIS_CONSISTENCY_HEADERS,
         "--filter-from",
         str(filter_path),
-        # Prevent NUL byte padding on virtual filesystems (e.g. Google Drive File Stream)
-        # See: rclone/rclone#6801
-        "--local-no-preallocate",
+        "--combined",
+        "-",
     ]
 
+    # rclone check exits non-zero when files differ — that's expected here, so we
+    # parse the combined listing rather than trusting the return code.
+    result = run(cmd, capture_output=True, text=True)
+    plan = _parse_check_combined(result.stdout)
+
+    # Trigger: non-zero exit AND the combined listing produced no entries at all.
+    # Why: a difference always yields +/-/*/! lines, so an empty listing on a
+    # non-zero exit means the check itself failed (auth, missing remote, network,
+    # bad filter) rather than finding zero differences. Without this guard the
+    # caller would see an empty plan, transfer nothing, and report success.
+    # Outcome: fail fast with rclone's stderr instead of a silent no-op.
+    if result.returncode != 0 and not (plan.new or plan.conflicts or plan.dest_only or plan.errors):
+        detail = result.stderr.strip() or f"rclone check exited with code {result.returncode}"
+        raise RcloneError(f"Failed to compare {project.name} with cloud: {detail}")
+
+    return plan
+
+
+def project_copy(
+    project: SyncProject,
+    bucket_name: str,
+    direction: TransferDirection,
+    *,
+    overwrite: bool,
+    dry_run: bool = False,
+    verbose: bool = False,
+    run: RunFunc = subprocess.run,
+    is_installed: IsInstalledFunc = is_rclone_installed,
+    filter_path: Path | None = None,
+) -> bool:
+    """Additive transfer via ``rclone copy`` — never deletes on the destination.
+
+    Trigger: ``overwrite=False`` adds ``--ignore-existing`` so files already on
+    the destination are left as-is (used when the destination side wins a
+    conflict, and for the no-conflict fast path).
+    Why: keeps the loser's bytes intact unless the caller explicitly chose to
+    overwrite, matching the "no surprises" contract.
+
+    Raises:
+        RcloneError: If project has no local_sync_path configured or rclone not installed
+    """
+    check_rclone_installed(is_installed=is_installed)
+
+    local_path, remote_path = _transfer_endpoints(project, bucket_name)
+    filter_path = filter_path or get_bmignore_filter_path()
+
+    source, dest = (remote_path, local_path) if direction == "pull" else (local_path, remote_path)
+    # Overwrite mode compares by checksum so the transfer decision matches
+    # project_diff's content-based conflict detection (rclone check). Without
+    # --checksum, copy's default size+modtime comparison could skip a file the
+    # diff flagged as a conflict (same size, destination not older) — silently
+    # ignoring the user's explicit keep-cloud/keep-local choice. New-only mode
+    # uses --ignore-existing, which skips by existence so the comparison basis
+    # does not matter.
+    extra_flags = ("--checksum",) if overwrite else ("--ignore-existing",)
+
+    cmd = _build_transfer_cmd(
+        "copy",
+        source,
+        dest,
+        filter_path=filter_path,
+        dry_run=dry_run,
+        verbose=verbose,
+        extra_flags=extra_flags,
+    )
+
+    result = run(cmd, text=True)
+    return result.returncode == 0
+
+
+def _conflict_copy_name(rel_path: str, suffix: str) -> str:
+    """Insert a ``.conflict-<suffix>`` marker before the extension of a rel path."""
+    p = PurePosixPath(rel_path)
+    return str(p.with_name(f"{p.stem}.conflict-{suffix}{p.suffix}"))
+
+
+def project_copy_file(
+    project: SyncProject,
+    bucket_name: str,
+    direction: TransferDirection,
+    source_rel_path: str,
+    dest_rel_path: str,
+    *,
+    dry_run: bool = False,
+    verbose: bool = False,
+    run: RunFunc = subprocess.run,
+    is_installed: IsInstalledFunc = is_rclone_installed,
+) -> bool:
+    """Copy a single file from source to destination under a (possibly renamed) path.
+
+    Used for the ``keep-both`` strategy: the incoming version is written beside
+    the destination's own copy as ``name.conflict-<date>`` so nothing is lost.
+
+    Raises:
+        RcloneError: If project has no local_sync_path configured or rclone not installed
+    """
+    check_rclone_installed(is_installed=is_installed)
+
+    local_path, remote_path = _transfer_endpoints(project, bucket_name)
+    source_root, dest_root = (
+        (remote_path, local_path) if direction == "pull" else (local_path, remote_path)
+    )
+
+    cmd = [
+        "rclone",
+        "copyto",
+        f"{source_root}/{source_rel_path}",
+        f"{dest_root}/{dest_rel_path}",
+        *TIGRIS_CONSISTENCY_HEADERS,
+        # Matches _build_transfer_cmd: on pull this writes the conflict copy to
+        # the local filesystem, where this prevents NUL byte padding on virtual
+        # filesystems (e.g. Google Drive File Stream). See rclone/rclone#6801.
+        "--local-no-preallocate",
+    ]
     if verbose:
         cmd.append("--verbose")
-    else:
-        cmd.append("--progress")
-
     if dry_run:
         cmd.append("--dry-run")
 
     result = run(cmd, text=True)
     return result.returncode == 0
+
+
+def _strategy_overwrites_dest(direction: TransferDirection, strategy: ConflictStrategy) -> bool:
+    """True when the strategy lets the source side overwrite the destination.
+
+    The source side is cloud on pull, local on push. "keep-cloud" wins on pull,
+    "keep-local" wins on push; otherwise the destination is preserved.
+    """
+    if strategy == "keep-cloud":
+        return direction == "pull"
+    if strategy == "keep-local":
+        return direction == "push"
+    return False  # "fail" (no conflicts) and "keep-both" never overwrite existing dest files
+
+
+def project_transfer(
+    project: SyncProject,
+    bucket_name: str,
+    direction: TransferDirection,
+    plan: TransferPlan,
+    *,
+    strategy: ConflictStrategy = "fail",
+    conflict_suffix: str = "",
+    dry_run: bool = False,
+    verbose: bool = False,
+    run: RunFunc = subprocess.run,
+    is_installed: IsInstalledFunc = is_rclone_installed,
+    filter_path: Path | None = None,
+) -> bool:
+    """Execute a directional transfer for the chosen conflict strategy.
+
+    Callers detect conflicts with ``project_diff`` first and abort when
+    ``strategy == "fail"`` and conflicts exist; this function assumes that gate
+    has already passed and applies the resolution.
+    """
+    # keep-both: preserve the destination's version and drop the incoming one
+    # beside it as a conflict copy, then do an additive (new-only) pass.
+    if strategy == "keep-both":
+        for rel_path in plan.conflicts:
+            dest_rel = _conflict_copy_name(rel_path, conflict_suffix)
+            copied = project_copy_file(
+                project,
+                bucket_name,
+                direction,
+                rel_path,
+                dest_rel,
+                dry_run=dry_run,
+                verbose=verbose,
+                run=run,
+                is_installed=is_installed,
+            )
+            if not copied:
+                return False
+
+    overwrite = _strategy_overwrites_dest(direction, strategy)
+    return project_copy(
+        project,
+        bucket_name,
+        direction,
+        overwrite=overwrite,
+        dry_run=dry_run,
+        verbose=verbose,
+        run=run,
+        is_installed=is_installed,
+        filter_path=filter_path,
+    )
 
 
 def project_bisync(

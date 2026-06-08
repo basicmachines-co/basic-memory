@@ -348,6 +348,13 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Manage snapshots: `basic-memory cloud snapshot [create|list|delete|show|browse]`
 - Restore from snapshot: `basic-memory cloud restore <path> --snapshot <id>`
 
+**Cloud Sync Commands (Personal and Team workspaces):**
+- Fetch cloud changes (cloud -> local): `basic-memory cloud pull --name "name"` (Team-safe; additive, never deletes local)
+- Upload local changes (local -> cloud): `basic-memory cloud push --name "name"` (Team-safe; additive, never deletes cloud)
+- Resolve conflicts on push/pull: `--on-conflict [fail|keep-local|keep-cloud|keep-both]` (default `fail` lists conflicts and aborts, git-style)
+- One-way mirror (local -> cloud): `basic-memory cloud sync --name "name"` (Personal workspaces only; deletes cloud files missing locally)
+- Two-way mirror (local <-> cloud): `basic-memory cloud bisync --name "name"` (Personal workspaces only)
+
 ### MCP Capabilities
 
 - Basic Memory exposes these MCP tools to LLMs:
