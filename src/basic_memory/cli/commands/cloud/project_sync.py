@@ -7,6 +7,7 @@ they are cloud-specific operations.
 
 import os
 from datetime import datetime
+from enum import Enum
 
 import typer
 from rich.console import Console
@@ -16,10 +17,14 @@ from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
 from basic_memory.cli.commands.cloud.rclone_commands import (
     RcloneError,
     SyncProject,
+    TransferDirection,
+    TransferPlan,
     get_project_bisync_state,
     project_bisync,
     project_check,
+    project_diff,
     project_sync,
+    project_transfer,
 )
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing
@@ -35,8 +40,29 @@ console = Console()
 
 TEAM_WORKSPACE_BISYNC_UNSUPPORTED = (
     "The bisync operation is only supported on Personal workspaces.\n"
-    "Use `bm cloud sync --name {name}` instead."
+    "Use `bm cloud pull --name {name}` / `bm cloud push --name {name}` instead."
 )
+
+TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
+    "The sync operation mirrors local onto the shared bucket and can delete a "
+    "teammate's files, so it is only supported on Personal workspaces.\n"
+    "Use `bm cloud pull --name {name}` (fetch) / `bm cloud push --name {name}` "
+    "(additive upload) instead."
+)
+
+
+class ConflictStrategy(str, Enum):
+    """How push/pull resolves files that differ on both sides.
+
+    Default is ``fail``: surface the conflicts and abort before transferring,
+    leaving the user to re-run with an explicit resolution — like git refusing
+    to clobber local changes.
+    """
+
+    fail = "fail"
+    keep_local = "keep-local"
+    keep_cloud = "keep-cloud"
+    keep_both = "keep-both"
 
 
 # --- Shared helpers ---
@@ -92,8 +118,18 @@ async def _get_workspace_for_project(name: str, config: BasicMemoryConfig) -> Wo
     )
 
 
-def _require_personal_workspace(name: str, config: BasicMemoryConfig) -> WorkspaceInfo:
-    """Exit before bisync work when the target workspace is not personal."""
+def _require_personal_workspace(
+    name: str,
+    config: BasicMemoryConfig,
+    *,
+    unsupported_message: str = TEAM_WORKSPACE_BISYNC_UNSUPPORTED,
+) -> WorkspaceInfo:
+    """Exit before mirror work when the target workspace is not personal.
+
+    Used to gate the destructive mirror operations (`sync`, `bisync`) to
+    Personal workspaces. ``unsupported_message`` lets each command point Team
+    users at the right Team-safe alternative.
+    """
     try:
         workspace = run_with_cleanup(_get_workspace_for_project(name, config))
     except Exception as exc:
@@ -101,7 +137,7 @@ def _require_personal_workspace(name: str, config: BasicMemoryConfig) -> Workspa
         raise typer.Exit(1)
 
     if workspace.workspace_type != "personal":
-        console.print(f"[red]{TEAM_WORKSPACE_BISYNC_UNSUPPORTED.format(name=name)}[/red]")
+        console.print(f"[red]{unsupported_message.format(name=name)}[/red]")
         raise typer.Exit(1)
 
     return workspace
@@ -150,7 +186,11 @@ def sync_project_command(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """One-way sync: local -> cloud (make cloud identical to local).
+    """One-way mirror: local -> cloud (make cloud identical to local).
+
+    Personal workspaces only. This deletes cloud files not present locally, so
+    on Team workspaces use `bm cloud push` (additive upload) / `bm cloud pull`
+    (fetch) instead.
 
     Example:
       bm cloud sync --name research
@@ -158,6 +198,7 @@ def sync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
+    _require_personal_workspace(name, config, unsupported_message=TEAM_WORKSPACE_SYNC_UNSUPPORTED)
 
     try:
         # Get tenant info for bucket name
@@ -189,6 +230,172 @@ def sync_project_command(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
+
+
+def _print_conflict_abort(name: str, direction: TransferDirection, plan: TransferPlan) -> None:
+    """Explain a conflict abort and how to resolve it (git-pull style)."""
+    console.print(
+        f"[red]{direction} aborted: {len(plan.conflicts)} file(s) differ between "
+        f"local and cloud.[/red]"
+    )
+    for path in plan.conflicts:
+        console.print(f"  [yellow]*[/yellow] {path}")
+    console.print("\nRe-run with one of:")
+    console.print("  [dim]--on-conflict keep-cloud[/dim]  take the cloud version")
+    console.print("  [dim]--on-conflict keep-local[/dim]  keep your local version")
+    console.print(
+        "  [dim]--on-conflict keep-both[/dim]   keep both (writes <name>.conflict-<date>)"
+    )
+
+
+def _run_directional_transfer(
+    name: str,
+    direction: TransferDirection,
+    *,
+    on_conflict: ConflictStrategy,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """Shared orchestration for `bm cloud push` / `bm cloud pull`.
+
+    Detects conflicts first, then aborts (the default) or applies the chosen
+    resolution. Uses additive `rclone copy`, so it never deletes on the
+    destination — safe for Team workspaces and therefore not gated.
+    """
+    config = ConfigManager().config
+    _require_cloud_credentials(config)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = run_with_cleanup(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        with force_routing(cloud=True):
+            project_data = run_with_cleanup(_get_cloud_project(name))
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        sync_project, _ = _get_sync_project(name, config, project_data)
+
+        # --- Detect before transferring ---
+        plan = project_diff(sync_project, bucket_name, direction)
+
+        # Trigger: rclone could not read/hash some files.
+        # Why: comparing is the whole basis for a safe transfer — never guess.
+        # Outcome: abort before moving any bytes.
+        if plan.errors:
+            console.print(
+                f"[red]{direction} aborted: rclone could not compare "
+                f"{len(plan.errors)} file(s)[/red]"
+            )
+            for path in plan.errors:
+                console.print(f"  [red]![/red] {path}")
+            raise typer.Exit(1)
+
+        # Trigger: files differ on both sides and the user chose no resolution.
+        # Why: "no surprises" — never silently pick a winner.
+        # Outcome: list the conflicts and exit, like git refusing to clobber.
+        if plan.conflicts and on_conflict is ConflictStrategy.fail:
+            _print_conflict_abort(name, direction, plan)
+            raise typer.Exit(1)
+
+        # --- Transfer ---
+        arrow = "cloud -> local" if direction == "pull" else "local -> cloud"
+        console.print(f"[blue]{direction.capitalize()} {name} ({arrow})...[/blue]")
+
+        conflict_suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
+        success = project_transfer(
+            sync_project,
+            bucket_name,
+            direction,
+            plan,
+            strategy=on_conflict.value,
+            conflict_suffix=conflict_suffix,
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+
+        if not success:
+            console.print(f"[red]{name} {direction} failed[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]{name} {direction} completed successfully[/green]")
+
+        # Without a sync baseline (see #862) we cannot tell an intentional delete
+        # from a file the other side simply never had, so deletions never sync.
+        if plan.dest_only:
+            kept_on = "local" if direction == "pull" else "cloud"
+            console.print(
+                f"[dim]{len(plan.dest_only)} file(s) exist only on {kept_on} and were left "
+                "untouched (deletions are not propagated).[/dim]"
+            )
+
+    except RcloneError as e:
+        console.print(f"[red]{direction.capitalize()} error: {e}[/red]")
+        raise typer.Exit(1)
+    except typer.Exit:
+        # Already-handled exits (not found, conflicts, errors) propagate cleanly.
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@cloud_app.command("pull")
+def pull_project_command(
+    name: str = typer.Option(..., "--name", "--project", help="Project name to pull"),
+    on_conflict: ConflictStrategy = typer.Option(
+        ConflictStrategy.fail,
+        "--on-conflict",
+        help="Resolve files that differ on both sides (default: fail and list them)",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without pulling"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """Fetch cloud changes into local (cloud -> local), git-pull style.
+
+    Additive and Team-safe: downloads new/changed cloud files and never deletes
+    local files. A file that differs on both sides is a conflict; by default
+    pull aborts and lists them. Deletions are not propagated (see #862).
+
+    Examples:
+      bm cloud pull --name research
+      bm cloud pull --name research --dry-run
+      bm cloud pull --name research --on-conflict keep-cloud
+    """
+    _run_directional_transfer(
+        name, "pull", on_conflict=on_conflict, dry_run=dry_run, verbose=verbose
+    )
+
+
+@cloud_app.command("push")
+def push_project_command(
+    name: str = typer.Option(..., "--name", "--project", help="Project name to push"),
+    on_conflict: ConflictStrategy = typer.Option(
+        ConflictStrategy.fail,
+        "--on-conflict",
+        help="Resolve files that differ on both sides (default: fail and list them)",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without pushing"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """Upload local changes to cloud (local -> cloud), additive and Team-safe.
+
+    Uploads new/changed local files and never deletes cloud files. A file that
+    differs on both sides is a conflict; by default push aborts and lists them
+    (like git rejecting a push when the remote is ahead — pull first). Deletions
+    are not propagated (see #862).
+
+    Examples:
+      bm cloud push --name research
+      bm cloud push --name research --dry-run
+      bm cloud push --name research --on-conflict keep-local
+    """
+    _run_directional_transfer(
+        name, "push", on_conflict=on_conflict, dry_run=dry_run, verbose=verbose
+    )
 
 
 @cloud_app.command("bisync")

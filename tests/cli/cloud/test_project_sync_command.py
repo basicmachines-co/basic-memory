@@ -8,6 +8,7 @@ import typer
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.cloud.rclone_commands import TransferPlan
 from basic_memory.config import ProjectEntry, ProjectMode
 from basic_memory.schemas.cloud import WorkspaceInfo
 
@@ -34,7 +35,7 @@ def test_cloud_sync_commands_skip_explicit_cloud_project_sync(monkeypatch, argv,
 
     monkeypatch.setattr(project_sync_command, "_require_cloud_credentials", lambda _config: None)
     monkeypatch.setattr(
-        project_sync_command, "_require_personal_workspace", lambda _name, _config: None
+        project_sync_command, "_require_personal_workspace", lambda _name, _config, **_kwargs: None
     )
     monkeypatch.setattr(
         project_sync_command,
@@ -72,7 +73,7 @@ def test_cloud_bisync_fails_fast_when_sync_entry_disappears(monkeypatch, config_
 
     monkeypatch.setattr(project_sync_command, "_require_cloud_credentials", lambda _config: None)
     monkeypatch.setattr(
-        project_sync_command, "_require_personal_workspace", lambda _name, _config: None
+        project_sync_command, "_require_personal_workspace", lambda _name, _config, **_kwargs: None
     )
     monkeypatch.setattr(
         project_sync_command,
@@ -141,11 +142,12 @@ def test_cloud_bisync_commands_block_organization_workspace(monkeypatch, argv, c
     assert result.exit_code == 1, result.output
     output = " ".join(result.output.split())
     assert "The bisync operation is only supported on Personal workspaces" in output
-    assert "Use `bm cloud sync --name research` instead" in output
+    assert "bm cloud pull --name research" in output
+    assert "bm cloud push --name research" in output
 
 
-def test_cloud_sync_allows_organization_workspace(monkeypatch, config_manager):
-    """Team workspaces can still use the one-way sync command."""
+def test_cloud_sync_blocks_organization_workspace(monkeypatch, config_manager):
+    """The destructive mirror `sync` is now Personal-only and blocks Team workspaces."""
     project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
     config = config_manager.load_config()
@@ -161,7 +163,41 @@ def test_cloud_sync_allows_organization_workspace(monkeypatch, config_manager):
     monkeypatch.setattr(
         project_sync_command,
         "get_available_workspaces",
-        lambda: pytest.fail("sync should not require a personal workspace"),
+        lambda: _async_value([_workspace("team-tenant", "organization", "team")]),
+    )
+    monkeypatch.setattr(
+        project_sync_command,
+        "get_mount_info",
+        lambda: pytest.fail("workspace guard should run before mount lookup"),
+    )
+
+    result = runner.invoke(app, ["cloud", "sync", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "only supported on Personal workspaces" in output
+    assert "bm cloud push --name research" in output
+    assert "bm cloud pull --name research" in output
+
+
+def test_cloud_sync_allows_personal_workspace(monkeypatch, config_manager):
+    """Personal workspaces keep the one-way mirror sync available."""
+    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+
+    config = config_manager.load_config()
+    config.cloud_api_key = "bmc_test"
+    config.projects["research"] = ProjectEntry(
+        path="/tmp/research",
+        mode=ProjectMode.CLOUD,
+        workspace_id="personal-tenant",
+        local_sync_path="/tmp/research",
+    )
+    config_manager.save_config(config)
+
+    monkeypatch.setattr(
+        project_sync_command,
+        "get_available_workspaces",
+        lambda: _async_value([_workspace("personal-tenant", "personal", "personal")]),
     )
     monkeypatch.setattr(
         project_sync_command,
@@ -349,6 +385,156 @@ def test_bisync_reset_skips_workspace_check_without_credentials(monkeypatch, tmp
 
     assert result.exit_code == 0, result.output
     assert "No bisync state found for project 'research'" in result.output
+
+
+def _stub_transfer_env(monkeypatch, module, *, plan, transfer_result=True, recorder=None):
+    """Stub the push/pull dependency chain so only diff/transfer logic is exercised."""
+    monkeypatch.setattr(module, "_require_cloud_credentials", lambda _config: None)
+    monkeypatch.setattr(
+        module,
+        "get_mount_info",
+        lambda: _async_value(SimpleNamespace(bucket_name="tenant-bucket")),
+    )
+    monkeypatch.setattr(
+        module,
+        "_get_cloud_project",
+        lambda _name: _async_value(SimpleNamespace(name="research", path="research")),
+    )
+    monkeypatch.setattr(
+        module,
+        "_get_sync_project",
+        lambda _name, _config, _project_data: (SimpleNamespace(name="research"), "/tmp/research"),
+    )
+    monkeypatch.setattr(module, "project_diff", lambda *args, **kwargs: plan)
+
+    def _fake_transfer(*args, **kwargs):
+        if recorder is not None:
+            recorder["args"] = args
+            recorder["kwargs"] = kwargs
+        return transfer_result
+
+    monkeypatch.setattr(module, "project_transfer", _fake_transfer)
+
+
+def test_cloud_pull_aborts_on_conflict_by_default(monkeypatch, config_manager):
+    """Pull refuses to clobber: it lists conflicts and exits without transferring."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=["new.md"], conflicts=["notes/dup.md"], dest_only=[], errors=[])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "notes/dup.md" in output
+    assert "--on-conflict keep-cloud" in output
+    assert "args" not in recorder  # transfer never ran
+
+
+def test_cloud_pull_clean_transfers(monkeypatch, config_manager):
+    """With no conflicts, pull proceeds and reports success."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=["local-only.md"], errors=[])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.lower().split())
+    assert "research pull completed successfully" in output
+    # Deletions are surfaced, not propagated
+    assert "deletions are not propagated" in output
+    assert recorder["kwargs"]["strategy"] == "fail"
+    assert recorder["args"][2] == "pull"
+
+
+def test_cloud_pull_keep_cloud_resolves_conflict(monkeypatch, config_manager):
+    """An explicit --on-conflict strategy lets pull proceed through conflicts."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=[], conflicts=["notes/dup.md"], dest_only=[], errors=[])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(
+        app, ["cloud", "pull", "--name", "research", "--on-conflict", "keep-cloud"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorder["kwargs"]["strategy"] == "keep-cloud"
+
+
+def test_cloud_pull_aborts_on_compare_errors(monkeypatch, config_manager):
+    """If rclone cannot read/hash files, pull aborts before transferring."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=[], conflicts=[], dest_only=[], errors=["bad.md"])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    assert "could not compare" in result.output
+    assert "args" not in recorder  # transfer never ran
+
+
+def test_cloud_push_aborts_on_conflict_by_default(monkeypatch, config_manager):
+    """Push aborts on conflicts like a rejected git push (pull first)."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=["new.md"], conflicts=["notes/dup.md"], dest_only=[], errors=[])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "push", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    assert "notes/dup.md" in result.output
+    assert "args" not in recorder
+
+
+def test_cloud_push_keep_local_resolves_conflict(monkeypatch, config_manager):
+    """Push with --on-conflict keep-local overwrites cloud and reports the direction."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=[], conflicts=["notes/dup.md"], dest_only=[], errors=[])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(
+        app, ["cloud", "push", "--name", "research", "--on-conflict", "keep-local"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorder["kwargs"]["strategy"] == "keep-local"
+    assert recorder["args"][2] == "push"
+
+
+def test_cloud_push_allows_organization_workspace(monkeypatch, config_manager):
+    """push is additive and Team-safe — it must not invoke the Personal-only guard."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+
+    config = config_manager.load_config()
+    config.cloud_api_key = "bmc_test"
+    config.projects["research"] = ProjectEntry(
+        path="/tmp/research",
+        mode=ProjectMode.CLOUD,
+        workspace_id="team-tenant",
+        local_sync_path="/tmp/research",
+    )
+    config_manager.save_config(config)
+
+    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
+    _stub_transfer_env(monkeypatch, module, plan=plan)
+    monkeypatch.setattr(
+        module,
+        "get_available_workspaces",
+        lambda: pytest.fail("push/pull must not gate on workspace type"),
+    )
+
+    result = runner.invoke(app, ["cloud", "push", "--name", "research"])
+
+    assert result.exit_code == 0, result.output
+    assert "research push completed successfully" in result.output
 
 
 async def _async_value(value):

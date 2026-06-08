@@ -10,6 +10,9 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     MIN_RCLONE_VERSION_EMPTY_DIRS,
     RcloneError,
     SyncProject,
+    TransferPlan,
+    _conflict_copy_name,
+    _parse_check_combined,
     bisync_initialized,
     check_rclone_installed,
     get_project_bisync_state,
@@ -17,8 +20,12 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     get_rclone_version,
     project_bisync,
     project_check,
+    project_copy,
+    project_copy_file,
+    project_diff,
     project_ls,
     project_sync,
+    project_transfer,
     supports_create_empty_src_dirs,
 )
 
@@ -562,3 +569,235 @@ def test_project_bisync_includes_no_preallocate_flag(tmp_path):
 
     cmd, _ = runner.calls[0]
     assert "--local-no-preallocate" in cmd
+
+
+# --- Directional transfer primitives (push / pull, issue #858) ---
+
+
+def test_parse_check_combined_classifies_lines():
+    output = "= same.md\n+ only-src.md\n- only-dst.md\n* differ.md\n! broken.md\n\n"
+    plan = _parse_check_combined(output)
+    assert plan.new == ["only-src.md"]
+    assert plan.dest_only == ["only-dst.md"]
+    assert plan.conflicts == ["differ.md"]
+    assert plan.errors == ["broken.md"]
+
+
+def test_parse_check_combined_handles_paths_with_spaces():
+    plan = _parse_check_combined("* notes/my file.md\n")
+    assert plan.conflicts == ["notes/my file.md"]
+
+
+def test_conflict_copy_name_inserts_marker_before_extension():
+    assert _conflict_copy_name("notes/x.md", "20260608-1030") == "notes/x.conflict-20260608-1030.md"
+    assert _conflict_copy_name("top.md", "S") == "top.conflict-S.md"
+
+
+def test_project_diff_pull_uses_remote_as_source(tmp_path):
+    runner = _Runner(returncode=1, stdout="+ a.md\n* b.md\n")
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    plan = project_diff(
+        project,
+        "my-bucket",
+        "pull",
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, kwargs = runner.calls[0]
+    assert cmd[:2] == ["rclone", "check"]
+    # pull: cloud is the source so "+" files (only on source) come down to local
+    assert cmd[2] == "basic-memory-cloud:my-bucket/research"
+    assert Path(cmd[3]) == Path("/tmp/research")
+    assert "--combined" in cmd and cmd[cmd.index("--combined") + 1] == "-"
+    _assert_has_consistency_headers(cmd)
+    assert "--filter-from" in cmd
+    assert kwargs["capture_output"] is True
+    # rclone exits non-zero when files differ; we parse output rather than trust it
+    assert plan.new == ["a.md"]
+    assert plan.conflicts == ["b.md"]
+
+
+def test_project_diff_push_uses_local_as_source(tmp_path):
+    runner = _Runner(returncode=0, stdout="")
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_diff(
+        project,
+        "my-bucket",
+        "push",
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert Path(cmd[2]) == Path("/tmp/research")
+    assert cmd[3] == "basic-memory-cloud:my-bucket/research"
+
+
+def test_project_copy_pull_new_only_adds_ignore_existing(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    result = project_copy(
+        project,
+        "my-bucket",
+        "pull",
+        overwrite=False,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    assert result is True
+    cmd, _ = runner.calls[0]
+    assert cmd[:2] == ["rclone", "copy"]
+    assert cmd[2] == "basic-memory-cloud:my-bucket/research"
+    assert Path(cmd[3]) == Path("/tmp/research")
+    assert "--ignore-existing" in cmd
+    assert "--local-no-preallocate" in cmd
+
+
+def test_project_copy_pull_overwrite_omits_ignore_existing(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_copy(
+        project,
+        "my-bucket",
+        "pull",
+        overwrite=True,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--ignore-existing" not in cmd
+
+
+def test_project_copy_push_uses_local_as_source(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_copy(
+        project,
+        "my-bucket",
+        "push",
+        overwrite=False,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert Path(cmd[2]) == Path("/tmp/research")
+    assert cmd[3] == "basic-memory-cloud:my-bucket/research"
+
+
+def test_project_copy_file_pull_copyto_renames_on_dest(tmp_path):
+    runner = _Runner(returncode=0)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_copy_file(
+        project,
+        "my-bucket",
+        "pull",
+        "notes/dup.md",
+        "notes/dup.conflict-S.md",
+        run=runner,
+        is_installed=lambda: True,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert cmd[:2] == ["rclone", "copyto"]
+    assert cmd[2] == "basic-memory-cloud:my-bucket/research/notes/dup.md"
+    assert cmd[3] == "/tmp/research/notes/dup.conflict-S.md"
+
+
+def test_project_transfer_keep_both_copies_conflicts_then_additive(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+    plan = TransferPlan(new=["a.md"], conflicts=["dup.md"], dest_only=[], errors=[])
+
+    result = project_transfer(
+        project,
+        "my-bucket",
+        "pull",
+        plan,
+        strategy="keep-both",
+        conflict_suffix="S",
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    assert result is True
+    # First a copyto for the conflict file, written beside the local copy...
+    first_cmd, _ = runner.calls[0]
+    assert first_cmd[:2] == ["rclone", "copyto"]
+    assert first_cmd[3] == "/tmp/research/dup.conflict-S.md"
+    # ...then an additive (new-only) copy that won't overwrite existing local files.
+    second_cmd, _ = runner.calls[1]
+    assert second_cmd[:2] == ["rclone", "copy"]
+    assert "--ignore-existing" in second_cmd
+
+
+def test_project_transfer_keep_cloud_on_pull_overwrites_local(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+    plan = TransferPlan(new=[], conflicts=["dup.md"], dest_only=[], errors=[])
+
+    project_transfer(
+        project,
+        "my-bucket",
+        "pull",
+        plan,
+        strategy="keep-cloud",
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    # keep-cloud + pull → cloud (source) overwrites local (dest): no --ignore-existing
+    assert len(runner.calls) == 1
+    cmd, _ = runner.calls[0]
+    assert cmd[:2] == ["rclone", "copy"]
+    assert "--ignore-existing" not in cmd
+
+
+def test_project_transfer_keep_local_on_push_overwrites_cloud(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+    plan = TransferPlan(new=[], conflicts=["dup.md"], dest_only=[], errors=[])
+
+    project_transfer(
+        project,
+        "my-bucket",
+        "push",
+        plan,
+        strategy="keep-local",
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--ignore-existing" not in cmd
+
+
+def test_project_diff_requires_local_path():
+    project = SyncProject(name="research", path="/research")
+    with pytest.raises(RcloneError):
+        project_diff(project, "my-bucket", "pull", is_installed=lambda: True)
