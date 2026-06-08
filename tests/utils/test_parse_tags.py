@@ -17,6 +17,9 @@ from basic_memory.utils import parse_tags
         (["tag1", "tag2"], ["tag1", "tag2"]),
         (["tag1", "", "tag2"], ["tag1", "tag2"]),  # Empty tags are filtered
         ([" tag1 ", " tag2 "], ["tag1", "tag2"]),  # Whitespace is stripped
+        # Comma inside a single list element is split (CLI `--tags "a,b"` -> ["a,b"])
+        (["tag1,tag2"], ["tag1", "tag2"]),
+        (["tag1, tag2", "tag3"], ["tag1", "tag2", "tag3"]),
         # String inputs
         ("", []),
         ("tag1", ["tag1"]),
