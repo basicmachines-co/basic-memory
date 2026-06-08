@@ -1,7 +1,9 @@
 """rclone configuration management for Basic Memory Cloud.
 
-This module provides simplified rclone configuration for SPEC-20.
-Uses a single "basic-memory-cloud" remote for all operations.
+This module owns rclone remote configuration and naming. The default tenant uses
+the "basic-memory-cloud" remote (from SPEC-20); non-default/team workspaces each
+get their own tenant-scoped remote via remote_name_for_workspace (see #919),
+since Tigris credentials are bucket-scoped.
 """
 
 import configparser
