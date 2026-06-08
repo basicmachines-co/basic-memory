@@ -10,7 +10,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.utils import validate_project_path
 
 
@@ -56,26 +56,16 @@ async def _detect_cross_project_move_attempt(
                     identifier, destination_path, current_project, matching_project
                 )
 
-        # --- Detection 2: workspace/projects/<x> shaped destination ---
-        # Trigger: the destination has the exact cloud workspace layout
-        #          "<workspace>/projects/<x>/..." — a single leading workspace segment,
-        #          then literal "projects", then at least one more segment.
-        # Why: this is the canonical cross-workspace routing shape from #881. It slips
-        #      past name-based detection because the workspace/project names need not
-        #      match any locally known project.
-        # Outcome: reject with cross-project guidance. The check is pinned to index 1 so
-        #      legitimate nested folders that merely contain a "projects" segment
-        #      (e.g. "notes/projects/my-project/note.md" or a top-level
-        #      "projects/2025/...") are NOT flagged as cross-project moves.
-        # In "<workspace>/projects/<x>/...", <x> (index 2) is the project being targeted,
-        # so report that as the target project — not the workspace at index 0 — so the
-        # guidance points the user at the real project name to write into.
-        if len(path_parts) >= 3 and path_parts[1] == "projects":
-            return _format_cross_project_error_response(
-                identifier, destination_path, current_project, path_parts[2]
-            )
-
-        # No other cross-project patterns detected
+        # NOTE: a "<seg>/projects/<seg>/..." structural heuristic was removed here.
+        # Why: matching any destination whose 2nd segment is literally "projects" is
+        #      fundamentally ambiguous — it cannot distinguish the cloud workspace
+        #      routing shape from a legitimate same-project nested folder like
+        #      "notes/projects/2025/file.md" or "work/projects/q1/report.md". The
+        #      heuristic produced false CROSS_PROJECT_MOVE_NOT_SUPPORTED rejections for
+        #      those common layouts.
+        # Outcome: cross-workspace routing that does not match a known project name (above)
+        #      now falls through to the move and is caught honestly by the MOVE_OUTCOME_MISMATCH
+        #      backstop if the result lands somewhere other than the requested path.
 
     except Exception as e:
         # If we can't detect, don't interfere with normal error handling
@@ -662,6 +652,18 @@ move_note("path/to/file.md", "{destination_path}/file.md")
         # Use typed KnowledgeClient for API calls
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
+        # --- Normalize the identifier for memory:// URLs ---
+        # Trigger: caller passed a "memory://..." URL (the docstring advertises this, and
+        #          read_note/edit_note/delete_note all accept it).
+        # Why: resolve_entity / the /resolve endpoint expect a bare permalink or title;
+        #      the literal "memory://" scheme prefix is not stripped by link resolution and
+        #      404s. resolve_project_and_path strips the prefix and normalizes the path the
+        #      same way the sibling tools do.
+        # Outcome: move_note resolves memory:// URLs identically to read/edit/delete.
+        _, resolved_identifier, _ = await resolve_project_and_path(
+            client, identifier, active_project.name, context
+        )
+
         # Resolve once and reuse the entity ID across extension validation and move.
         source_ext = "md"  # Default to .md if we can't determine source extension
         resolved_entity_id: str | None = None
@@ -671,7 +673,9 @@ move_note("path/to/file.md", "{destination_path}/file.md")
             """Resolve and cache the source entity ID for the duration of this move."""
             nonlocal resolved_entity_id
             if resolved_entity_id is None:
-                resolved_entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
+                resolved_entity_id = await knowledge_client.resolve_entity(
+                    resolved_identifier, strict=True
+                )
             return resolved_entity_id
 
         try:

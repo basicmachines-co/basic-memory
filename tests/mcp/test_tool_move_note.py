@@ -36,13 +36,14 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
 
 
 @pytest.mark.asyncio
-async def test_detect_cross_project_only_flags_workspace_shape(monkeypatch):
-    """Detection 2 must flag '<workspace>/projects/<x>/...' but not interior 'projects'.
+async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
+    """Detection flags only a leading segment that matches a KNOWN project name.
 
-    Regression: the original interior-scan loop rejected ANY path with a 'projects'
-    segment anywhere except the last, breaking legitimate nested folders like
-    'team/2026/projects/alpha/note.md'. The narrowed check fires only when 'projects'
-    is the second segment (index 1), the actual cloud workspace layout.
+    The ambiguous "<seg>/projects/<seg>/..." structural heuristic (#904) was removed
+    because it could not distinguish the cloud workspace layout from a legitimate nested
+    folder like 'notes/projects/2025/note.md'. Cross-project detection now fires only when
+    the first path segment matches another known project name (Detection 1); any 'projects'
+    segment anywhere in the path is just a normal nested folder.
     """
     import importlib
 
@@ -53,7 +54,7 @@ async def test_detect_cross_project_only_flags_workspace_shape(monkeypatch):
             self.name = name
 
     class _ProjectList:
-        projects = [_Project("test-project")]
+        projects = [_Project("test-project"), _Project("other-project")]
 
     class MockProjectClient:
         def __init__(self, *args, **kwargs):
@@ -66,17 +67,27 @@ async def test_detect_cross_project_only_flags_workspace_shape(monkeypatch):
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
-    # Workspace shape: projects at index 1 -> rejected.
+    # Leading segment is a known OTHER project name -> rejected (Detection 1).
     rejected = await move_note_module._detect_cross_project_move_attempt(
         client=None,
         identifier="source/note",
-        destination_path="other-workspace/projects/x/note.md",
+        destination_path="other-project/note.md",
         current_project="test-project",
     )
     assert rejected is not None
     assert "Cross-Project Move Not Supported" in rejected
 
-    # Interior 'projects' NOT at index 1 -> allowed (no false positive).
+    # Workspace-shaped path whose leading segment is NOT a known project -> allowed.
+    # (Previously rejected by the removed 'projects'-segment heuristic.)
+    workspace_shaped = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="other-workspace/projects/x/note.md",
+        current_project="test-project",
+    )
+    assert workspace_shaped is None
+
+    # Interior 'projects' segment -> allowed (no false positive).
     allowed = await move_note_module._detect_cross_project_move_attempt(
         client=None,
         identifier="source/note",

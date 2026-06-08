@@ -774,11 +774,15 @@ async def test_move_note_strict_resolution_rejects_fuzzy_match(mcp_server, app, 
 
 
 @pytest.mark.asyncio
-async def test_move_note_workspace_shaped_path_rejected(mcp_server, app, test_project):
-    """A workspace/projects/<x> destination must fail, not fake a same-project move (#881).
+async def test_move_note_unknown_workspace_shaped_path_allowed(mcp_server, app, test_project):
+    """A "<seg>/projects/<seg>/..." destination whose leading segment is NOT a known
+    project is a legitimate same-project nested move and must succeed.
 
-    The destination references a different workspace and would otherwise silently
-    create a nested folder inside the current project and report success.
+    The old "projects"-segment structural heuristic (#904) wrongly rejected this shape
+    even though it is structurally identical to a normal nested folder. Detection now
+    relies only on the leading segment matching a known project name (Detection 1) plus
+    the post-move outcome backstop, so a bare "other-workspace/projects/x/..." that
+    matches no known project is treated as a normal nested move.
     """
 
     async with Client(mcp_server) as client:
@@ -788,7 +792,7 @@ async def test_move_note_workspace_shaped_path_rejected(mcp_server, app, test_pr
                 "project": test_project.name,
                 "title": "Workspace Shape Note",
                 "directory": "source",
-                "content": "# Workspace Shape Note\n\nShould not cross workspaces.",
+                "content": "# Workspace Shape Note\n\nNested move into a projects folder.",
             },
         )
 
@@ -801,31 +805,20 @@ async def test_move_note_workspace_shaped_path_rejected(mcp_server, app, test_pr
             },
         )
 
-        error_message = move_result.content[0].text
-        assert "Cross-Project Move Not Supported" in error_message
-        assert "read_note" in error_message
-        assert "write_note" in error_message
-        # The guidance must name the actual target project ("x" from
-        # "<workspace>/projects/<x>/..."), not the leading workspace segment — so users
-        # are pointed at the real project to write into (PR #904 review).
-        assert "**Target project:** x" in error_message
+        move_text = move_result.content[0].text
+        assert "Cross-Project Move Not Supported" not in move_text
+        assert "✅ Note moved successfully" in move_text
+        assert "other-workspace/projects/x/moved-note.md" in move_text
 
-        # The note must remain at its original location — no nested folder created.
-        read_original = await client.call_tool(
-            "read_note",
-            {"project": test_project.name, "identifier": "Workspace Shape Note"},
-        )
-        assert "Should not cross workspaces" in read_original.content[0].text
-
-        # The degraded same-project nested path must NOT exist.
-        read_nested = await client.call_tool(
+        # The note landed at the requested nested location.
+        read_moved = await client.call_tool(
             "read_note",
             {
                 "project": test_project.name,
                 "identifier": "other-workspace/projects/x/moved-note.md",
             },
         )
-        assert "Note Not Found" in read_nested.content[0].text
+        assert "Nested move into a projects folder" in read_moved.content[0].text
 
 
 @pytest.mark.asyncio
@@ -879,8 +872,13 @@ async def test_move_note_destination_folder_boundary_rejected(mcp_server, app, t
 
 
 @pytest.mark.asyncio
-async def test_move_note_workspace_shaped_path_rejected_json(mcp_server, app, test_project):
-    """JSON output for a workspace-shaped destination reports moved=False (#881)."""
+async def test_move_note_unknown_workspace_shaped_path_allowed_json(mcp_server, app, test_project):
+    """JSON output for an unknown-workspace-shaped destination reports moved=True.
+
+    With the ambiguous "projects"-segment heuristic removed (#904), a
+    "<seg>/projects/<seg>/..." path whose leading segment is not a known project is a
+    legitimate same-project nested move, not a cross-project rejection.
+    """
 
     async with Client(mcp_server) as client:
         await client.call_tool(
@@ -904,8 +902,10 @@ async def test_move_note_workspace_shaped_path_rejected_json(mcp_server, app, te
         )
 
         data = json.loads(move_result.content[0].text)
-        assert data["moved"] is False
-        assert data["error"] == "CROSS_PROJECT_MOVE_NOT_SUPPORTED"
+        assert data["moved"] is True
+        # Success JSON does not include an error key.
+        assert "error" not in data
+        assert data["file_path"] == "team-space/projects/alpha/moved.md"
 
 
 @pytest.mark.asyncio
@@ -952,13 +952,12 @@ async def test_move_note_new_nested_folder_still_succeeds(mcp_server, app, test_
 
 @pytest.mark.asyncio
 async def test_move_note_interior_projects_segment_still_succeeds(mcp_server, app, test_project):
-    """An interior 'projects' segment NOT at index 1 must not trip cross-boundary detection.
+    """A path containing an interior 'projects' segment must not trip cross-boundary detection.
 
-    Regression for the false positive where any path containing an interior 'projects'
-    segment (e.g. "notes/projects/my-project/note.md") was rejected. Only the cloud
-    workspace shape "<workspace>/projects/<x>/..." (projects at index 1) is cross-project;
-    legitimate nested organization that happens to include a 'projects' folder deeper in
-    the path is a valid same-project move and must succeed.
+    Regression for the false positive where any path containing a 'projects' segment
+    (e.g. "notes/projects/my-project/note.md") was rejected. The ambiguous structural
+    heuristic has been removed (#904): a 'projects' folder anywhere in the path is just a
+    normal nested folder, so this is a valid same-project move and must succeed.
     """
 
     async with Client(mcp_server) as client:
@@ -972,9 +971,6 @@ async def test_move_note_interior_projects_segment_still_succeeds(mcp_server, ap
             },
         )
 
-        # Segments: team[0] / 2026[1] / projects[2] / alpha[3] / file. The "projects"
-        # segment sits at index 2, not index 1, so it is NOT the cloud workspace shape
-        # and must be treated as a normal same-project nested move.
         move_result = await client.call_tool(
             "move_note",
             {
