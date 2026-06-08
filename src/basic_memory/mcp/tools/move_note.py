@@ -660,9 +660,36 @@ move_note("path/to/file.md", "{destination_path}/file.md")
         #      404s. resolve_project_and_path strips the prefix and normalizes the path the
         #      same way the sibling tools do.
         # Outcome: move_note resolves memory:// URLs identically to read/edit/delete.
-        _, resolved_identifier, _ = await resolve_project_and_path(
+        source_project, resolved_identifier, _ = await resolve_project_and_path(
             client, identifier, active_project.name, context
         )
+
+        # Trigger: a memory:// identifier whose project prefix resolves to a DIFFERENT project
+        #          than the one move_note is operating on (e.g. "memory://other-project/...").
+        # Why: get_project_client already bound knowledge_client to the active project, so the
+        #      resolve_entity below runs against the active project regardless of the URL's
+        #      project. Honoring the cross-project prefix would misroute (path normalized for
+        #      the other project, looked up in the active one); move_note cannot move across
+        #      projects.
+        # Outcome: reject up front with the cross-project guidance instead of misrouting.
+        if source_project.external_id != active_project.external_id:
+            logger.info(
+                f"Move rejected: source '{identifier}' resolves to project "
+                f"'{source_project.name}', not the active project '{active_project.name}'"
+            )
+            if output_format == "json":
+                return {
+                    "moved": False,
+                    "title": None,
+                    "permalink": None,
+                    "file_path": None,
+                    "source": identifier,
+                    "destination": destination_path,
+                    "error": "CROSS_PROJECT_MOVE_NOT_SUPPORTED",
+                }
+            return _format_cross_project_error_response(
+                identifier, destination_path, active_project.name, source_project.name
+            )
 
         # Resolve once and reuse the entity ID across extension validation and move.
         source_ext = "md"  # Default to .md if we can't determine source extension
