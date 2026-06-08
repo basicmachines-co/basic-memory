@@ -18,9 +18,9 @@ Review the current diff or named files against:
 - `docs/ENGINEERING_STYLE.md`
 - The touched code paths and tests
 
-For `basic-memory`, prioritize local-first file/database/MCP boundaries. For
-`basic-memory-cloud`, prioritize tenant/workspace isolation, cloud worker behavior, and
-web-v2 state/runtime boundaries.
+Apply only the guidance for the active repo. In `basic-memory`, prioritize local-first
+file/database/MCP boundaries. In `basic-memory-cloud`, prioritize tenant/workspace isolation,
+cloud worker behavior, and web-v2 state/runtime boundaries.
 
 ## Review Rubric
 
@@ -52,6 +52,12 @@ Report only concrete, falsifiable risks:
 ## Reporting Format
 
 Lead with findings ordered by severity. Each finding should include:
+
+| Severity | Use for |
+| -------- | ------- |
+| `high` | A likely correctness, security, data-loss, or tenant/workspace isolation failure |
+| `medium` | A concrete maintainability or boundary risk that can cause future defects |
+| `low` | A minor consistency issue, ambiguous guidance, or review-only cleanup |
 
 ```text
 severity | file:line | risk category | claim

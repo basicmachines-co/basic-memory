@@ -133,9 +133,9 @@ short version for agents:
 
 - **Full file read before edits**: Before editing any file, read it in full first to ensure complete context; partial reads lead to corrupted edits
 - **Minimize diffs**: Prefer the smallest change that satisfies the request. Avoid unrelated refactors or style rewrites unless necessary for correctness
-- **No speculative getattr**: Never use `getattr(obj, "attr", default)` when unsure about attribute names. Check the class definition or source code first
-- **Fail fast**: Write code with fail-fast logic by default. Do not swallow exceptions with errors or warnings
-- **No fallback logic**: Do not add fallback logic unless explicitly told to and agreed with the user
+- **House style is canonical**: Follow the Programming Style section above for type-safe,
+  fail-fast code; do not hide unclear models with speculative attributes, broad exception
+  handling, casts, or unapproved fallback logic
 - **No guessing**: Do not say "The issue is..." before you actually know what the issue is. Investigate first.
 
 ### Literate Programming Style
