@@ -2,7 +2,8 @@
 
 This module provides simplified, project-scoped rclone operations:
 - Each project syncs independently
-- Uses single "basic-memory-cloud" remote (not tenant-specific)
+- Routes through the project's tenant-scoped remote (SyncProject.remote_name);
+  the default tenant keeps "basic-memory-cloud", others use their own (see #919)
 - Balanced defaults from SPEC-8 Phase 4 testing
 - Per-project bisync state tracking
 

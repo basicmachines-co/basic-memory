@@ -1,7 +1,10 @@
 import time
 
+import pytest
+
 from basic_memory.cli.commands.cloud.bisync_commands import convert_bmignore_to_rclone_filters
 from basic_memory.cli.commands.cloud.rclone_config import (
+    RcloneConfigError,
     configure_rclone_remote,
     get_rclone_config_path,
     rclone_remote_exists,
@@ -121,6 +124,14 @@ def test_remote_name_for_workspace():
     assert remote_name_for_workspace(None, is_default=False) == "basic-memory-cloud"
     # Non-default workspaces get their own tenant-scoped remote
     assert remote_name_for_workspace("acme", is_default=False) == "basic-memory-cloud-acme"
+
+
+def test_remote_name_for_workspace_rejects_unsafe_slug():
+    # A slug from the API with characters invalid in an rclone remote name must
+    # fail fast rather than write a broken rclone.conf section.
+    for bad in ["a/b", "has space", "dot.dot", "weird:name"]:
+        with pytest.raises(RcloneConfigError):
+            remote_name_for_workspace(bad, is_default=False)
 
 
 def test_configure_rclone_remote_named_workspace_remote(config_home):

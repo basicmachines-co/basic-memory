@@ -186,9 +186,15 @@ def _require_personal_workspace(
     return workspace
 
 
-async def _get_cloud_project(name: str) -> ProjectItem | None:
-    """Fetch a project by name from the cloud API."""
-    async with get_client(project_name=name) as client:
+async def _get_cloud_project(name: str, *, workspace_id: str | None = None) -> ProjectItem | None:
+    """Fetch a project by name from the cloud API.
+
+    ``workspace_id`` routes the lookup to a specific tenant so the project
+    metadata comes from the same workspace the transfer targets (otherwise
+    get_client would resolve the workspace from config/default and could read a
+    different tenant — see #920 review).
+    """
+    async with get_client(project_name=name, workspace=workspace_id) as client:
         projects_list = await ProjectClient(client).list_projects()
         for proj in projects_list.projects:
             if generate_permalink(proj.name) == generate_permalink(name):
@@ -252,7 +258,10 @@ def sync_project_command(
     _require_personal_workspace(name, config, unsupported_message=TEAM_WORKSPACE_SYNC_UNSUPPORTED)
 
     try:
-        # Get tenant info for bucket name
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because these mirror commands are gated to the (default-tenant) Personal
+        # workspace, so the default mount info is correct.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
@@ -353,9 +362,12 @@ def _run_directional_transfer(
         tenant_info = run_with_cleanup(get_mount_info(workspace_id=target_workspace.tenant_id))
         bucket_name = tenant_info.bucket_name
 
-        # Get project info
+        # Get project info from the same workspace we resolved above, so the
+        # project path and the bucket/remote all refer to one tenant.
         with force_routing(cloud=True):
-            project_data = run_with_cleanup(_get_cloud_project(name))
+            project_data = run_with_cleanup(
+                _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
+            )
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
@@ -512,7 +524,10 @@ def bisync_project_command(
     _require_personal_workspace(name, config)
 
     try:
-        # Get tenant info for bucket name
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because these mirror commands are gated to the (default-tenant) Personal
+        # workspace, so the default mount info is correct.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
@@ -570,7 +585,10 @@ def check_project_command(
     _require_cloud_credentials(config)
 
     try:
-        # Get tenant info for bucket name
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because these mirror commands are gated to the (default-tenant) Personal
+        # workspace, so the default mount info is correct.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 

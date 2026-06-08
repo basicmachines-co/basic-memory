@@ -409,7 +409,7 @@ def _stub_transfer_env(
     monkeypatch.setattr(
         module,
         "_get_cloud_project",
-        lambda _name: _async_value(SimpleNamespace(name="research", path="research")),
+        lambda _name, **_kwargs: _async_value(SimpleNamespace(name="research", path="research")),
     )
     monkeypatch.setattr(
         module,
@@ -538,6 +538,29 @@ def test_cloud_push_allows_organization_workspace(monkeypatch, config_manager):
     assert "research push completed successfully" in result.output
     # Routed through the team workspace's own remote, against its tenant's bucket.
     assert recorder["args"][0].remote_name == "basic-memory-cloud-acme"
+
+
+def test_cloud_pull_workspace_override_routes_through_workspace_remote(monkeypatch, config_manager):
+    """pull --workspace routes through the named workspace's own remote and bucket."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+
+    org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
+    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
+    recorder: dict = {}
+
+    # _get_workspace_for_project must receive the override and return the org workspace.
+    def _resolve(_name, _config, *, workspace_override=None):
+        assert workspace_override == "acme"
+        return _async_value(org_ws)
+
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
+    monkeypatch.setattr(module, "_get_workspace_for_project", _resolve)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research", "--workspace", "acme"])
+
+    assert result.exit_code == 0, result.output
+    assert recorder["args"][0].remote_name == "basic-memory-cloud-acme"
+    assert recorder["args"][2] == "pull"
 
 
 def test_cloud_push_errors_when_workspace_remote_not_set_up(monkeypatch, config_manager):

@@ -6,6 +6,7 @@ Uses a single "basic-memory-cloud" remote for all operations.
 
 import configparser
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -67,14 +68,29 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
 DEFAULT_RCLONE_REMOTE = "basic-memory-cloud"
 
 
+# rclone remote section names allow letters, digits, hyphens, and underscores.
+# The slug comes from the cloud API (a trust boundary), so validate it before
+# splicing it into a remote name to avoid a broken/unusable rclone.conf section.
+_SAFE_SLUG = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
 def remote_name_for_workspace(slug: str | None, *, is_default: bool) -> str:
     """Return the rclone remote name for a workspace.
 
     The default workspace keeps the legacy ``basic-memory-cloud`` remote so
     existing setups keep working; other workspaces get ``basic-memory-cloud-<slug>``.
+
+    Raises:
+        RcloneConfigError: If a non-default workspace slug contains characters
+            that are not valid in an rclone remote name.
     """
     if is_default or not slug:
         return DEFAULT_RCLONE_REMOTE
+    if not _SAFE_SLUG.match(slug):
+        raise RcloneConfigError(
+            f"Workspace slug '{slug}' cannot be used as an rclone remote name "
+            "(allowed: letters, digits, hyphens, underscores)."
+        )
     return f"{DEFAULT_RCLONE_REMOTE}-{slug}"
 
 

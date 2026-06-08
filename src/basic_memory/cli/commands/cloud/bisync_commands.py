@@ -77,6 +77,8 @@ async def generate_mount_credentials(tenant_id: str) -> MountCredentials:
         config = config_manager.config
         host_url = config.cloud_host.rstrip("/")
 
+        # The mount endpoints resolve X-Workspace-ID by matching the workspace's
+        # tenant_id, so passing a tenant_id here is the correct routing key.
         response = await make_api_request(
             method="POST",
             url=f"{host_url}/tenant/mount/credentials",
