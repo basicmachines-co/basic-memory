@@ -209,6 +209,18 @@ async def build_context(
     Raises:
         ToolError: If project doesn't exist or depth parameter is invalid
     """
+    # Validate pagination arguments before they reach the context service.
+    # Trigger: page < 1 or page_size < 1 (e.g. page_size=0 or negative).
+    # Why: a non-positive page_size flows into context_service as limit, where the
+    #      primary slice does primary = primary[:limit] — so limit=0 truncates the
+    #      requested entity to [] and the caller's valid memory:// lookup silently
+    #      returns primary_count=0. Mirrors recent_activity's guard for consistency.
+    # Outcome: caller gets an explicit ValueError instead of a dropped primary result.
+    if page < 1:
+        raise ValueError(f"page must be >= 1, got {page}")
+    if page_size < 1:
+        raise ValueError(f"page_size must be >= 1, got {page_size}")
+
     # Detect project from memory URL prefix before routing.
     # project_id routes by external UUID, so it bypasses URL discovery entirely.
     if project is None and project_id is None:

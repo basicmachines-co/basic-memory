@@ -866,6 +866,19 @@ async def search_notes(
         # Explicit project specification
         results = await search_notes("project planning", project="my-project")
     """
+    # Validate pagination arguments before they reach the API/repository layer.
+    # Trigger: page < 1 or page_size < 1 (e.g. page_size=0 or a negative slice).
+    # Why: a non-positive page_size yields zero rows yet the router computes
+    #      has_more = offset + len(results) < total, returning a misleading
+    #      has_more=True with no reachable page; a negative page_size becomes an
+    #      uncapped SQLite LIMIT. Mirrors recent_activity's guard so all navigation
+    #      tools reject invalid pagination consistently.
+    # Outcome: caller gets an explicit ValueError instead of a silent bad payload.
+    if page < 1:
+        raise ValueError(f"page must be >= 1, got {page}")
+    if page_size < 1:
+        raise ValueError(f"page_size must be >= 1, got {page_size}")
+
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     # Lowercase note_types so "Chapter" matches the stored "chapter".
     note_types = [t.lower() for t in note_types] if note_types else []

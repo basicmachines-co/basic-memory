@@ -300,14 +300,20 @@ async def recent_activity(
     else:
         # Project-Specific Mode: Get activity for specific project
         # Uses get_project_client() for per-project routing (local vs cloud)
-        logger.info(
-            f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
-        )
-
         async with get_project_client(resolved_project, context=context, project_id=project_id) as (
             client,
             active_project,
         ):
+            # Trigger: caller routed by project_id (a UUID), so resolved_project holds the
+            #          raw UUID rather than a human-readable name.
+            # Why: active_project.name is the canonical, display-safe project name regardless
+            #      of whether routing was by name or by external_id.
+            # Outcome: logs and the formatted text header always show the project name.
+            logger.info(
+                f"Getting recent activity from project {active_project.name}: "
+                f"type={type}, depth={depth}, timeframe={timeframe}"
+            )
+
             response = await call_get(
                 client,
                 f"/v2/projects/{active_project.external_id}/memory/recent",
@@ -319,7 +325,7 @@ async def recent_activity(
                 return _extract_recent_rows(activity_data)
 
             # Format project-specific mode output
-            return _format_project_output(resolved_project, activity_data, timeframe, type, page)
+            return _format_project_output(active_project.name, activity_data, timeframe, type, page)
 
 
 async def _get_project_activity(
