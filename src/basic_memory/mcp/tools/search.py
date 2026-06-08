@@ -11,7 +11,7 @@ from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager, has_cloud_credentials
-from basic_memory.utils import build_canonical_permalink, coerce_dict, coerce_list
+from basic_memory.utils import build_canonical_permalink, coerce_dict, coerce_list, parse_tags
 from basic_memory.mcp.async_client import (
     _explicit_routing,
     _force_local_mode,
@@ -678,7 +678,10 @@ async def search_notes(
     ] = None,
     tags: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        # Use parse_tags (not coerce_list) so a bare comma string like "alpha,beta"
+        # splits into ["alpha", "beta"], matching the `tag:` query shorthand and
+        # write_note's tag convention. See #910.
+        BeforeValidator(parse_tags),
     ] = None,
     status: Optional[str] = None,
     min_similarity: Annotated[
