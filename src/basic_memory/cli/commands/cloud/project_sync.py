@@ -57,6 +57,10 @@ class ConflictStrategy(str, Enum):
     Default is ``fail``: surface the conflicts and abort before transferring,
     leaving the user to re-run with an explicit resolution — like git refusing
     to clobber local changes.
+
+    This is the Typer-facing enum; the engine in ``rclone_commands`` accepts the
+    same values as a ``ConflictStrategy`` Literal. ``_run_directional_transfer``
+    bridges the two by passing ``on_conflict.value``. Keep the values in sync.
     """
 
     fail = "fail"
@@ -235,7 +239,7 @@ def sync_project_command(
 def _print_conflict_abort(name: str, direction: TransferDirection, plan: TransferPlan) -> None:
     """Explain a conflict abort and how to resolve it (git-pull style)."""
     console.print(
-        f"[red]{direction} aborted: {len(plan.conflicts)} file(s) differ between "
+        f"[red]{direction.capitalize()} aborted: {len(plan.conflicts)} file(s) differ between "
         f"local and cloud.[/red]"
     )
     for path in plan.conflicts:
@@ -287,7 +291,7 @@ def _run_directional_transfer(
         # Outcome: abort before moving any bytes.
         if plan.errors:
             console.print(
-                f"[red]{direction} aborted: rclone could not compare "
+                f"[red]{direction.capitalize()} aborted: rclone could not compare "
                 f"{len(plan.errors)} file(s)[/red]"
             )
             for path in plan.errors:
@@ -602,9 +606,15 @@ def setup_project_sync(
 
         console.print(f"[green]Sync configured for project '{name}'[/green]")
         console.print(f"\nLocal sync path: {resolved_path}")
+        # Lead with the Team-safe additive commands (work on any workspace); the
+        # `sync`/`bisync` mirrors are Personal-workspace-only.
         console.print("\nNext steps:")
-        console.print(f"  1. Preview: bm cloud sync --name {name} --dry-run")
-        console.print(f"  2. Sync: bm cloud sync --name {name}")
+        console.print(f"  1. Preview a pull: bm cloud pull --name {name} --dry-run")
+        console.print(f"  2. Fetch from cloud: bm cloud pull --name {name}")
+        console.print(f"  3. Upload local changes: bm cloud push --name {name}")
+        console.print(
+            f"  Personal workspaces can also mirror with: bm cloud bisync --name {name} --resync"
+        )
     except Exception as e:
         console.print(f"[red]Error configuring sync: {str(e)}[/red]")
         raise typer.Exit(1)

@@ -42,6 +42,7 @@ TIGRIS_CONSISTENCY_HEADERS = [
 class RunResult(Protocol):
     returncode: int
     stdout: str
+    stderr: str
 
 
 RunFunc = Callable[..., RunResult]
@@ -384,7 +385,19 @@ def project_diff(
     # rclone check exits non-zero when files differ — that's expected here, so we
     # parse the combined listing rather than trusting the return code.
     result = run(cmd, capture_output=True, text=True)
-    return _parse_check_combined(result.stdout)
+    plan = _parse_check_combined(result.stdout)
+
+    # Trigger: non-zero exit AND the combined listing produced no entries at all.
+    # Why: a difference always yields +/-/*/! lines, so an empty listing on a
+    # non-zero exit means the check itself failed (auth, missing remote, network,
+    # bad filter) rather than finding zero differences. Without this guard the
+    # caller would see an empty plan, transfer nothing, and report success.
+    # Outcome: fail fast with rclone's stderr instead of a silent no-op.
+    if result.returncode != 0 and not (plan.new or plan.conflicts or plan.dest_only or plan.errors):
+        detail = result.stderr.strip() or f"rclone check exited with code {result.returncode}"
+        raise RcloneError(f"Failed to compare {project.name} with cloud: {detail}")
+
+    return plan
 
 
 def project_copy(
