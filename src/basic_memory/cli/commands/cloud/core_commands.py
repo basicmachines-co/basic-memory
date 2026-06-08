@@ -26,13 +26,49 @@ from basic_memory.cli.commands.cloud.bisync_commands import (
     generate_mount_credentials,
     get_mount_info,
 )
-from basic_memory.cli.commands.cloud.rclone_config import configure_rclone_remote
+from basic_memory.cli.commands.cloud.rclone_config import (
+    configure_rclone_remote,
+    remote_name_for_workspace,
+)
 from basic_memory.cli.commands.cloud.rclone_installer import (
     RcloneInstallError,
     install_rclone,
 )
+from basic_memory.mcp.project_context import get_available_workspaces
+from basic_memory.schemas.cloud import (
+    WorkspaceInfo,
+    format_workspace_choices,
+    format_workspace_selection_choices,
+    workspace_matches_exact_identifier,
+)
 
 console = Console()
+
+
+def _resolve_setup_workspace(identifier: str) -> WorkspaceInfo:
+    """Resolve a workspace identifier (slug, name, or tenant_id) for setup.
+
+    Errors with copyable choices when the identifier matches zero or multiple
+    workspaces, so the user can disambiguate.
+    """
+    workspaces = run_with_cleanup(get_available_workspaces())
+    if not workspaces:
+        console.print("[red]No accessible cloud workspaces found for this account[/red]")
+        raise typer.Exit(1)
+
+    matches = [ws for ws in workspaces if workspace_matches_exact_identifier(ws, identifier)]
+    if len(matches) == 1:
+        return matches[0]
+
+    if not matches:
+        console.print(f"[red]No workspace matches '{identifier}'[/red]")
+        console.print("\nAvailable workspaces:")
+        console.print(format_workspace_choices(workspaces))
+    else:
+        console.print(f"[red]'{identifier}' matches multiple workspaces[/red]")
+        console.print("\nDisambiguate with the workspace slug or tenant_id:")
+        console.print(format_workspace_selection_choices(matches))
+    raise typer.Exit(1)
 
 
 @cloud_app.command()
@@ -164,13 +200,23 @@ def status() -> None:
 
 
 @cloud_app.command("setup")
-def setup() -> None:
+def setup(
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        help="Set up sync for a specific workspace (slug, name, or tenant_id). "
+        "Omit for your default workspace.",
+    ),
+) -> None:
     """Set up cloud sync by installing rclone and configuring credentials.
 
-    After setup, use project commands for syncing:
-      bm project add <name> --cloud --local-path ~/projects/<name>
-      bm project bisync --name <name> --resync  # First time
-      bm project bisync --name <name>            # Subsequent syncs
+    Run once per workspace you sync. The default workspace uses the
+    'basic-memory-cloud' remote; other (e.g. Team) workspaces each get their own
+    tenant-scoped remote, since Tigris credentials are bucket-scoped.
+
+    After setup, use the cloud sync commands:
+      bm cloud pull --name <name>   # fetch cloud changes (Team-safe)
+      bm cloud push --name <name>   # upload local changes (Team-safe)
     """
     console.print("[bold blue]Basic Memory Cloud Setup[/bold blue]")
     console.print("Setting up cloud sync with rclone...\n")
@@ -180,35 +226,46 @@ def setup() -> None:
         console.print("[blue]Step 1: Installing rclone...[/blue]")
         install_rclone()
 
-        # Step 2: Get tenant info
+        # --- Resolve target workspace ---
+        # Trigger: --workspace given. Why: Tigris keys are tenant-scoped, so a
+        # non-default workspace needs its own bucket + remote. Outcome: scope the
+        # mount-info/credentials calls and name the remote after the workspace.
+        if workspace is not None:
+            target = _resolve_setup_workspace(workspace)
+            workspace_id: str | None = target.tenant_id
+            remote_name = remote_name_for_workspace(target.slug, is_default=target.is_default)
+            console.print(f"[dim]Workspace: {target.name} ({target.slug})[/dim]")
+        else:
+            workspace_id = None  # default tenant
+            remote_name = remote_name_for_workspace(None, is_default=True)
+
+        # Step 2: Get tenant info (scoped to the target workspace when given)
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
-        tenant_info = run_with_cleanup(get_mount_info())
+        tenant_info = run_with_cleanup(get_mount_info(workspace_id=workspace_id))
         console.print(f"[green]Found tenant: {tenant_info.tenant_id}[/green]")
 
-        # Step 3: Generate credentials
+        # Step 3: Generate credentials for that tenant's bucket
         console.print("\n[blue]Step 3: Generating sync credentials...[/blue]")
         creds = run_with_cleanup(generate_mount_credentials(tenant_info.tenant_id))
         console.print("[green]Generated secure credentials[/green]")
 
-        # Step 4: Configure rclone remote
+        # Step 4: Configure the tenant's rclone remote
         console.print("\n[blue]Step 4: Configuring rclone remote...[/blue]")
         configure_rclone_remote(
             access_key=creds.access_key,
             secret_key=creds.secret_key,
+            remote_name=remote_name,
         )
 
         console.print("\n[bold green]Cloud setup completed successfully![/bold green]")
         console.print("\n[bold]Next steps:[/bold]")
-        console.print("1. Add a project with local sync path:")
-        console.print("   bm project add research --cloud --local-path ~/Documents/research")
-        console.print("\n   Or configure sync for an existing project:")
+        console.print("1. Configure sync for a project:")
         console.print("   bm cloud sync-setup research ~/Documents/research")
-        console.print("\n2. Preview the initial sync (recommended):")
-        console.print("   bm project bisync --name research --resync --dry-run")
-        console.print("\n3. If all looks good, run the actual sync:")
-        console.print("   bm project bisync --name research --resync")
-        console.print("\n4. Subsequent syncs (no --resync needed):")
-        console.print("   bm project bisync --name research")
+        console.print("\n2. Preview a pull (recommended):")
+        console.print("   bm cloud pull --name research --dry-run")
+        console.print("\n3. Fetch cloud changes / upload local changes:")
+        console.print("   bm cloud pull --name research")
+        console.print("   bm cloud push --name research")
         console.print(
             "\n[dim]Tip: Always use --dry-run first to preview changes before syncing[/dim]"
         )
@@ -216,6 +273,8 @@ def setup() -> None:
     except (RcloneInstallError, BisyncError, CloudAPIError) as e:
         console.print(f"\n[red]Setup failed: {e}[/red]")
         raise typer.Exit(1)
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"\n[red]Unexpected error during setup: {e}[/red]")
         raise typer.Exit(1)

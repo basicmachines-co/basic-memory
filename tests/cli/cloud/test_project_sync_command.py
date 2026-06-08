@@ -387,13 +387,24 @@ def test_bisync_reset_skips_workspace_check_without_credentials(monkeypatch, tmp
     assert "No bisync state found for project 'research'" in result.output
 
 
-def _stub_transfer_env(monkeypatch, module, *, plan, transfer_result=True, recorder=None):
+def _stub_transfer_env(
+    monkeypatch, module, *, plan, transfer_result=True, recorder=None, workspace=None
+):
     """Stub the push/pull dependency chain so only diff/transfer logic is exercised."""
     monkeypatch.setattr(module, "_require_cloud_credentials", lambda _config: None)
+    ws = workspace or _workspace("personal-tenant", "personal", "personal", is_default=True)
+    monkeypatch.setattr(
+        module,
+        "_get_workspace_for_project",
+        lambda _name, _config, **_kwargs: _async_value(ws),
+    )
+    monkeypatch.setattr(module, "rclone_remote_exists", lambda _remote: True)
     monkeypatch.setattr(
         module,
         "get_mount_info",
-        lambda: _async_value(SimpleNamespace(bucket_name="tenant-bucket")),
+        lambda **_kwargs: _async_value(
+            SimpleNamespace(bucket_name="tenant-bucket", tenant_id=ws.tenant_id)
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -403,7 +414,10 @@ def _stub_transfer_env(monkeypatch, module, *, plan, transfer_result=True, recor
     monkeypatch.setattr(
         module,
         "_get_sync_project",
-        lambda _name, _config, _project_data: (SimpleNamespace(name="research"), "/tmp/research"),
+        lambda _name, _config, _project_data, **kwargs: (
+            SimpleNamespace(name="research", remote_name=kwargs.get("remote_name")),
+            "/tmp/research",
+        ),
     )
     monkeypatch.setattr(module, "project_diff", lambda *args, **kwargs: plan)
 
@@ -510,31 +524,118 @@ def test_cloud_push_keep_local_resolves_conflict(monkeypatch, config_manager):
 
 
 def test_cloud_push_allows_organization_workspace(monkeypatch, config_manager):
-    """push is additive and Team-safe — it must not invoke the Personal-only guard."""
+    """push is additive and Team-safe — an organization workspace is allowed (no Personal gate)."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
-    config = config_manager.load_config()
-    config.cloud_api_key = "bmc_test"
-    config.projects["research"] = ProjectEntry(
-        path="/tmp/research",
-        mode=ProjectMode.CLOUD,
-        workspace_id="team-tenant",
-        local_sync_path="/tmp/research",
-    )
-    config_manager.save_config(config)
-
+    org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
-    _stub_transfer_env(monkeypatch, module, plan=plan)
-    monkeypatch.setattr(
-        module,
-        "get_available_workspaces",
-        lambda: pytest.fail("push/pull must not gate on workspace type"),
-    )
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
 
     result = runner.invoke(app, ["cloud", "push", "--name", "research"])
 
     assert result.exit_code == 0, result.output
     assert "research push completed successfully" in result.output
+    # Routed through the team workspace's own remote, against its tenant's bucket.
+    assert recorder["args"][0].remote_name == "basic-memory-cloud-acme"
+
+
+def test_cloud_push_errors_when_workspace_remote_not_set_up(monkeypatch, config_manager):
+    """If the workspace's remote isn't configured, push stops with the setup command."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+
+    org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
+    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
+    recorder: dict = {}
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
+    # Override: this workspace has not been set up yet.
+    monkeypatch.setattr(module, "rclone_remote_exists", lambda _remote: False)
+
+    result = runner.invoke(app, ["cloud", "push", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "not set up for sync" in output
+    assert "bm cloud setup --workspace acme" in output
+    assert "args" not in recorder  # never transferred
+
+
+def test_get_workspace_for_project_override_resolves(monkeypatch, config_manager):
+    """An explicit --workspace override selects that workspace regardless of config."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    config = config_manager.load_config()
+    monkeypatch.setattr(
+        module,
+        "get_available_workspaces",
+        lambda: _async_value(
+            [
+                _workspace("personal-tenant", "personal", "personal", is_default=True),
+                _workspace("team-tenant", "organization", "acme"),
+            ]
+        ),
+    )
+
+    ws = module.run_with_cleanup(
+        module._get_workspace_for_project("research", config, workspace_override="acme")
+    )
+
+    assert ws.tenant_id == "team-tenant"
+
+
+def test_get_workspace_for_project_override_no_match_raises(monkeypatch, config_manager):
+    """An override that matches no accessible workspace is a clear error."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    config = config_manager.load_config()
+    monkeypatch.setattr(
+        module,
+        "get_available_workspaces",
+        lambda: _async_value(
+            [_workspace("personal-tenant", "personal", "personal", is_default=True)]
+        ),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        module.run_with_cleanup(
+            module._get_workspace_for_project("research", config, workspace_override="acme")
+        )
+
+    assert "No accessible workspace matches 'acme'" in str(exc_info.value)
+
+
+def test_cloud_setup_workspace_configures_named_remote(monkeypatch):
+    """`bm cloud setup --workspace acme` provisions the acme tenant's own remote."""
+    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
+    recorder: dict = {}
+
+    monkeypatch.setattr(core, "install_rclone", lambda: None)
+    monkeypatch.setattr(
+        core,
+        "get_available_workspaces",
+        lambda: _async_value([_workspace("team-tenant", "organization", "acme")]),
+    )
+    monkeypatch.setattr(
+        core,
+        "get_mount_info",
+        lambda **_kwargs: _async_value(
+            SimpleNamespace(tenant_id="team-tenant", bucket_name="acme-bucket")
+        ),
+    )
+    monkeypatch.setattr(
+        core,
+        "generate_mount_credentials",
+        lambda _tenant_id: _async_value(SimpleNamespace(access_key="ak", secret_key="sk")),
+    )
+
+    def _fake_configure(**kwargs):
+        recorder.update(kwargs)
+        return kwargs.get("remote_name")
+
+    monkeypatch.setattr(core, "configure_rclone_remote", _fake_configure)
+
+    result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme"])
+
+    assert result.exit_code == 0, result.output
+    assert recorder["remote_name"] == "basic-memory-cloud-acme"
 
 
 async def _async_value(value):

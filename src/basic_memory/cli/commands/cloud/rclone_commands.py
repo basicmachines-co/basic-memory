@@ -113,11 +113,15 @@ class SyncProject:
         name: Project name
         path: Cloud path (e.g., "app/data/research")
         local_sync_path: Local directory for syncing (optional)
+        remote_name: rclone remote serving this project's tenant bucket. Defaults
+            to the legacy single remote; team/non-default workspaces use their own
+            (see remote_name_for_workspace).
     """
 
     name: str
     path: str
     local_sync_path: Optional[str] = None
+    remote_name: str = "basic-memory-cloud"
 
 
 def get_bmignore_filter_path() -> Path:
@@ -179,10 +183,13 @@ def get_project_remote(project: SyncProject, bucket_name: str) -> str:
         The API returns paths like "/app/data/basic-memory-llc" because the S3 bucket
         is mounted at /app/data on the fly machine. We need to strip the /app/data/
         prefix to get the actual S3 path within the bucket.
+
+        The remote name comes from the project so non-default/team workspaces route
+        through their own tenant-scoped remote (see #919).
     """
     # Normalize path to strip /app/data/ mount point prefix
     cloud_path = normalize_project_path(project.path).lstrip("/")
-    return f"basic-memory-cloud:{bucket_name}/{cloud_path}"
+    return f"{project.remote_name}:{bucket_name}/{cloud_path}"
 
 
 # --- Directional transfer primitives (push / pull) ---
