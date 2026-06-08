@@ -777,14 +777,22 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 category_placeholders.append(f":{param_name}")
             conditions.append(f"search_index.category IN ({', '.join(category_placeholders)})")
 
-        # Handle note type filter using JSONB containment (parameterized)
+        # Handle note type filter (frontmatter type field, parameterized).
+        # Trigger: caller passed `note_types` to scope by the frontmatter `type` field.
+        # Why: the stored note_type preserves the frontmatter casing (e.g. `Chapter`),
+        #      but the filter is documented case-insensitive. JSONB `@>` containment is
+        #      exact-match, so capitalized types were unfindable.
+        # Outcome: compare LOWER(metadata->>'note_type') against lowercased filter
+        #          values so `note_types=["Chapter"]` matches a stored `Chapter`.
         if note_types:
-            type_conditions = []
+            type_placeholders = []
             for idx, note_type in enumerate(note_types):
                 param_name = f"note_type_{idx}"
-                params[param_name] = json.dumps({"note_type": note_type})
-                type_conditions.append(f"search_index.metadata @> CAST(:{param_name} AS jsonb)")
-            conditions.append(f"({' OR '.join(type_conditions)})")
+                params[param_name] = note_type.lower()
+                type_placeholders.append(f":{param_name}")
+            conditions.append(
+                f"LOWER(search_index.metadata->>'note_type') IN ({', '.join(type_placeholders)})"
+            )
 
         # Handle date filter
         if after_date:

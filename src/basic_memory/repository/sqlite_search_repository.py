@@ -809,15 +809,22 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 category_placeholders.append(f":{param_name}")
             conditions.append(f"search_index.category IN ({', '.join(category_placeholders)})")
 
-        # Handle note type filter (frontmatter type field, parameterized)
+        # Handle note type filter (frontmatter type field, parameterized).
+        # Trigger: caller passed `note_types` to scope by the frontmatter `type` field.
+        # Why: the stored note_type preserves the frontmatter casing (e.g. `Chapter`),
+        #      but the filter is documented case-insensitive; comparing raw values
+        #      would miss capitalized types.
+        # Outcome: fold both sides to lowercase so `note_types=["Chapter"]` matches a
+        #          stored `Chapter`, `chapter`, etc.
         if note_types:
             type_placeholders = []
             for idx, t in enumerate(note_types):
                 param_name = f"note_type_{idx}"
-                params[param_name] = t
+                params[param_name] = t.lower()
                 type_placeholders.append(f":{param_name}")
             conditions.append(
-                f"json_extract(search_index.metadata, '$.note_type') IN ({', '.join(type_placeholders)})"
+                "LOWER(json_extract(search_index.metadata, '$.note_type')) "
+                f"IN ({', '.join(type_placeholders)})"
             )
 
         # Handle date filter using datetime() for proper comparison
