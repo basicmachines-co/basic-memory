@@ -91,6 +91,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
         "note_types",
         "entity_types",
+        "categories",
         "after_date",
         "metadata_filters",
         "tags",

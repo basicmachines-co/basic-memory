@@ -165,6 +165,7 @@ async def test_search_notes_emits_root_operation_and_project_context(
             "has_query": True,
             "note_type_filter_count": 0,
             "entity_type_filter_count": 0,
+            "category_filter_count": 0,
             "has_filters": True,
             "has_tags_filter": True,
             "has_status_filter": False,
