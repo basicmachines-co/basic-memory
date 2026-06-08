@@ -471,6 +471,10 @@ def project_copy_file(
         f"{source_root}/{source_rel_path}",
         f"{dest_root}/{dest_rel_path}",
         *TIGRIS_CONSISTENCY_HEADERS,
+        # Matches _build_transfer_cmd: on pull this writes the conflict copy to
+        # the local filesystem, where this prevents NUL byte padding on virtual
+        # filesystems (e.g. Google Drive File Stream). See rclone/rclone#6801.
+        "--local-no-preallocate",
     ]
     if verbose:
         cmd.append("--verbose")

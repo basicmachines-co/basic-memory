@@ -721,6 +721,8 @@ def test_project_copy_file_pull_copyto_renames_on_dest(tmp_path):
     assert cmd[:2] == ["rclone", "copyto"]
     assert cmd[2] == "basic-memory-cloud:my-bucket/research/notes/dup.md"
     assert cmd[3] == "/tmp/research/notes/dup.conflict-S.md"
+    # pull writes the conflict copy locally → must guard virtual-FS NUL padding
+    assert "--local-no-preallocate" in cmd
 
 
 def test_project_transfer_keep_both_copies_conflicts_then_additive(tmp_path):
