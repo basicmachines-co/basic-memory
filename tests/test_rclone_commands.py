@@ -662,6 +662,8 @@ def test_project_copy_pull_new_only_adds_ignore_existing(tmp_path):
     assert Path(cmd[3]) == Path("/tmp/research")
     assert "--ignore-existing" in cmd
     assert "--local-no-preallocate" in cmd
+    # new-only skips by existence, so no content comparison is needed
+    assert "--checksum" not in cmd
 
 
 def test_project_copy_pull_overwrite_omits_ignore_existing(tmp_path):
@@ -681,6 +683,8 @@ def test_project_copy_pull_overwrite_omits_ignore_existing(tmp_path):
 
     cmd, _ = runner.calls[0]
     assert "--ignore-existing" not in cmd
+    # overwrite compares by content so it matches hash-based conflict detection
+    assert "--checksum" in cmd
 
 
 def test_project_copy_push_uses_local_as_source(tmp_path):
@@ -771,11 +775,13 @@ def test_project_transfer_keep_cloud_on_pull_overwrites_local(tmp_path):
         filter_path=filter_path,
     )
 
-    # keep-cloud + pull → cloud (source) overwrites local (dest): no --ignore-existing
+    # keep-cloud + pull → cloud (source) overwrites local (dest): no --ignore-existing,
+    # and --checksum so the overwrite decision matches the content-based conflict.
     assert len(runner.calls) == 1
     cmd, _ = runner.calls[0]
     assert cmd[:2] == ["rclone", "copy"]
     assert "--ignore-existing" not in cmd
+    assert "--checksum" in cmd
 
 
 def test_project_transfer_keep_local_on_push_overwrites_cloud(tmp_path):

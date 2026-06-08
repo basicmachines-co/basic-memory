@@ -416,7 +416,14 @@ def project_copy(
     filter_path = filter_path or get_bmignore_filter_path()
 
     source, dest = (remote_path, local_path) if direction == "pull" else (local_path, remote_path)
-    extra_flags = () if overwrite else ("--ignore-existing",)
+    # Overwrite mode compares by checksum so the transfer decision matches
+    # project_diff's content-based conflict detection (rclone check). Without
+    # --checksum, copy's default size+modtime comparison could skip a file the
+    # diff flagged as a conflict (same size, destination not older) — silently
+    # ignoring the user's explicit keep-cloud/keep-local choice. New-only mode
+    # uses --ignore-existing, which skips by existence so the comparison basis
+    # does not matter.
+    extra_flags = ("--checksum",) if overwrite else ("--ignore-existing",)
 
     cmd = _build_transfer_cmd(
         "copy",
