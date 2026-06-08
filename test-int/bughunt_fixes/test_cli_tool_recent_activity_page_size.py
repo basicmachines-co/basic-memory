@@ -72,5 +72,5 @@ def test_recent_activity_default_page_size_matches_mcp(
     assert len(cli_default_rows) == MCP_DEFAULT_PAGE_SIZE, (
         f"CLI recent-activity default returned {len(cli_default_rows)} rows but "
         f"the MCP tool default (page_size={MCP_DEFAULT_PAGE_SIZE}) returns "
-        f"{len(mcp_default_rows)}. Default page_size diverges (CLI=50 vs MCP=10)."
+        f"{len(mcp_default_rows)}; the CLI and MCP default page_size must match."
     )
