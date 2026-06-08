@@ -941,9 +941,9 @@ move_note("{identifier}", destination_folder="notes")
                     moved within the same project. To move content between projects:
 
                     ```
-                    read_note("{identifier}")
+                    read_note("{result.file_path}")
                     write_note("Title", "content", "folder", project="target-project")
-                    delete_note("{identifier}", project="{active_project.name}")
+                    delete_note("{result.file_path}", project="{active_project.name}")
                     ```
                     """).strip()
 

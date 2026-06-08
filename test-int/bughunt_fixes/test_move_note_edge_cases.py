@@ -166,3 +166,54 @@ async def test_move_into_nested_projects_folder_not_flagged(mcp_server, app, tes
             "Legit nested 'projects' folder wrongly flagged as cross-project move"
         )
         assert result["moved"] is True, result.get("error")
+
+
+@pytest.mark.asyncio
+async def test_move_outcome_mismatch_guidance_uses_actual_landing_path(
+    mcp_server, app, test_project, monkeypatch
+):
+    """The text guidance should point agents at the actual post-move path.
+
+    The real move service stores the requested destination verbatim today, so the
+    mismatch backstop is exercised by returning a divergent file_path after the real
+    move completes.
+    """
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Outcome Guidance Note",
+                "directory": "source",
+                "content": "# Outcome Guidance Note\n\nbody",
+                "output_format": "json",
+            },
+        )
+
+        from basic_memory.mcp.clients import KnowledgeClient
+
+        real_move_entity = KnowledgeClient.move_entity
+        actual_landing_path = "unexpected/outcome-guidance-note.md"
+
+        async def diverging_move_entity(self, entity_id, destination_path):
+            result = await real_move_entity(self, entity_id, destination_path)
+            return result.model_copy(update={"file_path": actual_landing_path})
+
+        monkeypatch.setattr(KnowledgeClient, "move_entity", diverging_move_entity)
+
+        move = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "source/outcome-guidance-note",
+                "destination_path": "target/outcome-guidance-note.md",
+            },
+        )
+
+        guidance = move.content[0].text
+        stale_identifier = "source/outcome-guidance-note"
+        assert "Unexpected Result Location" in guidance
+        assert f'read_note("{actual_landing_path}")' in guidance
+        assert f'delete_note("{actual_landing_path}", project="{test_project.name}")' in guidance
+        assert f'read_note("{stale_identifier}")' not in guidance
+        assert f'delete_note("{stale_identifier}", project="{test_project.name}")' not in guidance
