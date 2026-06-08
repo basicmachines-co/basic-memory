@@ -28,6 +28,7 @@ from basic_memory.cli.commands.cloud.bisync_commands import (
 )
 from basic_memory.cli.commands.cloud.rclone_config import (
     configure_rclone_remote,
+    rclone_remote_exists,
     remote_name_for_workspace,
 )
 from basic_memory.cli.commands.cloud.rclone_installer import (
@@ -207,6 +208,11 @@ def setup(
         help="Set up sync for a specific workspace (slug, name, or tenant_id). "
         "Omit for your default workspace.",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Reconfigure an rclone remote that already exists (mints new credentials).",
+    ),
 ) -> None:
     """Set up cloud sync by installing rclone and configuring credentials.
 
@@ -238,6 +244,20 @@ def setup(
         else:
             workspace_id = None  # default tenant
             remote_name = remote_name_for_workspace(None, is_default=True)
+
+        # Trigger: the target rclone remote already exists.
+        # Why: re-running setup mints new credentials and overwrites the remote,
+        # silently repointing it (e.g. clobbering the shared basic-memory-cloud
+        # that served another tenant) — the #922 footgun. Checked BEFORE minting
+        # so an abort wastes no credentials.
+        # Outcome: stop unless the user explicitly opts in with --force.
+        if rclone_remote_exists(remote_name) and not force:
+            console.print(f"[red]rclone remote '{remote_name}' is already configured.[/red]")
+            console.print(
+                "Re-running setup mints new credentials and overwrites it. "
+                "Pass --force to reconfigure."
+            )
+            raise typer.Exit(1)
 
         # Step 2: Get tenant info (scoped to the target workspace when given)
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
