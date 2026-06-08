@@ -301,7 +301,9 @@ def test_status_wait_negative_timeout_is_rejected():
     result = runner.invoke(cli_app, ["status", "--wait", "--timeout", "-5"])
 
     assert result.exit_code != 0
-    assert "--timeout" in result.output
+    # Typer colorizes the flag name with ANSI codes (so the literal "--timeout" is split),
+    # but the message body renders clean — assert on that.
+    assert "must be >= 0" in result.output
 
 
 @patch("basic_memory.cli.commands.status.asyncio.sleep", new_callable=AsyncMock)
