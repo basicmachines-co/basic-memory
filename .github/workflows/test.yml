@@ -67,7 +67,9 @@ jobs:
             python-version: "3.12"
           - os: depot-ubuntu-24.04
             python-version: "3.13"
-          - os: depot-ubuntu-24.04
+          # Python 3.14 unit tests are the longest full-suite slice; keep this
+          # one on GitHub-hosted runners after Depot terminated it mid-suite.
+          - os: ubuntu-latest
             python-version: "3.14"
           - os: windows-latest
             python-version: "3.12"
@@ -182,9 +184,14 @@ jobs:
       matrix:
         include:
           - python-version: "3.12"
+            os: depot-ubuntu-24.04
           - python-version: "3.13"
+            os: depot-ubuntu-24.04
+          # Match the SQLite unit slice: this full Python 3.14 path outlived
+          # the Depot runner and was terminated mid-suite.
           - python-version: "3.14"
-    runs-on: depot-ubuntu-24.04
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     services:
       postgres:
         image: pgvector/pgvector:pg16
