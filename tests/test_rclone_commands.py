@@ -87,6 +87,19 @@ def test_get_project_remote():
     assert get_project_remote(project, "my-bucket") == "basic-memory-cloud:my-bucket/research"
 
 
+def test_get_project_remote_uses_workspace_remote():
+    # Non-default/team workspaces route through their own tenant-scoped remote.
+    project = SyncProject(name="research", path="/research", remote_name="basic-memory-cloud-acme")
+    assert (
+        get_project_remote(project, "acme-bucket") == "basic-memory-cloud-acme:acme-bucket/research"
+    )
+
+
+def test_sync_project_remote_name_defaults_to_legacy_remote():
+    project = SyncProject(name="research", path="/research")
+    assert project.remote_name == "basic-memory-cloud"
+
+
 def test_get_project_remote_strips_app_data_prefix():
     project = SyncProject(name="research", path="/app/data/research")
     assert get_project_remote(project, "my-bucket") == "basic-memory-cloud:my-bucket/research"

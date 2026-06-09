@@ -1,0 +1,7 @@
+interface:
+  display_name: "PR Create"
+  short_description: "Create PRs and wait for BM Bossbot"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $pr-create to create or update this Basic Memory PR and wait for BM Bossbot Approval."

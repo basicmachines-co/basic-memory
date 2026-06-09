@@ -26,13 +26,23 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     project_sync,
     project_transfer,
 )
+from basic_memory.cli.commands.cloud.rclone_config import (
+    DEFAULT_RCLONE_REMOTE,
+    rclone_remote_exists,
+    remote_name_for_workspace,
+)
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.project_context import get_available_workspaces
-from basic_memory.schemas.cloud import WorkspaceInfo
+from basic_memory.schemas.cloud import (
+    WorkspaceInfo,
+    format_workspace_choices,
+    format_workspace_selection_choices,
+    workspace_matches_exact_identifier,
+)
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_path
 
@@ -89,11 +99,40 @@ def _require_cloud_credentials(config: BasicMemoryConfig) -> None:
     raise typer.Exit(1)
 
 
-async def _get_workspace_for_project(name: str, config: BasicMemoryConfig) -> WorkspaceInfo:
-    """Resolve the cloud workspace targeted by a project-scoped sync command."""
+async def _get_workspace_for_project(
+    name: str,
+    config: BasicMemoryConfig,
+    *,
+    workspace_override: str | None = None,
+) -> WorkspaceInfo:
+    """Resolve the cloud workspace targeted by a project-scoped sync command.
+
+    ``workspace_override`` (a slug, name, or tenant_id, e.g. from ``--workspace``)
+    takes precedence over config, letting the user disambiguate a project name
+    that exists in more than one workspace.
+    """
     workspaces = await get_available_workspaces()
     if not workspaces:
         raise ValueError("No accessible cloud workspaces found for this account")
+
+    # An explicit override wins over config — this is how the user disambiguates.
+    if workspace_override is not None:
+        matches = [
+            item
+            for item in workspaces
+            if workspace_matches_exact_identifier(item, workspace_override)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise ValueError(
+                f"No accessible workspace matches '{workspace_override}'.\n"
+                f"{format_workspace_choices(workspaces)}"
+            )
+        raise ValueError(
+            f"'{workspace_override}' matches multiple workspaces; use a slug or tenant_id:\n"
+            f"{format_workspace_selection_choices(matches)}"
+        )
 
     entry = config.projects.get(name)
     workspace_id = entry.workspace_id if entry and entry.workspace_id else config.default_workspace
@@ -147,9 +186,15 @@ def _require_personal_workspace(
     return workspace
 
 
-async def _get_cloud_project(name: str) -> ProjectItem | None:
-    """Fetch a project by name from the cloud API."""
-    async with get_client(project_name=name) as client:
+async def _get_cloud_project(name: str, *, workspace_id: str | None = None) -> ProjectItem | None:
+    """Fetch a project by name from the cloud API.
+
+    ``workspace_id`` routes the lookup to a specific tenant so the project
+    metadata comes from the same workspace the transfer targets (otherwise
+    get_client would resolve the workspace from config/default and could read a
+    different tenant — see #920 review).
+    """
+    async with get_client(project_name=name, workspace=workspace_id) as client:
         projects_list = await ProjectClient(client).list_projects()
         for proj in projects_list.projects:
             if generate_permalink(proj.name) == generate_permalink(name):
@@ -158,9 +203,16 @@ async def _get_cloud_project(name: str) -> ProjectItem | None:
 
 
 def _get_sync_project(
-    name: str, config: BasicMemoryConfig, project_data: ProjectItem
+    name: str,
+    config: BasicMemoryConfig,
+    project_data: ProjectItem,
+    *,
+    remote_name: str = DEFAULT_RCLONE_REMOTE,
 ) -> tuple[SyncProject, str | None]:
     """Build a SyncProject and resolve local_sync_path from config.
+
+    ``remote_name`` selects which tenant-scoped rclone remote the project routes
+    through (default tenant vs a team workspace remote).
 
     Returns (sync_project, local_sync_path). Exits if no local_sync_path configured.
     """
@@ -177,6 +229,7 @@ def _get_sync_project(
         name=project_data.name,
         path=normalize_project_path(project_data.path),
         local_sync_path=local_sync_path,
+        remote_name=remote_name,
     )
     return sync_project, local_sync_path
 
@@ -205,7 +258,10 @@ def sync_project_command(
     _require_personal_workspace(name, config, unsupported_message=TEAM_WORKSPACE_SYNC_UNSUPPORTED)
 
     try:
-        # Get tenant info for bucket name
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because these mirror commands are gated to the (default-tenant) Personal
+        # workspace, so the default mount info is correct.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
@@ -259,29 +315,64 @@ def _run_directional_transfer(
     on_conflict: ConflictStrategy,
     dry_run: bool,
     verbose: bool,
+    workspace: str | None = None,
 ) -> None:
     """Shared orchestration for `bm cloud push` / `bm cloud pull`.
 
     Detects conflicts first, then aborts (the default) or applies the chosen
     resolution. Uses additive `rclone copy`, so it never deletes on the
     destination — safe for Team workspaces and therefore not gated.
+
+    Routes through the resolved workspace's own tenant-scoped rclone remote, so a
+    Team project reads/writes the right bucket (see #919).
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
 
     try:
-        # Get tenant info for bucket name
-        tenant_info = run_with_cleanup(get_mount_info())
+        # --- Resolve the target workspace and its tenant-scoped remote ---
+        # Tigris credentials are bucket/tenant-scoped, so each workspace has its
+        # own rclone remote. Resolve which workspace this project belongs to
+        # (config or --workspace override) before touching any bucket.
+        try:
+            target_workspace = run_with_cleanup(
+                _get_workspace_for_project(name, config, workspace_override=workspace)
+            )
+        except Exception as exc:
+            console.print(f"[red]Error resolving workspace for project '{name}': {exc}[/red]")
+            raise typer.Exit(1)
+
+        remote_name = remote_name_for_workspace(
+            target_workspace.slug, is_default=target_workspace.is_default
+        )
+
+        # Trigger: the workspace's remote has not been configured yet.
+        # Why: provisioning mints tenant-scoped credentials and must be explicit
+        # (no surprise key generation); push/pull only transfer.
+        # Outcome: stop with the exact setup command for this workspace.
+        if not rclone_remote_exists(remote_name):
+            setup_target = (
+                "" if target_workspace.is_default else f" --workspace {target_workspace.slug}"
+            )
+            console.print(f"[red]Workspace '{target_workspace.slug}' is not set up for sync.[/red]")
+            console.print(f"\nRun: bm cloud setup{setup_target}")
+            raise typer.Exit(1)
+
+        # Get tenant info for bucket name, scoped to the resolved workspace
+        tenant_info = run_with_cleanup(get_mount_info(workspace_id=target_workspace.tenant_id))
         bucket_name = tenant_info.bucket_name
 
-        # Get project info
+        # Get project info from the same workspace we resolved above, so the
+        # project path and the bucket/remote all refer to one tenant.
         with force_routing(cloud=True):
-            project_data = run_with_cleanup(_get_cloud_project(name))
+            project_data = run_with_cleanup(
+                _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
+            )
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
 
-        sync_project, _ = _get_sync_project(name, config, project_data)
+        sync_project, _ = _get_sync_project(name, config, project_data, remote_name=remote_name)
 
         # --- Detect before transferring ---
         plan = project_diff(sync_project, bucket_name, direction)
@@ -355,6 +446,11 @@ def pull_project_command(
         "--on-conflict",
         help="Resolve files that differ on both sides (default: fail and list them)",
     ),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        help="Workspace (slug, name, or tenant_id) when the project name is ambiguous",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without pulling"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
@@ -368,9 +464,10 @@ def pull_project_command(
       bm cloud pull --name research
       bm cloud pull --name research --dry-run
       bm cloud pull --name research --on-conflict keep-cloud
+      bm cloud pull --name research --workspace acme
     """
     _run_directional_transfer(
-        name, "pull", on_conflict=on_conflict, dry_run=dry_run, verbose=verbose
+        name, "pull", on_conflict=on_conflict, dry_run=dry_run, verbose=verbose, workspace=workspace
     )
 
 
@@ -381,6 +478,11 @@ def push_project_command(
         ConflictStrategy.fail,
         "--on-conflict",
         help="Resolve files that differ on both sides (default: fail and list them)",
+    ),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        help="Workspace (slug, name, or tenant_id) when the project name is ambiguous",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without pushing"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
@@ -396,9 +498,10 @@ def push_project_command(
       bm cloud push --name research
       bm cloud push --name research --dry-run
       bm cloud push --name research --on-conflict keep-local
+      bm cloud push --name research --workspace acme
     """
     _run_directional_transfer(
-        name, "push", on_conflict=on_conflict, dry_run=dry_run, verbose=verbose
+        name, "push", on_conflict=on_conflict, dry_run=dry_run, verbose=verbose, workspace=workspace
     )
 
 
@@ -421,7 +524,10 @@ def bisync_project_command(
     _require_personal_workspace(name, config)
 
     try:
-        # Get tenant info for bucket name
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because these mirror commands are gated to the (default-tenant) Personal
+        # workspace, so the default mount info is correct.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
@@ -479,7 +585,10 @@ def check_project_command(
     _require_cloud_credentials(config)
 
     try:
-        # Get tenant info for bucket name
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because these mirror commands are gated to the (default-tenant) Personal
+        # workspace, so the default mount info is correct.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 

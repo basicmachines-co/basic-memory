@@ -108,13 +108,34 @@ Before opening or updating a PR, run the checks that mirror the common required 
 - Follow the repository pattern for data access
 - Tools communicate to api routers via the httpx ASGI client (in process)
 
+### Programming Style
+
+See [docs/ENGINEERING_STYLE.md](docs/ENGINEERING_STYLE.md) for the fuller house style. The
+short version for agents:
+
+- Prefer type-safe, explicit designs over object-heavy indirection. Use Python 3.12 `type`
+  aliases, full annotations, and narrow `Protocol`s when a caller only needs a capability.
+- Use dataclasses for internal value objects and operation results; use Pydantic v2 at API,
+  CLI, MCP, and persistence boundaries where validation and serialization matter.
+- Keep async boundaries obvious. Resource-owning code should use context managers, propagate
+  cancellation, and avoid hidden background work unless the lifecycle is explicit.
+- Fail fast. Do not add silent fallback logic, broad exception swallowing, speculative
+  `getattr`, or casts that hide an unclear model shape.
+- Keep control flow simple and local. Push branching decisions up, keep leaf helpers focused,
+  and name values after the domain concept they carry.
+- Use evidence-first testing. Add or update meaningful regression tests for bugs and risky
+  behavior, prefer real code paths over mocks, and run the narrowest command that proves the
+  change before widening verification.
+- Comments should explain why a branch, invariant, or constraint exists. Avoid comments that
+  merely narrate obvious code.
+
 ### Code Change Guidelines
 
 - **Full file read before edits**: Before editing any file, read it in full first to ensure complete context; partial reads lead to corrupted edits
 - **Minimize diffs**: Prefer the smallest change that satisfies the request. Avoid unrelated refactors or style rewrites unless necessary for correctness
-- **No speculative getattr**: Never use `getattr(obj, "attr", default)` when unsure about attribute names. Check the class definition or source code first
-- **Fail fast**: Write code with fail-fast logic by default. Do not swallow exceptions with errors or warnings
-- **No fallback logic**: Do not add fallback logic unless explicitly told to and agreed with the user
+- **House style is canonical**: Follow the Programming Style section above for type-safe,
+  fail-fast code; do not hide unclear models with speculative attributes, broad exception
+  handling, casts, or unapproved fallback logic
 - **No guessing**: Do not say "The issue is..." before you actually know what the issue is. Investigate first.
 
 ### Literate Programming Style

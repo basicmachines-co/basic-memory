@@ -1,11 +1,14 @@
 """rclone configuration management for Basic Memory Cloud.
 
-This module provides simplified rclone configuration for SPEC-20.
-Uses a single "basic-memory-cloud" remote for all operations.
+This module owns rclone remote configuration and naming. The default tenant uses
+the "basic-memory-cloud" remote (from SPEC-20); non-default/team workspaces each
+get their own tenant-scoped remote via remote_name_for_workspace (see #919),
+since Tigris credentials are bucket-scoped.
 """
 
 import configparser
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -61,25 +64,65 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
     console.print(f"[dim]Updated rclone config: {config_path}[/dim]")
 
 
+# The default remote serves the account's default tenant (back-compat with SPEC-20,
+# which used a single "basic-memory-cloud" remote). Non-default workspaces each get
+# their own remote, since Tigris credentials are bucket/tenant-scoped (see #919).
+DEFAULT_RCLONE_REMOTE = "basic-memory-cloud"
+
+
+# rclone remote section names allow letters, digits, hyphens, and underscores.
+# The slug comes from the cloud API (a trust boundary), so validate it before
+# splicing it into a remote name to avoid a broken/unusable rclone.conf section.
+_SAFE_SLUG = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def remote_name_for_workspace(slug: str | None, *, is_default: bool) -> str:
+    """Return the rclone remote name for a workspace.
+
+    The default workspace keeps the legacy ``basic-memory-cloud`` remote so
+    existing setups keep working; other workspaces get ``basic-memory-cloud-<slug>``.
+
+    Raises:
+        RcloneConfigError: If a non-default workspace slug contains characters
+            that are not valid in an rclone remote name.
+    """
+    if is_default or not slug:
+        return DEFAULT_RCLONE_REMOTE
+    if not _SAFE_SLUG.match(slug):
+        raise RcloneConfigError(
+            f"Workspace slug '{slug}' cannot be used as an rclone remote name "
+            "(allowed: letters, digits, hyphens, underscores)."
+        )
+    return f"{DEFAULT_RCLONE_REMOTE}-{slug}"
+
+
+def rclone_remote_exists(remote_name: str) -> bool:
+    """Return whether an rclone remote section is already configured."""
+    return load_rclone_config().has_section(remote_name)
+
+
 def configure_rclone_remote(
     access_key: str,
     secret_key: str,
     endpoint: str = "https://fly.storage.tigris.dev",
     region: str = "auto",
+    remote_name: str = DEFAULT_RCLONE_REMOTE,
 ) -> str:
-    """Configure single rclone remote named 'basic-memory-cloud'.
+    """Configure an rclone remote for one tenant's bucket.
 
-    This is the simplified approach from SPEC-20 that uses one remote
-    for all Basic Memory cloud operations (not tenant-specific).
+    Each tenant (personal or team) has its own bucket-scoped credentials, so a
+    remote maps 1:1 to a tenant. The default tenant keeps ``basic-memory-cloud``;
+    other workspaces pass ``remote_name`` from :func:`remote_name_for_workspace`.
 
     Args:
         access_key: S3 access key ID
         secret_key: S3 secret access key
         endpoint: S3-compatible endpoint URL
         region: S3 region (default: auto)
+        remote_name: rclone remote section name to write
 
     Returns:
-        The remote name: "basic-memory-cloud"
+        The remote name that was configured
     """
     # Backup existing config
     backup_rclone_config()
@@ -87,24 +130,21 @@ def configure_rclone_remote(
     # Load existing config
     config = load_rclone_config()
 
-    # Single remote name (not tenant-specific)
-    REMOTE_NAME = "basic-memory-cloud"
-
     # Add/update the remote section
-    if not config.has_section(REMOTE_NAME):
-        config.add_section(REMOTE_NAME)
+    if not config.has_section(remote_name):
+        config.add_section(remote_name)
 
-    config.set(REMOTE_NAME, "type", "s3")
-    config.set(REMOTE_NAME, "provider", "Other")
-    config.set(REMOTE_NAME, "access_key_id", access_key)
-    config.set(REMOTE_NAME, "secret_access_key", secret_key)
-    config.set(REMOTE_NAME, "endpoint", endpoint)
-    config.set(REMOTE_NAME, "region", region)
+    config.set(remote_name, "type", "s3")
+    config.set(remote_name, "provider", "Other")
+    config.set(remote_name, "access_key_id", access_key)
+    config.set(remote_name, "secret_access_key", secret_key)
+    config.set(remote_name, "endpoint", endpoint)
+    config.set(remote_name, "region", region)
     # Prevent unnecessary encoding of filenames (only encode slashes and invalid UTF-8)
     # This prevents files with spaces like "Hello World.md" from being quoted
-    config.set(REMOTE_NAME, "encoding", "Slash,InvalidUtf8")
+    config.set(remote_name, "encoding", "Slash,InvalidUtf8")
     # Save updated config
     save_rclone_config(config)
 
-    console.print(f"[green]Configured rclone remote: {REMOTE_NAME}[/green]")
-    return REMOTE_NAME
+    console.print(f"[green]Configured rclone remote: {remote_name}[/green]")
+    return remote_name

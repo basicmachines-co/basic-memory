@@ -1,26 +1,18 @@
 name: Claude Code Review
 
-on:
-  pull_request:
-    types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+"on":
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review manually
+        required: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   claude-review:
-    # Only run for organization members and collaborators
-    if: |
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR'
-
+    if: inputs.pr_number != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,7 +35,14 @@ jobs:
           track_progress: true  # Enable visual progress tracking
           allowed_bots: '*'
           prompt: |
-            Review this Basic Memory PR against our team checklist:
+            Review Basic Memory PR #${{ inputs.pr_number }} as an advisory manual review.
+
+            Use `gh pr view ${{ inputs.pr_number }}` and related `gh pr`/`gh api`
+            commands to inspect the pull request. Do not merge the PR and do not
+            treat this advisory review as the required merge gate. BM Bossbot owns
+            the required `BM Bossbot Approval` status.
+
+            Review the PR against our team checklist:
 
             ## Code Quality & Standards
             - [ ] Follows Basic Memory's coding conventions in CLAUDE.md

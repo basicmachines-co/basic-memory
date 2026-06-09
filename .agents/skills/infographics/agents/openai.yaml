@@ -1,0 +1,7 @@
+interface:
+  display_name: "Infographics"
+  short_description: "Generate Basic Memory repo infographics"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $infographics to generate a Basic Memory PR or changelog infographic with canonical output paths."

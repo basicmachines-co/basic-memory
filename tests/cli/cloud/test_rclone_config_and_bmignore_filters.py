@@ -1,9 +1,14 @@
 import time
 
+import pytest
+
 from basic_memory.cli.commands.cloud.bisync_commands import convert_bmignore_to_rclone_filters
 from basic_memory.cli.commands.cloud.rclone_config import (
+    RcloneConfigError,
     configure_rclone_remote,
     get_rclone_config_path,
+    rclone_remote_exists,
+    remote_name_for_workspace,
 )
 from basic_memory.ignore_utils import get_bmignore_path
 
@@ -111,3 +116,36 @@ def test_configure_rclone_remote_writes_config_and_backs_up_existing(config_home
     # Backup exists
     backups = list(cfg_path.parent.glob("rclone.conf.backup-*"))
     assert backups, "expected a backup of rclone.conf to be created"
+
+
+def test_remote_name_for_workspace():
+    # Default workspace keeps the legacy remote name (back-compat)
+    assert remote_name_for_workspace("personal", is_default=True) == "basic-memory-cloud"
+    assert remote_name_for_workspace(None, is_default=False) == "basic-memory-cloud"
+    # Non-default workspaces get their own tenant-scoped remote
+    assert remote_name_for_workspace("acme", is_default=False) == "basic-memory-cloud-acme"
+
+
+def test_remote_name_for_workspace_rejects_unsafe_slug():
+    # A slug from the API with characters invalid in an rclone remote name must
+    # fail fast rather than write a broken rclone.conf section.
+    for bad in ["a/b", "has space", "dot.dot", "weird:name"]:
+        with pytest.raises(RcloneConfigError):
+            remote_name_for_workspace(bad, is_default=False)
+
+
+def test_configure_rclone_remote_named_workspace_remote(config_home):
+    remote = configure_rclone_remote(
+        access_key="ak", secret_key="sk", remote_name="basic-memory-cloud-acme"
+    )
+    assert remote == "basic-memory-cloud-acme"
+
+    text = get_rclone_config_path().read_text(encoding="utf-8")
+    assert "[basic-memory-cloud-acme]" in text
+    assert "access_key_id = ak" in text
+
+
+def test_rclone_remote_exists(config_home):
+    assert rclone_remote_exists("basic-memory-cloud-acme") is False
+    configure_rclone_remote(access_key="ak", secret_key="sk", remote_name="basic-memory-cloud-acme")
+    assert rclone_remote_exists("basic-memory-cloud-acme") is True
