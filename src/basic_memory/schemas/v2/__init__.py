@@ -9,6 +9,7 @@ from basic_memory.schemas.v2.entity import (
     DeleteDirectoryRequestV2,
     ProjectResolveRequest,
     ProjectResolveResponse,
+    SyncFileRequest,
 )
 from basic_memory.schemas.v2.graph import (
     GraphEdge,
@@ -31,6 +32,7 @@ __all__ = [
     "DeleteDirectoryRequestV2",
     "ProjectResolveRequest",
     "ProjectResolveResponse",
+    "SyncFileRequest",
     "GraphEdge",
     "GraphNode",
     "GraphResponse",

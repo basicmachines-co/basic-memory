@@ -1,11 +1,15 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import Annotated, Optional, Literal
+from typing import TYPE_CHECKING, Annotated, Optional, Literal
 
 import logfire
 from loguru import logger
 from fastmcp import Context
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
+
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.mcp.clients import KnowledgeClient
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
@@ -50,6 +54,33 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
         title = cleaned
 
     return title, directory
+
+
+async def _resolve_after_disk_recovery(
+    knowledge_client: "KnowledgeClient",
+    identifier: str,
+) -> Optional[str]:
+    """Recover from a resolution miss when the note exists on disk but is not indexed.
+
+    Trigger: identifier resolution failed with "not found", but the identifier may map
+        to a markdown file written directly to disk before the watcher indexed it (#581).
+    Why: editing an on-disk note should not require a manual full sync or watcher restart.
+    Outcome: the single file is indexed server-side and resolution is retried exactly
+        once. Returns None when the identifier does not map to an indexable file on
+        disk, so the caller keeps its existing not-found handling.
+    """
+    candidate = identifier if identifier.endswith(".md") else f"{identifier}.md"
+    try:
+        await knowledge_client.sync_file(candidate)
+    except ToolError as sync_error:
+        # Trigger: server rejected the candidate path (missing file, traversal, non-markdown)
+        # Why: only identifiers that plausibly map to a real file qualify for recovery
+        # Outcome: caller falls through to its existing not-found behavior
+        logger.debug(f"edit_note disk recovery skipped for '{candidate}': {sync_error}")
+        return None
+
+    logger.info(f"edit_note indexed unindexed file '{candidate}'; retrying resolution")
+    return await knowledge_client.resolve_entity(identifier, strict=True)
 
 
 def _compose_workspace_project_route(
@@ -126,7 +157,8 @@ The note with identifier '{identifier}' could not be found. The `find_replace` a
 ## Suggestions to try:
 1. **Use append/prepend instead**: These operations will create the note automatically if it doesn't exist
 2. **Search for the note first**: Use `search_notes("{project or "project-name"}", "{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
-3. **Try different exact identifier formats**:
+3. **File exists on disk but is not indexed yet?**: edit_note indexes the file automatically when the identifier matches its path (e.g. 'folder/note' for 'folder/note.md'). If your identifier is a title or differs from the file path, run a sync (`basic-memory sync`) or wait for the file watcher, then retry
+4. **Try different exact identifier formats**:
    - If you used a permalink like "folder/note-title", try the exact title: "{identifier.split("/")[-1].replace("-", " ").title()}"
    - If you used a title, try the exact permalink format: "{identifier.lower().replace(" ", "-")}"
    - Use `read_note("{project or "project-name"}", "{identifier}")` first to verify the note exists and get the exact identifier
@@ -465,14 +497,27 @@ async def edit_note(
                         strict=True,
                     )
                 except Exception as resolve_error:
-                    # Trigger: entity does not exist yet
-                    # Why: append/prepend can meaningfully create a new note from the content,
-                    #      while find_replace/replace_section require existing content to modify
-                    # Outcome: note is created via the same path as write_note
                     error_msg = str(resolve_error).lower()
                     is_not_found = "entity not found" in error_msg or "not found" in error_msg
 
-                    if is_not_found and operation in ("append", "prepend"):
+                    # Trigger: resolution missed but the file may already exist on disk
+                    # Why: files written directly to disk are invisible to identifier
+                    #      resolution until indexed; editing them should just work (#581)
+                    # Outcome: the single file is indexed and resolution retried once
+                    recovered_entity_id: str | None = None
+                    if is_not_found:
+                        recovered_entity_id = await _resolve_after_disk_recovery(
+                            knowledge_client, entity_identifier
+                        )
+
+                    if recovered_entity_id is not None:
+                        entity_id = recovered_entity_id
+                    elif is_not_found and operation in ("append", "prepend"):
+                        # Trigger: entity does not exist yet (on disk or in the index)
+                        # Why: append/prepend can meaningfully create a new note from the
+                        #      content, while find_replace/replace_section require existing
+                        #      content to modify
+                        # Outcome: note is created via the same path as write_note
                         title, directory = _parse_identifier_to_title_and_directory(identifier)
 
                         # Validate directory path (same security check as write_note)

@@ -276,6 +276,35 @@ class KnowledgeClient:
             )
         return DirectoryDeleteResult.model_validate(response.json())
 
+    # --- Single-file sync ---
+
+    async def sync_file(self, file_path: str) -> EntityResponse:
+        """Index a markdown file that exists on disk but is not indexed yet.
+
+        Args:
+            file_path: Markdown file path relative to the project root
+
+        Returns:
+            EntityResponse for the indexed entity
+
+        Raises:
+            ToolError: If the file does not exist on disk or indexing fails
+        """
+        with logfire.span(
+            "mcp.client.knowledge.sync_file",
+            client_name="knowledge",
+            operation="sync_file",
+        ):
+            response = await call_post(
+                self.http_client,
+                f"{self._base_path}/sync-file",
+                json={"file_path": file_path},
+                client_name="knowledge",
+                operation="sync_file",
+                path_template="/v2/projects/{project_id}/knowledge/sync-file",
+            )
+        return EntityResponse.model_validate(response.json())
+
     # --- Orphan detection ---
 
     async def get_orphans(self) -> list[GraphNode]:

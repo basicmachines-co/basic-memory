@@ -134,6 +134,36 @@ class TestKnowledgeClient:
         assert result == "entity-uuid-123"
 
     @pytest.mark.asyncio
+    async def test_sync_file(self, monkeypatch):
+        """Test sync_file posts the file path to the sync-file endpoint."""
+        from basic_memory.mcp.clients import knowledge as knowledge_mod
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "permalink": "notes/disk-note",
+            "title": "Disk Note",
+            "file_path": "notes/disk-note.md",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "observations": [],
+            "relations": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
+
+        async def mock_call_post(client, url, **kwargs):
+            assert "/v2/projects/proj-123/knowledge/sync-file" in url
+            assert kwargs.get("json") == {"file_path": "notes/disk-note.md"}
+            return mock_response
+
+        monkeypatch.setattr(knowledge_mod, "call_post", mock_call_post)
+
+        mock_http = MagicMock()
+        client = KnowledgeClient(mock_http, "proj-123")
+        result = await client.sync_file("notes/disk-note.md")
+        assert result.file_path == "notes/disk-note.md"
+
+    @pytest.mark.asyncio
     async def test_get_orphans_validates_response(self, monkeypatch):
         """Orphan responses are validated into GraphNode objects."""
         from basic_memory.mcp.clients import knowledge as knowledge_mod

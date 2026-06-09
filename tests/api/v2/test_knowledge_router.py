@@ -1,6 +1,7 @@
 """Tests for V2 knowledge graph API routes (ID-based endpoints)."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 import uuid
 
 import pytest
@@ -955,3 +956,96 @@ async def test_entity_response_includes_user_tracking_fields(client: AsyncClient
     assert "last_updated_by" in body
     assert body["created_by"] is None
     assert body["last_updated_by"] is None
+
+
+## Single-file sync endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_sync_file_indexes_file_on_disk(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """A markdown file written directly to disk becomes resolvable after sync-file (#581)."""
+    note_path = Path(test_project.path) / "incoming" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nWritten directly to disk.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/disk-note.md"},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "incoming/disk-note.md"
+
+    # The file is now resolvable by path, which is what edit_note retries with
+    resolve_response = await client.post(
+        f"{v2_project_url}/knowledge/resolve",
+        json={"identifier": "incoming/disk-note.md", "strict": True},
+    )
+    assert resolve_response.status_code == 200
+    resolved = EntityResolveResponse.model_validate(resolve_response.json())
+    assert resolved.external_id == entity.external_id
+
+
+@pytest.mark.asyncio
+async def test_sync_file_already_indexed_is_idempotent(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file on an already indexed, unchanged file returns the existing entity."""
+    entity_data = {
+        "title": "AlreadyIndexed",
+        "directory": "test",
+        "content": "Already indexed content",
+    }
+    create_response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
+    assert create_response.status_code == 200
+    created = EntityResponseV2.model_validate(create_response.json())
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": created.file_path},
+    )
+    assert response.status_code == 200
+    synced = EntityResponseV2.model_validate(response.json())
+    assert synced.external_id == created.external_id
+    assert synced.file_path == created.file_path
+
+
+@pytest.mark.asyncio
+async def test_sync_file_missing_file_returns_404(client: AsyncClient, v2_project_url):
+    """sync-file fails fast when the file does not exist on disk."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "missing/never-written.md"},
+    )
+    assert response.status_code == 404
+    assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_path_traversal(client: AsyncClient, v2_project_url):
+    """sync-file rejects paths that escape the project root."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "../outside-project.md"},
+    )
+    assert response.status_code == 400
+    assert "project boundaries" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_non_markdown(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file only indexes markdown notes."""
+    file_path = Path(test_project.path) / "data" / "records.csv"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("a,b,c\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "data/records.csv"},
+    )
+    assert response.status_code == 400
+    assert "Only markdown files" in response.json()["detail"]

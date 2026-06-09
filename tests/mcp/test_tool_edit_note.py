@@ -1,5 +1,6 @@
 """Tests for the edit_note MCP tool."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -1263,3 +1264,98 @@ async def test_edit_note_skips_detection_when_project_id_provided(
     assert isinstance(result, str)
     assert "Edited note (append)" in result
     assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_find_replace_recovers_file_on_disk_not_indexed(client, test_project):
+    """find_replace should index and edit a file written directly to disk (#581)."""
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nstatus: draft\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/disk-note",
+        operation="find_replace",
+        content="status: final",
+        find_text="status: draft",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (find_replace)" in result
+    assert "status: final" in note_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_recovers_identifier_with_md_extension(client, test_project):
+    """An identifier already ending in .md should recover via the exact file path (#581)."""
+    note_path = Path(test_project.path) / "notes" / "exact-path.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Exact Path\n\nversion: v1\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/exact-path.md",
+        operation="find_replace",
+        content="version: v2",
+        find_text="version: v1",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (find_replace)" in result
+    assert "version: v2" in note_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_recovers_file_on_disk_instead_of_autocreate(client, test_project):
+    """append to an unindexed on-disk file should edit it, not auto-create a replacement (#581)."""
+    note_path = Path(test_project.path) / "notes" / "disk-append.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Append\n\nOriginal disk content.\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/disk-append",
+        operation="append",
+        content="\nAppended line.",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert "Created note" not in result
+
+    final_content = note_path.read_text(encoding="utf-8")
+    assert "Original disk content." in final_content
+    assert "Appended line." in final_content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_traversal_identifier_is_blocked(client, test_project):
+    """A traversal identifier must be rejected by both disk recovery and auto-create."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="../escape-note",
+        operation="append",
+        content="should never be written",
+    )
+
+    assert isinstance(result, str)
+    assert "# Error" in result
+    assert "paths must stay within project boundaries" in result
+    assert not (Path(test_project.path).parent / "escape-note.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_traversal_identifier_json_error(client, test_project):
+    """JSON mode reports a structured security error for traversal identifiers."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="../escape-json-note",
+        operation="append",
+        content="should never be written",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["error"] == "SECURITY_VALIDATION_ERROR"
+    assert result["fileCreated"] is False

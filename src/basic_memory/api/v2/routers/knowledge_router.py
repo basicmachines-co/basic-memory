@@ -24,6 +24,7 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
+    SyncServiceV2ExternalDep,
     TaskSchedulerDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
@@ -40,8 +41,10 @@ from basic_memory.schemas.v2 import (
     MoveDirectoryRequestV2,
     DeleteDirectoryRequestV2,
     OrphanEntitiesResponse,
+    SyncFileRequest,
 )
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
+from basic_memory.utils import validate_project_path
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
 
@@ -233,6 +236,72 @@ async def resolve_identifier(
             f"API v2 response: resolved '{data.identifier}' to external_id={result.external_id} via {resolution_method}"
         )
 
+        return result
+
+
+## Single-file sync endpoint
+
+
+@router.post("/sync-file", response_model=EntityResponseV2)
+async def sync_file(
+    data: SyncFileRequest,
+    project_id: ProjectExternalIdPathDep,
+    sync_service: SyncServiceV2ExternalDep,
+    project_config: ProjectConfigV2ExternalDep,
+) -> EntityResponseV2:
+    """Index a single markdown file that exists on disk but is not indexed yet.
+
+    Recovery path for files written directly to disk before the watcher indexed
+    them (#581): callers such as edit_note can index the exact file and retry
+    identifier resolution without running a full project sync.
+
+    Args:
+        data: Request containing the markdown file path relative to project root
+
+    Returns:
+        The indexed entity
+
+    Raises:
+        HTTPException: 400 if the path escapes the project root or is not
+            markdown, 404 if the file does not exist on disk
+    """
+    with logfire.span(
+        "api.request.knowledge.sync_file",
+        entrypoint="api",
+        domain="knowledge",
+        action="sync_file",
+    ):
+        logger.info(f"API v2 request: sync_file file_path='{data.file_path}'")
+
+        if not validate_project_path(data.file_path, project_config.home):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' is not allowed - "
+                "paths must stay within project boundaries",
+            )
+        if not (project_config.home / data.file_path).is_file():
+            raise HTTPException(
+                status_code=404, detail=f"File not found on disk: '{data.file_path}'"
+            )
+        if not sync_service.file_service.is_markdown(data.file_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only markdown files can be indexed: '{data.file_path}'",
+            )
+
+        # Trigger: the file may already have a DB row (e.g. modified on disk after indexing)
+        # Why: the indexer needs to know whether to insert or update the entity
+        # Outcome: new is computed from the database instead of assumed by the caller
+        existing = await sync_service.entity_repository.get_by_file_path(data.file_path)
+        synced = await sync_service.sync_one_markdown_file(
+            data.file_path, new=existing is None, index_search=True
+        )
+
+        result = EntityResponseV2.model_validate(synced.entity)
+        logger.info(
+            f"API v2 response: sync_file file_path='{data.file_path}' "
+            f"external_id={result.external_id}"
+        )
         return result
 
 
