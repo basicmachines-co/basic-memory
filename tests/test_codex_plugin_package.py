@@ -55,3 +55,76 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "codex plugin add codex@basic-memory-local" in readme
     assert "Plugin installation is user-level in Codex" in readme
     assert "Each repository still needs its own `.codex/basic-memory.json`" in readme
+
+
+def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    skill = (repo_root / ".agents/skills/infographics/SKILL.md").read_text(encoding="utf-8")
+    style_balance = (
+        repo_root / ".agents/skills/infographics/references/style-balance.md"
+    ).read_text(encoding="utf-8")
+    prompt_blueprint = (
+        repo_root / ".agents/skills/infographics/references/prompt-blueprint.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Weekly infographic" in skill
+    assert "2-Week Retro window" in skill
+    assert "docs/assets/infographics/<year>-w<start-week>-w<end-week>.webp" in skill
+    assert (
+        "docs/assets/infographics/<start-year>-w<start-week>-<end-year>-w<end-week>.webp" in skill
+    )
+    assert "computer science college textbooks" in skill
+    assert "classic literature subjects" in skill
+    assert "Metal, Hard Rock, Punk, techno, soul, reggae" in skill
+    assert "Star Wars inspired knockoff" in skill
+    assert "WWII propaganda posters" in skill
+    assert "Italian movie posters" in skill
+    assert "space exploration and astronomy" in skill
+    assert "paintings" in skill
+    assert "abstract painting" in skill
+    assert "classical landscape" in skill
+    assert "Remington-inspired" in skill
+    assert "Rembrandt-inspired" in skill
+    assert "classic black-and-white photography" in skill
+    assert "documentary" in skill
+    assert "editorial photo essay" in skill
+    assert "80's action movies" in skill
+    assert "practical explosions" in skill
+    assert "no direct actor likenesses" in skill
+    assert "infographic, map, poster, scene, tableau" in skill
+    assert "let the model choose" in skill
+    assert "--print-prompt" in skill
+    assert "--dry-run" in skill
+    assert "--visual-format auto" in skill
+    assert "--visual-format infographic" in skill
+    assert "--visual-format image" in skill
+    assert "--provenance-output" in skill
+    assert "BM_INFOGRAPHIC_PROVENANCE:start" in skill
+    assert "Image prompt sent to" in skill
+    assert "revised prompt" in skill
+    assert "star charts" in style_balance
+    assert "editorial scene" in style_balance
+    assert "painting, photograph" in style_balance
+    assert "copyrighted characters, logos, or named fictional universes" in skill
+    assert "retro game or classic app aesthetic" not in skill
+    assert "BM style category" in style_balance
+    assert "Chosen visual format" in prompt_blueprint
+    assert "Chosen BM style category" in prompt_blueprint
+
+
+def test_pr_create_skill_documents_optional_infographic_theme_arg() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    skill = (repo_root / ".agents/skills/pr-create/SKILL.md").read_text(encoding="utf-8")
+
+    assert "## How To Use" in skill
+    assert "$pr-create" in skill
+    assert "<theme>" in skill
+    assert '$pr-create "Italian movie poster"' in skill
+    assert '$pr-create "80\'s action movies"' in skill
+    assert "<!-- BM_INFOGRAPHIC_THEME:start -->" in skill
+    assert "<!-- BM_INFOGRAPHIC_THEME:end -->" in skill
+    assert "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->" in skill
+    assert "BM Bossbot Approval" in skill
+    assert "Images API revised prompt" in skill
+    assert "never merges" in skill
+    assert "non-gating" in skill
