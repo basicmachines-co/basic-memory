@@ -76,25 +76,32 @@ cwd = payload.get("cwd") or os.getcwd()
 
 
 # --- Load plugin config from .claude settings (local overrides committed) ---
-# Precedence: settings.local.json (per-user) wins over settings.json (team).
-# `found` is True if either file declared a basicMemory block at all — its
-# presence is the first-run sentinel (setup writing it stops the nudge below).
+# Precedence (lowest to highest): user-level ~/.claude/settings.json,
+# ~/.claude/settings.local.json, then the project's .claude/settings.json and
+# .claude/settings.local.json. A single user-level basicMemory block can cover
+# every project without running setup per repo; any project can still pin its
+# own mapping, which wins. `found` is True if any file declared a basicMemory
+# block at all — its presence is the first-run sentinel (setup writing it stops
+# the nudge below).
 def load_settings(directory):
     merged = {}
     found = False
-    for name in ("settings.json", "settings.local.json"):
-        path = os.path.join(directory, ".claude", name)
-        try:
-            with open(path) as fh:
-                data = json.load(fh)
-        except FileNotFoundError:
-            continue
-        except Exception:
-            continue
-        block = data.get("basicMemory")
-        if isinstance(block, dict):
-            found = True
-            merged.update(block)
+    home = os.path.expanduser("~")
+    dirs = [home] if os.path.abspath(directory) == home else [home, directory]
+    for d in dirs:
+        for name in ("settings.json", "settings.local.json"):
+            path = os.path.join(d, ".claude", name)
+            try:
+                with open(path) as fh:
+                    data = json.load(fh)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                continue
+            block = data.get("basicMemory")
+            if isinstance(block, dict):
+                found = True
+                merged.update(block)
     return merged, found
 
 
