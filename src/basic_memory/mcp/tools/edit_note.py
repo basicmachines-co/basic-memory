@@ -375,7 +375,9 @@ async def edit_note(
 
     Note:
         Edit operations require exact identifier matches. If unsure, use read_note() or
-        search_notes() first to find the correct identifier. The tool provides detailed
+        search_notes() first to find the correct identifier. When the identifier looks
+        like a file path and the file exists on disk but is not indexed yet, edit_note
+        indexes that file automatically and retries the edit. The tool provides detailed
         error messages with suggestions if operations fail.
     """
     # Resolve effective default: allow MCP clients to send null for optional int field

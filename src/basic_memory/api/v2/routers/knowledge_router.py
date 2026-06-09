@@ -10,6 +10,9 @@ Key improvements:
 - Simplified caching strategies
 """
 
+import os
+import pathlib
+
 from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
@@ -242,6 +245,40 @@ async def resolve_identifier(
 ## Single-file sync endpoint
 
 
+def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
+    """Resolve the actual on-disk casing of a file path under the project home.
+
+    Trigger: case-insensitive filesystems (macOS/Windows) pass existence checks for
+        wrong-cased paths like 'notes/Disk-Note.md' when the file is 'notes/disk-note.md'.
+    Why: indexing the caller-supplied casing misses the existing DB row keyed by the
+        on-disk path and inserts a duplicate entity under the wrong-cased path.
+    Outcome: each segment is matched against real directory entries — exact name first
+        (so distinct case-variant files on case-sensitive filesystems stay distinct),
+        then a unique case-insensitive match. Returns None when any segment cannot be
+        matched to exactly one entry, including missing files.
+    """
+    current = home
+    canonical_segments: list[str] = []
+    for segment in segments:
+        try:
+            with os.scandir(current) as entries_iter:
+                entries = [entry.name for entry in entries_iter]
+        except OSError:
+            # A parent segment resolved to a non-directory (or vanished): no canonical
+            # path exists for the remaining segments.
+            return None
+        if segment in entries:
+            matched = segment
+        else:
+            matches = [entry for entry in entries if entry.lower() == segment.lower()]
+            if len(matches) != 1:
+                return None
+            matched = matches[0]
+        canonical_segments.append(matched)
+        current = current / matched
+    return "/".join(canonical_segments)
+
+
 @router.post("/sync-file", response_model=EntityResponseV2)
 async def sync_file(
     data: SyncFileRequest,
@@ -262,8 +299,9 @@ async def sync_file(
         The indexed entity
 
     Raises:
-        HTTPException: 400 if the path escapes the project root or is not
-            markdown, 404 if the file does not exist on disk
+        HTTPException: 400 if the path escapes the project root, contains
+            non-normalized segments, or is not markdown, 404 if the file does
+            not exist on disk
     """
     with logfire.span(
         "api.request.knowledge.sync_file",
@@ -279,11 +317,26 @@ async def sync_file(
                 detail=f"File path '{data.file_path}' is not allowed - "
                 "paths must stay within project boundaries",
             )
-        if not (project_config.home / data.file_path).is_file():
+
+        # Trigger: segments like './' or '//' survive the traversal check above
+        # Why: a non-normalized path would index under a non-canonical DB key
+        # Outcome: reject fail-fast instead of guessing the canonical form
+        segments = data.file_path.replace("\\", "/").split("/")
+        if any(segment in ("", ".") for segment in segments):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' is not normalized - "
+                "segments like './' or '//' are not allowed",
+            )
+
+        # Canonicalize to the actual on-disk casing so the DB lookup below hits the
+        # row keyed by the real path instead of inserting a wrong-cased duplicate.
+        file_path = _canonical_file_path(project_config.home, segments)
+        if file_path is None or not (project_config.home / file_path).is_file():
             raise HTTPException(
                 status_code=404, detail=f"File not found on disk: '{data.file_path}'"
             )
-        if not sync_service.file_service.is_markdown(data.file_path):
+        if not sync_service.file_service.is_markdown(file_path):
             raise HTTPException(
                 status_code=400,
                 detail=f"Only markdown files can be indexed: '{data.file_path}'",
@@ -292,15 +345,14 @@ async def sync_file(
         # Trigger: the file may already have a DB row (e.g. modified on disk after indexing)
         # Why: the indexer needs to know whether to insert or update the entity
         # Outcome: new is computed from the database instead of assumed by the caller
-        existing = await sync_service.entity_repository.get_by_file_path(data.file_path)
+        existing = await sync_service.entity_repository.get_by_file_path(file_path)
         synced = await sync_service.sync_one_markdown_file(
-            data.file_path, new=existing is None, index_search=True
+            file_path, new=existing is None, index_search=True
         )
 
         result = EntityResponseV2.model_validate(synced.entity)
         logger.info(
-            f"API v2 response: sync_file file_path='{data.file_path}' "
-            f"external_id={result.external_id}"
+            f"API v2 response: sync_file file_path='{file_path}' external_id={result.external_id}"
         )
         return result
 

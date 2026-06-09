@@ -1035,6 +1035,92 @@ async def test_sync_file_rejects_path_traversal(client: AsyncClient, v2_project_
 
 
 @pytest.mark.asyncio
+async def test_sync_file_wrong_cased_path_does_not_create_duplicate(
+    client: AsyncClient, v2_project_url, test_project: Project, entity_repository
+):
+    """A wrong-cased path resolves to the canonical on-disk file without duplicating it.
+
+    On case-insensitive filesystems (macOS/Windows) a wrong-cased path passes existence
+    checks; without canonicalization the indexer would insert a second entity keyed by
+    the wrong-cased path. The endpoint matches real directory entries, so the request
+    behaves identically on case-sensitive and case-insensitive filesystems.
+    """
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nWritten directly to disk.\n", encoding="utf-8")
+
+    first = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "notes/disk-note.md"},
+    )
+    assert first.status_code == 200
+    canonical = EntityResponseV2.model_validate(first.json())
+    assert canonical.file_path == "notes/disk-note.md"
+
+    second = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "notes/Disk-Note.md"},
+    )
+    assert second.status_code == 200
+    synced = EntityResponseV2.model_validate(second.json())
+    assert synced.file_path == "notes/disk-note.md"
+    assert synced.external_id == canonical.external_id
+
+    entities = await entity_repository.find_all()
+    assert [entity.file_path for entity in entities] == ["notes/disk-note.md"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_non_normalized_segments(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file rejects './' and '//' style segments instead of indexing them verbatim."""
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n", encoding="utf-8")
+
+    for non_normalized in ("./notes/disk-note.md", "notes//disk-note.md"):
+        response = await client.post(
+            f"{v2_project_url}/knowledge/sync-file",
+            json={"file_path": non_normalized},
+        )
+        assert response.status_code == 400
+        assert "not normalized" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_directory_returns_404(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file refuses a path that canonicalizes to a directory instead of a file."""
+    (Path(test_project.path) / "just-a-directory").mkdir(parents=True, exist_ok=True)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "just-a-directory"},
+    )
+    assert response.status_code == 404
+    assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_path_through_file_returns_404(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file fails fast when a parent segment resolves to a file, not a directory."""
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "notes/disk-note.md/child.md"},
+    )
+    assert response.status_code == 404
+    assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_sync_file_rejects_non_markdown(
     client: AsyncClient, v2_project_url, test_project: Project
 ):
