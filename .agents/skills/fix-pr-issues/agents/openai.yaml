@@ -1,0 +1,7 @@
+interface:
+  display_name: "Fix PR Issues"
+  short_description: "Address PR feedback and BM Bossbot blockers"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $fix-pr-issues to address PR feedback and wait for BM Bossbot Approval on the latest head SHA."

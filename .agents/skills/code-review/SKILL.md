@@ -1,5 +1,5 @@
 ---
-name: basic-machines-review
+name: code-review
 description: Use when reviewing Basic Machines code for house style, architecture risk, pre-merge hardening, or whether a change fits basic-memory/basic-memory-cloud conventions.
 license: MIT
 ---
