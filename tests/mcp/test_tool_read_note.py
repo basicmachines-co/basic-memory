@@ -121,6 +121,111 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 
 
 @pytest.mark.asyncio
+async def test_read_note_direct_match_returns_full_content_regardless_of_paging(app, test_project):
+    """page/page_size never chunk note content — a direct match returns the whole note."""
+    content = "Line one of the note\nLine two of the note\nLine three of the note"
+    await write_note(
+        project=test_project.name,
+        title="Paging Direct Note",
+        directory="test",
+        content=content,
+    )
+
+    result = await read_note(
+        "test/paging-direct-note",
+        project=test_project.name,
+        page=3,
+        page_size=1,
+    )
+
+    assert "Line one of the note" in result
+    assert "Line three of the note" in result
+
+
+@pytest.mark.asyncio
+async def test_read_note_rejects_non_positive_pagination(app, test_project):
+    """Fail fast on invalid pagination, matching search_notes/build_context."""
+    with pytest.raises(ValueError, match="page must be >= 1"):
+        await read_note("any-note", project=test_project.name, page=0)
+
+    with pytest.raises(ValueError, match="page_size must be >= 1"):
+        await read_note("any-note", project=test_project.name, page_size=0)
+
+
+@pytest.mark.asyncio
+async def test_read_note_forwards_pagination_to_fallback_search(monkeypatch, app, test_project):
+    """page/page_size must reach the server-side fallback search, not be swallowed."""
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+
+    captured_pages: list[tuple[str, int, int]] = []
+
+    async def fake_search_notes_fn(*, query, search_type, page, page_size, **kwargs):
+        captured_pages.append((search_type, page, page_size))
+        return {"results": [], "current_page": page, "page_size": page_size}
+
+    class FailingKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            raise RuntimeError("force fallback")
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
+    monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
+
+    result = await read_note("missing-note", project=test_project.name, page=2, page_size=3)
+
+    assert captured_pages == [("title", 2, 3), ("text", 2, 3)]
+    assert "Note Not Found" in result
+
+
+@pytest.mark.asyncio
+async def test_read_note_related_results_list_full_search_page(monkeypatch, app, test_project):
+    """Suggestions list the whole returned search page instead of a hardcoded cap of 5."""
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+
+    candidates = [
+        {
+            "title": f"Related {index}",
+            "permalink": f"docs/related-{index}",
+            "content": "",
+            "type": "entity",
+            "score": 1.0,
+            "file_path": f"docs/related-{index}.md",
+        }
+        for index in range(1, 7)
+    ]
+
+    async def fake_search_notes_fn(*, query, search_type, **kwargs):
+        if search_type == "title":
+            return {"results": [], "current_page": 1, "page_size": 10}
+        return {"results": candidates, "current_page": 1, "page_size": 10}
+
+    class FailingKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            raise RuntimeError("force fallback")
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
+    monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
+
+    text_result = await read_note("missing-note", project=test_project.name)
+    assert "## 6. Related 6" in text_result
+
+    json_result = await read_note(
+        "missing-note",
+        project=test_project.name,
+        output_format="json",
+    )
+    assert isinstance(json_result, dict)
+    assert len(json_result["related_results"]) == 6
+
+
+@pytest.mark.asyncio
 async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, app, test_project):
     """Do not fetch note content when title-search returns only fuzzy matches."""
     await write_note(

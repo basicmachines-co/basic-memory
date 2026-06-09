@@ -13,9 +13,49 @@ import pytest
 from fastmcp import Client
 
 
-# --- read_note: pagination params removed in #693 (were no-ops) ---
-# The `page` / `page_size` parameters were removed because the API endpoint
-# silently dropped them. Search-fallback pagination is unrelated to read_note.
+# --- read_note: pagination params restored in #883 ---
+# `page` / `page_size` were removed in #693 because they were no-ops on the
+# resource read. #883 restored them for parity with the sibling navigation
+# tools: they paginate the server-side search fallback (a direct match still
+# returns the full note content).
+
+
+@pytest.mark.asyncio
+async def test_read_note_accepts_pagination_params_and_aliases(mcp_server, app, test_project):
+    """Agents passing page/page_size (or their aliases) must not get a validation error."""
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Paged Read Note",
+                "directory": "test",
+                "content": "# Paged Read Note\n\npaged read body",
+            },
+        )
+
+        result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "Paged Read Note",
+                "page": 1,
+                "page_size": 10,
+            },
+        )
+        assert "paged read body" in result.content[0].text
+
+        # Aliases map silently: page_number -> page, limit -> page_size
+        result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "Paged Read Note",
+                "page_number": 1,
+                "limit": 10,
+            },
+        )
+        assert "paged read body" in result.content[0].text
 
 
 # --- edit_note: find_text / content / section aliases ---
@@ -485,12 +525,12 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
 
         # tool_name -> (must_have_canonical, must_not_have_aliases)
         checks = {
-            # read_note has no pagination params (#693 — they were no-ops; removed).
-            # The must_not_have list still includes the rejected aliases so future
-            # contributors don't reintroduce them.
+            # read_note pagination restored in #883 (paginates the search fallback).
+            # Accepted aliases (limit/page_number/per_page) plus the rejected
+            # `offset` must stay out of the advertised schema.
             "read_note": (
-                [],
-                ["page", "page_size", "offset", "limit", "page_number", "per_page"],
+                ["page", "page_size"],
+                ["offset", "limit", "page_number", "per_page"],
             ),
             "edit_note": (
                 ["find_text", "section", "content"],
