@@ -1,10 +1,14 @@
 """Tests for search MCP tools."""
 
+import inspect
+
 import pytest
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
+
+from pydantic import TypeAdapter
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import (
@@ -1620,6 +1624,74 @@ async def test_search_notes_tag_prefix_with_remaining_text(monkeypatch):
     assert captured_payload["tags"] == ["security"]
     # Remaining text should be preserved as the query
     assert captured_payload["text"] == "authentication"
+
+
+# --- Tests for comma-separated tags parameter (#910) ----------------------------
+
+
+def test_search_notes_tags_annotation_splits_comma_strings():
+    """The tags parameter annotation must parse every documented input form (#910).
+
+    Direct function calls bypass the BeforeValidator, so validate through the same
+    Annotated metadata pydantic applies on the MCP path. coerce_list wrapped a bare
+    comma string as the single literal tag ["a,b"]; parse_tags splits it like the
+    tag: query shorthand and write_note's tags convention.
+    """
+    annotation = inspect.signature(search_notes).parameters["tags"].annotation
+    adapter = TypeAdapter(annotation)
+
+    real_list = adapter.validate_python(["a", "b"])
+    comma_string = adapter.validate_python("a,b")
+    json_string = adapter.validate_python('["a", "b"]')
+    single_string = adapter.validate_python("a")
+
+    assert real_list == ["a", "b"]
+    # The comma string and the real list must behave identically (the #910 bug).
+    assert comma_string == real_list
+    assert json_string == real_list
+    assert single_string == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_search_notes_tags_comma_string_filters_via_mcp(mcp, client, test_project):
+    """tags="alpha,beta" through the real MCP layer must match like a real list (#910)."""
+    from fastmcp import Client
+
+    async with Client(mcp) as mcp_client:
+        await mcp_client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Tag Split Note",
+                "directory": "test",
+                "content": "# Tag Split Note\nTagSplitToken body",
+                "tags": ["alpha", "beta"],
+            },
+        )
+
+        async def found(tags_value: object) -> bool:
+            result = await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "TagSplitToken",
+                    "search_type": "text",
+                    "tags": tags_value,
+                },
+            )
+            return "Tag Split Note" in result.content[0].text
+
+        as_list = await found(["alpha", "beta"])
+        as_comma_string = await found("alpha,beta")
+        as_json_string = await found('["alpha", "beta"]')
+        as_single_string = await found("alpha")
+
+        assert as_list, "real-list tags must match (sanity)"
+        assert as_comma_string == as_list, "comma string must behave like the real list"
+        assert as_json_string == as_list
+        assert as_single_string == as_list
+        # Negative control: the filter is actually applied, not silently dropped.
+        assert not await found("gamma")
 
 
 # --- Tests for text output format (#641) -----------------------------------
