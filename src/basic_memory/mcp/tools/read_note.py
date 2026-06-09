@@ -116,8 +116,10 @@ async def read_note(
         identifier: The title or permalink of the note to read
                    Can be a full memory:// URL, a permalink, a title, or search text
         page: Page of fallback-search results to use when the identifier does not
-            resolve to a note directly (default: 1). A direct match always returns
-            the full note content — page/page_size never chunk the note itself.
+            resolve to a note directly (default: 1). A direct or exact-title match
+            always returns the full note content — page/page_size never chunk the
+            note itself, and the title-match lookup always checks the first page
+            of title results regardless of this value.
         page_size: Number of fallback-search results per page (default: 10). When no
             match is found, this caps how many related-note suggestions are listed.
         output_format: "text" returns markdown content or guidance text.
@@ -291,12 +293,19 @@ async def read_note(
                 # Without this, project names that collide across workspaces could re-resolve
                 # to a different tenant via the default-workspace fallback (CLI/context=None).
                 search_type = "title" if title_only else "text"
+                # Trigger: title_only — the title search exists to find THE note by
+                #          exact title, not to page through suggestions.
+                # Why: paginating it by the caller's page would skip an exact match
+                #      sitting on page 1 (read_note("Exact Title", page=2)) and
+                #      return unrelated suggestions instead of the note.
+                # Outcome: title lookup is pinned to page 1; caller paging applies
+                #          only to the text-search suggestion listing.
                 response = await search_notes(
                     project=active_project.name,
                     project_id=active_project.external_id,
                     query=identifier_text,
                     search_type=search_type,
-                    page=page,
+                    page=1 if title_only else page,
                     page_size=page_size,
                     output_format="json",
                     context=context,

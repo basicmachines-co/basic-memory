@@ -176,8 +176,47 @@ async def test_read_note_forwards_pagination_to_fallback_search(monkeypatch, app
 
     result = await read_note("missing-note", project=test_project.name, page=2, page_size=3)
 
-    assert captured_pages == [("title", 2, 3), ("text", 2, 3)]
+    # Title lookup is pinned to page 1 (it exists to find THE note by exact
+    # title); caller paging applies only to the text-search suggestions.
+    assert captured_pages == [("title", 1, 3), ("text", 2, 3)]
     assert "Note Not Found" in result
+
+
+@pytest.mark.asyncio
+async def test_read_note_title_fallback_finds_exact_match_on_later_page(
+    monkeypatch, app, test_project
+):
+    """An exact title match is returned even when the caller asks for page > 1.
+
+    The title-match lookup is pinned to page 1 of title results; without the pin,
+    read_note("Exact Title", page=2) would page past the match and return
+    unrelated suggestions instead of the note.
+    """
+    await write_note(
+        project=test_project.name,
+        title="Paged Title Note",
+        directory="test",
+        content="paged title content",
+    )
+
+    import importlib
+    from basic_memory.schemas.memory import memory_url_path
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+    direct_identifier = memory_url_path("Paged Title Note")
+
+    class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            # Fail on the direct identifier to force fallback to title search
+            if identifier == direct_identifier:
+                raise RuntimeError("force direct lookup failure")
+            return await super().resolve_entity(identifier, strict=strict)
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
+
+    content = await read_note("Paged Title Note", project=test_project.name, page=2)
+    assert "paged title content" in content
 
 
 @pytest.mark.asyncio
