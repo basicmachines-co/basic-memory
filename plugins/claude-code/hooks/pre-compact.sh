@@ -65,16 +65,21 @@ session_id = payload.get("session_id") or ""
 
 
 def load_settings(directory):
+    # Same precedence as session-start.sh: user-level ~/.claude is the base,
+    # the project's .claude overrides it, settings.local.json wins per level.
     merged = {}
-    for name in ("settings.json", "settings.local.json"):
-        path = os.path.join(directory, ".claude", name)
-        try:
-            with open(path) as fh:
-                merged.update(json.load(fh).get("basicMemory") or {})
-        except FileNotFoundError:
-            continue
-        except Exception:
-            continue
+    home = os.path.expanduser("~")
+    dirs = [home] if os.path.abspath(directory) == home else [home, directory]
+    for d in dirs:
+        for name in ("settings.json", "settings.local.json"):
+            path = os.path.join(d, ".claude", name)
+            try:
+                with open(path) as fh:
+                    merged.update(json.load(fh).get("basicMemory") or {})
+            except FileNotFoundError:
+                continue
+            except Exception:
+                continue
     return merged
 
 

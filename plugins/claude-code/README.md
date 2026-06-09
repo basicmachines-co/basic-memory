@@ -80,6 +80,13 @@ your project's `.claude/settings.json`. Copy
 }
 ```
 
+The block can also live in your **user-level** `~/.claude/settings.json` (or
+`settings.local.json`) — one block there covers every project, no per-repo setup.
+Precedence, lowest to highest: user-level `settings.json` → user-level
+`settings.local.json` → project `settings.json` → project `settings.local.json`,
+merged per key — so a project that pins its own `primaryProject` wins over the
+user-level default.
+
 To enable the capture reflexes, also set `"outputStyle": "basic-memory"` in your
 settings (or select it via `/config`).
 
