@@ -1,6 +1,7 @@
 # Basic Memory - Modern Command Runner
 
-TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--testmon --testmon-forceselect")
+TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--testmon-noselect")
+TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--testmon --testmon-forceselect")
 TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--testmon-noselect")
 
 # Install dependencies
@@ -67,7 +68,7 @@ test-int-postgres: testmon-seed
 # Run tests impacted by recent changes (requires pytest-testmon)
 # Pass paths or node ids after `just testmon` to limit the candidate set further.
 testmon *args: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=local {{args}}
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_SELECT_FLAGS}} --testmon-env=local {{args}}
 
 # Seed pytest-testmon data into this worktree from the shared Git cache.
 testmon-seed:

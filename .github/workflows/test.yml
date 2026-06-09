@@ -13,7 +13,9 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  BASIC_MEMORY_TESTMON_FLAGS: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && '--testmon-noselect' || '--testmon --testmon-forceselect' }}
+  # Required CI records pytest-testmon data but still runs the full selected suite.
+  # The selective mode stays on explicit developer flows such as `just testmon`.
+  BASIC_MEMORY_TESTMON_FLAGS: "--testmon-noselect"
 
 jobs:
   static-checks:
