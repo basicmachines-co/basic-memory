@@ -3,9 +3,12 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools.edit_note import edit_note
+from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.tools.edit_note import _resolve_after_disk_recovery, edit_note
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
 
@@ -1327,6 +1330,25 @@ async def test_edit_note_append_recovers_file_on_disk_instead_of_autocreate(clie
     final_content = note_path.read_text(encoding="utf-8")
     assert "Original disk content." in final_content
     assert "Appended line." in final_content
+
+
+@pytest.mark.asyncio
+async def test_resolve_after_disk_recovery_propagates_unexpected_errors():
+    """Server-side failures during disk recovery must not be masked as a not-found miss.
+
+    Only 400/404 sync-file rejections mean "nothing to recover"; a 500 (or auth
+    failure) would otherwise be swallowed and edit_note would continue into
+    auto-create with a misleading not-found error.
+    """
+
+    def server_error(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "boom"})
+
+    transport = httpx.MockTransport(server_error)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
+        knowledge_client = KnowledgeClient(http_client, "project-external-id")
+        with pytest.raises(ToolError, match="boom"):
+            await _resolve_after_disk_recovery(knowledge_client, "notes/unlucky-note")
 
 
 @pytest.mark.asyncio

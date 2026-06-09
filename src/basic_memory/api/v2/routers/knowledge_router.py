@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
+from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -300,8 +301,8 @@ async def sync_file(
 
     Raises:
         HTTPException: 400 if the path escapes the project root, contains
-            non-normalized segments, or is not markdown, 404 if the file does
-            not exist on disk
+            non-normalized segments, matches the project ignore rules, or is
+            not markdown, 404 if the file does not exist on disk
     """
     with logfire.span(
         "api.request.knowledge.sync_file",
@@ -335,6 +336,20 @@ async def sync_file(
         if file_path is None or not (project_config.home / file_path).is_file():
             raise HTTPException(
                 status_code=404, detail=f"File not found on disk: '{data.file_path}'"
+            )
+        # Trigger: the canonical path matches the .bmignore / project .gitignore rules
+        # Why: scan and watch flows filter ignored files before they ever reach the
+        #      indexer; indexing one here would bypass the ignored-file contract and
+        #      make hidden or gitignored content searchable
+        # Outcome: the same should_ignore_path() rules apply to single-file sync
+        ignore_patterns = load_gitignore_patterns(project_config.home)
+        if should_ignore_path(
+            project_config.home / file_path, project_config.home, ignore_patterns
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' matches Basic Memory ignore rules "
+                "(.bmignore or project .gitignore) and cannot be indexed",
             )
         if not sync_service.file_service.is_markdown(file_path):
             raise HTTPException(

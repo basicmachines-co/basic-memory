@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Annotated, Optional, Literal
 
 import logfire
+from httpx import HTTPStatusError
 from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
@@ -73,9 +74,20 @@ async def _resolve_after_disk_recovery(
     try:
         await knowledge_client.sync_file(candidate)
     except ToolError as sync_error:
-        # Trigger: server rejected the candidate path (missing file, traversal, non-markdown)
-        # Why: only identifiers that plausibly map to a real file qualify for recovery
-        # Outcome: caller falls through to its existing not-found behavior
+        # Trigger: the sync-file request failed
+        # Why: 400/404 are the expected "nothing to recover" rejections (missing file,
+        #      traversal, ignored path, non-markdown); anything else — auth, server,
+        #      transport-level failures — is a real error that must not be masked as
+        #      a not-found miss
+        # Outcome: expected rejections fall through to the caller's existing
+        #      not-found behavior; unexpected failures propagate
+        cause = sync_error.__cause__
+        candidate_rejected = isinstance(cause, HTTPStatusError) and cause.response.status_code in (
+            400,
+            404,
+        )
+        if not candidate_rejected:
+            raise
         logger.debug(f"edit_note disk recovery skipped for '{candidate}': {sync_error}")
         return None
 

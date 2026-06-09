@@ -7,6 +7,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -1118,6 +1119,62 @@ async def test_sync_file_path_through_file_returns_404(
     )
     assert response.status_code == 404
     assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_hidden_file(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file refuses hidden files, matching the default '.*' ignore pattern."""
+    hidden_path = Path(test_project.path) / ".secrets.md"
+    hidden_path.write_text("# Hidden\n\nShould never be indexed.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": ".secrets.md"},
+    )
+    assert response.status_code == 400
+    assert "ignore rules" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_gitignored_file(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file honors the project .gitignore, matching scan/watch filtering."""
+    project_path = Path(test_project.path)
+    (project_path / ".gitignore").write_text("private/\n", encoding="utf-8")
+    note_path = project_path / "private" / "secret.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Secret\n\nGitignored content.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "private/secret.md"},
+    )
+    assert response.status_code == 400
+    assert "ignore rules" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_bmignored_file(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file honors user .bmignore patterns, matching scan/watch filtering."""
+    bmignore_path = get_bmignore_path()
+    bmignore_path.parent.mkdir(parents=True, exist_ok=True)
+    bmignore_path.write_text("drafts-wip\n", encoding="utf-8")
+
+    note_path = Path(test_project.path) / "drafts-wip" / "scratch.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Scratch\n\nBmignored content.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "drafts-wip/scratch.md"},
+    )
+    assert response.status_code == 400
+    assert "ignore rules" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
