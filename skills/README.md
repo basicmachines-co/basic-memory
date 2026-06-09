@@ -47,16 +47,16 @@ Install or update skills using the [Skills CLI](https://github.com/vercel-labs/s
 
 ```bash
 # Install all skills
-npx skills add basicmachines-co/basic-memory --path skills
+npx skills add basicmachines-co/basic-memory/skills
 
 # Install a specific skill
-npx skills add basicmachines-co/basic-memory --path skills --skill memory-tasks
+npx skills add basicmachines-co/basic-memory/skills --skill memory-tasks
 
 # Install all skills for a specific agent
-npx skills add basicmachines-co/basic-memory --path skills --agent claude
+npx skills add basicmachines-co/basic-memory/skills --agent claude
 
 # List available skills without installing
-npx skills add basicmachines-co/basic-memory --path skills --list
+npx skills add basicmachines-co/basic-memory/skills --list
 
 # Check for updates
 npx skills check
