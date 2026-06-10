@@ -24,7 +24,7 @@ Memory's durable graph**, rather than a memory layer of its own. See
   configures the project for the plugin: maps it to a Basic Memory project (picking
   an existing one or creating a new one), seeds the `session`/`decision`/`task`
   schemas into the project, installs the shared `memory-*` skills via
-  `npx skills add basicmachines-co/basic-memory --path skills` (the plugin doesn't
+  `npx skills add basicmachines-co/basic-memory/skills` (the plugin doesn't
   vendor its own copies — `skills/` is the single source of truth, shared with
   OpenClaw), optionally learns the project's placement conventions, and enables the
   capture reflexes. Writes the `basicMemory` block to
