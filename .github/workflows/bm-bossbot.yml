@@ -1,12 +1,11 @@
 name: BM Bossbot
 
 "on":
-  pull_request_target:
+  workflow_run:
+    workflows:
+      - Tests
     types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+      - completed
   workflow_dispatch:
     inputs:
       pr_number:
@@ -20,7 +19,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: bm-bossbot-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: bm-bossbot-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number }}
   cancel-in-progress: true
 
 env:
@@ -30,17 +29,23 @@ env:
 jobs:
   review:
     name: BM Bossbot Review
-    if: github.event.pull_request.draft != true
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.pull_requests[0].number != ''
+      )
     runs-on: ubuntu-latest
     outputs:
       pr_number: ${{ steps.pr.outputs.pr_number }}
       head_ref: ${{ steps.pr.outputs.head_ref }}
+      should_review: ${{ steps.pr.outputs.should_review }}
 
     steps:
       - name: Checkout trusted base ref
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
 
       - name: Set up uv
@@ -53,22 +58,59 @@ jobs:
         run: |
           set -euo pipefail
           event_file="${RUNNER_TEMP}/bm-bossbot-event.json"
+          should_review=true
+
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            gh api "repos/${GITHUB_REPOSITORY}/pulls/${{ inputs.pr_number }}" > "${RUNNER_TEMP}/pull.json"
-            jq --arg repo "${GITHUB_REPOSITORY}" \
-              '{repository:{full_name:$repo}, pull_request:{number:.number,title:.title,body:(.body // ""),html_url:.html_url,head:{sha:.head.sha,ref:.head.ref},base:{ref:.base.ref,sha:.base.sha},author_association:.author_association,draft:.draft}}' \
-              "${RUNNER_TEMP}/pull.json" > "${event_file}"
+            pr_number="${{ inputs.pr_number }}"
+            tested_sha=""
           else
-            cp "${GITHUB_EVENT_PATH}" "${event_file}"
+            pr_number="$(jq -r '.workflow_run.pull_requests[0].number // ""' "${GITHUB_EVENT_PATH}")"
+            tested_sha="$(jq -r '.workflow_run.head_sha // ""' "${GITHUB_EVENT_PATH}")"
           fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" > "${RUNNER_TEMP}/pull.json"
+          current_head_sha="$(jq -r '.head.sha' "${RUNNER_TEMP}/pull.json")"
+          draft="$(jq -r '.draft' "${RUNNER_TEMP}/pull.json")"
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tests_run_id="$(
+              gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/test.yml/runs" \
+                -f event=pull_request \
+                -f head_sha="${current_head_sha}" \
+                -f status=completed \
+                --jq '[.workflow_runs[] | select(.conclusion == "success")][0].id // ""'
+            )"
+            if [ -z "${tests_run_id}" ]; then
+              should_review=false
+              echo "BM Bossbot skipped PR ${pr_number}: no successful Tests workflow for ${current_head_sha}."
+            fi
+          fi
+
+          if [ "${draft}" = "true" ]; then
+            should_review=false
+            echo "BM Bossbot skipped PR ${pr_number}: draft pull request."
+          fi
+
+          if [ -n "${tested_sha}" ] && [ "${tested_sha}" != "${current_head_sha}" ]; then
+            should_review=false
+            echo "BM Bossbot skipped PR ${pr_number}: Tests passed for ${tested_sha}, but current head is ${current_head_sha}."
+          fi
+
+          jq --arg repo "${GITHUB_REPOSITORY}" \
+            '{repository:{full_name:$repo}, pull_request:{number:.number,title:.title,body:(.body // ""),html_url:.html_url,head:{sha:.head.sha,ref:.head.ref},base:{ref:.base.ref,sha:.base.sha},author_association:.author_association,draft:.draft}}' \
+            "${RUNNER_TEMP}/pull.json" > "${event_file}"
+
           echo "event_file=${event_file}" >> "${GITHUB_OUTPUT}"
           echo "pr_number=$(jq -r '.pull_request.number' "${event_file}")" >> "${GITHUB_OUTPUT}"
           echo "head_sha=$(jq -r '.pull_request.head.sha' "${event_file}")" >> "${GITHUB_OUTPUT}"
           echo "head_ref=$(jq -r '.pull_request.head.ref' "${event_file}")" >> "${GITHUB_OUTPUT}"
           echo "author_association=$(jq -r '.pull_request.author_association // ""' "${event_file}")" >> "${GITHUB_OUTPUT}"
+          echo "tested_sha=${tested_sha}" >> "${GITHUB_OUTPUT}"
+          echo "should_review=${should_review}" >> "${GITHUB_OUTPUT}"
 
       - name: Classify PR author
         id: trust
+        if: steps.pr.outputs.should_review == 'true'
         env:
           AUTHOR_ASSOCIATION: ${{ steps.pr.outputs.author_association }}
         run: |
@@ -85,6 +127,7 @@ jobs:
           echo "author_association=${AUTHOR_ASSOCIATION}" >> "${GITHUB_OUTPUT}"
 
       - name: Mark BM Bossbot approval pending
+        if: steps.pr.outputs.should_review == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -95,7 +138,7 @@ jobs:
 
       - name: Decline outside contributor PRs
         id: outside
-        if: steps.trust.outputs.trusted_author != 'true'
+        if: steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author != 'true'
         env:
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           AUTHOR_ASSOCIATION: ${{ steps.trust.outputs.author_association }}
@@ -122,7 +165,7 @@ jobs:
 
       - name: Collect sanitized PR context
         id: context
-        if: steps.trust.outputs.trusted_author == 'true'
+        if: steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
@@ -195,7 +238,7 @@ jobs:
 
       - name: Run BM Bossbot review with Codex
         id: codex
-        if: steps.trust.outputs.trusted_author == 'true' && steps.context.outputs.diff_truncated != 'true'
+        if: steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author == 'true' && steps.context.outputs.diff_truncated != 'true'
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -207,7 +250,7 @@ jobs:
 
       - name: Select BM Bossbot review output
         id: review_output
-        if: always()
+        if: always() && steps.pr.outputs.should_review == 'true'
         env:
           OUTSIDE_REVIEW_FILE: ${{ steps.outside.outputs.review_file }}
           CONTEXT_REVIEW_FILE: ${{ steps.context.outputs.review_file }}
@@ -217,7 +260,7 @@ jobs:
           echo "review_file=${review_file}" >> "${GITHUB_OUTPUT}"
 
       - name: Finalize BM Bossbot approval
-        if: always()
+        if: always() && steps.pr.outputs.should_review == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -230,7 +273,7 @@ jobs:
   assets:
     name: BM Bossbot Assets
     needs: review
-    if: needs.review.result == 'success'
+    if: needs.review.result == 'success' && needs.review.outputs.should_review == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -240,13 +283,13 @@ jobs:
       - name: Checkout trusted base ref
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
 
-      - name: Generate non-gating PR infographic
+      - name: Generate non-gating PR image
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -258,10 +301,10 @@ jobs:
           uv run --script scripts/generate_pr_infographic.py \
             --pr-number "${PR_NUMBER}" \
             --pr-body-file "${RUNNER_TEMP}/bm-bossbot-pr-body.md" \
-            --provenance-output "${RUNNER_TEMP}/bm-bossbot-infographic-provenance.md" \
+            --provenance-output "${RUNNER_TEMP}/bm-bossbot-image-provenance.md" \
             --output "docs/assets/infographics/pr-${PR_NUMBER}.webp"
 
-      - name: Publish non-gating PR infographic
+      - name: Publish non-gating PR image
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -270,7 +313,7 @@ jobs:
         run: |
           set -euo pipefail
           asset_path="docs/assets/infographics/pr-${PR_NUMBER}.webp"
-          provenance_file="${RUNNER_TEMP}/bm-bossbot-infographic-provenance.md"
+          provenance_file="${RUNNER_TEMP}/bm-bossbot-image-provenance.md"
           test -f "${asset_path}"
           test -f "${provenance_file}"
 
@@ -286,7 +329,7 @@ jobs:
           mkdir -p "$(dirname "${asset_path}")"
           cp "${tmp_asset}" "${asset_path}"
           git add "${asset_path}"
-          git commit -m "chore: publish PR ${PR_NUMBER} infographic"
+          git commit -m "chore: publish PR ${PR_NUMBER} image"
           git push --force origin "HEAD:${asset_branch}"
 
           asset_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${asset_branch}/${asset_path}"
@@ -312,7 +355,7 @@ jobs:
           image_block = "\n".join(
               [
                   "<!-- pr-infographic:start -->",
-                  f"![BM Bossbot infographic for PR #{pr_number}]({asset_url})",
+                  f"![BM Bossbot image for PR #{pr_number}]({asset_url})",
                   "<!-- pr-infographic:end -->",
               ]
           )
