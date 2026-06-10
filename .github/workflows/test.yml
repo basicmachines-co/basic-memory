@@ -236,6 +236,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
             ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-main-
             ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-
 
       - name: Create virtual env
