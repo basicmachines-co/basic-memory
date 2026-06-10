@@ -321,8 +321,10 @@ def test_head_sha_was_approved_matches_only_the_approval_record(
 
     def _paged(pages: list[list[dict]]):
         def fake(*, method: str, path: str, token: str, payload=None):
+            # Anchor on "&page=N" — a bare "page=N" substring also matches
+            # "per_page=100", which served page 1 forever and hung the loop.
             for number, page in enumerate(pages, start=1):
-                if f"page={number}" in path:
+                if f"&page={number}" in path:
                     return page
             return []
 
@@ -363,9 +365,9 @@ def test_head_sha_was_approved_pages_past_first_page_of_statuses(
 
     def fake(*, method: str, path: str, token: str, payload=None):
         pages_served.append(path)
-        if "page=1" in path:
+        if "&page=1" in path:
             return [failure] * 100
-        if "page=2" in path:
+        if "&page=2" in path:
             return [approval]
         return []
 
