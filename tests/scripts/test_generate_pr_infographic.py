@@ -25,6 +25,7 @@ def test_generate_pr_infographic_cli_help_exposes_useful_options() -> None:
 
     assert result.exit_code == 0
     assert "--pr-number" in help_text
+    assert "--pr-title" in help_text
     assert "--pr-body-file" in help_text
     assert "--output" in help_text
     assert "--theme" in help_text
@@ -33,26 +34,38 @@ def test_generate_pr_infographic_cli_help_exposes_useful_options() -> None:
     assert "--dry-run" in help_text
 
 
-def test_extract_bossbot_summary_from_pr_body() -> None:
+def test_extract_pr_content_strips_managed_bot_blocks() -> None:
     body = "\n".join(
         [
-            "Before",
+            "## Summary",
+            "Adds per-workspace rclone remotes for Team push/pull.",
             "<!-- BM_BOSSBOT_SUMMARY:start -->",
             "Reviewed SHA: abc123",
             "Verdict: approve",
             "<!-- BM_BOSSBOT_SUMMARY:end -->",
-            "After",
+            "<!-- pr-infographic:start -->",
+            "![BM Bossbot image for PR #42](https://example.test/img.webp)",
+            "<!-- pr-infographic:end -->",
+            "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->",
+            "provenance details",
+            "<!-- BM_INFOGRAPHIC_PROVENANCE:end -->",
+            "## Test plan",
+            "pytest passes.",
         ]
     )
 
-    summary = generate_pr_infographic.extract_bossbot_summary(body)
+    content = generate_pr_infographic.extract_pr_content(body)
 
-    assert summary == "Reviewed SHA: abc123\nVerdict: approve"
+    assert "Adds per-workspace rclone remotes" in content
+    assert "pytest passes." in content
+    assert "Verdict: approve" not in content
+    assert "Reviewed SHA" not in content
+    assert "provenance details" not in content
+    assert "BM Bossbot image for PR" not in content
 
 
-def test_extract_bossbot_summary_requires_managed_block() -> None:
-    with pytest.raises(ValueError, match="BM Bossbot summary block"):
-        generate_pr_infographic.extract_bossbot_summary("No managed summary")
+def test_extract_pr_content_handles_body_without_managed_blocks() -> None:
+    assert generate_pr_infographic.extract_pr_content("Plain description") == "Plain description"
 
 
 def test_extract_infographic_theme_from_pr_body() -> None:
@@ -86,19 +99,19 @@ def test_select_image_theme_reports_source() -> None:
 
     from_body = generate_pr_infographic.select_image_theme(
         pr_number=42,
-        summary="Summary: Adds a merge gate.",
+        pr_title="feat(ci): add a merge gate",
         pr_body=body,
         theme_override=None,
     )
     from_cli = generate_pr_infographic.select_image_theme(
         pr_number=42,
-        summary="Summary: Adds a merge gate.",
+        pr_title="feat(ci): add a merge gate",
         pr_body=body,
         theme_override="80's action movies",
     )
     from_auto = generate_pr_infographic.select_image_theme(
         pr_number=42,
-        summary="Summary: Adds a merge gate.",
+        pr_title="feat(ci): add a merge gate",
         pr_body="No theme",
         theme_override=None,
     )
@@ -111,34 +124,38 @@ def test_select_image_theme_reports_source() -> None:
     assert from_auto.source == generate_pr_infographic.ThemeSource.AUTO
 
 
-def test_build_infographic_prompt_uses_summary_without_making_gate_claims() -> None:
+def test_build_infographic_prompt_depicts_pr_content_not_review_outcome() -> None:
     prompt = generate_pr_infographic.build_infographic_prompt(
         pr_number=42,
-        summary="Verdict: approve\nSummary: Adds a merge gate.",
+        pr_title="feat(sync): stream large files during cloud sync",
+        pr_content="Streams PDFs in chunks instead of loading them fully into memory.",
         theme="WWII propaganda posters with home-front logistics routes",
         theme_source=generate_pr_infographic.ThemeSource.CLI,
     )
 
     assert "PR #42" in prompt
-    assert "Adds a merge gate" in prompt
+    assert "stream large files during cloud sync" in prompt
+    assert "Streams PDFs in chunks" in prompt
     assert "WWII propaganda posters" in prompt
     assert "User-supplied visual direction" in prompt
     assert "style inspiration only" in prompt
     assert "polished landscape WebP editorial image" in prompt
     assert "image-first composition" in prompt
-    assert "scene" in prompt
-    assert "poster" in prompt
-    assert "painting" in prompt
-    assert "classic photograph" in prompt
     assert "symbolic tableau" in prompt
-    assert "before/after value story" in prompt
     assert "Do not render an infographic" in prompt
     assert "dashboard" in prompt
     assert "flowchart" in prompt
     assert "copyrighted characters" in prompt
-    assert "restrained" not in prompt
-    assert "non-gating" in prompt
-    assert "BM Bossbot Approval" in prompt
+    # The subject is the change itself; review-process imagery is banned.
+    assert "CONTENT of the pull request" in prompt
+    assert "do not depict review verdicts" in prompt
+    assert "approval" in prompt.lower()
+    assert "stamps" in prompt
+    assert "checkmarks" in prompt
+    # The old prompt fed the review summary and named the approval status,
+    # which produced literal "BOSSBOT APPROVED" stamp images.
+    assert "BM Bossbot summary:" not in prompt
+    assert "BM Bossbot Approval" not in prompt
 
 
 def test_build_infographic_provenance_block_includes_image_choices_without_prompt() -> None:
@@ -204,13 +221,14 @@ def test_upsert_managed_block_appends_and_replaces() -> None:
 def test_build_infographic_prompt_uses_auto_theme_as_visual_direction() -> None:
     theme = generate_pr_infographic.select_image_theme(
         pr_number=42,
-        summary="Verdict: approve\nSummary: Adds a merge gate.",
+        pr_title="feat(ci): add a merge gate",
         pr_body="No theme",
         theme_override=None,
     )
     prompt = generate_pr_infographic.build_infographic_prompt(
         pr_number=42,
-        summary="Verdict: approve\nSummary: Adds a merge gate.",
+        pr_title="feat(ci): add a merge gate",
+        pr_content="Adds a deterministic merge gate for pull requests.",
         theme=theme.theme,
         theme_source=theme.source,
     )
@@ -242,9 +260,10 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
     body_file.write_text(
         "\n".join(
             [
+                "Adds a deterministic merge gate for pull requests.",
                 "<!-- BM_BOSSBOT_SUMMARY:start -->",
                 "Verdict: approve",
-                "Summary: Adds a merge gate.",
+                "Summary: review artifact that must not reach the image.",
                 "<!-- BM_BOSSBOT_SUMMARY:end -->",
                 "<!-- BM_INFOGRAPHIC_THEME:start -->",
                 "space exploration and astronomy",
@@ -267,6 +286,8 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
         [
             "--pr-number",
             "42",
+            "--pr-title",
+            "feat(ci): add a merge gate",
             "--pr-body-file",
             str(body_file),
             "--output",
@@ -277,14 +298,15 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
 
     assert result.exit_code == 0, result.output
     assert (
-        "Create a polished landscape WebP editorial image for Basic Memory PR #42"
-        in result.output
+        "Create a polished landscape WebP editorial image for Basic Memory PR #42" in result.output
     )
-    assert "Adds a merge gate" in result.output
+    assert "feat(ci): add a merge gate" in result.output
+    assert "Adds a deterministic merge gate" in result.output
     assert "space exploration and astronomy" in result.output
     assert "image-first composition" in result.output
     assert "Do not render an infographic" in result.output
-    assert "BM Bossbot Approval" in result.output
+    assert "Verdict: approve" not in result.output
+    assert "must not reach the image" not in result.output
     assert not output.exists()
 
 
@@ -296,10 +318,7 @@ def test_generate_pr_infographic_writes_provenance_after_image_generation(
     body_file.write_text(
         "\n".join(
             [
-                "<!-- BM_BOSSBOT_SUMMARY:start -->",
-                "Verdict: approve",
-                "Summary: Adds a merge gate.",
-                "<!-- BM_BOSSBOT_SUMMARY:end -->",
+                "Adds a merge gate.",
                 "<!-- BM_INFOGRAPHIC_THEME:start -->",
                 "paintings: Rembrandt-inspired merge gate",
                 "<!-- BM_INFOGRAPHIC_THEME:end -->",
@@ -329,6 +348,8 @@ def test_generate_pr_infographic_writes_provenance_after_image_generation(
         [
             "--pr-number",
             "42",
+            "--pr-title",
+            "feat(ci): add a merge gate",
             "--pr-body-file",
             str(body_file),
             "--output",

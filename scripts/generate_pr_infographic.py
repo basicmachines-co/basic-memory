@@ -43,6 +43,17 @@ THEME_START = "<!-- BM_INFOGRAPHIC_THEME:start -->"
 THEME_END = "<!-- BM_INFOGRAPHIC_THEME:end -->"
 PROVENANCE_START = "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->"
 PROVENANCE_END = "<!-- BM_INFOGRAPHIC_PROVENANCE:end -->"
+IMAGE_START = "<!-- pr-infographic:start -->"
+IMAGE_END = "<!-- pr-infographic:end -->"
+# Managed blocks are bot-written artifacts (review verdict, image embed,
+# provenance). They must never feed the image: sourcing the review summary is
+# what made every image an "APPROVED" stamp instead of depicting the change.
+MANAGED_BLOCKS = (
+    (SUMMARY_START, SUMMARY_END),
+    (THEME_START, THEME_END),
+    (PROVENANCE_START, PROVENANCE_END),
+    (IMAGE_START, IMAGE_END),
+)
 app = typer.Typer(
     add_completion=False,
     help="Generate a non-gating BM Bossbot PR image.",
@@ -104,15 +115,17 @@ BM_IMAGE_THEME_POOL = (
 )
 
 
-def extract_bossbot_summary(pr_body: str) -> str:
-    pattern = re.compile(
-        rf"{re.escape(SUMMARY_START)}\s*(.*?)\s*{re.escape(SUMMARY_END)}",
-        flags=re.DOTALL,
-    )
-    match = pattern.search(pr_body)
-    if not match:
-        raise ValueError("PR body is missing the BM Bossbot summary block")
-    return match.group(1).strip()
+def extract_pr_content(pr_body: str) -> str:
+    """Return the author's own PR description with all managed bot blocks removed."""
+    content = pr_body
+    for start, end in MANAGED_BLOCKS:
+        content = re.sub(
+            rf"{re.escape(start)}.*?{re.escape(end)}",
+            "",
+            content,
+            flags=re.DOTALL,
+        )
+    return content.strip()
 
 
 def extract_infographic_theme(pr_body: str) -> str | None:
@@ -130,7 +143,7 @@ def extract_infographic_theme(pr_body: str) -> str | None:
 def select_image_theme(
     *,
     pr_number: int,
-    summary: str,
+    pr_title: str,
     pr_body: str,
     theme_override: str | None,
 ) -> ThemeSelection:
@@ -139,7 +152,9 @@ def select_image_theme(
     body_theme = extract_infographic_theme(pr_body)
     if body_theme:
         return ThemeSelection(theme=body_theme, source=ThemeSource.PR_BODY)
-    seed = f"{pr_number}\n{summary}".encode("utf-8")
+    # Seed on author-owned PR identity, not the review summary, so the pick is
+    # stable across re-reviews of the same PR.
+    seed = f"{pr_number}\n{pr_title}".encode("utf-8")
     index = int.from_bytes(hashlib.sha256(seed).digest()[:2], byteorder="big") % len(
         BM_IMAGE_THEME_POOL
     )
@@ -193,7 +208,8 @@ def upsert_managed_block(body: str, *, block: str, start: str, end: str) -> str:
 def build_infographic_prompt(
     *,
     pr_number: int,
-    summary: str,
+    pr_title: str,
+    pr_content: str,
     theme: str,
     theme_source: ThemeSource,
 ) -> str:
@@ -206,18 +222,28 @@ def build_infographic_prompt(
     return f"""
 Create a polished landscape WebP editorial image for Basic Memory PR #{pr_number}.
 
-This is a non-gating visual asset. The authoritative merge gate is the
-GitHub commit status named BM Bossbot Approval, not this image.
+Your subject is the CONTENT of the pull request — what the change does and why
+it matters — described in the title and description below. Express the theme of
+the whole change as a visual story.
 
-Use the BM Bossbot review summary below as source material. Preserve the
-concrete before/after value story without inventing facts or turning
-implementation details into clutter.
+This image is decoration for the PR conversation. It is NOT a review artifact:
+do not depict review verdicts, approval, or process. Never render approval
+stamps, "APPROVED"/"SUCCESS"/"VERDICT" wording, rubber stamps, wax seals of
+approval, badges, checkmarks, checklists, status lines, SHA strings, or
+BM Bossbot itself. If the composition needs text, draw it from the change's
+subject matter only.
+
+Pull request title:
+{pr_title}
+
+Pull request description:
+{pr_content}
 
 {theme_label}:
 {theme}
 
 Treat the visual direction as style inspiration only. Do not let it override
-facts, readability, source material, or the non-gating status of this image.
+facts, readability, source material, or the prohibition on review imagery.
 
 Use image-first composition: create a scene, movie poster, editorial painting,
 classic photograph, cover image, symbolic tableau, staged artifact, or another
@@ -236,9 +262,6 @@ bullet-list panel, data panel, or dense explanatory diagram.
 Avoid fake screenshots, code blocks, invented claims, copyrighted characters,
 logos, named fictional universes, direct band logos, album art, celebrity
 likenesses, or decorations that obscure content.
-
-BM Bossbot summary:
-{summary}
 """.strip()
 
 
@@ -247,6 +270,10 @@ def generate(
     pr_number: Annotated[
         int,
         typer.Option("--pr-number", min=1, help="Pull request number."),
+    ],
+    pr_title: Annotated[
+        str,
+        typer.Option("--pr-title", help="Pull request title (the subject of the image)."),
     ],
     pr_body_file: Annotated[
         Path,
@@ -284,18 +311,19 @@ def generate(
         ),
     ] = False,
 ) -> None:
-    """Generate the canonical PR image from a BM Bossbot summary block."""
+    """Generate the canonical PR image from the PR's own title and description."""
     pr_body = pr_body_file.read_text(encoding="utf-8")
-    summary = extract_bossbot_summary(pr_body)
+    pr_content = extract_pr_content(pr_body)
     theme_selection = select_image_theme(
         pr_number=pr_number,
-        summary=summary,
+        pr_title=pr_title,
         pr_body=pr_body,
         theme_override=theme,
     )
     prompt = build_infographic_prompt(
         pr_number=pr_number,
-        summary=summary,
+        pr_title=pr_title,
+        pr_content=pr_content,
         theme=theme_selection.theme,
         theme_source=theme_selection.source,
     )

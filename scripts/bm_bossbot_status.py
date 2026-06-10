@@ -97,6 +97,66 @@ def pull_request_event(
     )
 
 
+def count_unresolved_review_threads(*, token: str, repo: str, number: int) -> int:
+    """Count unresolved review threads (e.g. open Codex inline comments) on a PR.
+
+    Review threads are the canonical 'outstanding feedback' signal: bot reviewers
+    submit COMMENTED reviews that never flip reviewDecision, so thread resolution
+    is the only deterministic way to know feedback was addressed.
+    """
+    owner, _, name = repo.partition("/")
+    if not owner or not name:
+        raise SystemExit(f"Invalid repository: {repo}")
+
+    query = """
+    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { isResolved }
+          }
+        }
+      }
+    }
+    """
+
+    unresolved = 0
+    cursor: str | None = None
+    while True:
+        response = _github_request(
+            method="POST",
+            path="/graphql",
+            token=token,
+            payload={
+                "query": query,
+                "variables": {"owner": owner, "name": name, "number": number, "cursor": cursor},
+            },
+        )
+        if not isinstance(response, Mapping) or response.get("errors"):
+            raise SystemExit(f"GitHub GraphQL reviewThreads query failed: {response}")
+        try:
+            threads = response["data"]["repository"]["pullRequest"]["reviewThreads"]
+            nodes = threads["nodes"]
+            page_info = threads["pageInfo"]
+        except (KeyError, TypeError):
+            raise SystemExit(
+                "GitHub GraphQL reviewThreads response was missing expected fields"
+            ) from None
+        unresolved += sum(1 for node in nodes if not node.get("isResolved"))
+        if not page_info.get("hasNextPage"):
+            return unresolved
+        cursor = page_info.get("endCursor")
+
+
+def unresolved_threads_result(count: int) -> ApprovalResult:
+    return ApprovalResult(
+        False,
+        "failure",
+        f"BM Bossbot found {count} unresolved review thread(s)",
+    )
+
+
 def validate_review(payload: Mapping[str, Any], *, expected_head_sha: str) -> ApprovalResult:
     required = {
         "reviewed_head_sha",
@@ -245,6 +305,19 @@ def finalize_review(
         review = {}
 
     result = validate_review(review, expected_head_sha=event.head_sha)
+    # Trigger: the LLM review approved, but reviewers (human or bot, e.g. Codex
+    #          inline comments) still have unresolved threads on the PR.
+    # Why: the review prompt only sees metadata+diff, never review threads, so an
+    #      approve verdict says nothing about outstanding feedback (#932 merged
+    #      with two open P2 threads because of exactly this gap).
+    # Outcome: unresolved threads turn an approve into a failure status; the
+    #          recheck command restores approval once all threads are resolved.
+    if result.approved:
+        unresolved = count_unresolved_review_threads(
+            token=token, repo=event.repo, number=event.number
+        )
+        if unresolved > 0:
+            result = unresolved_threads_result(unresolved)
     current_body = get_pull_request_body(token=token, repo=event.repo, number=event.number)
     updated_body = upsert_summary_block(current_body, render_summary(review, result))
     update_pull_request_body(token=token, repo=event.repo, number=event.number, body=updated_body)
@@ -260,6 +333,89 @@ def finalize_review(
     )
     typer.echo(f"Marked {STATUS_CONTEXT} {result.state} for {event.head_sha}")
     return result
+
+
+def get_pull_request_head_sha(*, token: str, repo: str, number: int) -> str:
+    response = _github_request(
+        method="GET",
+        path=f"/repos/{repo}/pulls/{number}",
+        token=token,
+    )
+    if not isinstance(response, Mapping):
+        raise SystemExit("GitHub API response for pull request was invalid")
+    head = response.get("head")
+    head_sha = _string(head.get("sha")) if isinstance(head, Mapping) else ""
+    if not head_sha:
+        raise SystemExit("GitHub API response was missing pull request head SHA")
+    return head_sha
+
+
+def head_sha_was_approved(*, token: str, repo: str, sha: str) -> bool:
+    """Return whether a full BM Bossbot review previously approved this head SHA.
+
+    Commit statuses are append-only history, so the approval record survives a
+    later thread-failure status for the same SHA.
+    """
+    response = _github_request(
+        method="GET",
+        path=f"/repos/{repo}/commits/{sha}/statuses?per_page=100",
+        token=token,
+    )
+    if not isinstance(response, list):
+        raise SystemExit("GitHub API response for commit statuses was invalid")
+    return any(
+        isinstance(status, Mapping)
+        and status.get("context") == STATUS_CONTEXT
+        and status.get("state") == "success"
+        and status.get("description") == APPROVED_DESCRIPTION
+        for status in response
+    )
+
+
+def recheck_threads(
+    *,
+    repo: str,
+    number: int,
+    run_url: str,
+    token_env: str,
+) -> None:
+    """Re-evaluate the approval status when review threads change.
+
+    Trigger: pull_request_review / review_comment / review_thread events.
+    Why: the full review runs once per head SHA after Tests; feedback that
+         arrives later (or gets resolved later) must move the gate without
+         re-running the LLM review.
+    Outcome: unresolved threads flip the status to failure; once every thread
+         is resolved, a previously earned approval for the same head SHA is
+         restored. Without a prior approval the status is left untouched so a
+         pending/failed review cannot be upgraded by thread resolution alone.
+    """
+    token = _token(token_env)
+    head_sha = get_pull_request_head_sha(token=token, repo=repo, number=number)
+    unresolved = count_unresolved_review_threads(token=token, repo=repo, number=number)
+
+    if unresolved > 0:
+        result = unresolved_threads_result(unresolved)
+    elif head_sha_was_approved(token=token, repo=repo, sha=head_sha):
+        result = ApprovalResult(True, "success", APPROVED_DESCRIPTION)
+    else:
+        typer.echo(
+            f"All review threads resolved but no prior approval exists for {head_sha}; "
+            "leaving status unchanged"
+        )
+        return
+
+    set_commit_status(
+        token=token,
+        repo=repo,
+        sha=head_sha,
+        payload=build_status_payload(
+            state=result.state,
+            description=result.description,
+            target_url=run_url,
+        ),
+    )
+    typer.echo(f"Marked {STATUS_CONTEXT} {result.state} for {head_sha} ({result.description})")
 
 
 def _github_request(
@@ -376,6 +532,20 @@ def finalize(
     )
     if not result.approved:
         raise typer.Exit(1)
+
+
+@app.command("recheck")
+def recheck(
+    pr_number: Annotated[int, typer.Option("--pr-number", min=1, help="Pull request number.")],
+    run_url: Annotated[str, typer.Option("--run-url", help="Workflow run URL.")],
+    repo: Annotated[str, typer.Option("--repo", help="owner/name repository.")],
+    token_env: Annotated[
+        str,
+        typer.Option("--token-env", help="Environment variable containing a GitHub token."),
+    ] = "GITHUB_TOKEN",
+) -> None:
+    """Re-evaluate BM Bossbot Approval from current review-thread state."""
+    recheck_threads(repo=repo, number=pr_number, run_url=run_url, token_env=token_env)
 
 
 def main() -> None:

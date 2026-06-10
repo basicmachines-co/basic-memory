@@ -11,16 +11,25 @@ name: BM Bossbot
       pr_number:
         description: Pull request number to review
         required: true
+  # Review-thread activity re-evaluates the approval status without re-running
+  # the full LLM review: new feedback flips the gate to failure, resolving the
+  # last thread restores a previously earned approval for the same head SHA.
+  pull_request_review:
+    types:
+      - submitted
+  pull_request_review_comment:
+    types:
+      - created
+  pull_request_review_thread:
+    types:
+      - resolved
+      - unresolved
 
 permissions:
   contents: read
   pull-requests: write
   statuses: write
   issues: read
-
-concurrency:
-  group: bm-bossbot-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number }}
-  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -29,9 +38,15 @@ env:
 jobs:
   review:
     name: BM Bossbot Review
+    # Job-level concurrency (not workflow-level): thread-recheck events for the
+    # same PR must never cancel an in-flight review run, and vice versa.
+    concurrency:
+      group: bm-bossbot-review-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number }}
+      cancel-in-progress: true
     if: |
       github.event_name == 'workflow_dispatch' ||
       (
+        github.event_name == 'workflow_run' &&
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.pull_requests[0].number != ''
       )
@@ -298,8 +313,10 @@ jobs:
         run: |
           set -euo pipefail
           gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body // ""' > "${RUNNER_TEMP}/bm-bossbot-pr-body.md"
+          pr_title="$(gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json title --jq '.title // ""')"
           uv run --script scripts/generate_pr_infographic.py \
             --pr-number "${PR_NUMBER}" \
+            --pr-title "${pr_title}" \
             --pr-body-file "${RUNNER_TEMP}/bm-bossbot-pr-body.md" \
             --provenance-output "${RUNNER_TEMP}/bm-bossbot-image-provenance.md" \
             --output "docs/assets/infographics/pr-${PR_NUMBER}.webp"
@@ -375,3 +392,34 @@ jobs:
           Path(output_path).write_text(body, encoding="utf-8")
           PY
           gh pr edit "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file "${updated_body}"
+
+  recheck:
+    name: BM Bossbot Thread Recheck
+    if: |
+      github.event_name == 'pull_request_review' ||
+      github.event_name == 'pull_request_review_comment' ||
+      github.event_name == 'pull_request_review_thread'
+    runs-on: ubuntu-latest
+    # Job-level concurrency: collapse bursts of thread events for one PR while
+    # staying isolated from the review job's group so neither cancels the other.
+    concurrency:
+      group: bm-bossbot-recheck-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout trusted base ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Re-evaluate approval from review-thread state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          uv run --script scripts/bm_bossbot_status.py recheck \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

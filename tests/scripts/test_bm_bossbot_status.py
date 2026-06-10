@@ -136,8 +136,11 @@ def test_finalize_review_fetches_current_pr_body_before_upserting(
         statuses.append(payload)
 
     monkeypatch.setattr(bm_bossbot_status, "get_pull_request_body", fake_get_pull_request_body)
-    monkeypatch.setattr(bm_bossbot_status, "update_pull_request_body", fake_update_pull_request_body)
+    monkeypatch.setattr(
+        bm_bossbot_status, "update_pull_request_body", fake_update_pull_request_body
+    )
     monkeypatch.setattr(bm_bossbot_status, "set_commit_status", fake_set_commit_status)
+    monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", lambda **_: 0)
 
     result = bm_bossbot_status.finalize_review(
         event_path=event_path,
@@ -151,6 +154,234 @@ def test_finalize_review_fetches_current_pr_body_before_upserting(
     assert "Current body edited while the workflow was running" in updated_bodies[0]
     assert "Event snapshot body" not in updated_bodies[0]
     assert statuses[0]["state"] == "success"
+
+
+def test_finalize_review_blocks_approval_on_unresolved_review_threads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_path = tmp_path / "event.json"
+    review_path = tmp_path / "review.json"
+    event_path.write_text(json.dumps(_event_payload()), encoding="utf-8")
+    review_path.write_text(json.dumps(_review_payload()), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    statuses: list[Mapping[str, str]] = []
+
+    monkeypatch.setattr(bm_bossbot_status, "get_pull_request_body", lambda **_: "Body")
+    monkeypatch.setattr(bm_bossbot_status, "update_pull_request_body", lambda **_: None)
+    monkeypatch.setattr(
+        bm_bossbot_status,
+        "set_commit_status",
+        lambda *, token, repo, sha, payload: statuses.append(payload),
+    )
+    monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", lambda **_: 2)
+
+    result = bm_bossbot_status.finalize_review(
+        event_path=event_path,
+        review_path=review_path,
+        repo=None,
+        run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/1",
+        token_env="GITHUB_TOKEN",
+    )
+
+    assert result.approved is False
+    assert result.state == "failure"
+    assert result.description == "BM Bossbot found 2 unresolved review thread(s)"
+    assert statuses[0]["state"] == "failure"
+
+
+def test_finalize_review_skips_thread_count_when_review_already_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_path = tmp_path / "event.json"
+    review_path = tmp_path / "review.json"
+    event_path.write_text(json.dumps(_event_payload()), encoding="utf-8")
+    review_path.write_text(
+        json.dumps(_review_payload(verdict="changes_requested")), encoding="utf-8"
+    )
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    monkeypatch.setattr(bm_bossbot_status, "get_pull_request_body", lambda **_: "Body")
+    monkeypatch.setattr(bm_bossbot_status, "update_pull_request_body", lambda **_: None)
+    monkeypatch.setattr(bm_bossbot_status, "set_commit_status", lambda **_: None)
+
+    def fail_count(**_: object) -> int:
+        raise AssertionError("thread count must not run when the review already failed")
+
+    monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", fail_count)
+
+    result = bm_bossbot_status.finalize_review(
+        event_path=event_path,
+        review_path=review_path,
+        repo=None,
+        run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/1",
+        token_env="GITHUB_TOKEN",
+    )
+
+    assert result.approved is False
+    assert result.description == "BM Bossbot requested changes"
+
+
+def test_count_unresolved_review_threads_pages_through_graphql_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = [
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": {"hasNextPage": True, "endCursor": "CUR"},
+                            "nodes": [{"isResolved": False}, {"isResolved": True}],
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [{"isResolved": False}],
+                        }
+                    }
+                }
+            }
+        },
+    ]
+    cursors: list[object] = []
+
+    def fake_github_request(
+        *, method: str, path: str, token: str, payload: Mapping[str, object] | None = None
+    ) -> object:
+        assert method == "POST"
+        assert path == "/graphql"
+        assert payload is not None
+        variables = payload["variables"]
+        assert isinstance(variables, Mapping)
+        cursors.append(variables["cursor"])
+        return pages.pop(0)
+
+    monkeypatch.setattr(bm_bossbot_status, "_github_request", fake_github_request)
+
+    count = bm_bossbot_status.count_unresolved_review_threads(
+        token="token", repo="basicmachines-co/basic-memory", number=925
+    )
+
+    assert count == 2
+    assert cursors == [None, "CUR"]
+
+
+def test_recheck_marks_failure_when_threads_are_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    statuses: list[Mapping[str, str]] = []
+
+    monkeypatch.setattr(bm_bossbot_status, "get_pull_request_head_sha", lambda **_: "abc123")
+    monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", lambda **_: 3)
+    monkeypatch.setattr(
+        bm_bossbot_status,
+        "set_commit_status",
+        lambda *, token, repo, sha, payload: statuses.append({"sha": sha, **payload}),
+    )
+
+    bm_bossbot_status.recheck_threads(
+        repo="basicmachines-co/basic-memory",
+        number=925,
+        run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/2",
+        token_env="GITHUB_TOKEN",
+    )
+
+    assert statuses[0]["sha"] == "abc123"
+    assert statuses[0]["state"] == "failure"
+    assert "3 unresolved review thread(s)" in statuses[0]["description"]
+
+
+def test_recheck_restores_prior_approval_when_threads_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    statuses: list[Mapping[str, str]] = []
+
+    monkeypatch.setattr(bm_bossbot_status, "get_pull_request_head_sha", lambda **_: "abc123")
+    monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", lambda **_: 0)
+    monkeypatch.setattr(bm_bossbot_status, "head_sha_was_approved", lambda **_: True)
+    monkeypatch.setattr(
+        bm_bossbot_status,
+        "set_commit_status",
+        lambda *, token, repo, sha, payload: statuses.append(payload),
+    )
+
+    bm_bossbot_status.recheck_threads(
+        repo="basicmachines-co/basic-memory",
+        number=925,
+        run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/2",
+        token_env="GITHUB_TOKEN",
+    )
+
+    assert statuses[0]["state"] == "success"
+    assert statuses[0]["description"] == "BM Bossbot approved this head SHA"
+
+
+def test_recheck_leaves_status_alone_without_prior_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    monkeypatch.setattr(bm_bossbot_status, "get_pull_request_head_sha", lambda **_: "abc123")
+    monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", lambda **_: 0)
+    monkeypatch.setattr(bm_bossbot_status, "head_sha_was_approved", lambda **_: False)
+
+    def fail_set_status(**_: object) -> None:
+        raise AssertionError("status must not change without a prior approval")
+
+    monkeypatch.setattr(bm_bossbot_status, "set_commit_status", fail_set_status)
+
+    bm_bossbot_status.recheck_threads(
+        repo="basicmachines-co/basic-memory",
+        number=925,
+        run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/2",
+        token_env="GITHUB_TOKEN",
+    )
+
+
+def test_head_sha_was_approved_matches_only_the_approval_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history = [
+        {
+            "context": "BM Bossbot Approval",
+            "state": "failure",
+            "description": "BM Bossbot found 2 unresolved review thread(s)",
+        },
+        {
+            "context": "BM Bossbot Approval",
+            "state": "success",
+            "description": "BM Bossbot approved this head SHA",
+        },
+        {"context": "license/cla", "state": "success", "description": "ok"},
+    ]
+    monkeypatch.setattr(bm_bossbot_status, "_github_request", lambda **_: history)
+
+    assert (
+        bm_bossbot_status.head_sha_was_approved(
+            token="token", repo="basicmachines-co/basic-memory", sha="abc123"
+        )
+        is True
+    )
+
+    monkeypatch.setattr(bm_bossbot_status, "_github_request", lambda **_: history[:1])
+    assert (
+        bm_bossbot_status.head_sha_was_approved(
+            token="token", repo="basicmachines-co/basic-memory", sha="abc123"
+        )
+        is False
+    )
 
 
 def test_finalize_cli_marks_failure_when_review_file_is_missing(
@@ -181,7 +412,9 @@ def test_finalize_cli_marks_failure_when_review_file_is_missing(
         statuses.append(payload)
 
     monkeypatch.setattr(bm_bossbot_status, "get_pull_request_body", fake_get_pull_request_body)
-    monkeypatch.setattr(bm_bossbot_status, "update_pull_request_body", fake_update_pull_request_body)
+    monkeypatch.setattr(
+        bm_bossbot_status, "update_pull_request_body", fake_update_pull_request_body
+    )
     monkeypatch.setattr(bm_bossbot_status, "set_commit_status", fake_set_commit_status)
 
     result = CliRunner().invoke(
