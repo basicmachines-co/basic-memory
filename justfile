@@ -40,11 +40,15 @@ test-postgres: test-unit-postgres test-int-postgres
 
 # Run unit tests against SQLite
 test-unit-sqlite: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-sqlite tests
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-sqlite --ignore=tests/scripts --ignore=tests/ci tests
 
 # Run unit tests against Postgres
 test-unit-postgres: testmon-seed
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-postgres tests
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-postgres --ignore=tests/scripts --ignore=tests/ci tests
+
+# Run CI-tooling tests (bossbot scripts, workflow guards) — once, not per matrix leg
+test-ci-tooling:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov tests/scripts tests/ci
 
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)

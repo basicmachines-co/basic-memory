@@ -54,6 +54,10 @@ jobs:
         run: |
           just typecheck
 
+      - name: Run CI tooling tests
+        run: |
+          just test-ci-tooling
+
       - name: Run linting
         run: |
           just lint
