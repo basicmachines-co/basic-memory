@@ -91,6 +91,10 @@ def test_bm_bossbot_assets_are_non_gating_and_separate_from_review_job() -> None
         encoding="utf-8"
     )
     assert "--provenance-output" in WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "git rm -rf --ignore-unmatch ." in WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "<!-- pr-infographic:start -->" in WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "gh pr edit" in WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "--body-file" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "BM_INFOGRAPHIC_PROVENANCE:start" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "BM_INFOGRAPHIC_PROVENANCE:end" in WORKFLOW_PATH.read_text(encoding="utf-8")
 

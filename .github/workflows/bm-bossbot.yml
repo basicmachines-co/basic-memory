@@ -282,7 +282,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch --orphan "${asset_branch}"
-          git rm -rf .
+          git rm -rf --ignore-unmatch .
           mkdir -p "$(dirname "${asset_path}")"
           cp "${tmp_asset}" "${asset_path}"
           git add "${asset_path}"
