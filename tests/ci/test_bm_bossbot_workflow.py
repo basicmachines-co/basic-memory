@@ -90,6 +90,8 @@ def test_bm_bossbot_rejects_stale_successful_test_runs_before_codex() -> None:
     assert "tested_sha" in normalize["run"]
     assert "current_head_sha" in normalize["run"]
     assert "actions/workflows/test.yml/runs" in normalize["run"]
+    assert "-f event=push" in normalize["run"]
+    assert "-f event=pull_request" not in normalize["run"]
     assert "-f head_sha=\"${current_head_sha}\"" in normalize["run"]
     assert 'select(.conclusion == "success")' in normalize["run"]
     assert "no successful Tests workflow for ${current_head_sha}" in workflow_text

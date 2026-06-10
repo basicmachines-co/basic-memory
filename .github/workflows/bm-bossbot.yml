@@ -75,7 +75,7 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             tests_run_id="$(
               gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/test.yml/runs" \
-                -f event=pull_request \
+                -f event=push \
                 -f head_sha="${current_head_sha}" \
                 -f status=completed \
                 --jq '[.workflow_runs[] | select(.conclusion == "success")][0].id // ""'
