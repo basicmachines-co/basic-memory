@@ -179,11 +179,15 @@ jobs:
           just test-int-sqlite
 
   test-postgres-unit:
-    name: Test Postgres Unit (Python ${{ matrix.python-version }})
+    name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/3)
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
+        # Shard the largest suite across parallel jobs: each shard is a full job
+        # with its own Postgres service running 1/3 of the collection.
+        group: [1, 2, 3]
+        python-version: ["3.12", "3.13", "3.14"]
         include:
           - python-version: "3.12"
             os: depot-ubuntu-24.04
@@ -235,10 +239,10 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-main-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
             ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-
 
       - name: Create virtual env
@@ -251,7 +255,7 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-unit-postgres
+          BASIC_MEMORY_PYTEST_SPLIT_FLAGS="--splits 3 --group ${{ matrix.group }}" just test-unit-postgres
 
   test-postgres-integration:
     name: Test Postgres Integration (Python ${{ matrix.python-version }})
