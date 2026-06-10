@@ -1248,6 +1248,78 @@ async def test_index_entity_multiple_categories_same_content(
     assert len(results) >= 2
 
 
+@pytest.mark.asyncio
+async def test_index_entity_long_observations_shared_prefix_both_searchable(
+    search_service, session_maker, test_project
+):
+    """Regression test for issue #909: truncated permalink collisions drop observations.
+
+    Observation permalinks truncate content to 200 chars (PostgreSQL btree limit),
+    so two distinct observations of the same category sharing a 200-char prefix
+    collided on the same synthetic permalink and the second was silently skipped
+    during indexing. Both must be independently searchable.
+    """
+    from basic_memory.repository import EntityRepository, ObservationRepository
+    from datetime import datetime
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+
+    entity_data = {
+        "title": "Long Observation Collision Entity",
+        "note_type": "note",
+        "entity_metadata": {},
+        "content_type": "text/markdown",
+        "file_path": "test/long-obs-collision.md",
+        "permalink": "test/long-obs-collision",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+    entity = await entity_repo.create(entity_data)
+
+    # Identical for the first 210 chars (beyond the 200-char truncation point),
+    # differing only in the trailing unique marker
+    shared_prefix = "x" * 210
+    await obs_repo.create(
+        {
+            "entity_id": entity.id,
+            "category": "note",
+            "content": f"{shared_prefix} ALPHA_UNIQUE_MARKER",
+        }
+    )
+    await obs_repo.create(
+        {
+            "entity_id": entity.id,
+            "category": "note",
+            "content": f"{shared_prefix} BETA_UNIQUE_MARKER",
+        }
+    )
+
+    # Reload entity with observations (get_by_permalink eagerly loads observations)
+    entity = await entity_repo.get_by_permalink("test/long-obs-collision")
+    assert entity is not None
+    assert len(entity.observations) == 2
+
+    # Distinct content must produce distinct permalinks despite the shared prefix
+    permalinks = {obs.permalink for obs in entity.observations}
+    assert len(permalinks) == 2
+
+    await search_service.index_entity(entity, content="")
+
+    # The second observation must be findable by its own unique marker
+    results = await search_service.search(
+        SearchQuery(text="BETA_UNIQUE_MARKER", entity_types=[SearchItemType.OBSERVATION])
+    )
+    assert any("BETA_UNIQUE_MARKER" in (r.content_snippet or "") for r in results)
+
+    # The first observation must remain findable as well
+    results = await search_service.search(
+        SearchQuery(text="ALPHA_UNIQUE_MARKER", entity_types=[SearchItemType.OBSERVATION])
+    )
+    assert any("ALPHA_UNIQUE_MARKER" in (r.content_snippet or "") for r in results)
+
+
 # Tests for NUL byte stripping
 
 

@@ -28,7 +28,6 @@ def test_generate_pr_infographic_cli_help_exposes_useful_options() -> None:
     assert "--pr-body-file" in help_text
     assert "--output" in help_text
     assert "--theme" in help_text
-    assert "--visual-format" in help_text
     assert "--provenance-output" in help_text
     assert "--print-prompt" in help_text
     assert "--dry-run" in help_text
@@ -76,7 +75,7 @@ def test_extract_infographic_theme_is_optional() -> None:
     assert generate_pr_infographic.extract_infographic_theme("No theme") is None
 
 
-def test_select_infographic_theme_reports_source() -> None:
+def test_select_image_theme_reports_source() -> None:
     body = "\n".join(
         [
             "<!-- BM_INFOGRAPHIC_THEME:start -->",
@@ -85,15 +84,21 @@ def test_select_infographic_theme_reports_source() -> None:
         ]
     )
 
-    from_body = generate_pr_infographic.select_infographic_theme(
+    from_body = generate_pr_infographic.select_image_theme(
+        pr_number=42,
+        summary="Summary: Adds a merge gate.",
         pr_body=body,
         theme_override=None,
     )
-    from_cli = generate_pr_infographic.select_infographic_theme(
+    from_cli = generate_pr_infographic.select_image_theme(
+        pr_number=42,
+        summary="Summary: Adds a merge gate.",
         pr_body=body,
         theme_override="80's action movies",
     )
-    from_none = generate_pr_infographic.select_infographic_theme(
+    from_auto = generate_pr_infographic.select_image_theme(
+        pr_number=42,
+        summary="Summary: Adds a merge gate.",
         pr_body="No theme",
         theme_override=None,
     )
@@ -102,8 +107,8 @@ def test_select_infographic_theme_reports_source() -> None:
     assert from_body.source == generate_pr_infographic.ThemeSource.PR_BODY
     assert from_cli.theme == "80's action movies"
     assert from_cli.source == generate_pr_infographic.ThemeSource.CLI
-    assert from_none.theme is None
-    assert from_none.source == generate_pr_infographic.ThemeSource.NONE
+    assert from_auto.theme in generate_pr_infographic.BM_IMAGE_THEME_POOL
+    assert from_auto.source == generate_pr_infographic.ThemeSource.AUTO
 
 
 def test_build_infographic_prompt_uses_summary_without_making_gate_claims() -> None:
@@ -111,56 +116,54 @@ def test_build_infographic_prompt_uses_summary_without_making_gate_claims() -> N
         pr_number=42,
         summary="Verdict: approve\nSummary: Adds a merge gate.",
         theme="WWII propaganda posters with home-front logistics routes",
-        visual_format=generate_pr_infographic.VisualFormat.AUTO,
+        theme_source=generate_pr_infographic.ThemeSource.CLI,
     )
 
     assert "PR #42" in prompt
     assert "Adds a merge gate" in prompt
     assert "WWII propaganda posters" in prompt
+    assert "User-supplied visual direction" in prompt
     assert "style inspiration only" in prompt
-    assert "choose the most appropriate visual form" in prompt.lower()
-    assert "Choose exactly one visual mode" in prompt
-    assert "Do not blend the modes" in prompt
+    assert "polished landscape WebP editorial image" in prompt
+    assert "image-first composition" in prompt
     assert "scene" in prompt
     assert "poster" in prompt
-    assert "tableau" in prompt
-    assert "map backbone" in prompt
+    assert "painting" in prompt
+    assert "classic photograph" in prompt
+    assert "symbolic tableau" in prompt
     assert "before/after value story" in prompt
+    assert "Do not render an infographic" in prompt
+    assert "dashboard" in prompt
+    assert "flowchart" in prompt
     assert "copyrighted characters" in prompt
     assert "restrained" not in prompt
     assert "non-gating" in prompt
     assert "BM Bossbot Approval" in prompt
 
 
-def test_build_infographic_provenance_block_includes_choices_and_prompt() -> None:
-    prompt = "Create <gate> & keep `sha` exact."
+def test_build_infographic_provenance_block_includes_image_choices_without_prompt() -> None:
     block = generate_pr_infographic.build_infographic_provenance_block(
         pr_number=42,
         output_path=Path("docs/assets/infographics/pr-42.webp"),
         model="gpt-image-2",
         size="1536x1024",
         quality="high",
-        visual_format=generate_pr_infographic.VisualFormat.IMAGE,
         theme="classic black-and-white photography",
         theme_source=generate_pr_infographic.ThemeSource.CLI,
-        prompt=prompt,
-        revised_prompt="A black-and-white editorial photo of a guarded merge gate.",
     )
 
     assert generate_pr_infographic.PROVENANCE_START in block
     assert generate_pr_infographic.PROVENANCE_END in block
-    assert "BM Bossbot image provenance" in block
+    assert "BM Bossbot image choices" in block
     assert "Generated asset: `docs/assets/infographics/pr-42.webp`" in block
     assert "Image model: `gpt-image-2`" in block
     assert "Size: `1536x1024`" in block
     assert "Quality: `high`" in block
-    assert "Visual format: `image`" in block
+    assert "Image mode: `editorial-image`" in block
     assert "Theme source: `cli`" in block
     assert "classic black-and-white photography" in block
-    assert "Image prompt sent to `gpt-image-2`" in block
-    assert "Create &lt;gate&gt; &amp; keep `sha` exact." in block
-    assert "Images API revised prompt" in block
-    assert "black-and-white editorial photo" in block
+    assert "Image prompt sent to" not in block
+    assert "Images API revised prompt" not in block
 
 
 def test_upsert_managed_block_appends_and_replaces() -> None:
@@ -198,47 +201,35 @@ def test_upsert_managed_block_appends_and_replaces() -> None:
     assert replaced.count(generate_pr_infographic.PROVENANCE_START) == 1
 
 
-def test_build_infographic_prompt_can_force_infographic_format() -> None:
+def test_build_infographic_prompt_uses_auto_theme_as_visual_direction() -> None:
+    theme = generate_pr_infographic.select_image_theme(
+        pr_number=42,
+        summary="Verdict: approve\nSummary: Adds a merge gate.",
+        pr_body="No theme",
+        theme_override=None,
+    )
     prompt = generate_pr_infographic.build_infographic_prompt(
         pr_number=42,
         summary="Verdict: approve\nSummary: Adds a merge gate.",
-        visual_format=generate_pr_infographic.VisualFormat.INFOGRAPHIC,
+        theme=theme.theme,
+        theme_source=theme.source,
     )
 
-    assert "Use an infographic or map format." in prompt
-    assert "Use structured information design" in prompt
-    assert "data panels" in prompt
-    assert "timeline" in prompt
-    assert "bullet list" in prompt
-    assert "primarily scenic image" in prompt
-
-
-def test_build_infographic_prompt_can_force_regular_image_format() -> None:
-    prompt = generate_pr_infographic.build_infographic_prompt(
-        pr_number=42,
-        summary="Verdict: approve\nSummary: Adds a merge gate.",
-        visual_format=generate_pr_infographic.VisualFormat.IMAGE,
-    )
-
-    assert "Use a regular image format" in prompt
+    assert "Selected BM visual direction" in prompt
+    assert theme.theme in prompt
     assert "Use image-first composition" in prompt
-    assert "actual scene" in prompt
     assert "movie poster" in prompt
     assert "painting" in prompt
-    assert "editorial" in prompt
-    assert "single staged visual moment" in prompt
+    assert "classic photograph" in prompt
     assert "scene" in prompt
     assert "poster" in prompt
-    assert "tableau" in prompt
     assert "cover image" in prompt
-    assert "illustrated" in prompt
-    assert "at most a short title" in prompt
-    assert "Do not use data panels" in prompt
-    assert "dashboard" in prompt
-    assert "timeline strips" in prompt
-    assert "bullet lists" in prompt
+    assert "symbolic tableau" in prompt
+    assert "Use at most a short title" in prompt
     assert "Do not render an infographic" in prompt
-    assert "dense text-heavy infographic" in prompt
+    assert "dashboard" in prompt
+    assert "flowchart" in prompt
+    assert "bullet-list panel" in prompt
 
 
 @pytest.mark.parametrize("flag", ["--print-prompt", "--dry-run"])
@@ -280,17 +271,19 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
             str(body_file),
             "--output",
             str(output),
-            "--visual-format",
-            "image",
             flag,
         ],
     )
 
     assert result.exit_code == 0, result.output
-    assert "Create a polished landscape WebP visual for Basic Memory PR #42" in result.output
+    assert (
+        "Create a polished landscape WebP editorial image for Basic Memory PR #42"
+        in result.output
+    )
     assert "Adds a merge gate" in result.output
     assert "space exploration and astronomy" in result.output
-    assert "Use a regular image format" in result.output
+    assert "image-first composition" in result.output
+    assert "Do not render an infographic" in result.output
     assert "BM Bossbot Approval" in result.output
     assert not output.exists()
 
@@ -340,8 +333,6 @@ def test_generate_pr_infographic_writes_provenance_after_image_generation(
             str(body_file),
             "--output",
             str(output),
-            "--visual-format",
-            "image",
             "--provenance-output",
             str(provenance),
         ],
@@ -351,13 +342,13 @@ def test_generate_pr_infographic_writes_provenance_after_image_generation(
     assert output.exists()
     text = provenance.read_text(encoding="utf-8")
     assert "Generated asset:" in text
-    assert "Visual format: `image`" in text
+    assert "Image mode: `editorial-image`" in text
     assert "Theme source: `pr-body`" in text
     assert "paintings: Rembrandt-inspired merge gate" in text
-    assert "Image prompt sent to `gpt-image-2`" in text
-    assert "Images API revised prompt" in text
-    assert "robot guarding a merge gate" in text
-    assert "Adds a merge gate" in text
+    assert "Image prompt sent to" not in text
+    assert "Images API revised prompt" not in text
+    assert "robot guarding a merge gate" not in text
+    assert "Adds a merge gate" not in text
 
 
 def test_validate_output_path_must_stay_under_docs_assets_infographics(tmp_path: Path) -> None:
