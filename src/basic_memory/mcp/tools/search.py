@@ -11,7 +11,13 @@ from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager, has_cloud_credentials
-from basic_memory.utils import build_canonical_permalink, coerce_dict, coerce_list, parse_tags
+from basic_memory.utils import (
+    build_canonical_permalink,
+    coerce_dict,
+    coerce_list,
+    parse_tags,
+    strict_search_tags,
+)
 from basic_memory.mcp.async_client import (
     _explicit_routing,
     _force_local_mode,
@@ -676,13 +682,15 @@ async def search_notes(
         Dict[str, Any] | None,
         BeforeValidator(coerce_dict),
     ] = None,
-    # parse_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to match the
-    # tag: query shorthand below and write_note's documented tags convention (#910).
-    # coerce_list would wrap the comma string as the single literal tag ["a,b"],
-    # which matches nothing.
+    # strict_search_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to
+    # match the tag: query shorthand below and write_note's documented tags convention
+    # (#910). coerce_list would wrap the comma string as the single literal tag
+    # ["a,b"], which matches nothing. Unlike bare parse_tags, the strict wrapper only
+    # splits str/list/None and lets Pydantic reject other types (42, {"a": 1}) with a
+    # clear validation error instead of stringifying them into junk tags.
     tags: Annotated[
         List[str] | None,
-        BeforeValidator(parse_tags),
+        BeforeValidator(strict_search_tags),
     ] = None,
     status: Optional[str] = None,
     min_similarity: Annotated[
@@ -892,6 +900,15 @@ async def search_notes(
     # Categories are matched exactly against the indexed observation category,
     # so preserve their original casing (unlike the lowercased note_types).
     categories = categories or []
+
+    # Trigger: tags arrived via a direct function call instead of the MCP layer.
+    # Why: the BeforeValidator above only runs through MCP/Pydantic validation; direct
+    #      callers (e.g. `bm tool search-notes --tag a,b` in cli/commands/tool.py, which
+    #      Typer collects as the one-element list ["a,b"]) would otherwise forward the
+    #      comma string as one literal tag that matches nothing (#910).
+    # Outcome: comma-split/list normalization applies on every path; parse_tags is
+    #          idempotent, so MCP-validated input passes through unchanged.
+    tags = parse_tags(tags) or None
 
     # Parse tag:<value> shorthand at tool level so it works with all search modes.
     # Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing".

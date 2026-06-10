@@ -1694,6 +1694,88 @@ async def test_search_notes_tags_comma_string_filters_via_mcp(mcp, client, test_
         assert not await found("gamma")
 
 
+def test_search_notes_tags_annotation_rejects_non_string_types():
+    """Unsupported tag types must fail validation, not be stringified (#932 follow-up).
+
+    Bare parse_tags coerces anything to strings (42 -> ["42"], {"a": 1} -> junk tags),
+    silently turning caller mistakes into no-result searches. The strict_search_tags
+    wrapper only normalizes str/list/None and lets Pydantic reject everything else.
+    """
+    from pydantic import ValidationError
+
+    annotation = inspect.signature(search_notes).parameters["tags"].annotation
+    adapter = TypeAdapter(annotation)
+
+    with pytest.raises(ValidationError):
+        adapter.validate_python(42)
+    with pytest.raises(ValidationError):
+        adapter.validate_python({"a": 1})
+
+    # None stays a valid "no filter" input.
+    assert adapter.validate_python(None) in (None, [])
+
+
+@pytest.mark.asyncio
+async def test_search_notes_tags_invalid_type_rejected_via_mcp(mcp, client, test_project):
+    """tags=42 through the real MCP layer must raise a validation error (#932 follow-up)."""
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError
+
+    async with Client(mcp) as mcp_client:
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": 42,
+                },
+            )
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": {"a": 1},
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_search_notes_direct_call_splits_comma_tags(client, test_project):
+    """Direct callers bypass the BeforeValidator, so the body must normalize tags.
+
+    Regression for the CLI path: `bm tool search-notes --tag alpha,beta` calls this
+    function directly with Typer's collected list ["alpha,beta"], which must split
+    into ["alpha", "beta"] instead of matching nothing (#910, #932 follow-up).
+    """
+    await write_note(
+        project=test_project.name,
+        title="Direct Tag Split Note",
+        directory="test",
+        content="# Direct Tag Split Note\nDirectTagToken body",
+        tags=["alpha", "beta"],
+    )
+
+    async def found(tags_value: list[str] | None) -> bool:
+        result = await search_notes(
+            project=test_project.name,
+            query="DirectTagToken",
+            search_type="text",
+            output_format="json",
+            tags=tags_value,
+        )
+        assert isinstance(result, dict), f"search failed: {result}"
+        return any(r["title"] == "Direct Tag Split Note" for r in result["results"])
+
+    assert await found(["alpha"]), "plain tag list must match (sanity)"
+    # The CLI regression: Typer collects --tag alpha,beta as the single element "alpha,beta".
+    assert await found(["alpha,beta"])
+    # Negative control: the filter is still applied.
+    assert not await found(["gamma"])
+
+
 # --- Tests for text output format (#641) -----------------------------------
 
 

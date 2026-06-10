@@ -1,9 +1,9 @@
-"""Tests for coerce_list and coerce_dict utility functions.
+"""Tests for coerce_list, coerce_dict, and strict_search_tags utility functions.
 
 These must fail until the helpers are implemented in utils.py.
 """
 
-from basic_memory.utils import coerce_list, coerce_dict
+from basic_memory.utils import coerce_list, coerce_dict, strict_search_tags
 
 
 class TestCoerceList:
@@ -31,6 +31,33 @@ class TestCoerceList:
     def test_int_passthrough(self):
         """Non-string, non-None values pass through unchanged."""
         assert coerce_list(42) == 42
+
+
+class TestStrictSearchTags:
+    """Tests for strict_search_tags (the search_notes tags boundary coercer)."""
+
+    def test_none_parses_to_empty_list(self):
+        assert strict_search_tags(None) == []
+
+    def test_comma_string_splits(self):
+        assert strict_search_tags("a,b") == ["a", "b"]
+
+    def test_list_with_comma_element_splits(self):
+        assert strict_search_tags(["alpha,beta"]) == ["alpha", "beta"]
+
+    def test_plain_list_passthrough(self):
+        assert strict_search_tags(["a", "b"]) == ["a", "b"]
+
+    def test_json_array_string(self):
+        assert strict_search_tags('["a", "b"]') == ["a", "b"]
+
+    def test_int_passthrough_for_pydantic_rejection(self):
+        """Unsupported types pass through unchanged so Pydantic rejects them."""
+        assert strict_search_tags(42) == 42
+
+    def test_dict_passthrough_for_pydantic_rejection(self):
+        value = {"a": 1}
+        assert strict_search_tags(value) is value
 
 
 class TestCoerceDict:

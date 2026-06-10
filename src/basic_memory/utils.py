@@ -568,6 +568,19 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
         return []
 
 
+def strict_search_tags(v: Any) -> Any:
+    """Strictly coerce tag input at the search_notes tool boundary.
+
+    parse_tags stringifies anything (42 -> ["42"], {"a": 1} -> junk tags), which would
+    turn caller type mistakes into silent no-result searches. At the tool boundary only
+    str, list, and None are valid tag inputs; everything else passes through unchanged
+    so Pydantic rejects it with a clear validation error.
+    """
+    if v is None or isinstance(v, (str, list)):
+        return parse_tags(v)
+    return v
+
+
 def coerce_list(v: Any) -> Any:
     """Coerce string input to list for MCP clients that serialize lists as strings."""
     if v is None:
