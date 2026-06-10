@@ -73,6 +73,23 @@ class TestStrictSearchTags:
         value = ["ok", 42]
         assert strict_search_tags(value) is value
 
+    def test_json_array_string_with_int_passthrough_for_pydantic_rejection(self):
+        """A JSON-array string with non-string elements must not be stringified."""
+        value = "[42]"
+        assert strict_search_tags(value) is value
+
+    def test_json_array_string_with_dict_passthrough_for_pydantic_rejection(self):
+        value = '[{"a": 1}]'
+        assert strict_search_tags(value) is value
+
+    def test_json_array_string_mixed_passthrough_for_pydantic_rejection(self):
+        """One bad element poisons the whole JSON-array string — no partial parse."""
+        value = '["ok", 42]'
+        assert strict_search_tags(value) is value
+
+    def test_json_array_string_all_strings_still_parses(self):
+        assert strict_search_tags('["a","b"]') == ["a", "b"]
+
 
 class TestCoerceDict:
     """Tests for coerce_dict."""

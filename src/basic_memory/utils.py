@@ -576,9 +576,25 @@ def strict_search_tags(v: Any) -> Any:
     str, all-string lists, and None are valid tag inputs; everything else — including
     lists with non-string elements like [42] — passes through unchanged so Pydantic
     rejects it with a clear validation error.
+
+    JSON array strings (the MCP clients-serialize-arrays-as-strings path) get the same
+    all-string check: '[42]' or '["ok", 42]' would otherwise be stringified by
+    parse_tags' recursive JSON handling before Pydantic ever sees the bad elements.
     """
     if isinstance(v, list) and not all(isinstance(item, str) for item in v):
         return v
+    # Trigger: a str that looks like a JSON array, mirroring parse_tags' detection.
+    # Why: parse_tags recursively parses JSON arrays, stringifying non-string elements
+    #   ('[42]' -> ["42"]) and hiding the type error from Pydantic.
+    # Outcome: malformed arrays pass through unchanged so Pydantic rejects them; valid
+    #   all-string arrays and plain comma strings still delegate to parse_tags.
+    if isinstance(v, str) and v.strip().startswith("[") and v.strip().endswith("]"):
+        try:
+            parsed = json.loads(v)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list) and not all(isinstance(item, str) for item in parsed):
+            return v
     if v is None or isinstance(v, (str, list)):
         return parse_tags(v)
     return v

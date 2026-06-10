@@ -1719,8 +1719,18 @@ def test_search_notes_tags_annotation_rejects_non_string_types():
     with pytest.raises(ValidationError):
         adapter.validate_python(["ok", 42])
 
-    # All-string lists remain valid.
+    # JSON-array strings with non-string elements must fail the same way — parse_tags
+    # would otherwise recursively stringify them before Pydantic validates List[str].
+    with pytest.raises(ValidationError):
+        adapter.validate_python("[42]")
+    with pytest.raises(ValidationError):
+        adapter.validate_python('[{"a": 1}]')
+    with pytest.raises(ValidationError):
+        adapter.validate_python('["ok", 42]')
+
+    # All-string lists and all-string JSON-array strings remain valid.
     assert adapter.validate_python(["a", "b"]) == ["a", "b"]
+    assert adapter.validate_python('["a","b"]') == ["a", "b"]
 
     # None stays a valid "no filter" input.
     assert adapter.validate_python(None) in (None, [])
@@ -1779,6 +1789,44 @@ async def test_search_notes_tags_invalid_type_rejected_via_mcp(mcp, client, test
                     "tags": ["ok", 42],
                 },
             )
+        # JSON-array strings with non-string elements (clients that serialize arrays as
+        # strings) must be rejected too, not recursively stringified by parse_tags.
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": "[42]",
+                },
+            )
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": '[{"a": 1}]',
+                },
+            )
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": '["ok", 42]',
+                },
+            )
+        # Sanity: a valid all-string JSON-array string is still accepted.
+        await mcp_client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "anything",
+                "tags": '["a","b"]',
+            },
+        )
 
 
 @pytest.mark.asyncio
