@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 import pytest
 from typer.testing import CliRunner
@@ -255,15 +255,14 @@ def test_count_unresolved_review_threads_pages_through_graphql_results(
     ]
     cursors: list[object] = []
 
+    # Signature mirrors bm_bossbot_status._github_request (payload: Mapping[str, Any] | None).
     def fake_github_request(
-        *, method: str, path: str, token: str, payload: Mapping[str, object] | None = None
+        *, method: str, path: str, token: str, payload: Mapping[str, Any] | None = None
     ) -> object:
         assert method == "POST"
         assert path == "/graphql"
         assert payload is not None
-        variables = payload["variables"]
-        assert isinstance(variables, Mapping)
-        cursors.append(variables["cursor"])
+        cursors.append(payload["variables"]["cursor"])
         return pages.pop(0)
 
     monkeypatch.setattr(bm_bossbot_status, "_github_request", fake_github_request)
