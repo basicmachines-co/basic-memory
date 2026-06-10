@@ -64,22 +64,47 @@ transcript_path = payload.get("transcript_path") or ""
 session_id = payload.get("session_id") or ""
 
 
+def _read_block(path):
+    try:
+        with open(path) as fh:
+            block = json.load(fh).get("basicMemory")
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    return block if isinstance(block, dict) else None
+
+
+def _project_dir(directory):
+    # Nearest ancestor (including directory) holding a .claude settings file.
+    d = os.path.abspath(directory)
+    while True:
+        for name in ("settings.json", "settings.local.json"):
+            if os.path.isfile(os.path.join(d, ".claude", name)):
+                return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return os.path.abspath(directory)
+        d = parent
+
+
 def load_settings(directory):
-    # Same precedence as session-start.sh: user-level ~/.claude is the base,
-    # the project's .claude overrides it, settings.local.json wins per level.
+    # Same precedence as session-start.sh: user-level ~/.claude/settings.json is
+    # the base (no user-level settings.local.json — it isn't a real Claude Code
+    # source), then the nearest project .claude (settings.json, then
+    # settings.local.json) overrides it. cwd may be a repo subdirectory, so walk
+    # ancestors to the project root rather than reading cwd alone.
     merged = {}
     home = os.path.expanduser("~")
-    dirs = [home] if os.path.abspath(directory) == home else [home, directory]
-    for d in dirs:
-        for name in ("settings.json", "settings.local.json"):
-            path = os.path.join(d, ".claude", name)
-            try:
-                with open(path) as fh:
-                    merged.update(json.load(fh).get("basicMemory") or {})
-            except FileNotFoundError:
-                continue
-            except Exception:
-                continue
+    sources = [(home, ("settings.json",))]
+    project = _project_dir(directory)
+    if os.path.abspath(project) != home:
+        sources.append((project, ("settings.json", "settings.local.json")))
+    for d, names in sources:
+        for name in names:
+            block = _read_block(os.path.join(d, ".claude", name))
+            if block is not None:
+                merged.update(block)
     return merged
 
 
