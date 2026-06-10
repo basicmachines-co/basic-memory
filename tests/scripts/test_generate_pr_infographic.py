@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -25,8 +26,7 @@ def test_generate_pr_infographic_cli_help_exposes_useful_options() -> None:
 
     assert result.exit_code == 0
     assert "--pr-number" in help_text
-    assert "--pr-title" in help_text
-    assert "--pr-body-file" in help_text
+    assert "--pr-context-file" in help_text
     assert "--output" in help_text
     assert "--theme" in help_text
     assert "--provenance-output" in help_text
@@ -66,6 +66,51 @@ def test_extract_pr_content_strips_managed_bot_blocks() -> None:
 
 def test_extract_pr_content_handles_body_without_managed_blocks() -> None:
     assert generate_pr_infographic.extract_pr_content("Plain description") == "Plain description"
+
+
+def test_build_change_shape_digests_delivery_context() -> None:
+    context = {
+        "labels": [{"name": "enhancement"}, {"name": "cloud"}],
+        "closingIssuesReferences": [{"number": 581, "title": "edit_note recovery"}],
+        "commits": [
+            {"messageHeadline": "fix(mcp): recover edit_note"},
+            {"messageHeadline": "fix(api): canonicalize sync-file paths"},
+        ],
+        "files": [
+            {"path": "src/basic_memory/mcp/tools/edit_note.py", "additions": 120, "deletions": 30},
+            {"path": "tests/mcp/test_tool_edit_note.py", "additions": 80, "deletions": 5},
+        ],
+    }
+
+    context["commits"].append({"messageHeadline": "Merge branch 'main' into fix/581"})
+    shape = generate_pr_infographic.build_change_shape(context)
+
+    assert "Labels: enhancement, cloud" in shape
+    assert "#581: edit_note recovery" in shape
+    assert "Commit subjects (2 total):" in shape
+    assert "Merge branch" not in shape
+    assert "fix(mcp): recover edit_note" in shape
+    assert "Files changed (2 total, +200/-35):" in shape
+    assert "src/basic_memory/mcp/tools/edit_note.py (+120/-30)" in shape
+
+
+def test_build_change_shape_caps_long_lists_and_handles_empty_context() -> None:
+    context = {
+        "commits": [{"messageHeadline": f"commit {i}"} for i in range(15)],
+        "files": [{"path": f"file-{i}.py", "additions": i, "deletions": 0} for i in range(15)],
+    }
+
+    shape = generate_pr_infographic.build_change_shape(context)
+
+    assert "Commit subjects (15 total):" in shape
+    assert "- ... and 5 more" in shape
+    assert "- ... and 5 more files" in shape
+    # Files are ranked by churn, so the biggest file leads the list.
+    assert shape.index("file-14.py") < shape.index("file-5.py")
+
+    assert (
+        generate_pr_infographic.build_change_shape({}) == "(no additional change context available)"
+    )
 
 
 def test_extract_infographic_theme_from_pr_body() -> None:
@@ -129,6 +174,7 @@ def test_build_infographic_prompt_depicts_pr_content_not_review_outcome() -> Non
         pr_number=42,
         pr_title="feat(sync): stream large files during cloud sync",
         pr_content="Streams PDFs in chunks instead of loading them fully into memory.",
+        change_shape="Labels: sync\nFiles changed (3 total, +90/-20):\n- src/basic_memory/sync/x.py (+80/-15)",
         theme="WWII propaganda posters with home-front logistics routes",
         theme_source=generate_pr_infographic.ThemeSource.CLI,
     )
@@ -152,6 +198,10 @@ def test_build_infographic_prompt_depicts_pr_content_not_review_outcome() -> Non
     assert "approval" in prompt.lower()
     assert "stamps" in prompt
     assert "checkmarks" in prompt
+    # Change shape grounds the imagery but must not become captions.
+    assert "Change shape" in prompt
+    assert "src/basic_memory/sync/x.py" in prompt
+    assert "never render file" in prompt
     # The old prompt fed the review summary and named the approval status,
     # which produced literal "BOSSBOT APPROVED" stamp images.
     assert "BM Bossbot summary:" not in prompt
@@ -229,6 +279,7 @@ def test_build_infographic_prompt_uses_auto_theme_as_visual_direction() -> None:
         pr_number=42,
         pr_title="feat(ci): add a merge gate",
         pr_content="Adds a deterministic merge gate for pull requests.",
+        change_shape="(no additional change context available)",
         theme=theme.theme,
         theme_source=theme.source,
     )
@@ -256,19 +307,28 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
     monkeypatch: pytest.MonkeyPatch,
     flag: str,
 ) -> None:
-    body_file = tmp_path / "pr-body.md"
-    body_file.write_text(
-        "\n".join(
-            [
-                "Adds a deterministic merge gate for pull requests.",
-                "<!-- BM_BOSSBOT_SUMMARY:start -->",
-                "Verdict: approve",
-                "Summary: review artifact that must not reach the image.",
-                "<!-- BM_BOSSBOT_SUMMARY:end -->",
-                "<!-- BM_INFOGRAPHIC_THEME:start -->",
-                "space exploration and astronomy",
-                "<!-- BM_INFOGRAPHIC_THEME:end -->",
-            ]
+    context_file = tmp_path / "pr-context.json"
+    context_file.write_text(
+        json.dumps(
+            {
+                "title": "feat(ci): add a merge gate",
+                "body": "\n".join(
+                    [
+                        "Adds a deterministic merge gate for pull requests.",
+                        "<!-- BM_BOSSBOT_SUMMARY:start -->",
+                        "Verdict: approve",
+                        "Summary: review artifact that must not reach the image.",
+                        "<!-- BM_BOSSBOT_SUMMARY:end -->",
+                        "<!-- BM_INFOGRAPHIC_THEME:start -->",
+                        "space exploration and astronomy",
+                        "<!-- BM_INFOGRAPHIC_THEME:end -->",
+                    ]
+                ),
+                "labels": [{"name": "ci"}],
+                "commits": [{"messageHeadline": "feat(ci): add a merge gate"}],
+                "files": [{"path": ".github/workflows/gate.yml", "additions": 40, "deletions": 2}],
+                "closingIssuesReferences": [{"number": 7, "title": "merge gate"}],
+            }
         ),
         encoding="utf-8",
     )
@@ -286,10 +346,8 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
         [
             "--pr-number",
             "42",
-            "--pr-title",
-            "feat(ci): add a merge gate",
-            "--pr-body-file",
-            str(body_file),
+            "--pr-context-file",
+            str(context_file),
             "--output",
             str(output),
             flag,
@@ -303,6 +361,9 @@ def test_generate_pr_infographic_can_print_prompt_without_image_call(
     assert "feat(ci): add a merge gate" in result.output
     assert "Adds a deterministic merge gate" in result.output
     assert "space exploration and astronomy" in result.output
+    assert "Labels: ci" in result.output
+    assert ".github/workflows/gate.yml" in result.output
+    assert "#7: merge gate" in result.output
     assert "image-first composition" in result.output
     assert "Do not render an infographic" in result.output
     assert "Verdict: approve" not in result.output
@@ -314,15 +375,20 @@ def test_generate_pr_infographic_writes_provenance_after_image_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    body_file = tmp_path / "pr-body.md"
-    body_file.write_text(
-        "\n".join(
-            [
-                "Adds a merge gate.",
-                "<!-- BM_INFOGRAPHIC_THEME:start -->",
-                "paintings: Rembrandt-inspired merge gate",
-                "<!-- BM_INFOGRAPHIC_THEME:end -->",
-            ]
+    context_file = tmp_path / "pr-context.json"
+    context_file.write_text(
+        json.dumps(
+            {
+                "title": "feat(ci): add a merge gate",
+                "body": "\n".join(
+                    [
+                        "Adds a merge gate.",
+                        "<!-- BM_INFOGRAPHIC_THEME:start -->",
+                        "paintings: Rembrandt-inspired merge gate",
+                        "<!-- BM_INFOGRAPHIC_THEME:end -->",
+                    ]
+                ),
+            }
         ),
         encoding="utf-8",
     )
@@ -348,10 +414,8 @@ def test_generate_pr_infographic_writes_provenance_after_image_generation(
         [
             "--pr-number",
             "42",
-            "--pr-title",
-            "feat(ci): add a merge gate",
-            "--pr-body-file",
-            str(body_file),
+            "--pr-context-file",
+            str(context_file),
             "--output",
             str(output),
             "--provenance-output",

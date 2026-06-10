@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, Mapping
 
 import typer
 
@@ -115,6 +116,66 @@ BM_IMAGE_THEME_POOL = (
 )
 
 
+def build_change_shape(
+    context: Mapping[str, Any],
+    *,
+    max_commits: int = 10,
+    max_files: int = 10,
+) -> str:
+    """Render a compact factual digest of the PR: labels, linked issues, commits, files.
+
+    Mirrors the delivery context the Basic Memory CI capture flow collects
+    (ProjectUpdateContext): the goal is to ground the image in the theme of the
+    WHOLE change — what it touches and why — not just the title/description.
+    """
+    lines: list[str] = []
+
+    labels = [str(label.get("name", "")) for label in context.get("labels") or []]
+    labels = [label for label in labels if label]
+    if labels:
+        lines.append(f"Labels: {', '.join(labels)}")
+
+    issues = context.get("closingIssuesReferences") or []
+    if issues:
+        lines.append("Linked issues:")
+        for issue in issues:
+            number = issue.get("number")
+            title = str(issue.get("title") or "").strip()
+            lines.append(f"- #{number}: {title}" if title else f"- #{number}")
+
+    commits = context.get("commits") or []
+    subjects = [str(commit.get("messageHeadline") or "").strip() for commit in commits]
+    # Merge commits carry no thematic signal — they're branch bookkeeping.
+    subjects = [
+        subject
+        for subject in subjects
+        if subject and not subject.startswith(("Merge branch ", "Merge pull request "))
+    ]
+    if subjects:
+        lines.append(f"Commit subjects ({len(subjects)} total):")
+        lines.extend(f"- {subject}" for subject in subjects[:max_commits])
+        if len(subjects) > max_commits:
+            lines.append(f"- ... and {len(subjects) - max_commits} more")
+
+    files = context.get("files") or []
+    if files:
+        additions = sum(int(item.get("additions") or 0) for item in files)
+        deletions = sum(int(item.get("deletions") or 0) for item in files)
+        lines.append(f"Files changed ({len(files)} total, +{additions}/-{deletions}):")
+        ranked = sorted(
+            files,
+            key=lambda item: int(item.get("additions") or 0) + int(item.get("deletions") or 0),
+            reverse=True,
+        )
+        for item in ranked[:max_files]:
+            path = str(item.get("path") or "")
+            lines.append(f"- {path} (+{item.get('additions') or 0}/-{item.get('deletions') or 0})")
+        if len(files) > max_files:
+            lines.append(f"- ... and {len(files) - max_files} more files")
+
+    return "\n".join(lines) if lines else "(no additional change context available)"
+
+
 def extract_pr_content(pr_body: str) -> str:
     """Return the author's own PR description with all managed bot blocks removed."""
     content = pr_body
@@ -210,6 +271,7 @@ def build_infographic_prompt(
     pr_number: int,
     pr_title: str,
     pr_content: str,
+    change_shape: str,
     theme: str,
     theme_source: ThemeSource,
 ) -> str:
@@ -223,8 +285,8 @@ def build_infographic_prompt(
 Create a polished landscape WebP editorial image for Basic Memory PR #{pr_number}.
 
 Your subject is the CONTENT of the pull request — what the change does and why
-it matters — described in the title and description below. Express the theme of
-the whole change as a visual story.
+it matters — described in the title, description, and change shape below.
+Express the theme of the whole change as a visual story.
 
 This image is decoration for the PR conversation. It is NOT a review artifact:
 do not depict review verdicts, approval, or process. Never render approval
@@ -238,6 +300,12 @@ Pull request title:
 
 Pull request description:
 {pr_content}
+
+Change shape — factual delivery context (labels, linked issues, commit
+subjects, changed files). Use it to understand what the whole PR touches and
+let that steer the imagery. It is context, NOT captions: never render file
+paths, diff stats, issue numbers, or commit subjects verbatim in the image.
+{change_shape}
 
 {theme_label}:
 {theme}
@@ -271,18 +339,17 @@ def generate(
         int,
         typer.Option("--pr-number", min=1, help="Pull request number."),
     ],
-    pr_title: Annotated[
-        str,
-        typer.Option("--pr-title", help="Pull request title (the subject of the image)."),
-    ],
-    pr_body_file: Annotated[
+    pr_context_file: Annotated[
         Path,
         typer.Option(
-            "--pr-body-file",
+            "--pr-context-file",
             exists=True,
             dir_okay=False,
             readable=True,
-            help="File containing the pull request body.",
+            help=(
+                "JSON from `gh pr view --json "
+                "title,body,labels,files,commits,closingIssuesReferences`."
+            ),
         ),
     ],
     output: Annotated[Path, typer.Option("--output", help="Output .webp path.")],
@@ -311,9 +378,14 @@ def generate(
         ),
     ] = False,
 ) -> None:
-    """Generate the canonical PR image from the PR's own title and description."""
-    pr_body = pr_body_file.read_text(encoding="utf-8")
+    """Generate the canonical PR image from the PR's title, description, and change shape."""
+    context = json.loads(pr_context_file.read_text(encoding="utf-8"))
+    if not isinstance(context, Mapping):
+        raise typer.BadParameter("PR context file must contain a JSON object")
+    pr_title = str(context.get("title") or "")
+    pr_body = str(context.get("body") or "")
     pr_content = extract_pr_content(pr_body)
+    change_shape = build_change_shape(context)
     theme_selection = select_image_theme(
         pr_number=pr_number,
         pr_title=pr_title,
@@ -324,6 +396,7 @@ def generate(
         pr_number=pr_number,
         pr_title=pr_title,
         pr_content=pr_content,
+        change_shape=change_shape,
         theme=theme_selection.theme,
         theme_source=theme_selection.source,
     )

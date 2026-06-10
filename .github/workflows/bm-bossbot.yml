@@ -312,12 +312,14 @@ jobs:
           PR_NUMBER: ${{ needs.review.outputs.pr_number }}
         run: |
           set -euo pipefail
-          gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body // ""' > "${RUNNER_TEMP}/bm-bossbot-pr-body.md"
-          pr_title="$(gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json title --jq '.title // ""')"
+          # One delivery-context fetch (title/body/labels/files/commits/linked issues)
+          # so the image is grounded in the theme of the whole PR, not one artifact.
+          gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+            --json title,body,labels,files,commits,closingIssuesReferences \
+            > "${RUNNER_TEMP}/bm-bossbot-pr-context.json"
           uv run --script scripts/generate_pr_infographic.py \
             --pr-number "${PR_NUMBER}" \
-            --pr-title "${pr_title}" \
-            --pr-body-file "${RUNNER_TEMP}/bm-bossbot-pr-body.md" \
+            --pr-context-file "${RUNNER_TEMP}/bm-bossbot-pr-context.json" \
             --provenance-output "${RUNNER_TEMP}/bm-bossbot-image-provenance.md" \
             --output "docs/assets/infographics/pr-${PR_NUMBER}.webp"
 
