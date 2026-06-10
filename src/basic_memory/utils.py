@@ -573,9 +573,12 @@ def strict_search_tags(v: Any) -> Any:
 
     parse_tags stringifies anything (42 -> ["42"], {"a": 1} -> junk tags), which would
     turn caller type mistakes into silent no-result searches. At the tool boundary only
-    str, list, and None are valid tag inputs; everything else passes through unchanged
-    so Pydantic rejects it with a clear validation error.
+    str, all-string lists, and None are valid tag inputs; everything else — including
+    lists with non-string elements like [42] — passes through unchanged so Pydantic
+    rejects it with a clear validation error.
     """
+    if isinstance(v, list) and not all(isinstance(item, str) for item in v):
+        return v
     if v is None or isinstance(v, (str, list)):
         return parse_tags(v)
     return v

@@ -59,6 +59,20 @@ class TestStrictSearchTags:
         value = {"a": 1}
         assert strict_search_tags(value) is value
 
+    def test_int_list_passthrough_for_pydantic_rejection(self):
+        """Lists with non-string elements pass through unchanged so Pydantic rejects them."""
+        value = [42]
+        assert strict_search_tags(value) is value
+
+    def test_dict_list_passthrough_for_pydantic_rejection(self):
+        value = [{"a": 1}]
+        assert strict_search_tags(value) is value
+
+    def test_mixed_list_passthrough_for_pydantic_rejection(self):
+        """One bad element poisons the whole list — no partial stringification."""
+        value = ["ok", 42]
+        assert strict_search_tags(value) is value
+
 
 class TestCoerceDict:
     """Tests for coerce_dict."""

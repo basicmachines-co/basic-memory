@@ -1711,6 +1711,17 @@ def test_search_notes_tags_annotation_rejects_non_string_types():
     with pytest.raises(ValidationError):
         adapter.validate_python({"a": 1})
 
+    # Lists with non-string elements must also fail, not be stringified ([42] -> ["42"]).
+    with pytest.raises(ValidationError):
+        adapter.validate_python([42])
+    with pytest.raises(ValidationError):
+        adapter.validate_python([{"a": 1}])
+    with pytest.raises(ValidationError):
+        adapter.validate_python(["ok", 42])
+
+    # All-string lists remain valid.
+    assert adapter.validate_python(["a", "b"]) == ["a", "b"]
+
     # None stays a valid "no filter" input.
     assert adapter.validate_python(None) in (None, [])
 
@@ -1738,6 +1749,34 @@ async def test_search_notes_tags_invalid_type_rejected_via_mcp(mcp, client, test
                     "project": test_project.name,
                     "query": "anything",
                     "tags": {"a": 1},
+                },
+            )
+        # Lists with non-string elements must be rejected too, not stringified.
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": [42],
+                },
+            )
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": [{"a": 1}],
+                },
+            )
+        with pytest.raises(ToolError):
+            await mcp_client.call_tool(
+                "search_notes",
+                {
+                    "project": test_project.name,
+                    "query": "anything",
+                    "tags": ["ok", 42],
                 },
             )
 
