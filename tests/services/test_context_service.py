@@ -213,6 +213,47 @@ async def test_build_context_with_observations(context_service, test_graph):
 
 
 @pytest.mark.asyncio
+async def test_build_context_observation_permalinks_match_search_index(
+    context_service, search_service, entity_service
+):
+    """Regression test for #929: observation permalinks must match the search index.
+
+    build_context used to rebuild the synthetic observation permalink inline,
+    without the 200-char truncation (#446) or the content digest (#931) that
+    Observation.permalink applies, so for long observations it returned
+    permalinks the search index doesn't contain.
+    """
+    from basic_memory.schemas.base import Entity as EntitySchema
+    from basic_memory.schemas.search import SearchQuery
+
+    long_observation = "x" * 210 + " LONG_OBS_MARKER"
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Long Obs Entity",
+            note_type="test",
+            directory="test",
+            content=f"# Long Obs Entity\n- [note] {long_observation}\n",
+        )
+    )
+    await search_service.index_entity(entity)
+
+    url = memory_url.validate_strings(f"memory://{entity.permalink}")
+    context_result = await context_service.build_context(url, include_observations=True)
+    assert len(context_result.results) == 1
+    context_item = context_result.results[0]
+    assert len(context_item.observations) == 1
+    obs_row = context_item.observations[0]
+
+    # The model property is the single definition of the permalink format
+    assert obs_row.permalink == entity.observations[0].permalink
+
+    # The search index row for this observation carries the same permalink
+    index_rows = await search_service.search(SearchQuery(text="LONG_OBS_MARKER"))
+    obs_permalinks = [r.permalink for r in index_rows if r.type == SearchItemType.OBSERVATION.value]
+    assert obs_permalinks == [obs_row.permalink]
+
+
+@pytest.mark.asyncio
 async def test_build_context_not_found(context_service):
     """Test handling non-existent permalinks."""
     context = await context_service.build_context("memory://does/not/exist")

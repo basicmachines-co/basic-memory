@@ -245,9 +245,12 @@ class ContextService:
                                     type="observation",
                                     id=obs.id,
                                     title=f"{obs.category}: {obs.content[:50]}...",
-                                    permalink=generate_permalink(
-                                        f"{primary_item.permalink}/observations/{obs.category}/{obs.content}"
-                                    ),
+                                    # Observation.permalink is the single definition of the
+                                    # synthetic permalink format (200-char truncation plus
+                                    # content digest); rebuilding it inline diverged from the
+                                    # search index for long observations (#929). The parent
+                                    # entity is eager-loaded by ObservationRepository.
+                                    permalink=obs.permalink,
                                     file_path=primary_item.file_path,
                                     content=obs.content,
                                     category=obs.category,
