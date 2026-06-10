@@ -87,8 +87,12 @@ async def write_note(
                    Use forward slashes (/) as separators. Use "/" or "" to write to project root.
                    Examples: "notes", "projects/2025", "research/ml", "/" (root)
         project: Project name to write to. Optional - server will resolve using the
-                hierarchy above. If unknown, use list_memory_projects() to discover
-                available projects.
+                hierarchy above. Use "workspace/project" to route to a project in a
+                specific cloud workspace. A bare name that exists in multiple
+                workspaces resolves to the default workspace, so use the qualified
+                form (or project_id) to disambiguate. If unknown, use
+                list_memory_projects() to discover available projects and their
+                qualified names.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
