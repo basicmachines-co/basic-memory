@@ -13,11 +13,11 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # PR builds select only tests impacted by the change, using the cached
-  # testmon baseline (branch cache falling back to main's full-run recording) —
-  # same policy as basic-memory-cloud. Pushes to main run the full suite with
-  # --testmon-noselect, which refreshes the baseline the PR builds select from.
-  BASIC_MEMORY_TESTMON_FLAGS: ${{ github.event_name == 'pull_request' && '--testmon --testmon-forceselect' || '--testmon-noselect' }}
+  # Branch builds (PRs arrive as push events — this workflow has no
+  # pull_request trigger) select only impacted tests from the cached testmon
+  # baseline (branch cache falling back to main's full-run recording). Pushes
+  # to main run the full suite with --testmon-noselect to refresh the baseline.
+  BASIC_MEMORY_TESTMON_FLAGS: ${{ github.ref_name == 'main' && '--testmon-noselect' || '--testmon --testmon-forceselect' }}
 
 jobs:
   changes:
@@ -33,6 +33,9 @@ jobs:
       - id: filter
         uses: dorny/paths-filter@v3
         with:
+          # Tests only runs on push events; for branch pushes compare against
+          # main (merge-base), for main pushes dorny diffs the push range.
+          base: main
           filters: |
             code:
               - 'src/**'
