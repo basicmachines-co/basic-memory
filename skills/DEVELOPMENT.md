@@ -54,13 +54,13 @@ Users can install or update skills with the [Skills CLI](https://github.com/verc
 
 ```bash
 # Install all skills
-npx skills add basicmachines-co/basic-memory --path skills
+npx skills add basicmachines-co/basic-memory/skills
 
 # Install a specific skill
-npx skills add basicmachines-co/basic-memory --path skills --skill memory-tasks
+npx skills add basicmachines-co/basic-memory/skills --skill memory-tasks
 
 # Install for a specific agent
-npx skills add basicmachines-co/basic-memory --path skills --agent claude
+npx skills add basicmachines-co/basic-memory/skills --agent claude
 ```
 
 ## Adding a New Skill
