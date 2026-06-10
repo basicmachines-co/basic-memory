@@ -62,6 +62,8 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "identifier",
         "project",
         "project_id",
+        "page",
+        "page_size",
         "output_format",
         "include_frontmatter",
     ],
