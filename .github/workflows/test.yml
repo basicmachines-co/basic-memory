@@ -23,7 +23,7 @@ jobs:
   static-checks:
     name: Static Checks (Python 3.12)
     timeout-minutes: 20
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
@@ -65,9 +65,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.12"
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.13"
           # Python 3.14 unit tests are the longest full-suite slice; keep this
           # one on GitHub-hosted runners after Depot terminated it mid-suite.
@@ -126,11 +126,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.12"
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.13"
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.14"
           - os: windows-latest
             python-version: "3.12"
@@ -190,7 +190,6 @@ jobs:
         # Python-version coverage; Postgres carries backend coverage.
         group: [1, 2, 3]
         python-version: ["3.14"]
-    # ubuntu-latest: the 3.14 path previously outlived a Depot runner mid-suite.
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -260,7 +259,7 @@ jobs:
         # Latest Python only: SQLite carries version coverage, Postgres carries
         # backend coverage.
         python-version: ["3.14"]
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -323,7 +322,7 @@ jobs:
   test-semantic:
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
