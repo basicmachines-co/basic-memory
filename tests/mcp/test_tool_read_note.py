@@ -265,6 +265,117 @@ async def test_read_note_title_fallback_finds_exact_match_with_small_page_size(
 
 
 @pytest.mark.asyncio
+async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
+    monkeypatch, app, test_project
+):
+    """An exact title match is found even when it ranks beyond the first lookup page.
+
+    bm25 ranks titles that repeat the queried phrase above the exact title, so with
+    more than _TITLE_LOOKUP_PAGE_SIZE such decoys the exact match lands on page 2
+    of title results. A single-page lookup would fall through to suggestions even
+    though the note exists; the lookup must page until the exact title is found.
+    """
+    from basic_memory.mcp.tools.read_note import _TITLE_LOOKUP_PAGE_SIZE
+    from basic_memory.mcp.tools.search import search_notes
+
+    for index in range(1, _TITLE_LOOKUP_PAGE_SIZE + 2):
+        await write_note(
+            project=test_project.name,
+            title=f"Deep Page Note Deep Page Note Deep Page Note {index:02d}",
+            directory="test",
+            content=f"fuzzy decoy content {index}",
+        )
+    await write_note(
+        project=test_project.name,
+        title="Deep Page Note",
+        directory="test",
+        content="deep page exact content",
+    )
+
+    # Precondition: the exact title must rank beyond the first lookup page,
+    # otherwise this test would pass even with a single-page lookup.
+    first_page = await search_notes(
+        project=test_project.name,
+        query="Deep Page Note",
+        search_type="title",
+        page=1,
+        page_size=_TITLE_LOOKUP_PAGE_SIZE,
+        output_format="json",
+    )
+    assert isinstance(first_page, dict)
+    first_page_titles = [result["title"] for result in first_page["results"]]
+    assert "Deep Page Note" not in first_page_titles
+    assert first_page["has_more"] is True
+
+    import importlib
+    from basic_memory.schemas.memory import memory_url_path
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+    direct_identifier = memory_url_path("Deep Page Note")
+
+    class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            # Fail on the direct identifier to force fallback to title search
+            if identifier == direct_identifier:
+                raise RuntimeError("force direct lookup failure")
+            return await super().resolve_entity(identifier, strict=strict)
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
+
+    content = await read_note("Deep Page Note", project=test_project.name)
+    assert "deep page exact content" in content
+
+
+@pytest.mark.asyncio
+async def test_read_note_title_lookup_stops_at_page_cap(monkeypatch, app, test_project):
+    """The title lookup is bounded: after the page cap it falls through to suggestions."""
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+
+    captured_pages: list[tuple[str, int]] = []
+
+    async def fake_search_notes_fn(*, query, search_type, page, page_size, **kwargs):
+        captured_pages.append((search_type, page))
+        if search_type == "title":
+            # Endless fuzzy titles: every page is full and reports more available,
+            # simulating a pathological knowledge base that never yields the note.
+            return {
+                "results": [
+                    {
+                        "title": f"Fuzzy {page}-{index}",
+                        "permalink": f"docs/fuzzy-{page}-{index}",
+                        "content": "",
+                        "type": "entity",
+                        "score": 1.0,
+                        "file_path": f"docs/fuzzy-{page}-{index}.md",
+                    }
+                    for index in range(page_size)
+                ],
+                "current_page": page,
+                "page_size": page_size,
+                "has_more": True,
+            }
+        return {"results": [], "current_page": page, "page_size": page_size}
+
+    class FailingKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            raise RuntimeError("force fallback")
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
+    monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
+
+    result = await read_note("Pathological Note", project=test_project.name)
+
+    title_pages = [page for search_type, page in captured_pages if search_type == "title"]
+    assert title_pages == list(range(1, read_note_module._TITLE_LOOKUP_MAX_PAGES + 1))
+    assert "Note Not Found" in result
+
+
+@pytest.mark.asyncio
 async def test_read_note_related_results_list_full_search_page(monkeypatch, app, test_project):
     """Suggestions list the whole returned search page instead of a hardcoded cap of 5."""
     import importlib

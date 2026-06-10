@@ -21,10 +21,16 @@ from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
-# The title-match fallback exists to find THE note by exact title, so it always
-# scans a fixed-size first page of title results instead of the caller's
-# page/page_size (which apply only to the text-search suggestion listing).
+# The title-match fallback exists to find THE note by exact title, so it scans
+# fixed-size pages of title results instead of the caller's page/page_size
+# (which apply only to the text-search suggestion listing).
 _TITLE_LOOKUP_PAGE_SIZE = 10
+
+# Hard safety cap on title-lookup pages. The loop normally stops as soon as an
+# exact match is found or results run out (has_more=False); the cap only bounds
+# pathological knowledge bases where hundreds of fuzzy titles contain the
+# queried phrase. Exhausting the cap falls through to the suggestion behavior.
+_TITLE_LOOKUP_MAX_PAGES = 10
 
 
 def _is_exact_title_match(identifier: str, title: str) -> bool:
@@ -123,8 +129,9 @@ async def read_note(
         page: Page of fallback-search results to use when the identifier does not
             resolve to a note directly (default: 1). A direct or exact-title match
             always returns the full note content — page/page_size never chunk the
-            note itself, and the title-match lookup always checks a fixed-size
-            first page of title results regardless of page or page_size.
+            note itself, and the title-match lookup pages through fixed-size pages
+            of title results until an exact match is found or results are
+            exhausted, regardless of page or page_size.
         page_size: Number of fallback-search results per page (default: 10). When no
             match is found, this caps how many related-note suggestions are listed.
         output_format: "text" returns markdown content or guidance text.
@@ -287,7 +294,7 @@ async def read_note(
                 ]
 
             async def _search_candidates(
-                identifier_text: str, *, title_only: bool
+                identifier_text: str, *, title_only: bool, lookup_page: int = 1
             ) -> dict[str, object]:
                 # Trigger: direct entity resolution failed for the caller's identifier.
                 # Why: search_notes applies the same memory:// normalization and tool-level
@@ -306,15 +313,15 @@ async def read_note(
                 #      displace the exact match out of the lookup window
                 #      (read_note("Foo Bar", page_size=1) when "Foo Bar Foo Bar"
                 #      ranks first) — both returning suggestions instead of the note.
-                # Outcome: title lookup is pinned to page 1 with a fixed lookup
-                #          size; caller page/page_size apply only to the
-                #          text-search suggestion listing.
+                # Outcome: title lookup uses its own lookup_page with a fixed lookup
+                #          size, walked by the caller below; caller page/page_size
+                #          apply only to the text-search suggestion listing.
                 response = await search_notes(
                     project=active_project.name,
                     project_id=active_project.external_id,
                     query=identifier_text,
                     search_type=search_type,
-                    page=1 if title_only else page,
+                    page=lookup_page if title_only else page,
                     page_size=_TITLE_LOOKUP_PAGE_SIZE if title_only else page_size,
                     output_format="json",
                     context=context,
@@ -352,12 +359,24 @@ async def read_note(
                 logger.info(f"Direct lookup failed for '{entity_path}': {e}")
                 # Continue to fallback methods
 
-            # Fallback 1: Try title search via API
+            # Fallback 1: Try title search via API, walking fixed-size pages of
+            # title results until an exact match is found or results run out.
+            # A single page is not enough: when more than _TITLE_LOOKUP_PAGE_SIZE
+            # higher-ranked fuzzy titles contain the queried phrase, the exact
+            # title lands on a later page and a one-page lookup would miss it.
             logger.info(f"Search title for: {identifier}")
-            title_results = await _search_candidates(identifier, title_only=True)
-
-            title_candidates = _search_results(title_results)
-            if title_candidates:
+            result: dict[str, object] | None = None
+            for lookup_page in range(1, _TITLE_LOOKUP_MAX_PAGES + 1):
+                title_results = await _search_candidates(
+                    identifier, title_only=True, lookup_page=lookup_page
+                )
+                title_candidates = _search_results(title_results)
+                if not title_candidates:
+                    logger.info(
+                        f"No results in title search for: {identifier} "
+                        f"in project {active_project.name}"
+                    )
+                    break
                 # Trigger: direct resolution failed and title search returned candidates.
                 # Why: avoid returning unrelated notes when search yields only fuzzy matches.
                 # Outcome: fetch content only when a true exact title match exists.
@@ -369,33 +388,37 @@ async def read_note(
                     ),
                     None,
                 )
-                if not result:
+                if result is not None:
+                    break
+                # Trigger: this page held only fuzzy titles and the server reports
+                #          no further pages (has_more is False or absent).
+                # Why: continuing past the last page would issue empty lookups.
+                # Outcome: give up on the title fallback and try text search below.
+                if title_results.get("has_more") is not True:
                     logger.info(f"No exact title match found for: {identifier}")
-                elif _result_permalink(result):
-                    try:
-                        # Resolve the permalink to entity ID
-                        entity_id = await knowledge_client.resolve_entity(
-                            _result_permalink(result) or "", strict=True
-                        )
+                    break
 
-                        # Fetch content using the entity ID
-                        response = await resource_client.read(entity_id)
+            if result is not None and _result_permalink(result):
+                try:
+                    # Resolve the permalink to entity ID
+                    entity_id = await knowledge_client.resolve_entity(
+                        _result_permalink(result) or "", strict=True
+                    )
 
-                        if response.status_code == 200:
-                            logger.info(
-                                f"Found note by exact title search: {_result_permalink(result)}"
-                            )
-                            if output_format == "json":
-                                return await _read_json_payload(entity_id)
-                            return response.text
-                    except Exception as e:  # pragma: no cover
+                    # Fetch content using the entity ID
+                    response = await resource_client.read(entity_id)
+
+                    if response.status_code == 200:
                         logger.info(
-                            f"Failed to fetch content for found title match {_result_permalink(result)}: {e}"
+                            f"Found note by exact title search: {_result_permalink(result)}"
                         )
-            else:
-                logger.info(
-                    f"No results in title search for: {identifier} in project {active_project.name}"
-                )
+                        if output_format == "json":
+                            return await _read_json_payload(entity_id)
+                        return response.text
+                except Exception as e:  # pragma: no cover
+                    logger.info(
+                        f"Failed to fetch content for found title match {_result_permalink(result)}: {e}"
+                    )
 
             # Fallback 2: Text search as a last resort
             logger.info(f"Title search failed, trying text search for: {identifier}")
