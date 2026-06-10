@@ -354,22 +354,31 @@ def head_sha_was_approved(*, token: str, repo: str, sha: str) -> bool:
     """Return whether a full BM Bossbot review previously approved this head SHA.
 
     Commit statuses are append-only history, so the approval record survives a
-    later thread-failure status for the same SHA.
+    later thread-failure status for the same SHA. The recheck path can post a
+    new status on every review-thread event, so a busy PR can accumulate more
+    than one page of statuses — page through all of them or the approval
+    record falls off page one and a valid approval is never restored.
     """
-    response = _github_request(
-        method="GET",
-        path=f"/repos/{repo}/commits/{sha}/statuses?per_page=100",
-        token=token,
-    )
-    if not isinstance(response, list):
-        raise SystemExit("GitHub API response for commit statuses was invalid")
-    return any(
-        isinstance(status, Mapping)
-        and status.get("context") == STATUS_CONTEXT
-        and status.get("state") == "success"
-        and status.get("description") == APPROVED_DESCRIPTION
-        for status in response
-    )
+    page = 1
+    while True:
+        response = _github_request(
+            method="GET",
+            path=f"/repos/{repo}/commits/{sha}/statuses?per_page=100&page={page}",
+            token=token,
+        )
+        if not isinstance(response, list):
+            raise SystemExit("GitHub API response for commit statuses was invalid")
+        if not response:
+            return False
+        if any(
+            isinstance(status, Mapping)
+            and status.get("context") == STATUS_CONTEXT
+            and status.get("state") == "success"
+            and status.get("description") == APPROVED_DESCRIPTION
+            for status in response
+        ):
+            return True
+        page += 1
 
 
 def recheck_threads(

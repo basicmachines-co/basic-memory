@@ -365,8 +365,17 @@ def test_head_sha_was_approved_matches_only_the_approval_record(
         },
         {"context": "license/cla", "state": "success", "description": "ok"},
     ]
-    monkeypatch.setattr(bm_bossbot_status, "_github_request", lambda **_: history)
 
+    def _paged(pages: list[list[dict]]):
+        def fake(*, method: str, path: str, token: str, payload=None):
+            for number, page in enumerate(pages, start=1):
+                if f"page={number}" in path:
+                    return page
+            return []
+
+        return fake
+
+    monkeypatch.setattr(bm_bossbot_status, "_github_request", _paged([history]))
     assert (
         bm_bossbot_status.head_sha_was_approved(
             token="token", repo="basicmachines-co/basic-memory", sha="abc123"
@@ -374,13 +383,48 @@ def test_head_sha_was_approved_matches_only_the_approval_record(
         is True
     )
 
-    monkeypatch.setattr(bm_bossbot_status, "_github_request", lambda **_: history[:1])
+    monkeypatch.setattr(bm_bossbot_status, "_github_request", _paged([history[:1]]))
     assert (
         bm_bossbot_status.head_sha_was_approved(
             token="token", repo="basicmachines-co/basic-memory", sha="abc123"
         )
         is False
     )
+
+
+def test_head_sha_was_approved_pages_past_first_page_of_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recheck path can post >100 statuses; the approval may sit on page 2+."""
+    failure = {
+        "context": "BM Bossbot Approval",
+        "state": "failure",
+        "description": "BM Bossbot found 1 unresolved review thread(s)",
+    }
+    approval = {
+        "context": "BM Bossbot Approval",
+        "state": "success",
+        "description": "BM Bossbot approved this head SHA",
+    }
+    pages_served: list[str] = []
+
+    def fake(*, method: str, path: str, token: str, payload=None):
+        pages_served.append(path)
+        if "page=1" in path:
+            return [failure] * 100
+        if "page=2" in path:
+            return [approval]
+        return []
+
+    monkeypatch.setattr(bm_bossbot_status, "_github_request", fake)
+
+    assert (
+        bm_bossbot_status.head_sha_was_approved(
+            token="token", repo="basicmachines-co/basic-memory", sha="abc123"
+        )
+        is True
+    )
+    assert len(pages_served) == 2
 
 
 def test_finalize_cli_marks_failure_when_review_file_is_missing(
