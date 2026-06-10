@@ -466,3 +466,64 @@ async def test_observation_permalink_short_content_unchanged(
         # Short content should be fully included (after permalink normalization)
         # The generate_permalink function normalizes the content
         assert "short-observation-content" in permalink.lower()
+
+
+@pytest.mark.asyncio
+async def test_observation_permalink_disambiguates_truncated_content(
+    session_maker: async_sessionmaker, repo, test_project: Project
+):
+    """Regression test for issue #909: shared 200-char prefixes must not collide.
+
+    Truncating content to 200 chars (PostgreSQL btree limit) made two distinct
+    observations with the same category and an identical 200-char prefix produce
+    the same synthetic permalink, silently dropping the second from the search
+    index. A digest of the full content now disambiguates them.
+    """
+    async with db.scoped_session(session_maker) as session:
+        entity = Entity(
+            project_id=test_project.id,
+            title="test_entity",
+            note_type="test",
+            permalink="test/test-entity",
+            file_path="test/test_entity.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity)
+        await session.flush()
+
+        shared_prefix = "x" * 210  # identical beyond the 200-char truncation point
+        obs_alpha = Observation(
+            project_id=test_project.id,
+            entity_id=entity.id,
+            content=f"{shared_prefix} ALPHA_UNIQUE_MARKER",
+            category="note",
+        )
+        obs_beta = Observation(
+            project_id=test_project.id,
+            entity_id=entity.id,
+            content=f"{shared_prefix} BETA_UNIQUE_MARKER",
+            category="note",
+        )
+        session.add_all([obs_alpha, obs_beta])
+        await session.flush()
+
+        # Distinct content must yield distinct permalinks despite the shared prefix
+        assert obs_alpha.permalink != obs_beta.permalink
+
+        # The digest suffix must keep permalinks under the PostgreSQL btree budget
+        assert len(obs_alpha.permalink) < 300
+        assert len(obs_beta.permalink) < 300
+
+        # Truly identical long content must still produce the same permalink so
+        # exact duplicates continue to dedupe in the search index
+        obs_beta_dup = Observation(
+            project_id=test_project.id,
+            entity_id=entity.id,
+            content=f"{shared_prefix} BETA_UNIQUE_MARKER",
+            category="note",
+        )
+        session.add(obs_beta_dup)
+        await session.flush()
+        assert obs_beta_dup.permalink == obs_beta.permalink

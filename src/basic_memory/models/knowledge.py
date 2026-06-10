@@ -1,5 +1,6 @@
 """Knowledge graph models."""
 
+import hashlib
 import uuid
 from datetime import datetime
 from basic_memory.utils import ensure_timezone_aware
@@ -252,8 +253,18 @@ class Observation(Base):
         Content is truncated to 200 chars to stay under PostgreSQL's
         btree index limit of 2704 bytes.
         """
-        # Truncate content to avoid exceeding PostgreSQL's btree index limit
-        content_for_permalink = self.content[:200] if len(self.content) > 200 else self.content
+        if len(self.content) > 200:
+            # Trigger: content exceeds the 200-char budget imposed by PostgreSQL's
+            # 2704-byte btree index row limit, so the permalink can only carry a prefix.
+            # Why: two distinct observations with the same category and an identical
+            # 200-char prefix would collide on the same synthetic permalink, and the
+            # search index (permalink-keyed upsert) silently drops the second one.
+            # Outcome: a short stable digest of the FULL content disambiguates
+            # truncated permalinks while staying well under the index limit.
+            digest = hashlib.sha256(self.content.encode("utf-8")).hexdigest()[:12]
+            content_for_permalink = f"{self.content[:200]}-{digest}"
+        else:
+            content_for_permalink = self.content
         return generate_permalink(
             f"{self.entity.permalink}/observations/{self.category}/{content_for_permalink}"
         )
