@@ -176,9 +176,10 @@ async def test_read_note_forwards_pagination_to_fallback_search(monkeypatch, app
 
     result = await read_note("missing-note", project=test_project.name, page=2, page_size=3)
 
-    # Title lookup is pinned to page 1 (it exists to find THE note by exact
-    # title); caller paging applies only to the text-search suggestions.
-    assert captured_pages == [("title", 1, 3), ("text", 2, 3)]
+    # Title lookup is pinned to page 1 with a fixed lookup size (it exists to
+    # find THE note by exact title); caller page/page_size apply only to the
+    # text-search suggestions.
+    assert captured_pages == [("title", 1, 10), ("text", 2, 3)]
     assert "Note Not Found" in result
 
 
@@ -217,6 +218,50 @@ async def test_read_note_title_fallback_finds_exact_match_on_later_page(
 
     content = await read_note("Paged Title Note", project=test_project.name, page=2)
     assert "paged title content" in content
+
+
+@pytest.mark.asyncio
+async def test_read_note_title_fallback_finds_exact_match_with_small_page_size(
+    monkeypatch, app, test_project
+):
+    """An exact title match is returned even when the caller asks for a tiny page_size.
+
+    The title-match lookup uses a fixed lookup size; without it, a higher-ranked
+    fuzzy title ("Foo Bar Foo Bar") would displace the exact title ("Foo Bar")
+    out of a page_size=1 window and read_note("Foo Bar", page_size=1) would
+    return suggestions instead of the note.
+    """
+    await write_note(
+        project=test_project.name,
+        title="Foo Bar Foo Bar",
+        directory="test",
+        content="fuzzy decoy content",
+    )
+    await write_note(
+        project=test_project.name,
+        title="Foo Bar",
+        directory="test",
+        content="exact title content",
+    )
+
+    import importlib
+    from basic_memory.schemas.memory import memory_url_path
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+    direct_identifier = memory_url_path("Foo Bar")
+
+    class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            # Fail on the direct identifier to force fallback to title search
+            if identifier == direct_identifier:
+                raise RuntimeError("force direct lookup failure")
+            return await super().resolve_entity(identifier, strict=strict)
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
+
+    content = await read_note("Foo Bar", project=test_project.name, page_size=1)
+    assert "exact title content" in content
 
 
 @pytest.mark.asyncio

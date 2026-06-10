@@ -21,6 +21,11 @@ from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
+# The title-match fallback exists to find THE note by exact title, so it always
+# scans a fixed-size first page of title results instead of the caller's
+# page/page_size (which apply only to the text-search suggestion listing).
+_TITLE_LOOKUP_PAGE_SIZE = 10
+
 
 def _is_exact_title_match(identifier: str, title: str) -> bool:
     """Return True when identifier exactly matches a title (case-insensitive)."""
@@ -118,8 +123,8 @@ async def read_note(
         page: Page of fallback-search results to use when the identifier does not
             resolve to a note directly (default: 1). A direct or exact-title match
             always returns the full note content — page/page_size never chunk the
-            note itself, and the title-match lookup always checks the first page
-            of title results regardless of this value.
+            note itself, and the title-match lookup always checks a fixed-size
+            first page of title results regardless of page or page_size.
         page_size: Number of fallback-search results per page (default: 10). When no
             match is found, this caps how many related-note suggestions are listed.
         output_format: "text" returns markdown content or guidance text.
@@ -296,17 +301,21 @@ async def read_note(
                 # Trigger: title_only — the title search exists to find THE note by
                 #          exact title, not to page through suggestions.
                 # Why: paginating it by the caller's page would skip an exact match
-                #      sitting on page 1 (read_note("Exact Title", page=2)) and
-                #      return unrelated suggestions instead of the note.
-                # Outcome: title lookup is pinned to page 1; caller paging applies
-                #          only to the text-search suggestion listing.
+                #      sitting on page 1 (read_note("Exact Title", page=2)), and a
+                #      small caller page_size could let a higher-ranked fuzzy title
+                #      displace the exact match out of the lookup window
+                #      (read_note("Foo Bar", page_size=1) when "Foo Bar Foo Bar"
+                #      ranks first) — both returning suggestions instead of the note.
+                # Outcome: title lookup is pinned to page 1 with a fixed lookup
+                #          size; caller page/page_size apply only to the
+                #          text-search suggestion listing.
                 response = await search_notes(
                     project=active_project.name,
                     project_id=active_project.external_id,
                     query=identifier_text,
                     search_type=search_type,
                     page=1 if title_only else page,
-                    page_size=page_size,
+                    page_size=_TITLE_LOOKUP_PAGE_SIZE if title_only else page_size,
                     output_format="json",
                     context=context,
                 )
