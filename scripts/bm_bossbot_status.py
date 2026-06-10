@@ -7,9 +7,11 @@
 # ///
 """BM Bossbot status and PR-body helpers.
 
-The workflow lets Codex write a structured review. This script owns the
-deterministic gate: only a complete review for the current head SHA can publish
-the required success status.
+BM Bossbot is a deterministic merge gate — no LLM review. It approves a head
+SHA only when the Tests workflow succeeded for it (enforced by the workflow
+trigger), the PR is not a draft, the author is trusted, and every review
+thread is resolved. Code review itself comes from the Codex connector and
+human reviewers; this gate just refuses to let unaddressed feedback merge.
 """
 
 from __future__ import annotations
@@ -17,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -157,36 +158,32 @@ def unresolved_threads_result(count: int) -> ApprovalResult:
     )
 
 
-def validate_review(payload: Mapping[str, Any], *, expected_head_sha: str) -> ApprovalResult:
-    required = {
-        "reviewed_head_sha",
-        "review_complete",
-        "verdict",
-        "blocking_findings",
-        "nonblocking_findings",
-        "summary",
-    }
-    if not required.issubset(payload):
-        return ApprovalResult(False, "failure", "BM Bossbot review output was invalid")
+def evaluate_gate(
+    *,
+    token: str,
+    repo: str,
+    number: int,
+    trusted: bool,
+) -> tuple[ApprovalResult, int]:
+    """Deterministic approval decision: trusted author + zero unresolved threads.
 
-    if payload["reviewed_head_sha"] != expected_head_sha:
-        return ApprovalResult(False, "failure", "BM Bossbot reviewed a stale head SHA")
-
-    if payload["review_complete"] is not True:
-        return ApprovalResult(False, "failure", "BM Bossbot review did not finish")
-
-    verdict = payload["verdict"]
-    if verdict not in {"approve", "changes_requested", "needs_human"}:
-        return ApprovalResult(False, "failure", "BM Bossbot review output was invalid")
-
-    blockers = payload["blocking_findings"]
-    if not isinstance(blockers, list):
-        return ApprovalResult(False, "failure", "BM Bossbot review output was invalid")
-
-    if verdict != "approve" or blockers:
-        return ApprovalResult(False, "failure", "BM Bossbot requested changes")
-
-    return ApprovalResult(True, "success", APPROVED_DESCRIPTION)
+    Tests-passed-for-this-head and non-draft are enforced upstream by the
+    workflow trigger and the normalize step (should_review). Returns the
+    result plus the unresolved-thread count for the PR-body summary.
+    """
+    if not trusted:
+        return (
+            ApprovalResult(
+                False,
+                "failure",
+                "BM Bossbot only gates owner/member/collaborator PRs",
+            ),
+            0,
+        )
+    unresolved = count_unresolved_review_threads(token=token, repo=repo, number=number)
+    if unresolved > 0:
+        return unresolved_threads_result(unresolved), unresolved
+    return ApprovalResult(True, "success", APPROVED_DESCRIPTION), 0
 
 
 def build_status_payload(*, state: str, description: str, target_url: str) -> dict[str, str]:
@@ -198,24 +195,24 @@ def build_status_payload(*, state: str, description: str, target_url: str) -> di
     }
 
 
-def render_summary(review: Mapping[str, Any], result: ApprovalResult) -> str:
-    blockers = _format_findings(review.get("blocking_findings"))
-    nonblockers = _format_findings(review.get("nonblocking_findings"))
-    summary = _string(review.get("summary")) or "No summary provided."
+def render_summary(
+    *,
+    head_sha: str,
+    result: ApprovalResult,
+    trusted: bool,
+    unresolved_threads: int,
+) -> str:
     return "\n".join(
         [
-            f"Reviewed SHA: `{_string(review.get('reviewed_head_sha')) or 'unknown'}`",
-            f"Verdict: `{_string(review.get('verdict')) or 'invalid'}`",
+            f"Reviewed SHA: `{head_sha}`",
+            "Gate: deterministic (tests, draft, author trust, review threads)",
             f"Status: `{result.state}` - {result.description}",
             "",
-            "Summary:",
-            summary,
+            f"- Trusted author: {'yes' if trusted else 'no'}",
+            f"- Unresolved review threads: {unresolved_threads}",
             "",
-            "Blocking findings:",
-            blockers,
-            "",
-            "Non-blocking findings:",
-            nonblockers,
+            "Code review comes from the Codex connector and human reviewers;",
+            "resolve every review thread to (re)gain approval for this head SHA.",
         ]
     )
 
@@ -286,7 +283,7 @@ def mark_pending(
 def finalize_review(
     *,
     event_path: Path,
-    review_path: Path,
+    trusted: bool,
     repo: str | None,
     run_url: str,
     token_env: str,
@@ -294,32 +291,19 @@ def finalize_review(
     event = pull_request_event(read_json(event_path), repo_override=repo)
     token = _token(token_env)
 
-    review: Mapping[str, Any]
-    try:
-        raw_review = read_json(review_path)
-        if not isinstance(raw_review, Mapping):
-            raw_review = {}
-        review = raw_review
-    except SystemExit as exc:
-        print(exc, file=sys.stderr)
-        review = {}
-
-    result = validate_review(review, expected_head_sha=event.head_sha)
-    # Trigger: the LLM review approved, but reviewers (human or bot, e.g. Codex
-    #          inline comments) still have unresolved threads on the PR.
-    # Why: the review prompt only sees metadata+diff, never review threads, so an
-    #      approve verdict says nothing about outstanding feedback (#932 merged
-    #      with two open P2 threads because of exactly this gap).
-    # Outcome: unresolved threads turn an approve into a failure status; the
-    #          recheck command restores approval once all threads are resolved.
-    if result.approved:
-        unresolved = count_unresolved_review_threads(
-            token=token, repo=event.repo, number=event.number
-        )
-        if unresolved > 0:
-            result = unresolved_threads_result(unresolved)
+    result, unresolved = evaluate_gate(
+        token=token, repo=event.repo, number=event.number, trusted=trusted
+    )
     current_body = get_pull_request_body(token=token, repo=event.repo, number=event.number)
-    updated_body = upsert_summary_block(current_body, render_summary(review, result))
+    updated_body = upsert_summary_block(
+        current_body,
+        render_summary(
+            head_sha=event.head_sha,
+            result=result,
+            trusted=trusted,
+            unresolved_threads=unresolved,
+        ),
+    )
     update_pull_request_body(token=token, repo=event.repo, number=event.number, body=updated_body)
     set_commit_status(
         token=token,
@@ -456,20 +440,6 @@ def _github_request(
     return json.loads(response_body) if response_body else None
 
 
-def _format_findings(value: object) -> str:
-    if not isinstance(value, list) or not value:
-        return "- None"
-    lines: list[str] = []
-    for item in value:
-        if isinstance(item, Mapping):
-            title = _string(item.get("title")) or _string(item.get("summary")) or "Finding"
-            body = _string(item.get("body")) or _string(item.get("details"))
-            lines.append(f"- {title}: {body}" if body else f"- {title}")
-        else:
-            lines.append(f"- {_string(item)}")
-    return "\n".join(lines)
-
-
 def _string(value: object) -> str:
     return value if isinstance(value, str) else ""
 
@@ -516,12 +486,11 @@ def finalize(
             help="GitHub event payload JSON.",
         ),
     ],
-    review: Annotated[
-        Path,
+    trusted: Annotated[
+        str,
         typer.Option(
-            "--review",
-            dir_okay=False,
-            help="Structured BM Bossbot review JSON.",
+            "--trusted",
+            help="Whether the PR author is trusted (true/false from the classify step).",
         ),
     ],
     run_url: Annotated[str, typer.Option("--run-url", help="Workflow run URL.")],
@@ -531,10 +500,10 @@ def finalize(
         typer.Option("--token-env", help="Environment variable containing a GitHub token."),
     ] = "GITHUB_TOKEN",
 ) -> None:
-    """Finalize BM Bossbot Approval from a structured review JSON file."""
+    """Finalize BM Bossbot Approval from the deterministic gate."""
     result = finalize_review(
         event_path=event,
-        review_path=review,
+        trusted=trusted.strip().lower() == "true",
         repo=repo,
         run_url=run_url,
         token_env=token_env,

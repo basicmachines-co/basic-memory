@@ -30,46 +30,6 @@ def test_status_script_is_uv_typer_entrypoint() -> None:
     assert hasattr(bm_bossbot_status, "app")
 
 
-def _review_payload(**overrides: object) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "reviewed_head_sha": "abc123",
-        "review_complete": True,
-        "verdict": "approve",
-        "blocking_findings": [],
-        "nonblocking_findings": [],
-        "summary": "The change is ready.",
-    }
-    payload.update(overrides)
-    return payload
-
-
-def test_validate_review_accepts_matching_approved_head_sha() -> None:
-    result = bm_bossbot_status.validate_review(_review_payload(), expected_head_sha="abc123")
-
-    assert result.approved is True
-    assert result.state == "success"
-    assert result.description == "BM Bossbot approved this head SHA"
-
-
-def test_validate_review_rejects_stale_head_sha() -> None:
-    result = bm_bossbot_status.validate_review(_review_payload(), expected_head_sha="def456")
-
-    assert result.approved is False
-    assert result.state == "failure"
-    assert result.description == "BM Bossbot reviewed a stale head SHA"
-
-
-def test_validate_review_rejects_blocking_findings() -> None:
-    result = bm_bossbot_status.validate_review(
-        _review_payload(blocking_findings=[{"title": "Missing test", "body": "Add coverage."}]),
-        expected_head_sha="abc123",
-    )
-
-    assert result.approved is False
-    assert result.state == "failure"
-    assert result.description == "BM Bossbot requested changes"
-
-
 def test_status_payload_uses_required_context() -> None:
     payload = bm_bossbot_status.build_status_payload(
         state="pending",
@@ -109,9 +69,7 @@ def test_finalize_review_fetches_current_pr_body_before_upserting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event_path = tmp_path / "event.json"
-    review_path = tmp_path / "review.json"
     event_path.write_text(json.dumps(_event_payload()), encoding="utf-8")
-    review_path.write_text(json.dumps(_review_payload()), encoding="utf-8")
     monkeypatch.setenv("GITHUB_TOKEN", "token")
 
     updated_bodies: list[str] = []
@@ -144,7 +102,7 @@ def test_finalize_review_fetches_current_pr_body_before_upserting(
 
     result = bm_bossbot_status.finalize_review(
         event_path=event_path,
-        review_path=review_path,
+        trusted=True,
         repo=None,
         run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/1",
         token_env="GITHUB_TOKEN",
@@ -153,6 +111,7 @@ def test_finalize_review_fetches_current_pr_body_before_upserting(
     assert result.approved is True
     assert "Current body edited while the workflow was running" in updated_bodies[0]
     assert "Event snapshot body" not in updated_bodies[0]
+    assert "Gate: deterministic" in updated_bodies[0]
     assert statuses[0]["state"] == "success"
 
 
@@ -161,9 +120,7 @@ def test_finalize_review_blocks_approval_on_unresolved_review_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event_path = tmp_path / "event.json"
-    review_path = tmp_path / "review.json"
     event_path.write_text(json.dumps(_event_payload()), encoding="utf-8")
-    review_path.write_text(json.dumps(_review_payload()), encoding="utf-8")
     monkeypatch.setenv("GITHUB_TOKEN", "token")
 
     statuses: list[Mapping[str, str]] = []
@@ -179,7 +136,7 @@ def test_finalize_review_blocks_approval_on_unresolved_review_threads(
 
     result = bm_bossbot_status.finalize_review(
         event_path=event_path,
-        review_path=review_path,
+        trusted=True,
         repo=None,
         run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/1",
         token_env="GITHUB_TOKEN",
@@ -191,16 +148,12 @@ def test_finalize_review_blocks_approval_on_unresolved_review_threads(
     assert statuses[0]["state"] == "failure"
 
 
-def test_finalize_review_skips_thread_count_when_review_already_failed(
+def test_finalize_review_fails_untrusted_author_without_counting_threads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event_path = tmp_path / "event.json"
-    review_path = tmp_path / "review.json"
     event_path.write_text(json.dumps(_event_payload()), encoding="utf-8")
-    review_path.write_text(
-        json.dumps(_review_payload(verdict="changes_requested")), encoding="utf-8"
-    )
     monkeypatch.setenv("GITHUB_TOKEN", "token")
 
     monkeypatch.setattr(bm_bossbot_status, "get_pull_request_body", lambda **_: "Body")
@@ -208,20 +161,20 @@ def test_finalize_review_skips_thread_count_when_review_already_failed(
     monkeypatch.setattr(bm_bossbot_status, "set_commit_status", lambda **_: None)
 
     def fail_count(**_: object) -> int:
-        raise AssertionError("thread count must not run when the review already failed")
+        raise AssertionError("thread count must not run for untrusted authors")
 
     monkeypatch.setattr(bm_bossbot_status, "count_unresolved_review_threads", fail_count)
 
     result = bm_bossbot_status.finalize_review(
         event_path=event_path,
-        review_path=review_path,
+        trusted=False,
         repo=None,
         run_url="https://github.com/basicmachines-co/basic-memory/actions/runs/1",
         token_env="GITHUB_TOKEN",
     )
 
     assert result.approved is False
-    assert result.description == "BM Bossbot requested changes"
+    assert result.description == "BM Bossbot only gates owner/member/collaborator PRs"
 
 
 def test_count_unresolved_review_threads_pages_through_graphql_results(
@@ -427,12 +380,11 @@ def test_head_sha_was_approved_pages_past_first_page_of_statuses(
     assert len(pages_served) == 2
 
 
-def test_finalize_cli_marks_failure_when_review_file_is_missing(
+def test_finalize_cli_exits_nonzero_for_untrusted_author(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event_path = tmp_path / "event.json"
-    missing_review_path = tmp_path / "missing-review.json"
     event_path.write_text(json.dumps(_event_payload(body="Current body")), encoding="utf-8")
     monkeypatch.setenv("GITHUB_TOKEN", "token")
 
@@ -466,8 +418,8 @@ def test_finalize_cli_marks_failure_when_review_file_is_missing(
             "finalize",
             "--event",
             str(event_path),
-            "--review",
-            str(missing_review_path),
+            "--trusted",
+            "false",
             "--repo",
             "basicmachines-co/basic-memory",
             "--run-url",
@@ -476,5 +428,5 @@ def test_finalize_cli_marks_failure_when_review_file_is_missing(
     )
 
     assert result.exit_code == 1
-    assert "BM Bossbot review output was invalid" in updated_bodies[0]
+    assert "BM Bossbot only gates owner/member/collaborator PRs" in updated_bodies[0]
     assert statuses[0]["state"] == "failure"

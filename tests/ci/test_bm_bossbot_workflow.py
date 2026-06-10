@@ -5,7 +5,6 @@ import yaml
 
 
 WORKFLOW_PATH = Path(".github/workflows/bm-bossbot.yml")
-PROMPT_PATH = Path(".github/basic-memory/bm-bossbot-review.md")
 
 
 def _workflow() -> dict:
@@ -30,9 +29,7 @@ def test_bm_bossbot_runs_after_successful_tests_workflow() -> None:
     assert permissions["pull-requests"] == "write"
     assert permissions["statuses"] == "write"
 
-    asset_permissions = workflow["jobs"]["assets"]["permissions"]
-    assert asset_permissions["contents"] == "write"
-    assert asset_permissions["pull-requests"] == "write"
+    assert "assets" not in workflow["jobs"]
 
 
 def test_bm_bossbot_workflow_never_checks_out_untrusted_head() -> None:
@@ -66,29 +63,26 @@ def test_bm_bossbot_workflow_has_deterministic_status_steps() -> None:
 
     assert "Set up uv" in names
     assert "Mark BM Bossbot approval pending" in names
-    assert "Run BM Bossbot review with Codex" in names
     assert "Finalize BM Bossbot approval" in names
+    # The gate is deterministic: no LLM review step and no image generation.
+    assert "Run BM Bossbot review with Codex" not in names
+    assert "Collect sanitized PR context" not in names
 
-    run_codex = next(step for step in steps if step["name"] == "Run BM Bossbot review with Codex")
-    assert run_codex["uses"] == "openai/codex-action@v1"
-    assert run_codex["with"]["openai-api-key"] == "${{ secrets.OPENAI_API_KEY }}"
-    assert "--output-schema" in run_codex["with"]["codex-args"]
-    assert "steps.pr.outputs.should_review == 'true'" in run_codex["if"]
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "openai/codex-action" not in workflow_text
+    assert "OPENAI_API_KEY" not in workflow_text
 
     pending = next(step for step in steps if step["name"] == "Mark BM Bossbot approval pending")
     assert pending["if"] == "steps.pr.outputs.should_review == 'true'"
     finalize = next(step for step in steps if step["name"] == "Finalize BM Bossbot approval")
     assert finalize["if"] == "always() && steps.pr.outputs.should_review == 'true'"
-    assert "BM Bossbot Approval" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "uv run --script scripts/bm_bossbot_status.py pending" in WORKFLOW_PATH.read_text(
-        encoding="utf-8"
-    )
-    assert "uv run --script scripts/bm_bossbot_status.py finalize" in WORKFLOW_PATH.read_text(
-        encoding="utf-8"
-    )
+    assert '--trusted "${{ steps.trust.outputs.trusted_author }}"' in finalize["run"]
+    assert "BM Bossbot Approval" in workflow_text
+    assert "uv run --script scripts/bm_bossbot_status.py pending" in workflow_text
+    assert "uv run --script scripts/bm_bossbot_status.py finalize" in workflow_text
 
 
-def test_bm_bossbot_rejects_stale_successful_test_runs_before_codex() -> None:
+def test_bm_bossbot_rejects_stale_successful_test_runs_before_finalize() -> None:
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
     workflow = _workflow()
     steps = workflow["jobs"]["review"]["steps"]
@@ -112,97 +106,26 @@ def test_bm_bossbot_rejects_stale_successful_test_runs_before_codex() -> None:
     assert classify["if"] == "steps.pr.outputs.should_review == 'true'"
 
 
-def test_bm_bossbot_assets_are_non_gating_and_separate_from_review_job() -> None:
+def test_bm_bossbot_has_no_image_generation() -> None:
+    """The per-PR image job was removed: it spent OpenAI tokens on every run."""
     workflow = _workflow()
-    review_steps = workflow["jobs"]["review"]["steps"]
-    asset_job = workflow["jobs"]["assets"]
-    asset_steps = asset_job["steps"]
-
-    assert asset_job["needs"] == "review"
-    assert asset_job["if"] == (
-        "needs.review.result == 'success' && needs.review.outputs.should_review == 'true'"
-    )
-    assert not any(step["name"] == "Generate non-gating PR image" for step in review_steps)
-    assert not any(step["name"] == "Publish non-gating PR image" for step in review_steps)
-
-    generate = next(step for step in asset_steps if step["name"] == "Generate non-gating PR image")
-    publish = next(step for step in asset_steps if step["name"] == "Publish non-gating PR image")
-
-    assert generate["continue-on-error"] is True
-    assert publish["continue-on-error"] is True
-    assert "uv run --script scripts/generate_pr_infographic.py" in WORKFLOW_PATH.read_text(
-        encoding="utf-8"
-    )
-    assert "--provenance-output" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "git rm -rf --ignore-unmatch ." in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "<!-- pr-infographic:start -->" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "BM Bossbot image for PR" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "gh pr edit" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "--body-file" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "BM_INFOGRAPHIC_PROVENANCE:start" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "BM_INFOGRAPHIC_PROVENANCE:end" in WORKFLOW_PATH.read_text(encoding="utf-8")
-
-
-def test_bm_bossbot_rejects_oversized_diffs_without_partial_approval() -> None:
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
-    workflow = _workflow()
-    steps = workflow["jobs"]["review"]["steps"]
-    run_codex = next(step for step in steps if step["name"] == "Run BM Bossbot review with Codex")
 
-    assert "max_diff_bytes=120000" in workflow_text
-    assert "diff_truncated=true" in workflow_text
-    assert "review_complete: false" in workflow_text
-    assert 'verdict: "needs_human"' in workflow_text
-    assert "Diff exceeds BM Bossbot review limit" in workflow_text
-    assert (
-        run_codex["if"] == "steps.pr.outputs.should_review == 'true' && "
-        "steps.trust.outputs.trusted_author == 'true' && "
-        "steps.context.outputs.diff_truncated != 'true'"
-    )
-    assert "head -c 120000" not in workflow_text
+    assert "assets" not in workflow["jobs"]
+    assert "generate_pr_infographic" not in workflow_text
+    assert "pr-assets/" not in workflow_text
 
 
-def test_bm_bossbot_does_not_run_codex_for_outside_contributors() -> None:
-    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+def test_bm_bossbot_classifies_authors_and_gates_untrusted_deterministically() -> None:
     workflow = _workflow()
     steps = workflow["jobs"]["review"]["steps"]
 
     classify = next(step for step in steps if step["name"] == "Classify PR author")
-    outside = next(step for step in steps if step["name"] == "Decline outside contributor PRs")
-    collect = next(step for step in steps if step["name"] == "Collect sanitized PR context")
-    run_codex = next(step for step in steps if step["name"] == "Run BM Bossbot review with Codex")
-    select_review = next(
-        step for step in steps if step["name"] == "Select BM Bossbot review output"
-    )
     finalize = next(step for step in steps if step["name"] == "Finalize BM Bossbot approval")
 
     assert "OWNER|MEMBER|COLLABORATOR" in classify["run"]
-    assert (
-        outside["if"]
-        == "steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author != 'true'"
-    )
-    assert (
-        collect["if"]
-        == "steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author == 'true'"
-    )
-    assert (
-        run_codex["if"] == "steps.pr.outputs.should_review == 'true' && "
-        "steps.trust.outputs.trusted_author == 'true' && "
-        "steps.context.outputs.diff_truncated != 'true'"
-    )
-    assert select_review["if"] == "always() && steps.pr.outputs.should_review == 'true'"
-    assert finalize["if"] == "always() && steps.pr.outputs.should_review == 'true'"
-    assert "BM Bossbot does not run for outside contributors" in workflow_text
-    assert "missing-bm-bossbot-review.json" in workflow_text
-    assert '--review "${{ steps.review_output.outputs.review_file }}"' in finalize["run"]
-
-
-def test_bm_bossbot_prompt_references_engineering_style_and_json_bullets() -> None:
-    prompt = PROMPT_PATH.read_text(encoding="utf-8")
-
-    assert "docs/ENGINEERING_STYLE.md" in prompt
-    assert "- Set `reviewed_head_sha`" in prompt
-    assert "- Do not include Markdown outside the JSON." in prompt
+    assert classify["if"] == "steps.pr.outputs.should_review == 'true'"
+    assert '--trusted "${{ steps.trust.outputs.trusted_author }}"' in finalize["run"]
 
 
 def test_claude_code_review_is_manual_advisory_only() -> None:
