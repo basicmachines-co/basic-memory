@@ -11,7 +11,7 @@ Bossbot to approve the latest head SHA. This skill never merges a PR.
 ## Inputs
 
 - Optional `<theme>`: free-form visual direction for the non-gating PR
-  infographic. Example: `$pr-create "Italian movie poster"`.
+  image. Example: `$pr-create "Italian movie poster"`.
 - Treat `<theme>` as style guidance only. It must not affect PR readiness,
   BM Bossbot review, status checks, or merge behavior.
 
@@ -48,9 +48,8 @@ model choose from BM categories").
    <!-- BM_INFOGRAPHIC_PROVENANCE:end -->
    ```
 
-   The provenance records the visual format, theme source, image settings, the
-   exact image prompt, and the Images API revised prompt when available. It is
-   for review/debugging context only.
+   The provenance records the image mode, theme source, selected visual
+   direction, and image settings. It is for review/debugging context only.
 5. Codex reports the PR URL, head SHA, checks watched, verification run, and BM
    Bossbot verdict.
 
@@ -94,8 +93,8 @@ provenance block as a gate. The only required merge signal is the
 <!-- BM_INFOGRAPHIC_THEME:end -->
 ```
 
-Keep the rest of the PR body intact. The theme is non-gating infographic
-guidance only.
+Keep the rest of the PR body intact. The theme is non-gating image guidance
+only.
 
 5. Do not merge. Do not enable auto-merge.
 
@@ -111,5 +110,5 @@ guidance only.
 ## Report
 
 Return the PR URL, current head SHA, checks watched, verification run, and the
-BM Bossbot verdict. Include the infographic `<theme>` if one was supplied. Be
+BM Bossbot verdict. Include the image `<theme>` if one was supplied. Be
 explicit when any check is still pending.

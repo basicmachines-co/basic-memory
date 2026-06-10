@@ -1,23 +1,23 @@
 ---
 name: infographics
-description: Use when generating Basic Memory PR, changelog, release, or weekly infographics from Codex.
+description: Use when generating Basic Memory PR, changelog, release, or weekly images from Codex.
 ---
 
-# Basic Memory Infographics
+# Basic Memory Images
 
 Generate repository visuals with evidence-grounded content and canonical output
-paths. The file names still say "infographic", but the image may be an
-infographic, map, poster, scene, tableau, cover, or other visual form when that
-better describes the intent of the PR. PR images are non-gating BM Bossbot
-artifacts; changelog and release-summary images are manual evidence-pack
-workflows.
+paths. The file and marker names still say "infographic" for compatibility, but
+PR generation is image-first: scene, poster, painting, photograph, cover,
+tableau, staged artifact, or another editorial visual moment that describes the
+intent of the PR. PR images are non-gating BM Bossbot artifacts; changelog and
+release-summary images are manual evidence-pack workflows.
 
 ## Output Contract
 
 - Base output directory: `docs/assets/infographics/`
-- PR infographic: `docs/assets/infographics/pr-<number>.webp`
-- Changelog infographic: `docs/assets/infographics/changelog.webp`
-- Weekly infographic:
+- PR image: `docs/assets/infographics/pr-<number>.webp`
+- Changelog image: `docs/assets/infographics/changelog.webp`
+- Weekly image:
   - This is always a 2-Week Retro window: previous ISO week through current ISO
     week (`start-week = current-week - 1`, `end-week = current-week`).
   - Same year window: `docs/assets/infographics/<year>-w<start-week>-w<end-week>.webp`
@@ -42,12 +42,11 @@ uv run --script scripts/generate_pr_infographic.py \
   --pr-number <number> \
   --pr-body-file /tmp/bm-pr-body.md \
   --theme "<optional visual theme>" \
-  --visual-format auto \
   --provenance-output /tmp/bm-infographic-provenance.md \
   --output docs/assets/infographics/pr-<number>.webp
 ```
 
-If the PR body contains a managed infographic theme block, the script reads it
+If the PR body contains a managed image theme block, the script reads it
 automatically:
 
 ```markdown
@@ -63,7 +62,6 @@ uv run --script scripts/generate_pr_infographic.py \
   --pr-number <number> \
   --pr-body-file /tmp/bm-pr-body.md \
   --theme "<optional visual theme>" \
-  --visual-format auto \
   --output docs/assets/infographics/pr-<number>.webp \
   --print-prompt
 ```
@@ -71,11 +69,9 @@ uv run --script scripts/generate_pr_infographic.py \
 `--dry-run` is an alias for `--print-prompt`; both print the final prompt and
 exit without calling OpenAI.
 
-Use `--visual-format auto` by default so the model can choose the strongest
-form. Use `--visual-format infographic` when the user wants a structured,
-text-forward map/infographic. Use `--visual-format image` when the user wants an
-actual editorial scene, movie poster, painting, photograph, tableau, cover, or
-symbolic visual moment with minimal text.
+When no theme is supplied, the script selects a deterministic BM visual
+direction from the style pool below based on the PR number and Bossbot summary.
+This keeps repeated PR images from collapsing into the same generic visual.
 
 When the image is generated, also write provenance with
 `--provenance-output <path>`. BM Bossbot publishes that managed block into the
@@ -88,12 +84,11 @@ PR body with these markers:
 ```
 
 The provenance block records the generated asset path, image model, size,
-quality, visual format, theme source, theme or category-choice instruction, and
-the exact "Image prompt sent to" the image model. When the Images API provides
-a revised prompt, the block records that model interpretation too. Treat this
-block as debugging and creative provenance only; it is not a merge gate.
+quality, image mode, theme source, and selected visual direction. It
+intentionally does not dump the full generated prompt into the PR body. Treat
+this block as debugging and creative provenance only; it is not a merge gate.
 
-The PR infographic is visual support only. The authoritative merge gate is the
+The PR image is visual support only. The authoritative merge gate is the
 GitHub commit status named `BM Bossbot Approval`.
 
 ## Changelog Mode
@@ -104,8 +99,8 @@ Build an evidence pack before writing a prompt:
 - changed-file orientation: `git diff --stat` plus key file reads
 - impact ledger: before/after outcomes tied to actual changes
 - discard list: misleading titles, reverted work, rename-only churn, speculative TODOs
-- chosen visual format: infographic, map, poster, scene, tableau, cover, or let
-  the model choose
+- chosen image form: poster, scene, tableau, cover, painting, photograph,
+  staged artifact, or another editorial visual moment
 - chosen BM style category: exactly one category from the selection pool below
 
 Read these references before drafting the prompt:
@@ -118,15 +113,14 @@ changes.
 
 ## Style And Category Selection
 
-Select exactly one BM style category per infographic based on semantic fit. The
+Select exactly one BM style category per image based on semantic fit. The
 visual language should be recognizable and tasteful, while staying
 business-readable.
 
-Also choose the visual form that best communicates the change. Use an
-infographic or map when the work has several discrete facts, gates, checks, or
-before/after points. Use a poster, scene, tableau, cover image, illustrated
-moment, or other image when the PR has a clear intent that is better described
-as a visual story. If neither is obvious, let the model choose.
+Create an image-first visual form that communicates the change: poster, scene,
+tableau, cover image, painting, photograph, staged artifact, or another
+editorial visual moment. Maps, diagrams, dossiers, charts, and labels can appear
+as props inside the scene, but do not make a text-heavy infographic.
 
 BM category pool:
 
@@ -183,17 +177,15 @@ BM category pool:
 Selection rules:
 
 - Pick one category only; do not create mixed mashups.
-- Pick the most appropriate visual form; do not force a text-heavy infographic
-  when an actual scene, poster, painting, photograph, tableau, or cover would
-  communicate the intent better.
+- Pick the most appropriate image form. Prefer an actual scene, poster,
+  painting, photograph, tableau, or cover over a text-heavy infographic.
 - Match metaphor to content, but do not overthink it. The category is a creative
   catalyst, not a semantic constraint.
-- Use a polished upscaled editorial rendering direction: smooth anti-aliased
+- Use a polished editorial rendering direction: smooth anti-aliased
   text, high contrast, clean edges, readable labels.
-- Go bold with a map backbone when using an infographic or map. For scene-first
-  images, make the category drive the composition through a readable staged
-  moment, editorial composition, symbolic environment, route, artifact, or
-  visual metaphor.
+- Make the category drive the composition through a readable staged moment,
+  editorial composition, symbolic environment, route, artifact, or visual
+  metaphor.
 - Keep the structure literal enough to aid understanding, but not so heavy that
   it obscures engineering meaning.
 - Give the image generator creative latitude on layout, structure, color palette,
@@ -205,17 +197,16 @@ Selection rules:
 ## Content-First Aesthetic Contract
 
 The meaning must be readable and clearly hierarchical. Everything else is
-creative territory: visual format, layout, visual metaphors, decorative
-elements, color choices, and category-specific visual language.
+creative territory: image form, layout, visual metaphors, decorative elements,
+color choices, and category-specific visual language.
 
 Hierarchy:
 
 1. Meaning: what shipped, what changed, and why it matters must be clear.
 2. If the image uses text, labels, sections, or evidence bullets, they must be
    legible.
-3. The selected category's visual DNA should drive the composition, whether that
-   is a readable map structure, a poster, a scene, a tableau, or a symbolic
-   object arrangement.
+3. The selected category's visual DNA should drive the composition as a poster,
+   scene, painting, photograph, tableau, cover, or symbolic object arrangement.
 4. Do not play it safe. A visually striking image that someone wants to look at
    beats a correct but boring one.
 
@@ -224,9 +215,9 @@ Hard rules:
 - Content sections and labels must be readable when present. Text cannot be
   obscured by decorations.
 - Do not use lore-heavy copy that competes with engineering or business meaning.
-- Every prompt must include a clear composition cue: map regions, route lines,
-  checkpoints, node graphs, a staged scene, a poster composition, a symbolic
-  tableau, or a hero object.
+- Every prompt must include a clear image-first composition cue: a staged scene,
+  poster composition, painting, photograph, symbolic tableau, hero object,
+  mission room, dossier, artifact, route, or visual metaphor.
 - Do not over-prescribe exact coordinates or panel geometry; give a composition
   backbone and let the model compose around it.
 
@@ -248,8 +239,8 @@ uv run --script scripts/generate_infographic.py \
 - Tell a concrete before/after value story, not vague improvement claims.
 - Stay understandable for both engineers and non-technical stakeholders.
 - Use plain-language section titles and labels when text is present.
-- Include clear visual hierarchy: title, sections, evidence bullets, staged
-  focal point, or symbolic scene.
+- Include clear visual hierarchy: title, staged focal point, symbolic scene,
+  evidence props, or hero object.
 - Avoid invented facts; only use provided source material.
 - Favor shipped outcomes over intermediate or reverted work.
 - Preserve readability with high contrast, non-tiny labels, and uncluttered
