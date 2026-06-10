@@ -78,15 +78,16 @@ async def _resolve_after_disk_recovery(
         disk, so the caller keeps its existing not-found handling.
     """
     # Try the identifier as-is first so existing .markdown/.MD files are found; only
-    # fall back to appending ".md" when the identifier does not already carry a
-    # markdown suffix, so 'notes/foo.markdown' never becomes 'notes/foo.markdown.md'.
+    # fall back to appending markdown suffixes (".md" first, then ".markdown") when
+    # the identifier does not already carry one, so 'notes/foo.markdown' never becomes
+    # 'notes/foo.markdown.md' and a stem identifier still reaches 'notes/foo.markdown'.
     candidates = [identifier]
     if not identifier.lower().endswith(_MARKDOWN_SUFFIXES):
-        candidates.append(f"{identifier}.md")
+        candidates.extend(f"{identifier}{suffix}" for suffix in _MARKDOWN_SUFFIXES)
 
     for candidate in candidates:
         try:
-            await knowledge_client.sync_file(candidate)
+            synced = await knowledge_client.sync_file(candidate)
         except ToolError as sync_error:
             # Trigger: the sync-file request failed
             # Why: 400/404 are the expected "nothing to recover" rejections (missing
@@ -113,6 +114,18 @@ async def _resolve_after_disk_recovery(
             logger.debug(f"edit_note disk recovery skipped for '{candidate}': {sync_error}")
             continue
 
+        # Trigger: sync-file succeeded and returned the indexed entity.
+        # Why: the server may have canonicalized the path casing (notes/Disk-Note ->
+        #      notes/disk-note.md), so strictly re-resolving the raw identifier can
+        #      still miss the entity we just indexed.
+        # Outcome: use the entity identity from the sync-file response directly; only
+        #      fall back to a strict re-resolve when an older server omits external_id,
+        #      and let that re-resolve fail loudly instead of guessing.
+        if synced.external_id:
+            logger.info(
+                f"edit_note indexed unindexed file '{candidate}' as entity {synced.external_id}"
+            )
+            return synced.external_id
         logger.info(f"edit_note indexed unindexed file '{candidate}'; retrying resolution")
         return await knowledge_client.resolve_entity(identifier, strict=True)
 
