@@ -497,3 +497,55 @@ async def test_search_case_insensitive(mcp_server, app, test_project):
 
             result_text = search_result.content[0].text
             assert "Machine Learning Guide" in result_text, f"Failed for search term: {search_term}"
+
+
+@pytest.mark.asyncio
+async def test_tags_param_vs_tag_query_comma_consistency(mcp_server, app, test_project):
+    """The `tags=` parameter must split comma-separated strings like the `tag:` shorthand.
+
+    Regression test for #910: `search_notes(tags="alpha,beta")` previously coerced the
+    bare string into the single literal tag `["alpha,beta"]` (matching nothing), while
+    the `tag:alpha,beta` query shorthand splits on commas. Both paths must agree.
+    """
+
+    async with Client(mcp_server) as client:
+        # Note tagged alpha + beta
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Tag Shorthand Note",
+                "directory": "tag-shorthand",
+                "content": "# Tag Shorthand Note\n\nTagShorthandToken body",
+                "tags": ["alpha", "beta"],
+            },
+        )
+
+        # Path A: tag: query shorthand with comma list -> splits, matches
+        via_query = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "tag:alpha,beta",
+                "search_type": "text",
+            },
+        )
+        query_hit = "Tag Shorthand Note" in via_query.content[0].text
+
+        # Path B: tags= parameter with the SAME comma string
+        via_param = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "TagShorthandToken",
+                "search_type": "text",
+                "tags": "alpha,beta",
+            },
+        )
+        param_hit = "Tag Shorthand Note" in via_param.content[0].text
+
+        assert query_hit, "tag: query shorthand should match (sanity)"
+        assert param_hit == query_hit, (
+            "tags='alpha,beta' param must behave like the tag: shorthand "
+            f"(both split commas). query_hit={query_hit} param_hit={param_hit}"
+        )
