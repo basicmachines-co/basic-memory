@@ -15,8 +15,10 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    neither is found, report that Basic Memory isn't installed or on PATH, and stop —
    nothing else will work without it.
 
-2. **Configuration.** Read `.claude/settings.json` (and `.claude/settings.local.json`
-   if present) and report:
+2. **Configuration.** Read the `basicMemory` block with the hooks' precedence —
+   user-level `~/.claude/settings.json` as the base, then the project's
+   `.claude/settings.json` and `.claude/settings.local.json` overriding per key —
+   and report (note when a value comes from the user-level block vs. the project):
    - From the `basicMemory` block: `primaryProject` (or note none is pinned — the
      default project is used), `secondaryProjects` (team/shared read sources),
      `teamProjects` (share targets for `/basic-memory:bm-share`), `captureFolder`
