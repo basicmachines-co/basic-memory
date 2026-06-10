@@ -260,11 +260,23 @@ def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
     Outcome: each segment is matched against real directory entries — exact name first
         (so distinct case-variant files on case-sensitive filesystems stay distinct),
         then a unique case-insensitive match. Returns None when any segment cannot be
-        matched to exactly one entry, including missing files.
+        matched to exactly one entry, including missing files. Traversal stops at the
+        project boundary: a directory whose resolved path escapes the project home is
+        never scanned.
     """
+    resolved_home = home.resolve()
     current = home
     canonical_segments: list[str] = []
     for segment in segments:
+        # Trigger: a previously matched segment may be a symlink whose target lies
+        #     outside the project root (e.g. wrong-cased 'LINK' matched the on-disk
+        #     'link' -> /tmp/outside on a case-sensitive filesystem).
+        # Why: os.scandir follows symlinked directories, so continuing would read
+        #     directory contents outside the project boundary even though the
+        #     post-canonicalization containment check rejects the request later.
+        # Outcome: bail before scanning the moment resolution escapes the home.
+        if not current.resolve().is_relative_to(resolved_home):
+            return None
         try:
             with os.scandir(current) as entries_iter:
                 entries = [entry.name for entry in entries_iter]

@@ -1,5 +1,6 @@
 """Tests for V2 knowledge graph API routes (ID-based endpoints)."""
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import uuid
@@ -7,6 +8,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
 from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
@@ -1045,9 +1047,9 @@ async def test_sync_file_rejects_symlink_escape(
     boundary check: the path exists, so resolve() follows the symlink and detects the
     escape. The wrong-cased request ('LINK/secret.md') is the regression case — on a
     case-sensitive filesystem that path does not exist, the pre-check resolves it
-    lexically and passes, and only canonicalization rewrites it to the real 'link'
-    segment; the post-canonicalization containment check must reject it. On
-    case-insensitive filesystems the pre-check catches both. Either way: 400.
+    lexically and passes; canonicalization then matches the real 'link' segment but
+    stops at the project boundary and reports the path as not found (404). On
+    case-insensitive filesystems the pre-check catches both with 400.
     """
     project_path = Path(test_project.path)
     outside_dir = project_path.parent / "sync-file-outside"
@@ -1057,16 +1059,96 @@ async def test_sync_file_rejects_symlink_escape(
     )
     (project_path / "link").symlink_to(outside_dir, target_is_directory=True)
 
-    for requested in ("link/secret.md", "LINK/secret.md"):
-        response = await client.post(
-            f"{v2_project_url}/knowledge/sync-file",
-            json={"file_path": requested},
-        )
-        assert response.status_code == 400, requested
-        assert "project boundaries" in response.json()["detail"]
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "link/secret.md"},
+    )
+    assert response.status_code == 400
+    assert "project boundaries" in response.json()["detail"]
+
+    # 400 (pre-check, case-insensitive FS) or 404 (canonicalization stops at the
+    # boundary, case-sensitive FS) — either way the escape is rejected.
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "LINK/secret.md"},
+    )
+    assert response.status_code in (400, 404)
 
     # Nothing outside the project root was indexed
     assert await entity_repository.find_all() == []
+
+
+@pytest.mark.asyncio
+async def test_sync_file_symlink_escape_never_scans_outside_directory(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    entity_repository,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Canonicalization never scans directories outside the project root.
+
+    Rejecting the request is not enough: before this fix, the wrong-cased request
+    ('LINK/secret.md') passed the pre-check on a case-sensitive filesystem, and
+    canonicalization followed the escaping 'link' symlink with os.scandir before the
+    post-canonicalization containment check fired — an information touch outside the
+    boundary. We spy on os.scandir and assert the outside directory is never scanned.
+    The spy is what makes this test meaningful on case-insensitive macOS too, where
+    the request is already rejected by the pre-check: the assertion proves no layer
+    scanned past the boundary either way.
+    """
+    project_path = Path(test_project.path)
+    outside_dir = (project_path.parent / "sync-file-outside-scan").resolve()
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.md").write_text(
+        "# Outside\n\nMust never be scanned.\n", encoding="utf-8"
+    )
+    (project_path / "link").symlink_to(outside_dir, target_is_directory=True)
+
+    real_scandir = os.scandir
+    scanned: list[Path] = []
+
+    def recording_scandir(path=".", *args, **kwargs):
+        # Record the resolved path so a scandir on the symlinked 'link' directory
+        # shows up as the outside directory it actually reads.
+        scanned.append(Path(path).resolve())
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", recording_scandir)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "LINK/secret.md"},
+    )
+    assert response.status_code in (400, 404)
+    assert outside_dir not in scanned
+
+    assert await entity_repository.find_all() == []
+
+
+def test_canonical_file_path_stops_at_project_boundary(tmp_path: Path):
+    """_canonical_file_path bails before descending past the resolved project home.
+
+    Exercised directly (not via the endpoint) so the boundary bail is covered on
+    case-insensitive filesystems too, where the endpoint pre-check rejects the
+    request before canonicalization runs.
+    """
+    home = tmp_path / "project"
+    home.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "secret.md").write_text("# Outside\n", encoding="utf-8")
+    (home / "link").symlink_to(outside_dir, target_is_directory=True)
+
+    assert _canonical_file_path(home, ["link", "secret.md"]) is None
+
+    # Symlinks that stay inside the project keep canonicalizing as before.
+    real_dir = home / "real"
+    real_dir.mkdir()
+    (real_dir / "inside.md").write_text("# Inside\n", encoding="utf-8")
+    (home / "alias").symlink_to(real_dir, target_is_directory=True)
+
+    assert _canonical_file_path(home, ["alias", "inside.md"]) == "alias/inside.md"
 
 
 @pytest.mark.asyncio
