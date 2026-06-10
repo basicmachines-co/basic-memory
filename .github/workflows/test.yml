@@ -186,18 +186,12 @@ jobs:
       matrix:
         # Shard the largest suite across parallel jobs: each shard is a full job
         # with its own Postgres service running 1/3 of the collection.
+        # Postgres runs on the latest Python only — the SQLite matrix carries
+        # Python-version coverage; Postgres carries backend coverage.
         group: [1, 2, 3]
-        python-version: ["3.12", "3.13", "3.14"]
-        include:
-          - python-version: "3.12"
-            os: depot-ubuntu-24.04
-          - python-version: "3.13"
-            os: depot-ubuntu-24.04
-          # Match the SQLite unit slice: this full Python 3.14 path outlived
-          # the Depot runner and was terminated mid-suite.
-          - python-version: "3.14"
-            os: ubuntu-latest
-    runs-on: ${{ matrix.os }}
+        python-version: ["3.14"]
+    # ubuntu-latest: the 3.14 path previously outlived a Depot runner mid-suite.
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -263,10 +257,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: "3.12"
-          - python-version: "3.13"
-          - python-version: "3.14"
+        # Latest Python only: SQLite carries version coverage, Postgres carries
+        # backend coverage.
+        python-version: ["3.14"]
     runs-on: depot-ubuntu-24.04
     services:
       postgres:
