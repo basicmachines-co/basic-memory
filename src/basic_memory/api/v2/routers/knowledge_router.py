@@ -341,6 +341,24 @@ async def sync_file(
             raise HTTPException(
                 status_code=404, detail=f"File not found on disk: '{data.file_path}'"
             )
+        # Trigger: canonicalization rewrote a segment to its on-disk form, and that
+        #     segment may be a symlink. The pre-check above validated the ORIGINAL
+        #     request path — on a case-sensitive filesystem 'LINK/secret.md' does not
+        #     exist, so resolve() cannot follow the real 'link' symlink and the check
+        #     passes even when 'link' points outside the project root.
+        # Why: indexing through an escaping symlink would read and index content
+        #     outside the project boundary.
+        # Outcome: the canonical path is re-validated and the fully-resolved absolute
+        #     target must stay inside the resolved project home; escapes get a 400.
+        resolved_target = (project_config.home / file_path).resolve()
+        if not validate_project_path(file_path, project_config.home) or not (
+            resolved_target.is_relative_to(project_config.home.resolve())
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' is not allowed - "
+                "paths must stay within project boundaries",
+            )
         # Trigger: the canonical path matches the .bmignore / project .gitignore rules
         # Why: scan and watch flows filter ignored files before they ever reach the
         #      indexer; indexing one here would bypass the ignored-file contract and

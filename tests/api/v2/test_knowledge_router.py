@@ -1036,6 +1036,65 @@ async def test_sync_file_rejects_path_traversal(client: AsyncClient, v2_project_
 
 
 @pytest.mark.asyncio
+async def test_sync_file_rejects_symlink_escape(
+    client: AsyncClient, v2_project_url, test_project: Project, entity_repository
+):
+    """sync-file rejects paths whose canonical target escapes the project via symlink.
+
+    The exact-cased request ('link/secret.md') is rejected by the pre-canonicalization
+    boundary check: the path exists, so resolve() follows the symlink and detects the
+    escape. The wrong-cased request ('LINK/secret.md') is the regression case — on a
+    case-sensitive filesystem that path does not exist, the pre-check resolves it
+    lexically and passes, and only canonicalization rewrites it to the real 'link'
+    segment; the post-canonicalization containment check must reject it. On
+    case-insensitive filesystems the pre-check catches both. Either way: 400.
+    """
+    project_path = Path(test_project.path)
+    outside_dir = project_path.parent / "sync-file-outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.md").write_text(
+        "# Outside\n\nMust never be indexed.\n", encoding="utf-8"
+    )
+    (project_path / "link").symlink_to(outside_dir, target_is_directory=True)
+
+    for requested in ("link/secret.md", "LINK/secret.md"):
+        response = await client.post(
+            f"{v2_project_url}/knowledge/sync-file",
+            json={"file_path": requested},
+        )
+        assert response.status_code == 400, requested
+        assert "project boundaries" in response.json()["detail"]
+
+    # Nothing outside the project root was indexed
+    assert await entity_repository.find_all() == []
+
+
+@pytest.mark.asyncio
+async def test_sync_file_symlink_inside_project_still_indexes(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """A symlinked directory that stays inside the project is still accepted.
+
+    Pre-existing behavior we preserve: the containment check follows the symlink,
+    sees the resolved target inside the project root, and indexes the entity under
+    the requested (symlinked) path — only escapes outside the root are rejected.
+    """
+    project_path = Path(test_project.path)
+    real_dir = project_path / "real"
+    real_dir.mkdir(parents=True, exist_ok=True)
+    (real_dir / "inside.md").write_text("# Inside\n\nReachable via alias.\n", encoding="utf-8")
+    (project_path / "alias").symlink_to(real_dir, target_is_directory=True)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "alias/inside.md"},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "alias/inside.md"
+
+
+@pytest.mark.asyncio
 async def test_sync_file_wrong_cased_path_does_not_create_duplicate(
     client: AsyncClient, v2_project_url, test_project: Project, entity_repository
 ):
