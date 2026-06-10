@@ -16,6 +16,21 @@ runner = CliRunner()
 
 
 @pytest.mark.parametrize(
+    "command",
+    ["sync", "bisync", "check", "bisync-reset"],
+)
+def test_cloud_mirror_command_help_marks_personal_workspaces_only(command):
+    """Mirror-family help must say Personal-only and point Team users at push/pull (#851)."""
+    result = runner.invoke(app, ["cloud", command, "--help"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Personal workspaces only" in output
+    assert "bm cloud pull" in output
+    assert "bm cloud push" in output
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["cloud", "sync", "--name", "research"],

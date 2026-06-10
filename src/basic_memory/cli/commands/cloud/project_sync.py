@@ -512,7 +512,11 @@ def bisync_project_command(
     resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Two-way sync: local <-> cloud (bidirectional sync).
+    """Two-way mirror: local <-> cloud (bidirectional sync).
+
+    Personal workspaces only. This mirror can delete and overwrite files on both
+    sides, so on Team workspaces use `bm cloud pull` (fetch) / `bm cloud push`
+    (additive upload) instead.
 
     Examples:
       bm cloud bisync --name research --resync  # First time
@@ -576,7 +580,11 @@ def check_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to check"),
     one_way: bool = typer.Option(False, "--one-way", help="Check one direction only (faster)"),
 ) -> None:
-    """Verify file integrity between local and cloud.
+    """Verify file integrity between local and cloud (no changes made).
+
+    Personal workspaces only: check compares against the Personal workspace
+    mirror remote. On Team workspaces use `bm cloud pull --dry-run` /
+    `bm cloud push --dry-run` to preview differences instead.
 
     Example:
       bm cloud check --name research
@@ -623,6 +631,9 @@ def bisync_reset(
     name: str = typer.Argument(..., help="Project name to reset bisync state for"),
 ) -> None:
     """Clear bisync state for a project.
+
+    Personal workspaces only (bisync is a Personal-workspace mirror; on Team
+    workspaces use `bm cloud pull` / `bm cloud push` instead).
 
     This removes the bisync metadata files, forcing a fresh --resync on next bisync.
     Useful when bisync gets into an inconsistent state or when remote path changes.
