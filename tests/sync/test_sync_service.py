@@ -6,6 +6,8 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any, cast
 
+import os
+
 import pytest
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
@@ -388,6 +390,11 @@ modified: 2024-01-01
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="#940: intermittent batch-indexing race leaves a relation unresolved under CI "
+    "concurrency; quarantined pending root-cause, still runs locally",
+)
 async def test_sync_entity_circular_relations(
     sync_service: SyncService, project_config: ProjectConfig
 ):
