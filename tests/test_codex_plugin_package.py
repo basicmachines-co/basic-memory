@@ -66,8 +66,9 @@ def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:
     prompt_blueprint = (
         repo_root / ".agents/skills/infographics/references/prompt-blueprint.md"
     ).read_text(encoding="utf-8")
+    skill_flat = " ".join(skill.split())
 
-    assert "Weekly infographic" in skill
+    assert "Weekly image" in skill
     assert "2-Week Retro window" in skill
     assert "docs/assets/infographics/<year>-w<start-week>-w<end-week>.webp" in skill
     assert (
@@ -91,30 +92,29 @@ def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:
     assert "80's action movies" in skill
     assert "practical explosions" in skill
     assert "no direct actor likenesses" in skill
-    assert "infographic, map, poster, scene, tableau" in skill
-    assert "let the model choose" in skill
+    assert "poster, scene, tableau, cover image" in skill_flat
+    assert "image-first" in skill
     assert "--print-prompt" in skill
     assert "--dry-run" in skill
-    assert "--visual-format auto" in skill
-    assert "--visual-format infographic" in skill
-    assert "--visual-format image" in skill
+    assert "--visual-format" not in skill
     assert "--provenance-output" in skill
     assert "BM_INFOGRAPHIC_PROVENANCE:start" in skill
-    assert "Image prompt sent to" in skill
-    assert "revised prompt" in skill
+    assert "Image prompt sent to" not in skill
+    assert "revised prompt" not in skill
     assert "star charts" in style_balance
     assert "editorial scene" in style_balance
     assert "painting, photograph" in style_balance
     assert "copyrighted characters, logos, or named fictional universes" in skill
     assert "retro game or classic app aesthetic" not in skill
     assert "BM style category" in style_balance
-    assert "Chosen visual format" in prompt_blueprint
+    assert "Chosen image form" in prompt_blueprint
     assert "Chosen BM style category" in prompt_blueprint
 
 
 def test_pr_create_skill_documents_optional_infographic_theme_arg() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / ".agents/skills/pr-create/SKILL.md").read_text(encoding="utf-8")
+    skill_flat = " ".join(skill.split())
 
     assert "## How To Use" in skill
     assert "$pr-create" in skill
@@ -125,6 +125,6 @@ def test_pr_create_skill_documents_optional_infographic_theme_arg() -> None:
     assert "<!-- BM_INFOGRAPHIC_THEME:end -->" in skill
     assert "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->" in skill
     assert "BM Bossbot Approval" in skill
-    assert "Images API revised prompt" in skill
+    assert "selected visual direction" in skill_flat
     assert "never merges" in skill
     assert "non-gating" in skill
