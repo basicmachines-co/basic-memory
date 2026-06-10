@@ -1310,6 +1310,54 @@ async def test_edit_note_recovers_identifier_with_md_extension(client, test_proj
 
 
 @pytest.mark.asyncio
+async def test_edit_note_recovers_identifier_with_markdown_extension(client, test_project):
+    """A .markdown identifier must recover via the exact path, not '<path>.markdown.md' (#581)."""
+    note_path = Path(test_project.path) / "notes" / "alt-suffix.markdown"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Alt Suffix\n\nstate: pending\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/alt-suffix.markdown",
+        operation="find_replace",
+        content="state: done",
+        find_text="state: pending",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (find_replace)" in result
+    assert "state: done" in note_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_refuses_ignored_on_disk_file(client, test_project):
+    """An on-disk file matched by .gitignore must be refused, not shadowed by auto-create."""
+    project_path = Path(test_project.path)
+    (project_path / ".gitignore").write_text("private/\n", encoding="utf-8")
+    note_path = project_path / "private" / "secret.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    original_content = "# Secret\n\nGitignored content.\n"
+    note_path.write_text(original_content, encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="private/secret",
+        operation="append",
+        content="\nShould never be written.",
+    )
+
+    assert isinstance(result, str)
+    assert "ignore rules" in result
+    assert "will not be edited" in result
+    assert "Edited note" not in result
+    assert "Created note" not in result
+
+    # The ignored file is untouched and auto-create did not shadow it with a new entity
+    assert note_path.read_text(encoding="utf-8") == original_content
+    assert [entry.name for entry in (project_path / "private").iterdir()] == ["secret.md"]
+
+
+@pytest.mark.asyncio
 async def test_edit_note_append_recovers_file_on_disk_instead_of_autocreate(client, test_project):
     """append to an unindexed on-disk file should edit it, not auto-create a replacement (#581)."""
     note_path = Path(test_project.path) / "notes" / "disk-append.md"

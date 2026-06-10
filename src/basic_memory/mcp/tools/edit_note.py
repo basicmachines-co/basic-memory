@@ -13,6 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.mcp.clients import KnowledgeClient
 
 from basic_memory.config import ConfigManager
+from basic_memory.ignore_utils import IGNORED_PATH_REJECTION_DETAIL
 from basic_memory.mcp.project_context import (
     _workspace_identifier_discovery_available,
     detect_project_from_memory_url_prefix,
@@ -21,6 +22,7 @@ from basic_memory.mcp.project_context import (
     resolve_project_and_path,
 )
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.response import EntityResponse
 from basic_memory.services.link_resolver import (
@@ -57,6 +59,11 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
     return title, directory
 
 
+# Suffixes mimetypes maps to text/markdown (extension matching is case-insensitive),
+# mirroring FileService.is_markdown which gates the sync-file endpoint server-side.
+_MARKDOWN_SUFFIXES = (".md", ".markdown")
+
+
 async def _resolve_after_disk_recovery(
     knowledge_client: "KnowledgeClient",
     identifier: str,
@@ -70,29 +77,46 @@ async def _resolve_after_disk_recovery(
         once. Returns None when the identifier does not map to an indexable file on
         disk, so the caller keeps its existing not-found handling.
     """
-    candidate = identifier if identifier.endswith(".md") else f"{identifier}.md"
-    try:
-        await knowledge_client.sync_file(candidate)
-    except ToolError as sync_error:
-        # Trigger: the sync-file request failed
-        # Why: 400/404 are the expected "nothing to recover" rejections (missing file,
-        #      traversal, ignored path, non-markdown); anything else — auth, server,
-        #      transport-level failures — is a real error that must not be masked as
-        #      a not-found miss
-        # Outcome: expected rejections fall through to the caller's existing
-        #      not-found behavior; unexpected failures propagate
-        cause = sync_error.__cause__
-        candidate_rejected = isinstance(cause, HTTPStatusError) and cause.response.status_code in (
-            400,
-            404,
-        )
-        if not candidate_rejected:
-            raise
-        logger.debug(f"edit_note disk recovery skipped for '{candidate}': {sync_error}")
-        return None
+    # Try the identifier as-is first so existing .markdown/.MD files are found; only
+    # fall back to appending ".md" when the identifier does not already carry a
+    # markdown suffix, so 'notes/foo.markdown' never becomes 'notes/foo.markdown.md'.
+    candidates = [identifier]
+    if not identifier.lower().endswith(_MARKDOWN_SUFFIXES):
+        candidates.append(f"{identifier}.md")
 
-    logger.info(f"edit_note indexed unindexed file '{candidate}'; retrying resolution")
-    return await knowledge_client.resolve_entity(identifier, strict=True)
+    for candidate in candidates:
+        try:
+            await knowledge_client.sync_file(candidate)
+        except ToolError as sync_error:
+            # Trigger: the sync-file request failed
+            # Why: 400/404 are the expected "nothing to recover" rejections (missing
+            #      file, traversal, non-markdown) — except the ignored-path 400, which
+            #      means the file exists on disk but the ignore rules forbid indexing
+            #      it, so falling through to auto-create would silently shadow the
+            #      file. Anything else — auth, server, transport-level failures — is a
+            #      real error that must not be masked as a not-found miss.
+            # Outcome: ignored-path rejections raise a clear ToolError; other expected
+            #      rejections try the next candidate or fall through to the caller's
+            #      existing not-found behavior; unexpected failures propagate.
+            cause = sync_error.__cause__
+            candidate_rejected = isinstance(
+                cause, HTTPStatusError
+            ) and cause.response.status_code in (400, 404)
+            if not candidate_rejected:
+                raise
+            detail = _response_detail_text(_extract_response_data(cause.response)) or ""
+            if IGNORED_PATH_REJECTION_DETAIL in detail:
+                raise ToolError(
+                    f"Note file '{candidate}' exists on disk but {IGNORED_PATH_REJECTION_DETAIL} "
+                    "and will not be edited"
+                ) from sync_error
+            logger.debug(f"edit_note disk recovery skipped for '{candidate}': {sync_error}")
+            continue
+
+        logger.info(f"edit_note indexed unindexed file '{candidate}'; retrying resolution")
+        return await knowledge_client.resolve_entity(identifier, strict=True)
+
+    return None
 
 
 def _compose_workspace_project_route(

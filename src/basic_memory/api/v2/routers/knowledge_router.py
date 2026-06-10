@@ -17,7 +17,11 @@ from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
-from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
+from basic_memory.ignore_utils import (
+    IGNORED_PATH_REJECTION_DETAIL,
+    load_gitignore_patterns,
+    should_ignore_path,
+)
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -348,8 +352,8 @@ async def sync_file(
         ):
             raise HTTPException(
                 status_code=400,
-                detail=f"File path '{data.file_path}' matches Basic Memory ignore rules "
-                "(.bmignore or project .gitignore) and cannot be indexed",
+                detail=f"File path '{data.file_path}' {IGNORED_PATH_REJECTION_DETAIL} "
+                "and cannot be indexed",
             )
         if not sync_service.file_service.is_markdown(file_path):
             raise HTTPException(
