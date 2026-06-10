@@ -13,12 +13,15 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Required CI records pytest-testmon data but still runs the full selected suite.
+  # The selective mode stays on explicit developer flows such as `just testmon`.
+  BASIC_MEMORY_TESTMON_FLAGS: "--testmon-noselect"
 
 jobs:
   static-checks:
     name: Static Checks (Python 3.12)
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -60,10 +63,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: depot-ubuntu-24.04
             python-version: "3.12"
-          - os: ubuntu-latest
+          - os: depot-ubuntu-24.04
             python-version: "3.13"
+          # Python 3.14 unit tests are the longest full-suite slice; keep this
+          # one on GitHub-hosted runners after Depot terminated it mid-suite.
           - os: ubuntu-latest
             python-version: "3.14"
           - os: windows-latest
@@ -86,6 +91,19 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
+
+      - name: Cache pytest-testmon results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .testmondata
+            .testmondata-shm
+            .testmondata-wal
+          key: ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-main-
+            ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-
 
       - name: Create virtual env
         run: |
@@ -106,11 +124,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: depot-ubuntu-24.04
             python-version: "3.12"
-          - os: ubuntu-latest
+          - os: depot-ubuntu-24.04
             python-version: "3.13"
-          - os: ubuntu-latest
+          - os: depot-ubuntu-24.04
             python-version: "3.14"
           - os: windows-latest
             python-version: "3.12"
@@ -132,6 +150,19 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
+
+      - name: Cache pytest-testmon results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .testmondata
+            .testmondata-shm
+            .testmondata-wal
+          key: ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-main-
+            ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-
 
       - name: Create virtual env
         run: |
@@ -153,9 +184,14 @@ jobs:
       matrix:
         include:
           - python-version: "3.12"
+            os: depot-ubuntu-24.04
           - python-version: "3.13"
+            os: depot-ubuntu-24.04
+          # Match the SQLite unit slice: this full Python 3.14 path outlived
+          # the Depot runner and was terminated mid-suite.
           - python-version: "3.14"
-    runs-on: ubuntu-latest
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -189,6 +225,19 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
+
+      - name: Cache pytest-testmon results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .testmondata
+            .testmondata-shm
+            .testmondata-wal
+          key: ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-main-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-
 
       - name: Create virtual env
         run: |
@@ -212,7 +261,7 @@ jobs:
           - python-version: "3.12"
           - python-version: "3.13"
           - python-version: "3.14"
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -247,6 +296,19 @@ jobs:
 
       - uses: extractions/setup-just@v4
 
+      - name: Cache pytest-testmon results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .testmondata
+            .testmondata-shm
+            .testmondata-wal
+          key: ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-main-
+            ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-
+
       - name: Create virtual env
         run: |
           uv venv
@@ -262,7 +324,7 @@ jobs:
   test-semantic:
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -280,6 +342,19 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
+
+      - name: Cache pytest-testmon results
+        uses: actions/cache@v4
+        with:
+          path: |
+            .testmondata
+            .testmondata-shm
+            .testmondata-wal
+          key: ${{ runner.os }}-testmon-semantic-py3.12-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-testmon-semantic-py3.12-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-semantic-py3.12-main-
+            ${{ runner.os }}-testmon-semantic-py3.12-
 
       - name: Create virtual env
         run: |
