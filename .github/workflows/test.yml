@@ -20,7 +20,33 @@ env:
   BASIC_MEMORY_TESTMON_FLAGS: ${{ github.event_name == 'pull_request' && '--testmon --testmon-forceselect' || '--testmon-noselect' }}
 
 jobs:
+  changes:
+    # Docs/workflow-only changes skip the entire test matrix while the workflow
+    # still concludes successfully, so the BM Bossbot gate (workflow_run on
+    # Tests success) keeps firing and the PR stays mergeable.
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'test-int/**'
+              - 'alembic/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'justfile'
+              - '.github/workflows/test.yml'
+
   static-checks:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Static Checks (Python 3.12)
     timeout-minutes: 20
     runs-on: ubuntu-latest
@@ -59,6 +85,8 @@ jobs:
           just lint
 
   test-sqlite-unit:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test SQLite Unit (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 45
     strategy:
@@ -120,6 +148,8 @@ jobs:
           just test-unit-sqlite
 
   test-sqlite-integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 45
     strategy:
@@ -179,6 +209,8 @@ jobs:
           just test-int-sqlite
 
   test-postgres-unit:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/3)
     timeout-minutes: 60
     strategy:
@@ -252,6 +284,8 @@ jobs:
           BASIC_MEMORY_PYTEST_SPLIT_FLAGS="--splits 3 --group ${{ matrix.group }}" just test-unit-postgres
 
   test-postgres-integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test Postgres Integration (Python ${{ matrix.python-version }})
     timeout-minutes: 45
     strategy:
@@ -321,6 +355,8 @@ jobs:
           just test-int-postgres
 
   test-semantic:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
     runs-on: ubuntu-latest
