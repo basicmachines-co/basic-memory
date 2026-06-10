@@ -46,9 +46,10 @@ test-unit-sqlite: testmon-seed
 test-unit-postgres: testmon-seed
     BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-postgres tests
 
-# Run integration tests against SQLite (excludes semantic benchmarks — use just test-semantic)
+# Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
+# use just test-semantic / run benchmark files explicitly)
 test-int-sqlite: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-sqlite -m "not semantic" test-int
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-sqlite -m "not semantic and not benchmark" test-int
 
 # Run integration tests against Postgres
 # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
@@ -59,10 +60,10 @@ test-int-postgres: testmon-seed
     # Use gtimeout (macOS/Homebrew) or timeout (Linux)
     TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic" test-int' || test $? -eq 137
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic and not benchmark" test-int' || test $? -eq 137
     else
         echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic" test-int
+        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic and not benchmark" test-int
     fi
 
 # Run tests impacted by recent changes (requires pytest-testmon)
