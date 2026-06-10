@@ -292,6 +292,13 @@ def app_config(config_home, db_backend, postgres_container, monkeypatch) -> Basi
         update_permalinks_on_move=True,
         database_backend=backend,
         database_url=database_url,
+        # Trigger: semantic_search_enabled defaults to True whenever fastembed/sqlite-vec
+        #          are importable, which they are in dev and CI environments.
+        # Why: with it on, every test that syncs pays the ONNX embedding stack (~5-7s per
+        #      sync) — embeddings are covered by the dedicated semantic suites, which
+        #      configure semantic_search_enabled explicitly themselves.
+        # Outcome: non-semantic tests skip embedding work entirely.
+        semantic_search_enabled=False,
     )
 
     return app_config

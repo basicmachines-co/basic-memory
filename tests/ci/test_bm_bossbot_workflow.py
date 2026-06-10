@@ -11,18 +11,18 @@ def _workflow() -> dict:
     return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
 
-def test_bm_bossbot_uses_safe_pull_request_target_gate() -> None:
+def test_bm_bossbot_runs_after_successful_tests_workflow() -> None:
     workflow = _workflow()
+    review_job = workflow["jobs"]["review"]
 
     assert workflow["name"] == "BM Bossbot"
-    assert "pull_request_target" in workflow["on"]
-    assert workflow["on"]["pull_request_target"]["types"] == [
-        "opened",
-        "synchronize",
-        "reopened",
-        "ready_for_review",
-    ]
+    assert "pull_request_target" not in workflow["on"]
+    assert workflow["on"]["workflow_run"]["workflows"] == ["Tests"]
+    assert workflow["on"]["workflow_run"]["types"] == ["completed"]
     assert "workflow_dispatch" in workflow["on"]
+    assert "github.event.workflow_run.conclusion == 'success'" in review_job["if"]
+    assert "github.event.workflow_run.pull_requests[0].number != ''" in review_job["if"]
+    assert review_job["outputs"]["should_review"] == "${{ steps.pr.outputs.should_review }}"
 
     permissions = workflow["permissions"]
     assert permissions["contents"] == "read"
@@ -36,12 +36,18 @@ def test_bm_bossbot_uses_safe_pull_request_target_gate() -> None:
 
 def test_bm_bossbot_workflow_never_checks_out_untrusted_head() -> None:
     workflow = _workflow()
-    review_job = workflow["jobs"]["review"]
-    steps = review_job["steps"]
-    checkout_step = next(step for step in steps if step.get("uses") == "actions/checkout@v6")
+    checkout_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("uses") == "actions/checkout@v6"
+    ]
 
-    assert checkout_step["with"]["ref"] == "${{ github.event.pull_request.base.ref || github.ref }}"
-    assert "${{ github.event.pull_request.head.sha }}" not in str(checkout_step)
+    assert checkout_steps
+    for checkout_step in checkout_steps:
+        assert checkout_step["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+        assert "${{ github.event.pull_request.head.sha }}" not in str(checkout_step)
+    assert "github.event.pull_request" not in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "cancel-in-progress: true" in WORKFLOW_PATH.read_text(encoding="utf-8")
 
 
@@ -59,9 +65,12 @@ def test_bm_bossbot_workflow_has_deterministic_status_steps() -> None:
     assert run_codex["uses"] == "openai/codex-action@v1"
     assert run_codex["with"]["openai-api-key"] == "${{ secrets.OPENAI_API_KEY }}"
     assert "--output-schema" in run_codex["with"]["codex-args"]
+    assert "steps.pr.outputs.should_review == 'true'" in run_codex["if"]
 
+    pending = next(step for step in steps if step["name"] == "Mark BM Bossbot approval pending")
+    assert pending["if"] == "steps.pr.outputs.should_review == 'true'"
     finalize = next(step for step in steps if step["name"] == "Finalize BM Bossbot approval")
-    assert finalize["if"] == "always()"
+    assert finalize["if"] == "always() && steps.pr.outputs.should_review == 'true'"
     assert "BM Bossbot Approval" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "uv run --script scripts/bm_bossbot_status.py pending" in WORKFLOW_PATH.read_text(
         encoding="utf-8"
@@ -71,6 +80,28 @@ def test_bm_bossbot_workflow_has_deterministic_status_steps() -> None:
     )
 
 
+def test_bm_bossbot_rejects_stale_successful_test_runs_before_codex() -> None:
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    workflow = _workflow()
+    steps = workflow["jobs"]["review"]["steps"]
+    normalize = next(step for step in steps if step["name"] == "Normalize PR event")
+    classify = next(step for step in steps if step["name"] == "Classify PR author")
+
+    assert "tested_sha" in normalize["run"]
+    assert "current_head_sha" in normalize["run"]
+    assert "actions/workflows/test.yml/runs" in normalize["run"]
+    assert "-f event=push" in normalize["run"]
+    assert "-f event=pull_request" not in normalize["run"]
+    assert "-f head_sha=\"${current_head_sha}\"" in normalize["run"]
+    assert 'select(.conclusion == "success")' in normalize["run"]
+    assert "no successful Tests workflow for ${current_head_sha}" in workflow_text
+    stale_sha_guard = '[ -n "${tested_sha}" ] && [ "${tested_sha}" != "${current_head_sha}" ]'
+    assert stale_sha_guard in normalize["run"]
+    assert "should_review=false" in normalize["run"]
+    assert "Tests passed for ${tested_sha}, but current head is ${current_head_sha}" in workflow_text
+    assert classify["if"] == "steps.pr.outputs.should_review == 'true'"
+
+
 def test_bm_bossbot_assets_are_non_gating_and_separate_from_review_job() -> None:
     workflow = _workflow()
     review_steps = workflow["jobs"]["review"]["steps"]
@@ -78,12 +109,14 @@ def test_bm_bossbot_assets_are_non_gating_and_separate_from_review_job() -> None
     asset_steps = asset_job["steps"]
 
     assert asset_job["needs"] == "review"
-    assert asset_job["if"] == "needs.review.result == 'success'"
-    assert not any(step["name"] == "Generate non-gating PR infographic" for step in review_steps)
-    assert not any(step["name"] == "Publish non-gating PR infographic" for step in review_steps)
+    assert asset_job["if"] == (
+        "needs.review.result == 'success' && needs.review.outputs.should_review == 'true'"
+    )
+    assert not any(step["name"] == "Generate non-gating PR image" for step in review_steps)
+    assert not any(step["name"] == "Publish non-gating PR image" for step in review_steps)
 
-    generate = next(step for step in asset_steps if step["name"] == "Generate non-gating PR infographic")
-    publish = next(step for step in asset_steps if step["name"] == "Publish non-gating PR infographic")
+    generate = next(step for step in asset_steps if step["name"] == "Generate non-gating PR image")
+    publish = next(step for step in asset_steps if step["name"] == "Publish non-gating PR image")
 
     assert generate["continue-on-error"] is True
     assert publish["continue-on-error"] is True
@@ -93,6 +126,7 @@ def test_bm_bossbot_assets_are_non_gating_and_separate_from_review_job() -> None
     assert "--provenance-output" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "git rm -rf --ignore-unmatch ." in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "<!-- pr-infographic:start -->" in WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "BM Bossbot image for PR" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "gh pr edit" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "--body-file" in WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "BM_INFOGRAPHIC_PROVENANCE:start" in WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -112,7 +146,9 @@ def test_bm_bossbot_rejects_oversized_diffs_without_partial_approval() -> None:
     assert "Diff exceeds BM Bossbot review limit" in workflow_text
     assert (
         run_codex["if"]
-        == "steps.trust.outputs.trusted_author == 'true' && steps.context.outputs.diff_truncated != 'true'"
+        == "steps.pr.outputs.should_review == 'true' && "
+        "steps.trust.outputs.trusted_author == 'true' && "
+        "steps.context.outputs.diff_truncated != 'true'"
     )
     assert "head -c 120000" not in workflow_text
 
@@ -130,13 +166,22 @@ def test_bm_bossbot_does_not_run_codex_for_outside_contributors() -> None:
     finalize = next(step for step in steps if step["name"] == "Finalize BM Bossbot approval")
 
     assert "OWNER|MEMBER|COLLABORATOR" in classify["run"]
-    assert outside["if"] == "steps.trust.outputs.trusted_author != 'true'"
-    assert collect["if"] == "steps.trust.outputs.trusted_author == 'true'"
+    assert (
+        outside["if"]
+        == "steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author != 'true'"
+    )
+    assert (
+        collect["if"]
+        == "steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author == 'true'"
+    )
     assert (
         run_codex["if"]
-        == "steps.trust.outputs.trusted_author == 'true' && steps.context.outputs.diff_truncated != 'true'"
+        == "steps.pr.outputs.should_review == 'true' && "
+        "steps.trust.outputs.trusted_author == 'true' && "
+        "steps.context.outputs.diff_truncated != 'true'"
     )
-    assert select_review["if"] == "always()"
+    assert select_review["if"] == "always() && steps.pr.outputs.should_review == 'true'"
+    assert finalize["if"] == "always() && steps.pr.outputs.should_review == 'true'"
     assert "BM Bossbot does not run for outside contributors" in workflow_text
     assert "missing-bm-bossbot-review.json" in workflow_text
     assert '--review "${{ steps.review_output.outputs.review_file }}"' in finalize["run"]

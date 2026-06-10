@@ -7,10 +7,11 @@
 #   "typer>=0.9.0",
 # ]
 # ///
-"""Build and generate a non-gating BM Bossbot PR infographic."""
+"""Build and generate a non-gating BM Bossbot PR image."""
 
 from __future__ import annotations
 
+import hashlib
 import html
 import re
 from dataclasses import dataclass
@@ -44,27 +45,63 @@ PROVENANCE_START = "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->"
 PROVENANCE_END = "<!-- BM_INFOGRAPHIC_PROVENANCE:end -->"
 app = typer.Typer(
     add_completion=False,
-    help="Generate a non-gating BM Bossbot PR infographic.",
+    help="Generate a non-gating BM Bossbot PR image.",
     no_args_is_help=True,
 )
 
 
-class VisualFormat(StrEnum):
-    AUTO = "auto"
-    INFOGRAPHIC = "infographic"
-    IMAGE = "image"
-
-
 class ThemeSource(StrEnum):
+    AUTO = "auto"
     CLI = "cli"
     PR_BODY = "pr-body"
-    NONE = "none"
 
 
 @dataclass(frozen=True)
 class ThemeSelection:
-    theme: str | None
+    theme: str
     source: ThemeSource
+
+
+BM_IMAGE_THEME_POOL = (
+    "computer science college textbook: SICP-style diagrams, automata, compiler "
+    "pipelines, type theory, and annotated chalkboard rigor",
+    "classic literature: sea voyages, gothic manors, Dickensian streets, library "
+    "marginalia, and travel-journal artifacts",
+    "fantasy quest ledger: original guild maps, spellbooks, dungeon keys, tavern "
+    "notices, and artifact inventories with no copyrighted settings",
+    "heavy music editorial: metal, hard rock, punk, techno, soul, or reggae "
+    "tour-poster energy with no direct band logos or likenesses",
+    "knockoff space opera: fleet routes, mission consoles, contraband manifests, "
+    "and practical starship drama with no named fictional universes",
+    "sword-and-sorcery: ruined temples, desert roads, battle standards, ancient "
+    "maps, and heroic silhouettes with no named character likenesses",
+    "comic book cover: original splash-page composition, caption boxes, clean "
+    "halftone texture, and bold issue-cover drama",
+    "French new wave movie poster: stark typography, city streets, jump-cut "
+    "composition, and high-contrast editorial photography cues",
+    "WWII public-information poster: home-front logistics, mobilization arrows, "
+    "bold simplified figures, and no real-world party symbols or hate imagery",
+    "Italian movie poster: hand-painted drama, expressive color, credit-block "
+    "energy, and 1960s or 1970s cinema composition with no actor likenesses",
+    "Shakespearean stage: acts and scenes, court intrigue, stage blocking, "
+    "dramatis personae, backstage cue sheets, and theatrical light",
+    "Greek mythology: temple steps, oracle tablets, constellations, labyrinths, "
+    "ship routes, and original heroic allegory",
+    "noir detective photography: case files, typed evidence labels, civic "
+    "infrastructure, streetlight shadows, and newsroom archive grit",
+    "space exploration and astronomy: celestial atlases, observatory charts, "
+    "orbital mechanics, planetary survey routes, and deep-space mission drama",
+    "editorial painting: abstract, classical landscape, western action, "
+    "chiaroscuro, historical mural, stormy seascape, or allegorical canvas",
+    "classic black-and-white photography: documentary field report, contact "
+    "sheet, street photography, civic infrastructure, and darkroom contrast",
+    "80's action movie poster: smoky backlit warehouses, neon streets, practical "
+    "explosions, mission dossiers, countdowns, and no actor likenesses",
+    "alchemy manuscript: transformation diagrams, annotated symbols, recipe-like "
+    "process artifacts, and illuminated margins",
+    "brutalist civic planning: concrete signage, zoning blocks, transit diagrams, "
+    "infrastructure maps, and stern public-service clarity",
+)
 
 
 def extract_bossbot_summary(pr_body: str) -> str:
@@ -90,66 +127,23 @@ def extract_infographic_theme(pr_body: str) -> str | None:
     return theme or None
 
 
-def select_infographic_theme(*, pr_body: str, theme_override: str | None) -> ThemeSelection:
+def select_image_theme(
+    *,
+    pr_number: int,
+    summary: str,
+    pr_body: str,
+    theme_override: str | None,
+) -> ThemeSelection:
     if theme_override:
         return ThemeSelection(theme=theme_override, source=ThemeSource.CLI)
     body_theme = extract_infographic_theme(pr_body)
     if body_theme:
         return ThemeSelection(theme=body_theme, source=ThemeSource.PR_BODY)
-    return ThemeSelection(theme=None, source=ThemeSource.NONE)
-
-
-def _visual_format_guidance(visual_format: VisualFormat) -> str:
-    if visual_format == VisualFormat.INFOGRAPHIC:
-        return """
-Visual mode: infographic/map.
-
-Use an infographic or map format. Use structured information design:
-- data panels, route maps, timeline bands, status badges, legends, checkpoints,
-  before/after boxes, and compact bullet list sections are appropriate.
-- Organize the source facts into scannable sections with plain-language labels.
-- Show the before/after value story through layout, hierarchy, and evidence.
-- Do not render this as a primarily scenic image, movie poster, or painting.
-""".strip()
-    if visual_format == VisualFormat.IMAGE:
-        return """
-Visual mode: regular image/scene.
-
-Use a regular image format: actual scene, movie poster, editorial painting,
-tableau, cover image, or illustrated artifact.
-
-Use image-first composition:
-- Create a single staged visual moment with one strong focal point.
-- Communicate intent through cinematic staging, editorial metaphor, atmosphere,
-  characters, objects, architecture, landscape, lighting, and motion.
-- Use at most a short title plus zero to three short labels when text is needed.
-- Convert process details into visual symbols instead of explanatory boxes.
-- Do not use data panels, dashboard layouts, timeline strips, flowcharts,
-  legends, before/after boxes, bullet lists, checklist columns, or small
-  explanatory labels.
-- Do not render an infographic or dense text-heavy infographic.
-""".strip()
-    return """
-Choose the most appropriate visual form: infographic, map, scene, poster,
-painting, tableau, cover image, illustrated artifact, or another image form that
-best communicates the PR intent. Choose exactly one visual mode and follow only
-that mode's rules. Do not blend the modes.
-
-Mode A - infographic/map:
-- Use a readable map backbone with structured information design: sections,
-  route lines, checkpoints, nodes, annotations, status badges, compact evidence
-  bullets, and a legend.
-- Use this mode when the PR needs several facts, gates, checks, or before/after
-  points to be read explicitly.
-
-Mode B - editorial scene/poster/painting:
-- Use image-first composition: an actual scene, movie poster, painting, tableau,
-  cover image, or symbolic illustrated artifact.
-- Use this mode when the PR intent can be shown through one staged visual moment
-  with minimal text.
-- Avoid dashboard layouts, data panels, timeline strips, flowcharts, legends,
-  before/after boxes, bullet lists, and checklist columns in this mode.
-""".strip()
+    seed = f"{pr_number}\n{summary}".encode("utf-8")
+    index = int.from_bytes(hashlib.sha256(seed).digest()[:2], byteorder="big") % len(
+        BM_IMAGE_THEME_POOL
+    )
+    return ThemeSelection(theme=BM_IMAGE_THEME_POOL[index], source=ThemeSource.AUTO)
 
 
 def _preformatted(value: str) -> str:
@@ -163,39 +157,24 @@ def build_infographic_provenance_block(
     model: str,
     size: str,
     quality: str,
-    visual_format: VisualFormat,
-    theme: str | None,
+    theme: str,
     theme_source: ThemeSource,
-    prompt: str,
-    revised_prompt: str | None = None,
 ) -> str:
-    theme_section = "_None supplied._" if theme is None else _preformatted(theme)
-    revised_prompt_section = (
-        "_Not provided by the Images API._"
-        if revised_prompt is None
-        else _preformatted(revised_prompt)
-    )
     return f"""
 {PROVENANCE_START}
 <details>
-<summary>BM Bossbot image provenance</summary>
+<summary>BM Bossbot image choices</summary>
 
 - Pull request: `#{pr_number}`
 - Generated asset: `{output_path.as_posix()}`
 - Image model: `{model}`
 - Size: `{size}`
 - Quality: `{quality}`
-- Visual format: `{visual_format.value}`
+- Image mode: `editorial-image`
 - Theme source: `{theme_source.value}`
 
-Theme / choice instruction:
-{theme_section}
-
-Image prompt sent to `{model}`:
-{_preformatted(prompt)}
-
-Images API revised prompt:
-{revised_prompt_section}
+Theme / visual direction:
+{_preformatted(theme)}
 
 </details>
 {PROVENANCE_END}
@@ -215,38 +194,44 @@ def build_infographic_prompt(
     *,
     pr_number: int,
     summary: str,
-    theme: str | None = None,
-    visual_format: VisualFormat = VisualFormat.AUTO,
+    theme: str,
+    theme_source: ThemeSource,
 ) -> str:
-    theme_section = ""
-    if theme:
-        theme_section = f"""
-
-Optional user-supplied visual theme preference:
-{theme}
-
-Treat the theme as style inspiration only. Do not let it override facts,
-readability, source material, or the non-gating status of this image.
-""".rstrip()
+    theme_label = (
+        "Selected BM visual direction"
+        if theme_source == ThemeSource.AUTO
+        else "User-supplied visual direction"
+    )
 
     return f"""
-Create a polished landscape WebP visual for Basic Memory PR #{pr_number}.
+Create a polished landscape WebP editorial image for Basic Memory PR #{pr_number}.
 
-This is a non-gating visual summary. The authoritative merge gate is the
+This is a non-gating visual asset. The authoritative merge gate is the
 GitHub commit status named BM Bossbot Approval, not this image.
 
 Use the BM Bossbot review summary below as source material. Preserve the
 concrete before/after value story without inventing facts or turning
 implementation details into clutter.
 
-{_visual_format_guidance(visual_format)}
+{theme_label}:
+{theme}
 
-The visual theme should drive the composition through original style cues while
-the engineering meaning stays easy to scan.
+Treat the visual direction as style inspiration only. Do not let it override
+facts, readability, source material, or the non-gating status of this image.
 
-Use high contrast, smooth anti-aliased text when text is present, clean edges,
-and non-tiny labels. Text is optional for scene-first images, but any text that
-appears must be readable.
+Use image-first composition: create a scene, movie poster, editorial painting,
+classic photograph, cover image, symbolic tableau, staged artifact, or another
+visual moment that expresses the PR intent.
+
+Make the selected direction shape the subject, lighting, composition, props,
+environment, and mood. Use one strong focal point. Prefer visual metaphor over
+explanatory UI.
+
+Use at most a short title and zero to three short labels if text helps. Any text
+that appears must be high-contrast, smooth, anti-aliased, and readable.
+
+Do not render an infographic, dashboard, flowchart, timeline strip, checklist,
+bullet-list panel, data panel, or dense explanatory diagram.
 
 Avoid fake screenshots, code blocks, invented claims, copyrighted characters,
 logos, named fictional universes, direct band logos, album art, celebrity
@@ -254,7 +239,6 @@ likenesses, or decorations that obscure content.
 
 BM Bossbot summary:
 {summary}
-{theme_section}
 """.strip()
 
 
@@ -291,14 +275,6 @@ def generate(
             help="Optional file to write the managed PR-body provenance block.",
         ),
     ] = None,
-    visual_format: Annotated[
-        VisualFormat,
-        typer.Option(
-            "--visual-format",
-            case_sensitive=False,
-            help="Visual format to request: auto, infographic, or image.",
-        ),
-    ] = VisualFormat.AUTO,
     print_prompt: Annotated[
         bool,
         typer.Option(
@@ -308,15 +284,20 @@ def generate(
         ),
     ] = False,
 ) -> None:
-    """Generate the canonical PR infographic from a BM Bossbot summary block."""
+    """Generate the canonical PR image from a BM Bossbot summary block."""
     pr_body = pr_body_file.read_text(encoding="utf-8")
     summary = extract_bossbot_summary(pr_body)
-    theme_selection = select_infographic_theme(pr_body=pr_body, theme_override=theme)
+    theme_selection = select_image_theme(
+        pr_number=pr_number,
+        summary=summary,
+        pr_body=pr_body,
+        theme_override=theme,
+    )
     prompt = build_infographic_prompt(
         pr_number=pr_number,
         summary=summary,
         theme=theme_selection.theme,
-        visual_format=visual_format,
+        theme_source=theme_selection.source,
     )
     if print_prompt:
         typer.echo(prompt)
@@ -340,11 +321,8 @@ def generate(
                 model=model,
                 size=size,
                 quality=quality,
-                visual_format=visual_format,
                 theme=theme_selection.theme,
                 theme_source=theme_selection.source,
-                prompt=prompt,
-                revised_prompt=image_result.revised_prompt,
             ),
             encoding="utf-8",
         )
