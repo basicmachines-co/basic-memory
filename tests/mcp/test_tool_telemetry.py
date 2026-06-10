@@ -109,6 +109,8 @@ async def test_read_note_emits_root_operation_and_project_context(
             "tool_name": "read_note",
             "requested_project": test_project.name,
             "requested_project_id": None,
+            "page": 1,
+            "page_size": 10,
             "output_format": "json",
             "include_frontmatter": True,
         },
