@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import yaml
@@ -47,8 +48,15 @@ def test_bm_bossbot_workflow_never_checks_out_untrusted_head() -> None:
     for checkout_step in checkout_steps:
         assert checkout_step["with"]["ref"] == "${{ github.event.repository.default_branch }}"
         assert "${{ github.event.pull_request.head.sha }}" not in str(checkout_step)
-    assert "github.event.pull_request" not in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "cancel-in-progress: true" in WORKFLOW_PATH.read_text(encoding="utf-8")
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    # The danger is consuming UNTRUSTED PR data: checking out the PR head, or
+    # interpolating attacker-controlled strings (title/body/branch names) into
+    # run scripts. The numeric PR id is safe and the recheck job needs it, so
+    # allow exactly `.number` and nothing else from the pull_request payload.
+    pr_event_fields = set(re.findall(r"github\.event\.pull_request\.[a-zA-Z_.]+", workflow_text))
+    assert pr_event_fields <= {"github.event.pull_request.number"}
+    assert "github.event.pull_request.head" not in workflow_text
+    assert "cancel-in-progress: true" in workflow_text
 
 
 def test_bm_bossbot_workflow_has_deterministic_status_steps() -> None:
@@ -92,13 +100,15 @@ def test_bm_bossbot_rejects_stale_successful_test_runs_before_codex() -> None:
     assert "actions/workflows/test.yml/runs" in normalize["run"]
     assert "-f event=push" in normalize["run"]
     assert "-f event=pull_request" not in normalize["run"]
-    assert "-f head_sha=\"${current_head_sha}\"" in normalize["run"]
+    assert '-f head_sha="${current_head_sha}"' in normalize["run"]
     assert 'select(.conclusion == "success")' in normalize["run"]
     assert "no successful Tests workflow for ${current_head_sha}" in workflow_text
     stale_sha_guard = '[ -n "${tested_sha}" ] && [ "${tested_sha}" != "${current_head_sha}" ]'
     assert stale_sha_guard in normalize["run"]
     assert "should_review=false" in normalize["run"]
-    assert "Tests passed for ${tested_sha}, but current head is ${current_head_sha}" in workflow_text
+    assert (
+        "Tests passed for ${tested_sha}, but current head is ${current_head_sha}" in workflow_text
+    )
     assert classify["if"] == "steps.pr.outputs.should_review == 'true'"
 
 
@@ -145,8 +155,7 @@ def test_bm_bossbot_rejects_oversized_diffs_without_partial_approval() -> None:
     assert 'verdict: "needs_human"' in workflow_text
     assert "Diff exceeds BM Bossbot review limit" in workflow_text
     assert (
-        run_codex["if"]
-        == "steps.pr.outputs.should_review == 'true' && "
+        run_codex["if"] == "steps.pr.outputs.should_review == 'true' && "
         "steps.trust.outputs.trusted_author == 'true' && "
         "steps.context.outputs.diff_truncated != 'true'"
     )
@@ -162,7 +171,9 @@ def test_bm_bossbot_does_not_run_codex_for_outside_contributors() -> None:
     outside = next(step for step in steps if step["name"] == "Decline outside contributor PRs")
     collect = next(step for step in steps if step["name"] == "Collect sanitized PR context")
     run_codex = next(step for step in steps if step["name"] == "Run BM Bossbot review with Codex")
-    select_review = next(step for step in steps if step["name"] == "Select BM Bossbot review output")
+    select_review = next(
+        step for step in steps if step["name"] == "Select BM Bossbot review output"
+    )
     finalize = next(step for step in steps if step["name"] == "Finalize BM Bossbot approval")
 
     assert "OWNER|MEMBER|COLLABORATOR" in classify["run"]
@@ -175,8 +186,7 @@ def test_bm_bossbot_does_not_run_codex_for_outside_contributors() -> None:
         == "steps.pr.outputs.should_review == 'true' && steps.trust.outputs.trusted_author == 'true'"
     )
     assert (
-        run_codex["if"]
-        == "steps.pr.outputs.should_review == 'true' && "
+        run_codex["if"] == "steps.pr.outputs.should_review == 'true' && "
         "steps.trust.outputs.trusted_author == 'true' && "
         "steps.context.outputs.diff_truncated != 'true'"
     )
