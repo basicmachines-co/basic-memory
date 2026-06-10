@@ -13,9 +13,11 @@ from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.repository.search_repository_base import VectorSyncBatchResult
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
+from basic_memory.services.search_service import SearchService
 
 
 @pytest.mark.asyncio
@@ -1016,6 +1018,92 @@ async def test_sync_file_already_indexed_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_sync_file_syncs_vectors_when_semantic_enabled(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    app_config,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """sync-file refreshes semantic vectors for the synced entity.
+
+    Mirrors the inline sync_entity_vectors_batch() pass the project sync flow runs
+    after indexing changed files (SyncService.sync); without it, a note recovered
+    via sync-file stays missing from semantic search until a later edit or full
+    sync. Fixtures run with semantic search disabled, so enable it here and stub
+    the service-level vector batch (like test_search_service.py::test_reindex_vectors
+    stubs the repository batch) to exercise the wiring without the embedding stack.
+    """
+    app_config.semantic_search_enabled = True
+
+    synced_batches: list[list[int]] = []
+
+    async def stub_sync_entity_vectors_batch(
+        self, entity_ids: list[int], progress_callback=None
+    ) -> VectorSyncBatchResult:
+        synced_batches.append(list(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
+
+    # The router builds its SearchService per request, so patch the class method
+    # rather than a fixture instance.
+    monkeypatch.setattr(SearchService, "sync_entity_vectors_batch", stub_sync_entity_vectors_batch)
+
+    note_path = Path(test_project.path) / "incoming" / "semantic-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Semantic Note\n\nNeeds vectors after recovery.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/semantic-note.md"},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+
+    assert synced_batches == [[entity.id]]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_skips_vector_sync_when_semantic_disabled(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    app_config,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """sync-file does not touch the vector pipeline when semantic search is disabled."""
+    assert app_config.semantic_search_enabled is False
+
+    synced_batches: list[list[int]] = []
+
+    async def stub_sync_entity_vectors_batch(
+        self, entity_ids: list[int], progress_callback=None
+    ) -> VectorSyncBatchResult:
+        synced_batches.append(list(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
+
+    monkeypatch.setattr(SearchService, "sync_entity_vectors_batch", stub_sync_entity_vectors_batch)
+
+    note_path = Path(test_project.path) / "incoming" / "plain-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Plain Note\n\nNo vectors needed.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/plain-note.md"},
+    )
+    assert response.status_code == 200
+    assert synced_batches == []
+
+
+@pytest.mark.asyncio
 async def test_sync_file_missing_file_returns_404(client: AsyncClient, v2_project_url):
     """sync-file fails fast when the file does not exist on disk."""
     response = await client.post(
@@ -1122,6 +1210,55 @@ async def test_sync_file_symlink_escape_never_scans_outside_directory(
     )
     assert response.status_code in (400, 404)
     assert outside_dir not in scanned
+
+    assert await entity_repository.find_all() == []
+
+
+@pytest.mark.asyncio
+async def test_sync_file_symlink_escape_never_probes_outside_target(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    entity_repository,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The containment check runs before any filesystem probe that follows symlinks.
+
+    Regression: a wrong-cased request ('SECRET.md') canonicalizes onto an in-project
+    FILE symlink ('secret.md' -> outside target) on a case-sensitive filesystem.
+    Before the fix, the endpoint's is_file() existence probe ran before the
+    resolved-containment check, so it followed the symlink and stat'ed the target
+    outside the project boundary (and the response flipped between 404 and 400
+    depending on whether the external target existed). We spy on Path.is_file and
+    assert no probe ever resolves to the outside target; the escape is always
+    rejected with 400 — by the pre-check on case-insensitive filesystems, by the
+    post-canonicalization containment check on case-sensitive ones.
+    """
+    project_path = Path(test_project.path)
+    outside_dir = (project_path.parent / "sync-file-outside-probe").resolve()
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    outside_target = outside_dir / "secret.md"
+    outside_target.write_text("# Outside\n\nMust never be probed.\n", encoding="utf-8")
+    (project_path / "secret.md").symlink_to(outside_target)
+
+    real_is_file = Path.is_file
+    probed: list[Path] = []
+
+    def recording_is_file(self, *args, **kwargs):
+        # Record the resolved path so a probe on the in-project symlink name shows
+        # up as the outside target it would actually stat.
+        probed.append(self.resolve())
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", recording_is_file)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "SECRET.md"},
+    )
+    assert response.status_code == 400
+    assert "project boundaries" in response.json()["detail"]
+    assert outside_target not in probed
 
     assert await entity_repository.find_all() == []
 

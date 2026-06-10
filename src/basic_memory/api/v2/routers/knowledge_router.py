@@ -302,6 +302,8 @@ async def sync_file(
     project_id: ProjectExternalIdPathDep,
     sync_service: SyncServiceV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+    app_config: AppConfigDep,
 ) -> EntityResponseV2:
     """Index a single markdown file that exists on disk but is not indexed yet.
 
@@ -349,7 +351,7 @@ async def sync_file(
         # Canonicalize to the actual on-disk casing so the DB lookup below hits the
         # row keyed by the real path instead of inserting a wrong-cased duplicate.
         file_path = _canonical_file_path(project_config.home, segments)
-        if file_path is None or not (project_config.home / file_path).is_file():
+        if file_path is None:
             raise HTTPException(
                 status_code=404, detail=f"File not found on disk: '{data.file_path}'"
             )
@@ -359,9 +361,14 @@ async def sync_file(
         #     exist, so resolve() cannot follow the real 'link' symlink and the check
         #     passes even when 'link' points outside the project root.
         # Why: indexing through an escaping symlink would read and index content
-        #     outside the project boundary.
+        #     outside the project boundary — and even an is_file() existence probe on
+        #     the joined path would follow the symlink and stat its target, so
+        #     containment must hold BEFORE any filesystem probe that follows symlinks.
+        #     Path.resolve() only walks symlink names (readlink); it never opens or
+        #     stats the final target, so it is safe to run pre-containment.
         # Outcome: the canonical path is re-validated and the fully-resolved absolute
-        #     target must stay inside the resolved project home; escapes get a 400.
+        #     target must stay inside the resolved project home; escapes get a 400
+        #     before the file-existence probe below ever touches the target.
         resolved_target = (project_config.home / file_path).resolve()
         if not validate_project_path(file_path, project_config.home) or not (
             resolved_target.is_relative_to(project_config.home.resolve())
@@ -370,6 +377,11 @@ async def sync_file(
                 status_code=400,
                 detail=f"File path '{data.file_path}' is not allowed - "
                 "paths must stay within project boundaries",
+            )
+        # Containment holds, so probing the resolved target cannot leave the project.
+        if not resolved_target.is_file():
+            raise HTTPException(
+                status_code=404, detail=f"File not found on disk: '{data.file_path}'"
             )
         # Trigger: the canonical path matches the .bmignore / project .gitignore rules
         # Why: scan and watch flows filter ignored files before they ever reach the
@@ -398,6 +410,16 @@ async def sync_file(
         synced = await sync_service.sync_one_markdown_file(
             file_path, new=existing is None, index_search=True
         )
+
+        # Trigger: semantic search is enabled and the entity index was just refreshed
+        # Why: the project sync flow awaits sync_entity_vectors_batch() inline after
+        #      indexing changed files (SyncService.sync); without the single-entity
+        #      equivalent, a note recovered via sync-file stays missing or stale in
+        #      semantic search until a later edit or full project sync
+        # Outcome: vectors refresh synchronously before the response returns,
+        #          mirroring the sync flow instead of the out-of-band scheduler
+        if app_config.semantic_search_enabled:
+            await search_service.sync_entity_vectors_batch([synced.entity.id])
 
         result = EntityResponseV2.model_validate(synced.entity)
         logger.info(
