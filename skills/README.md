@@ -67,7 +67,7 @@ npx skills update
 
 Skills are installed to your agent's skills directory (e.g., `~/.claude/skills/` for Claude Code global, or `.claude/skills/` for project-scoped).
 
-If your installed Skills CLI does not support `--path`, copy the `memory-*` directories manually for now. Phase 2 will add a first-class Codex/package install path.
+If your installed Skills CLI cannot load `basicmachines-co/basic-memory/skills`, update the CLI or copy the `memory-*` directories manually.
 
 ### Claude Desktop (claude.ai)
 

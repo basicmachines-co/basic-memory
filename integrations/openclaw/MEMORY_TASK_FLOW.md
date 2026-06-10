@@ -150,7 +150,7 @@ This plugin ships with workflow-oriented skills that are automatically loaded wh
 No manual installation needed. To update skills or install new ones as they become available:
 
 ```bash
-npx skills add basicmachines-co/basic-memory --path skills --agent openclaw
+npx skills add basicmachines-co/basic-memory/skills --agent openclaw
 ```
 
 See the canonical source at [`basic-memory/skills`](../../skills).

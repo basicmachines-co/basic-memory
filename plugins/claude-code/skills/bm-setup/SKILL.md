@@ -156,7 +156,7 @@ git ls-files skills/ | grep -q memory- && echo "source repo - skip install"
 Otherwise, run from the project root:
 
 ```
-npx skills add basicmachines-co/basic-memory --path skills
+npx skills add basicmachines-co/basic-memory/skills
 ```
 
 This installs the canonical `memory-*` skills into the user's skills directory — the
