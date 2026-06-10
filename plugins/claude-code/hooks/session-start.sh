@@ -90,8 +90,6 @@ def _read_block(path):
     try:
         with open(path) as fh:
             block = json.load(fh).get("basicMemory")
-    except FileNotFoundError:
-        return None
     except Exception:
         return None
     return block if isinstance(block, dict) else None
@@ -115,8 +113,8 @@ def load_settings(directory):
     found = False
     home = os.path.expanduser("~")
     sources = [(home, ("settings.json",))]
-    project = _project_dir(directory)
-    if os.path.abspath(project) != home:
+    project = _project_dir(directory)  # already absolute
+    if project != home:
         sources.append((project, ("settings.json", "settings.local.json")))
     for d, names in sources:
         for name in names:
