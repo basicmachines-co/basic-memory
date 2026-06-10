@@ -1384,6 +1384,21 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
+    # Test fixtures disable semantic search, and delete_stale_vector_rows is the one call
+    # in this flow that requires the semantic stack — stub it so the test exercises the
+    # reindex wiring (id collection, batch call, stats mapping) without embeddings.
+    # raising=False: the method is SQLite-only; the Postgres purge path never calls it,
+    # so on Postgres this just attaches an unused attribute.
+    async def _noop_delete_stale_vector_rows() -> None:
+        return None
+
+    monkeypatch.setattr(
+        search_service.repository,
+        "delete_stale_vector_rows",
+        _noop_delete_stale_vector_rows,
+        raising=False,
+    )
+
     # Create some entities
     created_entity_ids: list[int] = []
     for i in range(3):
@@ -1454,6 +1469,22 @@ async def test_reindex_vectors_no_callback(
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Test fixtures disable semantic search, and delete_stale_vector_rows is the one call
+    # in this flow that requires the semantic stack — stub it so the test exercises the
+    # reindex wiring without embeddings.
+    # raising=False: the method is SQLite-only; the Postgres purge path never calls it,
+    # so on Postgres this just attaches an unused attribute.
+    async def _noop_delete_stale_vector_rows() -> None:
+        return None
+
+    monkeypatch.setattr(
+        search_service.repository,
+        "delete_stale_vector_rows",
+        _noop_delete_stale_vector_rows,
+        raising=False,
+    )
+
     entity = await entity_repo.create(
         {
             "title": "No Callback Entity",
