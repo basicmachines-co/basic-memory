@@ -820,6 +820,11 @@ async def search_notes(
         Formatted markdown text (output_format="text"), dict (output_format="json"),
         or helpful error guidance string if search fails
 
+        Pagination note: `total` is exact only for text/title/permalink searches.
+        Vector and hybrid searches skip the count query (it would cost a second
+        semantic retrieval pass) and report `total: 0` even when results are
+        returned — use `has_more` for pagination in those modes.
+
     Examples:
         # Basic text search
         results = await search_notes("project planning")

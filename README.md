@@ -590,7 +590,7 @@ retention).
 | `BASIC_MEMORY_IMPORT_UPLOAD_MAX_BYTES` | `104857600` | Max uploaded import size |
 
 ```bash
-BASIC_MEMORY_LOG_LEVEL=DEBUG basic-memory sync
+BASIC_MEMORY_LOG_LEVEL=DEBUG basic-memory reindex
 tail -f ~/.basic-memory/basic-memory.log
 ```
 
