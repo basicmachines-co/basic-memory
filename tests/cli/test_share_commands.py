@@ -38,6 +38,19 @@ def _mock_config_manager():
     return mock_config_manager
 
 
+def _patch_workspace(resolved):
+    """Patch the workspace resolver used by the share commands.
+
+    Returns whatever ``resolved`` is for every lookup, so tests can assert the
+    X-Workspace-ID header is built (and routed) the way the cloud expects
+    without depending on real config files.
+    """
+    return patch(
+        "basic_memory.cli.commands.cloud.shares.resolve_configured_workspace",
+        return_value=resolved,
+    )
+
+
 class TestShareCreateCommand:
     """Tests for 'bm cloud share create' command."""
 
@@ -52,6 +65,7 @@ class TestShareCreateCommand:
 
         async def mock_make_api_request(*args, **kwargs):
             captured["json_data"] = kwargs.get("json_data")
+            captured["headers"] = kwargs.get("headers")
             return mock_response
 
         with patch(
@@ -62,9 +76,10 @@ class TestShareCreateCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                result = runner.invoke(
-                    app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
-                )
+                with _patch_workspace("tenant-xyz"):
+                    result = runner.invoke(
+                        app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
+                    )
 
                 assert result.exit_code == 0
                 assert "Share link created successfully" in result.stdout
@@ -75,6 +90,90 @@ class TestShareCreateCommand:
                     "project_name": "my-project",
                     "note_permalink": "notes/my-idea",
                 }
+                # Workspace routing: the resolved tenant must travel as the
+                # X-Workspace-ID header so team-workspace projects aren't
+                # evaluated against the caller's default tenant.
+                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
+
+    def test_create_share_explicit_workspace_routes_header(self):
+        """--workspace overrides resolution and is passed through as the header."""
+        runner = CliRunner()
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = SHARE_RESPONSE
+
+        captured = {}
+
+        async def mock_make_api_request(*args, **kwargs):
+            captured["headers"] = kwargs.get("headers")
+            return mock_response
+
+        seen = {}
+
+        def fake_resolve(*, project_name=None, workspace=None):
+            seen["project_name"] = project_name
+            seen["workspace"] = workspace
+            return workspace
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with patch(
+                    "basic_memory.cli.commands.cloud.shares.resolve_configured_workspace",
+                    side_effect=fake_resolve,
+                ):
+                    result = runner.invoke(
+                        app,
+                        [
+                            "cloud",
+                            "share",
+                            "create",
+                            "my-project",
+                            "notes/my-idea",
+                            "--workspace",
+                            "acme",
+                        ],
+                    )
+
+                assert result.exit_code == 0
+                assert seen == {"project_name": "my-project", "workspace": "acme"}
+                assert captured["headers"] == {"X-Workspace-ID": "acme"}
+
+    def test_create_share_no_workspace_sends_no_header(self):
+        """When nothing resolves, no routing header is added (default tenant)."""
+        runner = CliRunner()
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = SHARE_RESPONSE
+
+        captured = {}
+
+        async def mock_make_api_request(*args, **kwargs):
+            captured["headers"] = kwargs.get("headers")
+            return mock_response
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace(None):
+                    result = runner.invoke(
+                        app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
+                    )
+
+                assert result.exit_code == 0
+                assert captured["headers"] == {}
 
     def test_create_share_with_expires_at(self):
         runner = CliRunner()
@@ -290,6 +389,7 @@ class TestShareListCommand:
 
         async def mock_make_api_request(*args, **kwargs):
             captured["url"] = kwargs.get("url", args[1] if len(args) > 1 else "")
+            captured["headers"] = kwargs.get("headers")
             return mock_response
 
         with patch(
@@ -300,10 +400,52 @@ class TestShareListCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                result = runner.invoke(app, ["cloud", "share", "list", "--project", "my-project"])
+                with _patch_workspace("tenant-xyz"):
+                    result = runner.invoke(
+                        app, ["cloud", "share", "list", "--project", "my-project"]
+                    )
 
                 assert result.exit_code == 0
                 assert "project_name=my-project" in captured["url"]
+                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
+
+    def test_list_shares_project_filter_url_encoded(self):
+        """Project names with query-reserved chars must be percent-encoded.
+
+        A name like "R&D+notes #1" interpolated raw would split into bogus
+        query params (project_name=R, plus a stray "D+notes #1" key); encoding
+        keeps it a single faithful project_name value.
+        """
+        runner = CliRunner()
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"shares": [SHARE_RESPONSE], "total": 1}
+
+        captured = {}
+
+        async def mock_make_api_request(*args, **kwargs):
+            captured["url"] = kwargs.get("url", args[1] if len(args) > 1 else "")
+            return mock_response
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace(None):
+                    result = runner.invoke(
+                        app, ["cloud", "share", "list", "--project", "R&D+notes #1"]
+                    )
+
+                assert result.exit_code == 0
+                # Reserved characters are percent-encoded into a single value.
+                assert "project_name=R%26D%2Bnotes+%231" in captured["url"]
+                # And the raw, ambiguous form never reaches the wire.
+                assert "project_name=R&D" not in captured["url"]
 
     def test_list_shares_api_error(self):
         runner = CliRunner()
@@ -340,6 +482,7 @@ class TestShareUpdateCommand:
         async def mock_make_api_request(*args, **kwargs):
             captured["json_data"] = kwargs.get("json_data")
             captured["method"] = kwargs.get("method")
+            captured["headers"] = kwargs.get("headers")
             return mock_response
 
         with patch(
@@ -350,12 +493,17 @@ class TestShareUpdateCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                result = runner.invoke(app, ["cloud", "share", "update", "abc123", "--disable"])
+                with _patch_workspace("tenant-xyz"):
+                    result = runner.invoke(
+                        app,
+                        ["cloud", "share", "update", "abc123", "--disable", "--workspace", "acme"],
+                    )
 
                 assert result.exit_code == 0
                 assert "updated successfully" in result.stdout
                 assert captured["method"] == "PATCH"
                 assert captured["json_data"] == {"enabled": False}
+                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
 
     def test_update_enable(self):
         runner = CliRunner()
@@ -516,6 +664,7 @@ class TestShareRevokeCommand:
         async def mock_make_api_request(*args, **kwargs):
             captured["method"] = kwargs.get("method")
             captured["url"] = kwargs.get("url")
+            captured["headers"] = kwargs.get("headers")
             return mock_response
 
         with patch(
@@ -526,12 +675,17 @@ class TestShareRevokeCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                result = runner.invoke(app, ["cloud", "share", "revoke", "abc123", "--force"])
+                with _patch_workspace("tenant-xyz"):
+                    result = runner.invoke(
+                        app,
+                        ["cloud", "share", "revoke", "abc123", "--force", "--workspace", "acme"],
+                    )
 
                 assert result.exit_code == 0
                 assert "revoked successfully" in result.stdout
                 assert captured["method"] == "DELETE"
                 assert captured["url"].endswith("/api/shares/abc123")
+                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
 
     def test_revoke_cancelled(self):
         runner = CliRunner()
