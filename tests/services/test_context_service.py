@@ -717,11 +717,30 @@ async def test_find_related_carries_to_name_for_unresolved_relations(session_mak
         obs_repo = ObservationRepository(session_maker, project.id)
         context_service = ContextService(search_repo, entity_repo, obs_repo)
 
-        related = await context_service.find_related(
-            [("entity", source.id)], max_depth=2
-        )
+        related = await context_service.find_related([("entity", source.id)], max_depth=2)
         relation_rows = {r.to_name: r for r in related if r.type == "relation"}
 
         assert "edit-note(3)" in relation_rows, "unresolved relation row missing to_name"
         assert relation_rows["edit-note(3)"].to_id is None
         assert relation_rows["bm-note(5)"].to_name == "bm-note(5)"
+
+
+@pytest.mark.asyncio
+async def test_pattern_search_falls_back_for_legacy_unqualified_rows(context_service, test_graph):
+    """Workspace-qualified patterns fall back to the project form for legacy rows (#957).
+
+    Rows written before workspace canonicalization (or via clients that did not
+    forward workspace headers) store project-qualified permalinks. A pattern
+    canonicalized under an active workspace context would otherwise match
+    nothing — the field failure that opened the issue.
+    """
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    # test_graph rows are stored without any workspace prefix (legacy form).
+    # Query with a workspace-qualified pattern under an active context.
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        context = await context_service.build_context("memory://team-paul/test-project/test/*")
+
+    permalinks = {result.primary_result.permalink for result in context.results}
+    assert permalinks, "fallback did not match legacy rows"
+    assert all(p and p.startswith("test-project/test/") for p in permalinks), permalinks

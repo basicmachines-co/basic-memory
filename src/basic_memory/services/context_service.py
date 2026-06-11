@@ -18,6 +18,7 @@ from basic_memory.repository.search_repository import SearchRepository, SearchIn
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
 from basic_memory.utils import generate_permalink
+from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
 
 if TYPE_CHECKING:
     from basic_memory.services.link_resolver import LinkResolver
@@ -144,6 +145,29 @@ class ContextService:
                         primary = await self.search_repository.search(
                             permalink_match=normalized_path, limit=fetch_limit, offset=offset
                         )
+
+                        # Trigger: a workspace-qualified pattern matched nothing while a
+                        #   workspace permalink context is active.
+                        # Why: rows written before workspace canonicalization (or via
+                        #   clients that didn't forward workspace headers) store
+                        #   project-qualified permalinks; a workspace-prefixed pattern
+                        #   can never match those legacy rows (#957).
+                        # Outcome: retry once with the workspace prefix stripped so the
+                        #   pattern matches the index form the rows actually carry.
+                        if not primary:
+                            workspace_slug = workspace_slug_for_canonical_permalinks()
+                            ws_prefix = f"{workspace_slug}/" if workspace_slug else None
+                            if ws_prefix and normalized_path.startswith(ws_prefix):
+                                fallback_path = normalized_path.removeprefix(ws_prefix)
+                                logger.debug(
+                                    f"Pattern search fallback without workspace prefix: "
+                                    f"'{fallback_path}'"
+                                )
+                                primary = await self.search_repository.search(
+                                    permalink_match=fallback_path,
+                                    limit=fetch_limit,
+                                    offset=offset,
+                                )
                     else:
                         normalized_path = generate_permalink(path, split_extension=False)
                         logger.debug(f"Direct lookup for '{normalized_path}'")
