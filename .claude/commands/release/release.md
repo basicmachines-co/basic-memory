@@ -96,7 +96,7 @@ After PyPI release is published, update the MCP registry:
 
 2. **Publish to MCP Registry**
    ```bash
-   cd /Users/drew/code/basic-memory
+   # from the basic-memory repo root
    mcp-publisher publish
    ```
 
@@ -116,7 +116,7 @@ After PyPI release is published, update the MCP registry:
 
 #### Website Updates
 
-**1. basicmachines.co** (`/Users/drew/code/basicmachines.co`)
+**1. basicmachines.co** (sibling `basicmachines.co` repo)
    - **Goal**: Update version number displayed on the homepage
    - **Location**: Search for "Basic Memory v0." in the codebase to find version displays
    - **What to update**:
@@ -133,7 +133,7 @@ After PyPI release is published, update the MCP registry:
      7. Push branch: `git push origin release/v{VERSION}`
    - **Deploy**: Follow deployment process for basicmachines.co
 
-**2. docs.basicmemory.com** (`/Users/drew/code/docs.basicmemory.com`)
+**2. docs.basicmemory.com** (sibling `docs.basicmemory.com` repo)
    - **Goal**: Add a What's New page for the release and bump the homepage badge
    - **Site shape**: Nuxt/Docus content site. The changelog page
      (`content/2.whats-new/*.changelog.md`) auto-fetches GitHub releases — no
@@ -142,7 +142,7 @@ After PyPI release is published, update the MCP registry:
    - **What to do**:
      1. Pull latest from GitHub: `git pull origin main`
      2. Create release branch: `git checkout -b release/v{VERSION}`
-     3. Read `/Users/drew/code/basic-memory/CHANGELOG.md` to get release content
+     3. Read `CHANGELOG.md` in the `basic-memory` repo to get release content
      4. **New minor/major release**: add `content/2.whats-new/1.v{VERSION}.md`
         modeled on the previous version page (frontmatter title/description,
         headline feature first, then sections, then an Upgrading note) and
