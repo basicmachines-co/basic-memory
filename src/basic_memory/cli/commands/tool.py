@@ -181,9 +181,7 @@ def _display_build_context(result: dict[str, Any]) -> None:
                 primary_node.add(" ".join(parts))
 
     # Count total related items across all primary results.
-    total_related = sum(
-        len(cr.get("related_results", [])) for cr in context_items
-    )
+    total_related = sum(len(cr.get("related_results", [])) for cr in context_items)
     subtitle = f"{len(context_items)} primary  •  {total_related} related"
     console.print(Panel(tree, subtitle=subtitle, expand=False))
 
@@ -414,7 +412,7 @@ def read_note(
         # Why: scripts and downstream tools need parseable JSON; Rich markup
         #      would corrupt those pipelines.
         # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich():
+        if json_output or not _use_rich() or isinstance(result, str):
             _print_json(result)
         else:
             _display_read_note(result)
@@ -627,7 +625,7 @@ def build_context(
         # Why: scripts and downstream tools need parseable JSON; Rich markup
         #      would corrupt those pipelines.
         # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich():
+        if json_output or not _use_rich() or isinstance(result, str):
             _print_json(result)
         else:
             _display_build_context(result)
@@ -704,7 +702,7 @@ def recent_activity(
         # Why: scripts and downstream tools need parseable JSON; Rich markup
         #      would corrupt those pipelines.
         # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich():
+        if json_output or not _use_rich() or isinstance(result, str):
             _print_json(result)
         else:
             _display_recent_activity(result)
