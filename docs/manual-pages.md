@@ -27,8 +27,42 @@ manual/
 └── diagrams/               # canvas visualizations of the manual graph
 ```
 
-Sections follow Unix numbering: `1` CLI commands, `3` MCP tools, `5` file
-formats and schemas, `7` concepts, `8` admin/cloud operations.
+### Why "man1", "man3", "man5"?
+
+The folder names are Unix's, unchanged since 1971. The manual is divided
+into numbered **sections**, pages physically live in directories named
+after them (`/usr/share/man/man1`, `man5`, ...), and the number tells you
+what *kind* of thing is documented — not importance, not reading order:
+
+- **1** — user commands (`ls`, `grep`)
+- **2** — system calls
+- **3** — library functions / APIs (`printf(3)`)
+- **4** — devices
+- **5** — file formats and config files (`crontab(5)`, `passwd(5)`)
+- **6** — games (really)
+- **7** — miscellanea: concepts, conventions, overviews (`regex(7)`, `signal(7)`)
+- **8** — system administration
+
+That's also why man page names carry the parenthesized number —
+`crontab(1)` is the command, `crontab(5)` is the file format, same name in
+two sections. `man 5 crontab` picks the section explicitly.
+
+This manual copies that layout with the sections that have a Basic Memory
+analog:
+
+- **man1/** — `bm` CLI commands → `bm-status(1)`
+- **man3/** — MCP tools, our equivalent of the "library API" section → `write-note(3)`
+- **man5/** — file formats: note syntax, observations, relations, schemas → `bm-note(5)`
+- **man7/** — concepts → `basic-memory(7)`, `semantic-memory(7)`
+- **8** is reserved for admin/cloud operations but has no pages yet; 2, 4,
+  and 6 have no analog (no system calls, no devices, and no games — yet)
+
+When a page says `see_also [[bm-note(5)]]`, the `(5)` reads "the
+file-format page," exactly the way a Unix manual cross-references — except
+here it's a traversable relation in the graph instead of a typographic
+convention. The manual explains its own conventions in `man-pages(7)` —
+fittingly, the same page name Linux uses for this, and that almost nobody
+ever reads.
 
 ## Page anatomy
 
@@ -69,6 +103,19 @@ bm tool search-notes --project manual          # then filter, or via MCP:
 ```
 
 A future `bm man <topic>` command is thin sugar over exactly these calls.
+
+And for the real thing — `man bm` in an actual terminal:
+
+```bash
+bm man install        # copies bundled groff pages to ~/.local/share/man
+man bm                # the overview page, rendered by man(1)
+man basic-memory      # same page via its alias
+```
+
+`bm man install` warns with a one-line `MANPATH` fix if the install root
+isn't searched by your `man`. Agents with shell access can use `man bm` as
+an offline quick reference; the full per-tool detail stays in the manual
+project's section-3 pages.
 
 ## The verification discipline
 
@@ -129,7 +176,8 @@ GOTCHAS, SEE ALSO, observations) survives — that ownership split is what the
   help; the hand-written corpus is the template spec. Regenerate-and-diff in
   CI becomes the drift gate.
 - **`bm man <topic>`** — CLI sugar over `read_note` + metadata search.
-- **Real man pages / docs site** — the same extraction renders to groff
-  ([#610](https://github.com/basicmachines-co/basic-memory/issues/610)) and
-  to the hosted docs site; the notes remain canonical for sections 5 and 7,
-  code is canonical for 1 and 3.
+  (`bm man install` + a hand-written `bm.1` already ship — the first slice
+  of [#610](https://github.com/basicmachines-co/basic-memory/issues/610);
+  the generator will produce per-command pages from the same extraction.)
+- **Docs site** — the notes remain canonical for sections 5 and 7, code is
+  canonical for 1 and 3; both render to the hosted docs site.
