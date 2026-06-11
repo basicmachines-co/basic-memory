@@ -36,7 +36,11 @@ from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 # Schema tools
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 
+# Diagnostics tool
+from basic_memory.mcp.tools.basic_memory_diagnostics import basic_memory_diagnostics
+
 __all__ = [
+    "basic_memory_diagnostics",
     "build_context",
     "canvas",
     "cloud_info",
