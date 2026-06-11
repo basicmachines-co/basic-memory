@@ -11,9 +11,11 @@ from basic_memory.cli.commands.cloud.project_sync import *  # noqa: F401,F403
 # Register snapshot sub-command group
 from basic_memory.cli.commands.cloud.snapshot import snapshot_app
 from basic_memory.cli.commands.cloud.workspace import workspace_app
+from basic_memory.cli.commands.cloud.shares import share_app
 
 cloud_app.add_typer(snapshot_app, name="snapshot")
 cloud_app.add_typer(workspace_app, name="workspace")
+cloud_app.add_typer(share_app, name="share")
 
 # Register restore command (directly on cloud_app via decorator)
 from basic_memory.cli.commands.cloud.restore import restore  # noqa: F401, E402
