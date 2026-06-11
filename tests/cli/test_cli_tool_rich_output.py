@@ -27,46 +27,72 @@ READ_NOTE_RESULT = {
 }
 
 SEARCH_RESULT = {
-    "query": "test",
+    # Real SearchResponse.model_dump() uses "current_page", not "page".
+    # No "query" key in the response -- the query comes from the CLI argument.
     "total": 2,
-    "page": 1,
+    "current_page": 1,
     "page_size": 10,
+    "has_more": False,
     "results": [
         {
             "type": "entity",
             "title": "Test Note",
             "permalink": "notes/test-note",
             "file_path": "notes/Test Note.md",
+            "score": 0.95,
+            "matched_chunk": "A snippet about test notes",
+            "content": None,
         },
         {
             "type": "observation",
             "title": "Another Note",
             "permalink": "notes/another-note",
             "file_path": "notes/Another Note.md",
+            "score": 0.72,
+            "matched_chunk": None,
+            "content": "Full content here",
         },
     ],
 }
 
 SEARCH_RESULT_EMPTY = {
-    "query": "nothing",
     "total": 0,
-    "page": 1,
+    "current_page": 1,
     "page_size": 10,
+    "has_more": False,
     "results": [],
 }
 
 BUILD_CONTEXT_RESULT = {
+    # Real GraphContext.model_dump() shape: results is a list of ContextResult dicts.
+    # Each ContextResult has primary_result + observations + related_results.
     "results": [
         {
-            "type": "entity",
-            "title": "Related Note",
-            "permalink": "notes/related",
-            "relation_type": "references",
+            "primary_result": {
+                "type": "entity",
+                "external_id": "abc123",
+                "title": "Test Note",
+                "permalink": "notes/test-note",
+                "file_path": "notes/Test Note.md",
+                "created_at": "2025-01-01T00:00:00",
+            },
+            "observations": [],
+            "related_results": [
+                {
+                    "type": "relation",
+                    "title": "Related Note",
+                    "permalink": "notes/related",
+                    "file_path": "notes/Related Note.md",
+                    "relation_type": "references",
+                    "created_at": "2025-01-01T00:00:00",
+                }
+            ],
         }
     ],
     "metadata": {"uri": "notes/test-note", "depth": 1},
     "page": 1,
     "page_size": 10,
+    "has_more": False,
 }
 
 BUILD_CONTEXT_EMPTY = {
@@ -74,16 +100,18 @@ BUILD_CONTEXT_EMPTY = {
     "metadata": {"uri": "notes/test-note", "depth": 1},
     "page": 1,
     "page_size": 10,
+    "has_more": False,
 }
 
 RECENT_ACTIVITY_RESULT = [
+    # Real _extract_recent_rows output keys: type/title/permalink/file_path/created_at
+    # (optional: project).  No "updated_at" key in the real output.
     {
         "type": "entity",
         "title": "Note A",
         "permalink": "notes/note-a",
         "file_path": "notes/Note A.md",
         "created_at": "2025-01-01 00:00:00",
-        "updated_at": "2025-01-01 12:00:00",
     },
     {
         "type": "entity",
@@ -91,7 +119,6 @@ RECENT_ACTIVITY_RESULT = [
         "permalink": "notes/note-b",
         "file_path": "notes/Note B.md",
         "created_at": "2025-01-02 00:00:00",
-        "updated_at": None,
     },
 ]
 
@@ -125,10 +152,11 @@ def test_search_notes_rich_output_default(mock_mcp):
     # Rich output should NOT be valid JSON
     with pytest.raises((json.JSONDecodeError, ValueError)):
         json.loads(result.output)
-    # But it should contain the result titles
+    # But it should contain the result titles and partial permalink
     assert "Test Note" in result.output
     assert "Another Note" in result.output
-    assert "notes/test-note" in result.output
+    # Rich may truncate long permalinks with ellipsis; check the prefix.
+    assert "notes/test-no" in result.output
 
 
 @patch(
@@ -287,7 +315,9 @@ def test_build_context_json_flag_overrides_tty(mock_mcp):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
     assert "results" in data
-    assert data["results"][0]["title"] == "Related Note"
+    # Real shape: results[i] is a ContextResult with primary_result nested inside.
+    assert data["results"][0]["primary_result"]["title"] == "Test Note"
+    assert data["results"][0]["related_results"][0]["title"] == "Related Note"
 
 
 @patch(
