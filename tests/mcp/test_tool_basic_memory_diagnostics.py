@@ -49,7 +49,6 @@ def test_diagnostics_returns_string():
 def test_diagnostics_includes_version():
     result = basic_memory_diagnostics()
     assert basic_memory.__version__ in result
-    assert basic_memory.__api_version__ in result
 
 
 def test_diagnostics_includes_python_version():

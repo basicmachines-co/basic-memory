@@ -69,13 +69,18 @@ def _redact_config(raw: dict) -> dict:
 
 @mcp.tool(
     "basic_memory_diagnostics",
+    title="Basic Memory Diagnostics",
+    tags={"diagnostics"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
+    # The report is a markdown string; suppress FastMCP's wrap_result so the
+    # payload isn't duplicated into structuredContent.
+    output_schema=None,
 )
 def basic_memory_diagnostics() -> str:
     """Return version, system, and configuration diagnostics for Basic Memory.
 
     Provides:
-    - Basic Memory package version and API version
+    - Basic Memory package version
     - Python version and platform details
     - Config file path and its contents (secrets redacted)
 
@@ -84,7 +89,6 @@ def basic_memory_diagnostics() -> str:
     """
     # --- Version information ---
     bm_version = basic_memory.__version__
-    api_version = basic_memory.__api_version__
 
     # --- System information ---
     python_version = sys.version
@@ -111,7 +115,6 @@ def basic_memory_diagnostics() -> str:
         "",
         "## Version",
         f"- basic-memory: {bm_version}",
-        f"- API version: {api_version}",
         "",
         "## System",
         f"- Python: {python_version}",
