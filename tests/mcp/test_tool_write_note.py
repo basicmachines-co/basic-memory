@@ -477,6 +477,38 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_write_note_single_line_inline_fence_is_body_issue_972(app, test_project):
+    """Single-line content starting with `---` must be stored as body, not frontmatter.
+
+    Reproduces issue #972: a one-line string where `\\n` are literal backslash-n
+    characters (a common CLI/agent input shape) was misread as frontmatter, merging a
+    garbage `\\nstatus` YAML key into the note and silently dropping the inline
+    `---...---` segment from the body.
+    """
+    one_line = r"---\nstatus: active\n---\nDiscussed Q3 roadmap with Anthony."
+
+    await write_note(
+        project=test_project.name,
+        title="Meeting Notes",
+        directory="meetings",
+        content=one_line,
+    )
+
+    content = await read_note("meetings/meeting-notes", project=test_project.name)
+
+    # The literal one-line string survives verbatim in the body...
+    assert one_line in content
+
+    # ...and no garbage `\nstatus` key leaked into the generated YAML frontmatter.
+    # Inspect only the frontmatter block (between the first pair of fence lines).
+    lines = content.splitlines()
+    assert lines[0] == "---"
+    closing = lines.index("---", 1)
+    frontmatter_block = lines[1:closing]
+    assert not any("status" in line for line in frontmatter_block)
+
+
+@pytest.mark.asyncio
 async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     """Test fix for GitHub Issue #139: UNIQUE constraint failed: entity.permalink.
 
