@@ -54,6 +54,14 @@ _workspace_provider: Optional[Callable[[], Awaitable[list[WorkspaceInfo]]]] = No
 _WORKSPACE_PROJECT_INDEX_STATE_KEY = "workspace_project_index"
 
 
+class WorkspaceProjectLookupMiss(ValueError):
+    """A project was absent from the workspace index (as opposed to ambiguous).
+
+    Misses are retried once against a freshly rebuilt index, because the
+    session cache may simply predate an out-of-band project creation (#956).
+    """
+
+
 @dataclass(frozen=True)
 class WorkspaceProjectEntry:
     """A cloud project resolved together with the workspace that owns it."""
@@ -722,9 +730,15 @@ async def _fetch_workspace_project_entries(
 
 async def _ensure_workspace_project_index(
     context: Optional[Context] = None,
+    *,
+    force_refresh: bool = False,
 ) -> WorkspaceProjectIndex:
-    """Build or load the session-local workspace/project lookup index."""
-    if context:
+    """Build or load the session-local workspace/project lookup index.
+
+    force_refresh bypasses the cached index and rebuilds from discovery —
+    used by resolve_workspace_project_identifier when a lookup misses (#956).
+    """
+    if context and not force_refresh:
         cached_raw = await context.get_state(_WORKSPACE_PROJECT_INDEX_STATE_KEY)
         cached_index = _workspace_project_index_from_state(cached_raw)
         if cached_index is not None:
@@ -865,7 +879,32 @@ async def resolve_workspace_project_identifier(
 ) -> WorkspaceProjectEntry:
     """Resolve a project by external_id (UUID), qualified name, or unqualified name."""
     index = await _ensure_workspace_project_index(context=context)
+    try:
+        return await _resolve_workspace_project_from_index(index, project, context)
+    except WorkspaceProjectLookupMiss:
+        # Trigger: the lookup missed the session-cached index.
+        # Why: a miss is exactly the signal the cache may be stale — projects
+        #   created out-of-band (CLI, a teammate in a shared workspace) post-date
+        #   the index built at session start (#956).
+        # Outcome: rebuild the index once and retry; a second miss is authoritative
+        #   and its error (with the refreshed project list) propagates.
+        logger.info(
+            f"Workspace project lookup missed for '{project}'; refreshing index and retrying"
+        )
+        refreshed = await _ensure_workspace_project_index(context=context, force_refresh=True)
+        return await _resolve_workspace_project_from_index(refreshed, project, context)
 
+
+async def _resolve_workspace_project_from_index(
+    index: WorkspaceProjectIndex,
+    project: str,
+    context: Optional[Context] = None,
+) -> WorkspaceProjectEntry:
+    """Resolve a project against one concrete index snapshot.
+
+    Raises WorkspaceProjectLookupMiss for absent projects (retryable via index
+    refresh) and plain ValueError for ambiguity, which a refresh cannot fix.
+    """
     # Fast path: direct lookup by external_id when the identifier is a UUID
     # Canonicalize via str(UUID(...)) so uppercase, brace-wrapped, or urn:uuid forms
     # all hash to the same lowercase-hyphenated key as the stored external_ids.
@@ -895,7 +934,7 @@ async def resolve_workspace_project_identifier(
                 failed_workspace.tenant_id == workspace.tenant_id
                 for failed_workspace in index.failed_workspaces
             ):
-                raise ValueError(
+                raise WorkspaceProjectLookupMiss(
                     f"Projects for workspace '{workspace.name}' ({workspace.slug}) "
                     "could not be loaded. Retry after workspace discovery recovers."
                 )
@@ -904,7 +943,7 @@ async def resolve_workspace_project_identifier(
                 for entry in index.entries
                 if entry.workspace.tenant_id == workspace.tenant_id
             )
-            raise ValueError(
+            raise WorkspaceProjectLookupMiss(
                 f"Project '{project_identifier}' was not found in workspace "
                 f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
             )
@@ -929,7 +968,7 @@ async def resolve_workspace_project_identifier(
                 "retry or use a qualified project from an indexed workspace."
             )
         available = ", ".join(entry.qualified_name for entry in index.entries)
-        raise ValueError(
+        raise WorkspaceProjectLookupMiss(
             f"Project '{project}' was not found in indexed cloud workspaces. "
             f"Available projects: {available}.{failed_note}"
         )
