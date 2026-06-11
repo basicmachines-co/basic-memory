@@ -6,12 +6,12 @@
     "url": "https://github.com/basicmachines-co/basic-memory.git",
     "source": "github"
   },
-  "version": "0.21.6",
+  "version": "0.22.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "basic-memory",
-      "version": "0.21.6",
+      "version": "0.22.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

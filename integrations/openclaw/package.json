@@ -1,6 +1,6 @@
 {
   "name": "@basicmemory/openclaw-basic-memory",
-  "version": "0.21.6",
+  "version": "0.22.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
