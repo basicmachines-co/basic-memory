@@ -600,6 +600,55 @@ def strict_search_tags(v: Any) -> Any:
     return v
 
 
+def parse_str_list(v: Any) -> List[str]:
+    """Parse a list of plain strings from various input formats.
+
+    Like parse_tags but without stripping '#' — correct for type/category params
+    where the value is a literal identifier, not a hashtag.
+
+    Handles the four input shapes that MCP clients commonly produce:
+    - None → []
+    - "note,task" → ["note", "task"] (comma-split string)
+    - '["note","task"]' → ["note", "task"] (JSON array string)
+    - ["note,task"] → ["note", "task"] (list with comma-string element)
+
+    Non-str/list/None values are returned unchanged so Pydantic can reject them
+    with a clear validation error instead of silently coercing.
+    """
+    if v is None:
+        return []
+
+    if isinstance(v, list):
+        # Trigger: a list element may itself be a comma-separated string (e.g. some MCP clients
+        #   serialise `["note,task"]` when the caller passed `note_types="note,task"`).
+        # Outcome: flatten each element by splitting on commas and stripping whitespace.
+        return [
+            item.strip()
+            for raw in v
+            if raw is not None
+            for item in str(raw).split(",")
+            if item and item.strip()
+        ]
+
+    if isinstance(v, str):
+        # Trigger: MCP clients sometimes send a JSON array string like '["note","task"]'.
+        # Outcome: parse it as JSON first, then recurse to handle the resulting list.
+        stripped = v.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed_json = json.loads(stripped)
+                if isinstance(parsed_json, list):
+                    return parse_str_list(parsed_json)
+            except json.JSONDecodeError:
+                pass
+
+        # Plain comma-separated string: "note,task" → ["note", "task"]
+        return [item.strip() for item in v.split(",") if item and item.strip()]
+
+    # Non-str/list/None — return unchanged so Pydantic rejects with a clear error.
+    return v  # type: ignore[return-value]
+
+
 def coerce_list(v: Any) -> Any:
     """Coerce string input to list for MCP clients that serialize lists as strings."""
     if v is None:

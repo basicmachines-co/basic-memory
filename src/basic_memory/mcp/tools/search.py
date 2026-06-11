@@ -14,7 +14,7 @@ from basic_memory.config import ConfigManager, has_cloud_credentials
 from basic_memory.utils import (
     build_canonical_permalink,
     coerce_dict,
-    coerce_list,
+    parse_str_list,
     parse_tags,
     strict_search_tags,
 )
@@ -649,24 +649,30 @@ async def search_notes(
     # Plural-vs-singular trips models constantly. Accept the singular too.
     note_types: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        # parse_str_list, not coerce_list: "note,task" must split into ["note", "task"]
+        # consistent with how tags are handled (#910/#930). coerce_list wraps the whole
+        # comma string as the single literal type ["note,task"], which matches nothing.
+        BeforeValidator(parse_str_list),
         Field(default=None, validation_alias=AliasChoices("note_types", "note_type", "types")),
         "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
+        "Accepts a list, a comma-separated string (e.g. 'note,task'), or a JSON-array string. "
         "Case-insensitive.",
     ] = None,
     entity_types: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        BeforeValidator(parse_str_list),
         Field(default=None, validation_alias=AliasChoices("entity_types", "entity_type")),
         "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
         "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
-        "'Chapter' here — use note_types instead.",
+        "'Chapter' here — use note_types instead. "
+        "Accepts a list, a comma-separated string (e.g. 'entity,observation'), or a JSON-array string.",
     ] = None,
     categories: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        BeforeValidator(parse_str_list),
         Field(default=None, validation_alias=AliasChoices("categories", "category")),
         "Filter observation results to these exact categories (e.g. ['requirement']). "
+        "Accepts a list, a comma-separated string (e.g. 'requirement,decision'), or a JSON-array string. "
         "Pair with entity_types=['observation'] to return only observations whose "
         "category matches exactly — not every row mentioning the word.",
     ] = None,
