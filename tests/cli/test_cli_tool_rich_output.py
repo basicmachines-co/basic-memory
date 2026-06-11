@@ -66,6 +66,7 @@ SEARCH_RESULT_EMPTY = {
 BUILD_CONTEXT_RESULT = {
     # Real GraphContext.model_dump() shape: results is a list of ContextResult dicts.
     # Each ContextResult has primary_result + observations + related_results.
+    # ObservationSummary fields: type, category, content, permalink, file_path, created_at.
     "results": [
         {
             "primary_result": {
@@ -76,7 +77,16 @@ BUILD_CONTEXT_RESULT = {
                 "file_path": "notes/Test Note.md",
                 "created_at": "2025-01-01T00:00:00",
             },
-            "observations": [],
+            "observations": [
+                {
+                    "type": "observation",
+                    "category": "fact",
+                    "content": "This is a key fact about the test note",
+                    "permalink": "notes/test-note",
+                    "file_path": "notes/Test Note.md",
+                    "created_at": "2025-01-01T00:00:00",
+                }
+            ],
             "related_results": [
                 {
                     "type": "relation",
@@ -398,3 +408,58 @@ def test_recent_activity_non_tty_gives_json(mock_mcp):
     data = json.loads(result.output)
     assert isinstance(data, list)
     assert len(data) == 2
+
+
+# ---------------------------------------------------------------------------
+# read-note – frontmatter rendering (issue #678)
+# ---------------------------------------------------------------------------
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_rich_include_frontmatter(mock_mcp):
+    """read-note --include-frontmatter renders frontmatter keys in Rich path.
+
+    Regression: previously the Rich renderer silently dropped frontmatter even
+    when --include-frontmatter was passed, requiring --json to see the data.
+    """
+    result = _tty_runner(["tool", "read-note", "test-note", "--include-frontmatter"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # Frontmatter section header should appear
+    assert "frontmatter" in result.output
+    # The frontmatter key and value from READ_NOTE_RESULT should be visible
+    assert "tags" in result.output
+    assert "test" in result.output
+    # The note content should still appear
+    assert "hello world" in result.output
+
+
+# ---------------------------------------------------------------------------
+# build-context – observations rendering (issue #678)
+# ---------------------------------------------------------------------------
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_build_context",
+    new_callable=AsyncMock,
+    return_value=BUILD_CONTEXT_RESULT,
+)
+def test_build_context_rich_renders_observations(mock_mcp):
+    """build-context Rich tree includes observations under each primary node.
+
+    Regression: ContextResult.observations was exposed in JSON output but never
+    rendered in the Rich path, so interactive users lost core entity facts.
+    """
+    result = _tty_runner(["tool", "build-context", "memory://notes/test-note"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # The observation category should appear in the tree
+    assert "fact" in result.output
+    # The observation content should appear (possibly truncated)
+    assert "key fact" in result.output
+    # The subtitle should include an observations count
+    assert "observations" in result.output

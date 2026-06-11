@@ -113,10 +113,11 @@ def _display_search_results(result: dict[str, Any], query: str = "") -> None:
 
 
 def _display_read_note(result: dict[str, Any]) -> None:
-    """Render read-note result: header panel + rendered Markdown content."""
+    """Render read-note result: header panel + optional frontmatter + rendered Markdown content."""
     title = result.get("title", "")
     permalink = result.get("permalink", "")
     content = result.get("content", "")
+    frontmatter: dict[str, Any] = result.get("frontmatter") or {}
 
     header = Text()
     header.append(title, style="bold cyan")
@@ -124,6 +125,18 @@ def _display_read_note(result: dict[str, Any]) -> None:
         header.append(f"  [{permalink}]", style="dim green")
 
     console.print(Panel(header, expand=False))
+
+    # Trigger: --include-frontmatter was passed; the MCP tool populates "frontmatter".
+    # Why: without rendering it here, the explicitly requested metadata is silently
+    #      dropped in the Rich path — users must also know to add --json to see it.
+    # Outcome: print a dim key/value block above the content when frontmatter is present.
+    if frontmatter:
+        fm_table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+        fm_table.add_column("key", style="dim")
+        fm_table.add_column("value", style="dim")
+        for key, value in frontmatter.items():
+            fm_table.add_row(str(key), str(value))
+        console.print(Panel(fm_table, title="[dim]frontmatter[/dim]", expand=False))
 
     if content:
         console.print(Markdown(content))
@@ -165,6 +178,24 @@ def _display_build_context(result: dict[str, Any]) -> None:
                 primary_label = f"[dim]{p_type}[/dim]  {primary_label}"
             primary_node = tree.add(primary_label)
 
+            # --- Observations as children (category + truncated content) ---
+            # Trigger: ContextResult.observations exists in the JSON output but was
+            #          never rendered in the Rich path.
+            # Why: users running interactively lost core entity facts (observations)
+            #      that the --json path exposes; the TTY view must be at least as
+            #      informative as the JSON view for the primary entity.
+            # Outcome: each observation appears as a dim "[category] content" leaf
+            #          under its primary node, truncated at 120 chars.
+            observations: list[dict[str, Any]] = list(context_result.get("observations", []))
+            for obs in observations:
+                category = obs.get("category", "")
+                obs_content = obs.get("content", "")
+                # Truncate long observations so the tree stays readable.
+                if len(obs_content) > 120:
+                    obs_content = obs_content[:117] + "..."
+                obs_label = f"[dim][{category}] {obs_content}[/dim]"
+                primary_node.add(obs_label)
+
             # --- Related items as children ---
             related: list[dict[str, Any]] = list(context_result.get("related_results", []))
             for rel_item in related:
@@ -182,7 +213,8 @@ def _display_build_context(result: dict[str, Any]) -> None:
 
     # Count total related items across all primary results.
     total_related = sum(len(cr.get("related_results", [])) for cr in context_items)
-    subtitle = f"{len(context_items)} primary  •  {total_related} related"
+    total_observations = sum(len(cr.get("observations", [])) for cr in context_items)
+    subtitle = f"{len(context_items)} primary  •  {total_observations} observations  •  {total_related} related"
     console.print(Panel(tree, subtitle=subtitle, expand=False))
 
 
