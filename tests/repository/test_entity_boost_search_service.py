@@ -105,15 +105,14 @@ async def _build_search_service(
             embedding_provider=provider,
         )
     else:
+        # Pass the stub provider at construction time so __init__ does not
+        # instantiate the real configured provider when semantic_search_enabled=True.
         repo = SQLiteSearchRepository(
             session_maker,
             project_id=test_project.id,
             app_config=app_config,
+            embedding_provider=provider,
         )
-        repo._semantic_enabled = True
-        repo._embedding_provider = provider
-        repo._vector_dimensions = provider.dimensions
-        repo._vector_tables_initialized = False
         search_repo = repo
 
     service = SearchService(search_repo, entity_repository, file_service)
