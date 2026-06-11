@@ -1,7 +1,10 @@
 """CLI tool commands for Basic Memory.
 
 Every command calls its MCP tool with output_format="json" and prints the result.
-No text formatting, no separate code paths, no duplicate data fetching.
+Commands that benefit from human-readable output (search-notes, read-note,
+build-context, recent-activity) default to Rich formatting when stdout is a TTY
+and fall back to raw JSON when piped or when --json is supplied.  This follows
+the same bm status / bm project list precedent.
 """
 
 import json
@@ -10,6 +13,12 @@ from typing import Annotated, Any, Dict, List, Optional
 
 import typer
 from loguru import logger
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.tree import Tree
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
@@ -24,13 +33,133 @@ app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 
 VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
 
+# Shared Rich console (stderr=False so output goes to stdout, matching _print_json).
+console = Console()
+
 
 # --- Shared helpers ---
+
+
+def _use_rich() -> bool:
+    """Return True when stdout is an interactive TTY and Rich output is appropriate.
+
+    Trigger: caller did not pass --json and stdout is a TTY.
+    Why: piped output (scripts, jq, etc.) must stay machine-parseable;
+         human-readable formatting is only useful in an interactive terminal.
+    Outcome: Rich output in a terminal; raw JSON when piped or redirected.
+    """
+    return sys.stdout.isatty()
 
 
 def _print_json(result: Any) -> None:
     """Print a result as formatted JSON."""
     print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+
+
+# --- Rich formatters ---
+
+
+def _display_search_results(result: dict[str, Any]) -> None:
+    """Render search-notes results as a Rich table."""
+    results = result.get("results", [])
+    total = result.get("total", len(results))
+    query = result.get("query") or ""
+    page = result.get("page", 1)
+    page_size = result.get("page_size", len(results))
+
+    title = f"Search results for [bold cyan]{query}[/bold cyan]" if query else "Search results"
+    subtitle = f"{total} result(s)  •  page {page} of {max(1, -(-total // page_size))}"
+
+    if not results:
+        console.print(Panel(Text("No results found.", style="dim"), title=title, expand=False))
+        return
+
+    table = Table(show_header=True, header_style="bold", expand=False)
+    table.add_column("Type", style="dim", width=12)
+    table.add_column("Title", style="bold cyan")
+    table.add_column("Permalink", style="green")
+
+    for item in results:
+        item_type = item.get("type", "")
+        item_title = item.get("title") or item.get("permalink", "")
+        permalink = item.get("permalink", "")
+        table.add_row(item_type, item_title, permalink)
+
+    console.print(Panel(table, title=title, subtitle=subtitle, expand=False))
+
+
+def _display_read_note(result: dict[str, Any]) -> None:
+    """Render read-note result: header panel + rendered Markdown content."""
+    title = result.get("title", "")
+    permalink = result.get("permalink", "")
+    content = result.get("content", "")
+
+    header = Text()
+    header.append(title, style="bold cyan")
+    if permalink:
+        header.append(f"  [{permalink}]", style="dim green")
+
+    console.print(Panel(header, expand=False))
+
+    if content:
+        console.print(Markdown(content))
+    else:
+        console.print(Text("(no content)", style="dim"))
+
+
+def _display_build_context(result: dict[str, Any]) -> None:
+    """Render build-context result as a Rich tree."""
+    metadata = result.get("metadata", {})
+    uri = metadata.get("uri", "")
+    results = result.get("results", [])
+    total = len(results)
+
+    label = f"[bold cyan]{uri}[/bold cyan]" if uri else "Context"
+    tree = Tree(f"[bold]Context:[/bold] {label}")
+
+    if not results:
+        tree.add("[dim]No related content found.[/dim]")
+    else:
+        for item in results:
+            item_title = item.get("title") or item.get("permalink", "")
+            relation = item.get("relation_type", "")
+            item_type = item.get("type", "")
+
+            parts = []
+            if relation:
+                parts.append(f"[yellow]{relation}[/yellow]")
+            if item_type:
+                parts.append(f"[dim]{item_type}[/dim]")
+            parts.append(f"[cyan]{item_title}[/cyan]")
+
+            tree.add(" ".join(parts))
+
+    subtitle = f"{total} related item(s)"
+    console.print(Panel(tree, subtitle=subtitle, expand=False))
+
+
+def _display_recent_activity(result: list[dict[str, Any]]) -> None:
+    """Render recent-activity results as a Rich table."""
+    if not result:
+        console.print(
+            Panel(Text("No recent activity.", style="dim"), title="Recent Activity", expand=False)
+        )
+        return
+
+    table = Table(show_header=True, header_style="bold", expand=False)
+    table.add_column("Type", style="dim", width=12)
+    table.add_column("Title", style="bold cyan")
+    table.add_column("Permalink", style="green")
+    table.add_column("Updated", style="dim")
+
+    for item in result:
+        item_type = item.get("type", "")
+        item_title = item.get("title") or item.get("permalink", "")
+        permalink = item.get("permalink", "")
+        updated = str(item.get("updated_at") or item.get("created_at") or "")
+        table.add_row(item_type, item_title, permalink, updated)
+
+    console.print(Panel(table, title="Recent Activity", expand=False))
 
 
 def _delete_note_failure_message(result: dict[str, Any]) -> str | None:
@@ -178,6 +307,9 @@ def read_note(
     include_frontmatter: bool = typer.Option(
         False, "--include-frontmatter", help="Include YAML frontmatter in output"
     ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output raw JSON instead of formatted display"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -196,10 +328,14 @@ def read_note(
 ):
     """Read a markdown note from the knowledge base.
 
+    Displays formatted Markdown output by default when run in a terminal.
+    Use --json for raw machine-readable output.
+
     Examples:
 
     bm tool read-note my-note
     bm tool read-note my-note --include-frontmatter
+    bm tool read-note my-note --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import read_note as mcp_read_note
@@ -230,7 +366,14 @@ def read_note(
             _print_json(result)
             raise typer.Exit(1)
 
-        _print_json(result)
+        # Trigger: --json flag or non-TTY stdout (piped output).
+        # Why: scripts and downstream tools need parseable JSON; Rich markup
+        #      would corrupt those pipelines.
+        # Outcome: raw JSON for machine consumers; formatted display for humans.
+        if json_output or not _use_rich():
+            _print_json(result)
+        else:
+            _display_read_note(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -394,6 +537,9 @@ def build_context(
     page: int = typer.Option(1, "--page", help="Page number for pagination"),
     page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
     max_related: int = typer.Option(10, "--max-related", help="Maximum related items to return"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output raw JSON instead of formatted display"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -412,10 +558,14 @@ def build_context(
 ):
     """Get context needed to continue a discussion.
 
+    Displays a Rich tree view by default when run in a terminal.
+    Use --json for raw machine-readable output.
+
     Examples:
 
     bm tool build-context memory://specs/search
     bm tool build-context specs/search --depth 2 --timeframe 30d
+    bm tool build-context memory://specs/search --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import build_context as mcp_build_context
@@ -437,7 +587,15 @@ def build_context(
                     output_format="json",
                 )
             )
-        _print_json(result)
+
+        # Trigger: --json flag or non-TTY stdout (piped output).
+        # Why: scripts and downstream tools need parseable JSON; Rich markup
+        #      would corrupt those pipelines.
+        # Outcome: raw JSON for machine consumers; formatted display for humans.
+        if json_output or not _use_rich():
+            _print_json(result)
+        else:
+            _display_build_context(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -459,6 +617,9 @@ def recent_activity(
     # Match the MCP recent_activity default (page_size=10) so identical default
     # invocations return the same number of rows from CLI and MCP.
     page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output raw JSON instead of formatted display"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -477,11 +638,15 @@ def recent_activity(
 ):
     """Get recent activity across the knowledge base.
 
+    Displays a formatted table by default when run in a terminal.
+    Use --json for raw machine-readable output.
+
     Examples:
 
     bm tool recent-activity
     bm tool recent-activity --timeframe 30d --page-size 20
     bm tool recent-activity --type entity --type observation
+    bm tool recent-activity --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
@@ -502,7 +667,15 @@ def recent_activity(
                     output_format="json",
                 )
             )
-        _print_json(result)
+
+        # Trigger: --json flag or non-TTY stdout (piped output).
+        # Why: scripts and downstream tools need parseable JSON; Rich markup
+        #      would corrupt those pipelines.
+        # Outcome: raw JSON for machine consumers; formatted display for humans.
+        if json_output or not _use_rich():
+            _print_json(result)
+        else:
+            _display_recent_activity(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -566,6 +739,9 @@ def search_notes(
     ] = None,
     page: int = typer.Option(1, "--page", help="Page number for pagination"),
     page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output raw JSON instead of formatted display"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -584,6 +760,9 @@ def search_notes(
 ):
     """Search across all content in the knowledge base.
 
+    Displays a formatted table by default when run in a terminal.
+    Use --json for raw machine-readable output.
+
     Examples:
 
     bm tool search-notes "my query"
@@ -591,6 +770,7 @@ def search_notes(
     bm tool search-notes --tag python --tag async
     bm tool search-notes --meta status=draft
     bm tool search-notes "auth" --entity-type observation --category requirement
+    bm tool search-notes "my query" --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import search_notes as mcp_search
@@ -671,7 +851,14 @@ def search_notes(
             typer.echo(result, err=True)
             raise typer.Exit(1)
 
-        _print_json(result)
+        # Trigger: --json flag or non-TTY stdout (piped output).
+        # Why: scripts and downstream tools need parseable JSON; Rich markup
+        #      would corrupt those pipelines.
+        # Outcome: raw JSON for machine consumers; formatted display for humans.
+        if json_output or not _use_rich():
+            _print_json(result)
+        else:
+            _display_search_results(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
