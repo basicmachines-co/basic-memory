@@ -33,7 +33,7 @@ Tools are grouped by function. Parameters marked *(required)* have no default va
   - [`list_directory`](#list-directory)
 - [Search](#search)
   - [`search_notes`](#search-notes)
-  - [`search`](#search)
+  - [`search`](#search-tool)
   - [`fetch`](#fetch)
 - [Project & Workspace Management](#project-workspace-management)
   - [`list_memory_projects`](#list-memory-projects)
@@ -103,20 +103,24 @@ Returns:
     - Tags if present
     - Session tracking metadata for project awareness
 
+Raises:
+    HTTPError: If project doesn't exist or is inaccessible
+    SecurityError: If directory path attempts path traversal
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `title` | `str` | *(required)* | |
-| `content` | `str` | *(required)* | |
-| `directory` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `tags` | `list[str] | str | None` | `None` | |
-| `note_type` | `str` | `'note'` | |
-| `metadata` | `dict | None` | `None` | |
-| `overwrite` | `bool | None` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `title` | `str` | *(required)* | The title of the note |
+| `content` | `str` | *(required)* | Markdown content for the note, can include observations and relations |
+| `directory` | `str` | *(required)* | Directory path relative to project root where the file should be saved. |
+| `project` | `Optional[str]` | `None` | Project name to write to. Optional - server will resolve using the |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `tags` | `list[str] \| str \| None` | `None` | Tags to categorize the note. Can be a list of strings, a comma-separated string, or None. |
+| `note_type` | `str` | `'note'` | Type of note to create (stored in frontmatter). Defaults to "note". |
+| `metadata` | `dict \| None` | `None` | Optional dict of extra frontmatter fields merged into entity_metadata. |
+| `overwrite` | `bool \| None` | `None` | If True, replace existing note on conflict. If False, error on conflict. |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns the existing markdown summary. "json" returns |
 
 **Examples**
 
@@ -161,10 +165,6 @@ Returns:
             "settings": {"validation": "warn"},
         },
     )
-
-Raises:
-    HTTPError: If project doesn't exist or is inaccessible
-    SecurityError: If directory path attempts path traversal
 ```
 
 *Source: `src/basic_memory/mcp/tools/write_note.py`*
@@ -194,17 +194,25 @@ Returns:
     The full markdown content of the note if found, or helpful guidance if not found.
     Content includes frontmatter, observations, relations, and all markdown formatting.
 
+Raises:
+    HTTPError: If project doesn't exist or is inaccessible
+    SecurityError: If identifier attempts path traversal
+
+Note:
+    If the exact note isn't found, this tool provides helpful suggestions
+    including related notes, search commands, and note creation templates.
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `identifier` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `page` | `int` | `1` | |
-| `page_size` | `int` | `10` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
-| `include_frontmatter` | `bool` | `False` | |
+| `identifier` | `str` | *(required)* | The title or permalink of the note to read |
+| `project` | `Optional[str]` | `None` | Project name to read from. Optional - server will resolve using the |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `page` | `int` | `1` | Page of fallback-search results to use when the identifier does not |
+| `page_size` | `int` | `10` | Number of fallback-search results per page (default: 10). When no |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns markdown content or guidance text. |
+| `include_frontmatter` | `bool` | `False` | When output_format="json", whether content should include the |
 
 **Examples**
 
@@ -223,14 +231,6 @@ Returns:
 
     # Page through fallback-search suggestions when nothing matches directly
     read_note("unknown topic", page=2, page_size=5)
-
-Raises:
-    HTTPError: If project doesn't exist or is inaccessible
-    SecurityError: If identifier attempts path traversal
-
-Note:
-    If the exact note isn't found, this tool provides helpful suggestions
-    including related notes, search commands, and note creation templates.
 ```
 
 *Source: `src/basic_memory/mcp/tools/read_note.py`*
@@ -250,13 +250,17 @@ Project parameter optional with server resolution.
 Returns:
     Instructions for Claude to create a markdown artifact with the note content.
 
+Raises:
+    HTTPError: If project doesn't exist or is inaccessible
+    SecurityError: If identifier attempts path traversal
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `identifier` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
+| `identifier` | `str` | *(required)* | The title or permalink of the note to view |
+| `project` | `Optional[str]` | `None` | Project name to read from. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
 
 **Examples**
 
@@ -269,10 +273,6 @@ Returns:
 
     # Explicit project specification
     view_note("Meeting Notes", project="my-project")
-
-Raises:
-    HTTPError: If project doesn't exist or is inaccessible
-    SecurityError: If identifier attempts path traversal
 ```
 
 *Source: `src/basic_memory/mcp/tools/view_note.py`*
@@ -295,20 +295,32 @@ Returns:
     A markdown formatted summary of the edit operation and resulting semantic content,
     including operation details, file path, observations, relations, and project metadata.
 
+Raises:
+    HTTPError: If project doesn't exist or is inaccessible
+    ValueError: If operation is invalid or required parameters are missing
+    SecurityError: If identifier attempts path traversal
+
+Note:
+    Edit operations require exact identifier matches. If unsure, use read_note() or
+    search_notes() first to find the correct identifier. When the identifier looks
+    like a file path and the file exists on disk but is not indexed yet, edit_note
+    indexes that file automatically and retries the edit. The tool provides detailed
+    error messages with suggestions if operations fail.
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `identifier` | `str` | *(required)* | |
-| `operation` | `str` | *(required)* | |
-| `content` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `workspace` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `section` | `Annotated[Optional[str], Field(default=None, validation_alias=AliasChoices('section', 'section_heading', 'heading'))]` | `None` | |
-| `find_text` | `Annotated[Optional[str], Field(default=None, validation_alias=AliasChoices('find_text', 'find', 'old_text', 'old_content', 'search'))]` | `None` | |
-| `expected_replacements` | `Optional[int]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `identifier` | `str` | *(required)* | The exact title, permalink, or memory:// URL of the note to edit. |
+| `operation` | `str` | *(required)* | The editing operation to perform: |
+| `content` | `str` | *(required)* | The content to add or use for replacement |
+| `project` | `Optional[str]` | `None` | Project name to edit in. Optional - server will resolve using hierarchy. |
+| `workspace` | `Optional[str]` | `None` | Workspace slug, name, or tenant_id. When provided with `project`, |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `section` | `Optional[str]` | `None` | For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation") |
+| `find_text` | `Optional[str]` | `None` | For find_replace operation - the text to find and replace |
+| `expected_replacements` | `Optional[int]` | `None` | For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match) |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns the existing markdown summary. "json" returns |
 
 **Examples**
 
@@ -347,18 +359,6 @@ Returns:
 
     # Update status across document (expecting exactly 2 occurrences)
     edit_note("reports", "status-report", "find_replace", "In Progress", find_text="Not Started", expected_replacements=2)
-
-Raises:
-    HTTPError: If project doesn't exist or is inaccessible
-    ValueError: If operation is invalid or required parameters are missing
-    SecurityError: If identifier attempts path traversal
-
-Note:
-    Edit operations require exact identifier matches. If unsure, use read_note() or
-    search_notes() first to find the correct identifier. When the identifier looks
-    like a file path and the file exists on disk but is not indexed yet, edit_note
-    indexes that file automatically and retries the edit. The tool provides detailed
-    error messages with suggestions if operations fail.
 ```
 
 *Source: `src/basic_memory/mcp/tools/edit_note.py`*
@@ -379,17 +379,31 @@ Returns:
     Success message with move details and project information.
     For directories, includes count of files moved and any errors.
 
+Raises:
+    ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
+
+Note:
+    This operation moves notes within the specified project only. Moving notes
+    between different projects is not currently supported.
+
+The move operation:
+- Updates the entity's file_path in the database
+- Moves the physical file on the filesystem
+- Optionally updates permalinks if configured
+- Re-indexes the entity for search
+- Maintains all observations and relations
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `identifier` | `str` | *(required)* | |
-| `destination_path` | `str` | `''` | |
-| `destination_folder` | `Annotated[Optional[str], Field(default=None, validation_alias=AliasChoices('destination_folder', 'dest_folder', 'to_folder'))]` | `None` | |
-| `is_directory` | `bool` | `False` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `identifier` | `str` | *(required)* | For files: exact entity identifier (title, permalink, or memory:// URL). |
+| `destination_path` | `str` | `''` | For files: new path relative to project root (e.g., "work/meetings/note.md") |
+| `destination_folder` | `Optional[str]` | `None` | Move the note into this folder, preserving the original filename. |
+| `is_directory` | `bool` | `False` | If True, moves an entire directory and all its contents. |
+| `project` | `Optional[str]` | `None` | Project name to move within. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns existing markdown guidance/success text. "json" |
 
 **Examples**
 
@@ -418,20 +432,6 @@ Returns:
     # If uncertain about identifier, search first:
     # search_notes("my note")  # Find available notes
     # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
-
-Raises:
-    ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
-
-Note:
-    This operation moves notes within the specified project only. Moving notes
-    between different projects is not currently supported.
-
-The move operation:
-- Updates the entity's file_path in the database
-- Moves the physical file on the filesystem
-- Optionally updates permalinks if configured
-- Re-indexes the entity for search
-- Maintains all observations and relations
 ```
 
 *Source: `src/basic_memory/mcp/tools/move_note.py`*
@@ -458,15 +458,28 @@ Returns:
     For directories, returns a formatted summary of deleted files.
     On errors, returns a formatted string with helpful troubleshooting guidance.
 
+Raises:
+    HTTPError: If project doesn't exist or is inaccessible
+    SecurityError: If identifier attempts path traversal
+
+Warning:
+    This operation is permanent and cannot be undone. The note/directory files
+    will be removed from the filesystem and all references will be lost.
+
+Note:
+    If the note is not found, this function provides helpful error messages
+    with suggestions for finding the correct identifier, including search
+    commands and alternative formats to try.
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `identifier` | `str` | *(required)* | |
-| `is_directory` | `bool` | `False` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `identifier` | `str` | *(required)* | For files: note title or permalink to delete. |
+| `is_directory` | `bool` | `False` | If True, deletes an entire directory and all its contents. |
+| `project` | `Optional[str]` | `None` | Project name to delete from. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" preserves existing behavior (bool/string). "json" |
 
 **Examples**
 
@@ -491,19 +504,6 @@ Returns:
         print("Note deleted successfully")
     else:
         print("Note not found or already deleted")
-
-Raises:
-    HTTPError: If project doesn't exist or is inaccessible
-    SecurityError: If identifier attempts path traversal
-
-Warning:
-    This operation is permanent and cannot be undone. The note/directory files
-    will be removed from the filesystem and all references will be lost.
-
-Note:
-    If the note is not found, this function provides helpful error messages
-    with suggestions for finding the correct identifier, including search
-    commands and alternative formats to try.
 ```
 
 *Source: `src/basic_memory/mcp/tools/delete_note.py`*
@@ -516,8 +516,6 @@ Note:
 ### `read_content`
 
 Read a file's raw content by path or permalink
-
-Read a file's raw content by path or permalink.
 
 This tool provides direct access to file content in the knowledge base,
 handling different file types appropriately. Uses stateless architecture -
@@ -535,13 +533,17 @@ Returns:
     - For other files: {"type": "document", "source": {"type": "base64", "media_type": "content_type", "data": "base64_data"}}
     - For errors: {"type": "error", "error": "error message"}
 
+Raises:
+    HTTPError: If project doesn't exist or is inaccessible
+    SecurityError: If path attempts path traversal
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `path` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
+| `path` | `str` | *(required)* | The path or permalink to the file. Can be: |
+| `project` | `Optional[str]` | `None` | Project name to read from. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
 
 **Examples**
 
@@ -560,10 +562,6 @@ Returns:
 
     # Explicit project specification
     result = await read_content("docs/project-specs.md", project="my-project")
-
-Raises:
-    HTTPError: If project doesn't exist or is inaccessible
-    SecurityError: If path attempts path traversal
 ```
 
 *Source: `src/basic_memory/mcp/tools/read_content.py`*
@@ -606,19 +604,22 @@ Returns:
     dict (output_format="json"): Structured JSON with internal fields excluded
     str (output_format="text"): Compact markdown representation
 
+Raises:
+    ToolError: If project doesn't exist or depth parameter is invalid
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `url` | `MemoryUrl` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `depth` | `str | int | None` | `1` | |
-| `timeframe` | `Annotated[Optional[TimeFrame], Field(default='7d', validation_alias=AliasChoices('timeframe', 'since', 'time_range', 'lookback'))]` | `'7d'` | |
-| `page` | `int` | `1` | |
-| `page_size` | `int` | `10` | |
-| `max_related` | `int` | `10` | |
-| `output_format` | `Literal['json', 'text']` | `'json'` | |
+| `url` | `MemoryUrl` | *(required)* | memory:// URI pointing to discussion content (e.g. memory://specs/search) |
+| `project` | `Optional[str]` | `None` | Project name to build context from. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `depth` | `str \| int \| None` | `1` | How many relation hops to traverse (1-3 recommended for performance) |
+| `timeframe` | `Optional[TimeFrame]` | `'7d'` | How far back to look. Supports natural language like "2 days ago", "last week" |
+| `page` | `int` | `1` | Page number of results to return (default: 1) |
+| `page_size` | `int` | `10` | Number of results to return per page (default: 10) |
+| `max_related` | `int` | `10` | Maximum number of related results to return (default: 10) |
+| `output_format` | `Literal['json', 'text']` | `'json'` | Response format - "json" for structured JSON dict, |
 
 **Examples**
 
@@ -631,9 +632,6 @@ Returns:
 
     # Get text output for compact context
     build_context("research", "memory://specs/search", output_format="text")
-
-Raises:
-    ToolError: If project doesn't exist or depth parameter is invalid
 ```
 
 *Source: `src/basic_memory/mcp/tools/build_context.py`*
@@ -675,18 +673,26 @@ Returns:
     resolved, returns cross-project discovery information. When a specific
     project is resolved, returns detailed activity for that project.
 
+Raises:
+    ToolError: If project doesn't exist or type parameter contains invalid values
+
+Notes:
+    - Higher depth values (>3) may impact performance with large result sets
+    - For focused queries, consider using build_context with a specific URI
+    - Max timeframe is 1 year in the past
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `type` | `Union[str], Field(default='', validation_alias=AliasChoices('type', 'types', 'kind'))]` | `''` | |
-| `depth` | `int` | `1` | |
-| `timeframe` | `TimeFrame` | `'7d'` | |
-| `page` | `int` | `1` | |
-| `page_size` | `int` | `10` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `type` | `Union[str, List[str]]` | `''` | Filter by content type(s). Can be a string or list of strings. |
+| `depth` | `int` | `1` | How many relation hops to traverse (1-3 recommended) |
+| `timeframe` | `TimeFrame` | `'7d'` | Time window to search. Supports natural language: |
+| `page` | `int` | `1` | Page number for pagination (default 1) |
+| `page_size` | `int` | `10` | Number of items per page (default 10) |
+| `project` | `Optional[str]` | `None` | Project name to query. Optional - server will resolve using the |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns human-readable summary text. "json" returns |
 
 **Examples**
 
@@ -699,14 +705,6 @@ Returns:
     recent_activity(project="work-docs", type="entity", timeframe="yesterday")
     recent_activity(project="research", type=["entity", "relation"], timeframe="today")
     recent_activity(project="notes", type="entity", depth=2, timeframe="2 weeks ago")
-
-Raises:
-    ToolError: If project doesn't exist or type parameter contains invalid values
-
-Notes:
-    - Higher depth values (>3) may impact performance with large result sets
-    - For focused queries, consider using build_context with a specific URI
-    - Max timeframe is 1 year in the past
 ```
 
 *Source: `src/basic_memory/mcp/tools/recent_activity.py`*
@@ -726,15 +724,18 @@ and supports glob pattern filtering for finding specific files.
 Returns:
     Formatted listing of directory contents with file metadata
 
+Raises:
+    ToolError: If project doesn't exist or directory path is invalid
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `dir_name` | `str` | `'/'` | |
-| `depth` | `int` | `1` | |
-| `file_name_glob` | `Annotated[Optional[str], Field(default=None, validation_alias=AliasChoices('file_name_glob', 'glob', 'pattern', 'filter'))]` | `None` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
+| `dir_name` | `str` | `'/'` | Directory path to list (default: root "/") |
+| `depth` | `int` | `1` | Recursion depth (1-10, default: 1 for immediate children only) |
+| `file_name_glob` | `Optional[str]` | `None` | Optional glob pattern for filtering file names |
+| `project` | `Optional[str]` | `None` | Project name to list directory from. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
 
 **Examples**
 
@@ -756,9 +757,6 @@ Returns:
 
     # Explicit project specification
     list_directory(project="work-docs", dir_name="/projects")
-
-Raises:
-    ToolError: If project doesn't exist or directory path is invalid
 ```
 
 *Source: `src/basic_memory/mcp/tools/list_directory.py`*
@@ -786,11 +784,11 @@ performs one search per project.
 
 ## Search Syntax Examples
 
-### Basic Searches
+#### Basic Searches
 - `search_notes("my-project", "keyword")` - Find any content containing "keyword"
 - `search_notes("work-docs", "'exact phrase'")` - Search for exact phrase match
 
-### Advanced Boolean Searches
+#### Advanced Boolean Searches
 - `search_notes("my-project", "term1 term2")` - Strict implicit-AND first; retries with
   relaxed OR terms only if strict search returns no results
 - `search_notes("my-project", "term1 AND term2")` - Explicit AND search (both terms required)
@@ -798,7 +796,7 @@ performs one search per project.
 - `search_notes("my-project", "term1 NOT term2")` - Include term1 but exclude term2
 - `search_notes("my-project", "(project OR planning) AND notes")` - Grouped boolean logic
 
-### Content-Specific Searches
+#### Content-Specific Searches
 - `search_notes("research", "tag:example")` - Search within specific tags (if supported by content)
 - `search_notes("work-project", "req", entity_types=["observation"], categories=["requirement"])`
   - Return only observations whose category is exactly "requirement"
@@ -808,14 +806,14 @@ performs one search per project.
 with any search type (text, hybrid, vector). You can also use the `tags` parameter
 directly: `search_notes("project", "query", tags=["my-tag"])`
 
-### Search Type Examples
+#### Search Type Examples
 - `search_notes("my-project", "Meeting", search_type="title")` - Search only in titles
 - `search_notes("work-docs", "docs/meeting-*", search_type="permalink")` - Pattern match permalinks
   Note: Permalink patterns match the full path (e.g., "project/folder/chapter-13*", not just "chapter-13*").
 - `search_notes("research", "keyword")` - Default search (hybrid when semantic is enabled,
   text when disabled)
 
-### Filtering Options
+#### Filtering Options
 - `search_notes("my-project", "query", note_types=["note"])` - Search only notes
 - `search_notes("work-docs", "query", note_types=["note", "person"])` - Multiple note types
 - `search_notes("research", "query", entity_types=["observation"])` - Filter by entity type
@@ -827,7 +825,7 @@ directly: `search_notes("project", "query", tags=["my-tag"])`
 - `search_notes("my-project", "query", status="in-progress")` - Filter by frontmatter status
 - `search_notes("my-project", "query", metadata_filters={"priority": {"$in": ["high"]}})`
 
-### Structured Metadata Filters
+#### Structured Metadata Filters
 Filters are exact matches on frontmatter metadata. Supported forms:
 - Equality: `{"status": "in-progress"}`
 - Array contains (all): `{"tags": ["security", "oauth"]}`
@@ -837,17 +835,17 @@ Filters are exact matches on frontmatter metadata. Supported forms:
   - `$between`: `{"schema.confidence": {"$between": [0.3, 0.6]}}`
 - Nested keys use dot notation (e.g., `"schema.confidence"`).
 
-### Filter-only Searches
+#### Filter-only Searches
 Omit `query` (or pass None) when only using structured filters:
 - `search_notes(metadata_filters={"type": "spec"}, project="my-project")`
 - `search_notes(tags=["security"], project="my-project")`
 - `search_notes(status="draft", project="my-project")`
 
-### Convenience Filters
+#### Convenience Filters
 `tags` and `status` are shorthand for metadata_filters. If the same key exists in
 metadata_filters, that value wins.
 
-### Advanced Pattern Examples
+#### Advanced Pattern Examples
 - `search_notes("work-project", "project AND (meeting OR discussion)")` - Complex boolean logic
 - `search_notes("research", ""exact phrase" AND keyword")` - Combine phrase and keyword search
 - `search_notes("dev-notes", "bug NOT fixed")` - Exclude resolved issues
@@ -861,22 +859,22 @@ Returns:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `query` | `Annotated[Optional[str], Field(default=None, validation_alias=AliasChoices('query', 'q', 'search', 'text'))]` | `None` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `search_all_projects` | `bool` | `False` | |
-| `page` | `int` | `1` | |
-| `page_size` | `int` | `10` | |
-| `search_type` | `str | None` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
-| `note_types` | `Annotated[List[str] | None, BeforeValidator(coerce_list), Field(default=None, validation_alias=AliasChoices('note_types', 'note_type', 'types')), "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). Case-insensitive."]` | `None` | |
-| `entity_types` | `Annotated[List[str] | None, BeforeValidator(coerce_list), Field(default=None, validation_alias=AliasChoices('entity_types', 'entity_type')), "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or 'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like 'Chapter' here — use note_types instead."]` | `None` | |
-| `categories` | `Annotated[List[str] | None, BeforeValidator(coerce_list), Field(default=None, validation_alias=AliasChoices('categories', 'category')), "Filter observation results to these exact categories (e.g. ['requirement']). Pair with entity_types=['observation'] to return only observations whose category matches exactly — not every row mentioning the word."]` | `None` | |
-| `after_date` | `Annotated[Optional[str], Field(default=None, validation_alias=AliasChoices('after_date', 'since', 'after', 'from_date'))]` | `None` | |
-| `metadata_filters` | `Dict[str | None, BeforeValidator(coerce_dict)]` | `None` | |
-| `tags` | `Annotated[List[str] | None, BeforeValidator(strict_search_tags)]` | `None` | |
-| `status` | `Optional[str]` | `None` | |
-| `min_similarity` | `Annotated[Optional[float], Field(default=None, validation_alias=AliasChoices('min_similarity', 'threshold', 'similarity_threshold'))]` | `None` | |
+| `query` | `Optional[str]` | `None` | Optional search query string (supports boolean operators, phrases, patterns). |
+| `project` | `Optional[str]` | `None` | Project name to search in. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `search_all_projects` | `bool` | `False` | Optional opt-in to search every accessible project. Ignored when |
+| `page` | `int` | `1` | The page number of results to return (default 1) |
+| `page_size` | `int` | `10` | The number of results to return per page (default 10) |
+| `search_type` | `str \| None` | `None` | Type of search to perform, one of: |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" preserves existing structured search response behavior. |
+| `note_types` | `List[str] \| None` | `None` | Optional list of note types to search (e.g., ["note", "person"]) |
+| `entity_types` | `List[str] \| None` | `None` | Optional list of entity types to filter by (e.g., ["entity", "observation"]) |
+| `categories` | `List[str] \| None` | `None` | Optional list of observation categories for exact matching (e.g., |
+| `after_date` | `Optional[str]` | `None` | Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01") |
+| `metadata_filters` | `Dict[str, Any] \| None` | `None` | Optional structured frontmatter filters (e.g., {"status": "in-progress"}) |
+| `tags` | `List[str] \| None` | `None` | Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"]. |
+| `status` | `Optional[str]` | `None` | Optional status filter (frontmatter status); shorthand for metadata_filters["status"] |
+| `min_similarity` | `Optional[float]` | `None` | Optional float to override the global semantic_min_similarity threshold |
 
 **Examples**
 
@@ -945,6 +943,8 @@ Returns:
 
 ---
 
+<a id="search-tool"></a>
+
 ### `search`
 
 Search for content across the knowledge base
@@ -959,7 +959,7 @@ Returns:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `query` | `str` | *(required)* | |
+| `query` | `str` | *(required)* | Search query (full-text syntax supported by `search_notes`) |
 
 *Source: `src/basic_memory/mcp/tools/chatgpt_tools.py`*
 
@@ -979,7 +979,7 @@ Returns:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `id` | `str` | *(required)* | |
+| `id` | `str` | *(required)* | Document identifier (permalink, title, or memory URL) |
 
 *Source: `src/basic_memory/mcp/tools/chatgpt_tools.py`*
 
@@ -989,8 +989,6 @@ Returns:
 ## Project & Workspace Management
 
 ### `list_memory_projects`
-
-List all available projects with their status.
 
 List all available projects with their status.
 
@@ -1006,15 +1004,13 @@ exists in more than one workspace.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns the existing human-readable project list. |
 
 *Source: `src/basic_memory/mcp/tools/project_management.py`*
 
 ---
 
 ### `create_memory_project`
-
-Create a new Basic Memory project.
 
 Create a new Basic Memory project.
 
@@ -1033,19 +1029,17 @@ Example:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `project_name` | `str` | *(required)* | |
-| `project_path` | `str` | *(required)* | |
-| `set_default` | `bool` | `False` | |
-| `workspace` | `str | None` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `project_name` | `str` | *(required)* | Name for the new project (must be unique) |
+| `project_path` | `str` | *(required)* | File system path where the project will be stored |
+| `set_default` | `bool` | `False` | Whether to set this project as the default (optional, defaults to False) |
+| `workspace` | `str \| None` | `None` | Optional cloud workspace selector to create the project in. Slug is |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns the existing human-readable result text. |
 
 *Source: `src/basic_memory/mcp/tools/project_management.py`*
 
 ---
 
 ### `delete_project`
-
-Delete a Basic Memory project.
 
 Delete a Basic Memory project.
 
@@ -1068,8 +1062,8 @@ Warning:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `project_name` | `str` | *(required)* | |
-| `workspace` | `str | None` | `None` | |
+| `project_name` | `str` | *(required)* | Name of the project to delete |
+| `workspace` | `str \| None` | `None` | Optional cloud workspace selector to delete the project from. |
 
 *Source: `src/basic_memory/mcp/tools/project_management.py`*
 
@@ -1085,7 +1079,7 @@ List workspaces available to the current cloud user.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `output_format` | `Literal['text', 'json']` | `'text'` | "text" returns human-readable workspace list. |
 
 *Source: `src/basic_memory/mcp/tools/workspaces.py`*
 
@@ -1120,11 +1114,11 @@ Returns:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `note_type` | `Optional[str]` | `None` | |
-| `identifier` | `Optional[str]` | `None` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `note_type` | `Optional[str]` | `None` | Note type to batch-validate (e.g., "person", "meeting"). |
+| `identifier` | `Optional[str]` | `None` | Specific note to validate (permalink, title, or path). |
+| `project` | `Optional[str]` | `None` | Project name. Optional -- server will resolve. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `output_format` | `Literal['text', 'json']` | `'text'` |  |
 
 **Examples**
 
@@ -1169,11 +1163,11 @@ Returns:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `note_type` | `str` | *(required)* | |
-| `threshold` | `float` | `0.25` | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `note_type` | `str` | *(required)* | The note type to analyze (e.g., "person", "meeting"). |
+| `threshold` | `float` | `0.25` | Minimum frequency (0-1) for a field to be suggested as optional. |
+| `project` | `Optional[str]` | `None` | Project name. Optional -- server will resolve. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `output_format` | `Literal['text', 'json']` | `'text'` |  |
 
 **Examples**
 
@@ -1193,8 +1187,6 @@ Returns:
 ---
 
 ### `schema_diff`
-
-Detect drift between a schema definition and actual note usage.
 
 Detect drift between a schema definition and actual note usage.
 
@@ -1218,10 +1210,10 @@ Returns:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `note_type` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
-| `output_format` | `Literal['text', 'json']` | `'text'` | |
+| `note_type` | `str` | *(required)* | The note type to check for drift (e.g., "person"). |
+| `project` | `Optional[str]` | `None` | Project name. Optional -- server will resolve. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
+| `output_format` | `Literal['text', 'json']` | `'text'` |  |
 
 **Examples**
 
@@ -1292,16 +1284,19 @@ Basic Structure:
 }
 ```
 
+Raises:
+    ToolError: If project doesn't exist or directory path is invalid
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `nodes` | `List[Dict[str], BeforeValidator(coerce_list)]` | *(required)* | |
-| `edges` | `List[Dict[str], BeforeValidator(coerce_list)]` | *(required)* | |
-| `title` | `str` | *(required)* | |
-| `directory` | `str` | *(required)* | |
-| `project` | `Optional[str]` | `None` | |
-| `project_id` | `Optional[str]` | `None` | |
+| `nodes` | `List[Dict[str, Any]]` | *(required)* | List of node objects following JSON Canvas 1.0 spec |
+| `edges` | `List[Dict[str, Any]]` | *(required)* | List of edge objects following JSON Canvas 1.0 spec |
+| `title` | `str` | *(required)* | The title of the canvas (will be saved as title.canvas) |
+| `directory` | `str` | *(required)* | Directory path relative to project root where the canvas should be saved. |
+| `project` | `Optional[str]` | `None` | Project name to create canvas in. Optional - server will resolve using hierarchy. |
+| `project_id` | `Optional[str]` | `None` | Project external_id (UUID). Prefer this over `project` when known — |
 
 **Examples**
 
@@ -1311,9 +1306,6 @@ Basic Structure:
 
     # Create canvas with explicit project
     canvas(nodes=[...], edges=[...], title="Process Flow", directory="visual/maps", project="work-project")
-
-Raises:
-    ToolError: If project doesn't exist or directory path is invalid
 ```
 
 *Source: `src/basic_memory/mcp/tools/canvas.py`*
@@ -1327,15 +1319,11 @@ Raises:
 
 Return optional Basic Memory Cloud information and setup guidance.
 
-Return optional Basic Memory Cloud information and setup guidance.
-
 *Source: `src/basic_memory/mcp/tools/cloud_info.py`*
 
 ---
 
 ### `release_notes`
-
-Return the latest product release notes for optional user review.
 
 Return the latest product release notes for optional user review.
 
