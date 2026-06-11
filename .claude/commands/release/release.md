@@ -28,7 +28,10 @@ You are an expert release manager for the Basic Memory project. When the user ru
 
 #### Documentation Validation
 1. **Changelog Check**
-   - CHANGELOG.md contains entry for target version
+   - CHANGELOG.md contains entry for target version **already landed on `main`**
+     (main only accepts changes via PR, so the changelog entry must go through
+     its own PR before running the release; the recipe pre-flight-checks for a
+     `## vX.Y.Z` heading)
    - Entry includes all major features and fixes
    - Breaking changes are documented
 
@@ -41,11 +44,15 @@ just release <version>
 The justfile target handles:
 - ✅ Version format validation
 - ✅ Git status and branch checks
-- ✅ Quality checks (`just check` - lint, format, type-check, tests)
+- ✅ Changelog entry check (must already be on `main`)
+- ✅ Quality checks (`just lint` + `just typecheck`)
 - ✅ Version update across all consolidated manifests via `just set-version` (Python
   package + Claude Code plugin/marketplaces + Codex plugin + Hermes + OpenClaw)
-- ✅ Automatic commit with proper message
-- ✅ Tag creation and pushing to GitHub
+- ✅ Release PR: commits the bump on a `release/vX.Y.Z` branch, opens a PR
+  (`chore(core): release vX.Y.Z`), and rebase-merges it — the `main` ruleset
+  rejects direct pushes and the repo disallows merge commits
+- ✅ Tags the rebased bump commit on `main` (found by commit subject, since
+  the rebase rewrites the SHA) and pushes the tag
 - ✅ Release workflow trigger (automatic on tag push)
 
 The GitHub Actions workflow (`.github/workflows/release.yml`) then:
@@ -127,25 +134,30 @@ After PyPI release is published, update the MCP registry:
    - **Deploy**: Follow deployment process for basicmachines.co
 
 **2. docs.basicmemory.com** (`/Users/drew/code/docs.basicmemory.com`)
-   - **Goal**: Add new release notes section to the latest-releases page
-   - **File**: `src/pages/latest-releases.mdx`
+   - **Goal**: Add a What's New page for the release and bump the homepage badge
+   - **Site shape**: Nuxt/Docus content site. The changelog page
+     (`content/2.whats-new/*.changelog.md`) auto-fetches GitHub releases — no
+     manual changelog update needed. See that repo's CLAUDE.md "Version Bump
+     Checklist".
    - **What to do**:
      1. Pull latest from GitHub: `git pull origin main`
      2. Create release branch: `git checkout -b release/v{VERSION}`
-     3. Read the existing file to understand the format and structure
-     4. Read `/Users/drew/code/basic-memory/CHANGELOG.md` to get release content
-     5. Add new release section **at the top** (after MDX imports, before other releases)
-     6. Follow the existing pattern:
-        - Heading: `## [v{VERSION}](github-link) — YYYY-MM-DD`
-        - Focus statement if applicable
-        - `<Info>` block with highlights (3-5 key items)
-        - Sections for Features, Bug Fixes, Breaking Changes, etc.
-        - Link to full changelog at the end
-        - Separator `---` between releases
-     7. Commit changes: `git commit -m "docs: add v{VERSION} release notes"`
-     8. Push branch: `git push origin release/v{VERSION}`
-   - **Source content**: Extract and format sections from CHANGELOG.md for this version
-   - **Deploy**: Follow deployment process for docs.basicmemory.com
+     3. Read `/Users/drew/code/basic-memory/CHANGELOG.md` to get release content
+     4. **New minor/major release**: add `content/2.whats-new/1.v{VERSION}.md`
+        modeled on the previous version page (frontmatter title/description,
+        headline feature first, then sections, then an Upgrading note) and
+        renumber the existing what's-new pages down one slot (URLs don't
+        change — Nuxt strips the numeric prefixes)
+     5. **Patch release**: append a short note to the current version's page
+        instead of creating a new one
+     6. Update the homepage version badge in `content/index.md` (the
+        `v0.XX →` button text and its `to: /whats-new/v{VERSION}` link)
+     7. If the release adds user-facing features, update the relevant guide
+        and reference pages (`content/3.cloud/`, `content/9.reference/`)
+     8. Commit: `git commit -s -m "docs: add v{VERSION} release notes"`
+     9. Push branch and open a PR; merge after the release is tagged
+   - **Deploy**: push to main auto-deploys to development; production requires
+     manual workflow dispatch via GitHub Actions
 
 **4. Announce Release**
    - Post to Discord community if significant changes

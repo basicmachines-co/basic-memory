@@ -383,17 +383,31 @@ release version:
         echo "❌ Tag {{version}} already exists"
         exit 1
     fi
-    
+
+    # Changelog must already be on main (land it via a normal PR first)
+    if ! grep -q "^## {{version}} " CHANGELOG.md; then
+        echo "❌ CHANGELOG.md has no entry for {{version}}. Land one via PR first."
+        exit 1
+    fi
+
     # Run quality checks
     echo "🔍 Running lint  checks..."
     just lint
     just typecheck
-    
+
     # Update all package manifests to the one Basic Memory product version.
     echo "📝 Updating consolidated package versions..."
     just set-version "{{version}}"
 
-    # Commit version update
+    # Trigger: main's ruleset rejects direct pushes ("Changes must be made
+    # through a pull request").
+    # Why: the version bump must land on main before the tag is cut, so it
+    # rides a release PR that is rebase-merged (the repo disallows merge
+    # commits).
+    # Outcome: the bump commit gets a new SHA on main; the tag is created on
+    # that rebased commit, found by its commit subject.
+    COMMIT_SUBJECT="chore: update version to $VERSION_NUM for {{version}} release"
+    git checkout -b "release/{{version}}"
     git add \
         src/basic_memory/__init__.py \
         server.json \
@@ -404,22 +418,35 @@ release version:
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
-    git commit -s -m "chore: update version to $VERSION_NUM for {{version}} release"
-    
-    # Create and push tag
-    echo "🏷️  Creating tag {{version}}..."
-    git tag "{{version}}"
-    
-    echo "📤 Pushing to GitHub..."
-    git push origin main
+    git commit -s -m "$COMMIT_SUBJECT"
+
+    echo "📤 Opening release PR..."
+    git push -u origin "release/{{version}}"
+    gh pr create --title "chore(core): release {{version}}" \
+        --body "Version bump for {{version}}. See CHANGELOG.md for release notes."
+    gh pr merge "release/{{version}}" --rebase --delete-branch
+
+    git checkout main
+    git pull --ff-only origin main
+
+    # Tag the rebased bump commit, wherever it landed on main
+    TAG_COMMIT=$(git log origin/main --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
+    if [[ -z "$TAG_COMMIT" ]]; then
+        echo "❌ Could not find the version bump commit on main. Tag manually."
+        exit 1
+    fi
+
+    echo "🏷️  Creating tag {{version}} at $TAG_COMMIT..."
+    git tag "{{version}}" "$TAG_COMMIT"
     git push origin "{{version}}"
-    
+
     echo "✅ Release {{version}} created successfully!"
     echo "📦 GitHub Actions will build and publish to PyPI"
     echo "🔗 Monitor at: https://github.com/basicmachines-co/basic-memory/actions"
     echo ""
     echo "📝 REMINDER: Post-release tasks:"
-    echo "   1. docs.basicmemory.com - Add release notes to src/pages/latest-releases.mdx"
+    echo "   1. docs.basicmemory.com - Add a What's New page under content/2.whats-new/"
+    echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
     echo "   2. basicmachines.co - Update version in src/components/sections/hero.tsx"
     echo "   3. MCP Registry - Run: mcp-publisher publish"
     echo "   See: .claude/commands/release/release.md for detailed instructions"
@@ -467,7 +494,15 @@ beta version:
     echo "📝 Updating consolidated package versions..."
     just set-version "{{version}}"
 
-    # Commit version update
+    # Trigger: main's ruleset rejects direct pushes ("Changes must be made
+    # through a pull request").
+    # Why: the version bump must land on main before the tag is cut, so it
+    # rides a release PR that is rebase-merged (the repo disallows merge
+    # commits).
+    # Outcome: the bump commit gets a new SHA on main; the tag is created on
+    # that rebased commit, found by its commit subject.
+    COMMIT_SUBJECT="chore: update version to $VERSION_NUM for {{version}} beta release"
+    git checkout -b "release/{{version}}"
     git add \
         src/basic_memory/__init__.py \
         server.json \
@@ -478,23 +513,36 @@ beta version:
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
-    git commit -s -m "chore: update version to $VERSION_NUM for {{version}} beta release"
-    
-    # Create and push tag
-    echo "🏷️  Creating tag {{version}}..."
-    git tag "{{version}}"
-    
-    echo "📤 Pushing to GitHub..."
-    git push origin main
+    git commit -s -m "$COMMIT_SUBJECT"
+
+    echo "📤 Opening release PR..."
+    git push -u origin "release/{{version}}"
+    gh pr create --title "chore(core): release {{version}}" \
+        --body "Version bump for {{version}} beta."
+    gh pr merge "release/{{version}}" --rebase --delete-branch
+
+    git checkout main
+    git pull --ff-only origin main
+
+    # Tag the rebased bump commit, wherever it landed on main
+    TAG_COMMIT=$(git log origin/main --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
+    if [[ -z "$TAG_COMMIT" ]]; then
+        echo "❌ Could not find the version bump commit on main. Tag manually."
+        exit 1
+    fi
+
+    echo "🏷️  Creating tag {{version}} at $TAG_COMMIT..."
+    git tag "{{version}}" "$TAG_COMMIT"
     git push origin "{{version}}"
-    
+
     echo "✅ Beta release {{version}} created successfully!"
     echo "📦 GitHub Actions will build and publish to PyPI as pre-release"
     echo "🔗 Monitor at: https://github.com/basicmachines-co/basic-memory/actions"
     echo "📥 Install with: uv tool install basic-memory --pre"
     echo ""
     echo "📝 REMINDER: For stable releases, update documentation sites:"
-    echo "   1. docs.basicmemory.com - Add release notes to src/pages/latest-releases.mdx"
+    echo "   1. docs.basicmemory.com - Add a What's New page under content/2.whats-new/"
+    echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
     echo "   2. basicmachines.co - Update version in src/components/sections/hero.tsx"
     echo "   See: .claude/commands/release/release.md for detailed instructions"
 
