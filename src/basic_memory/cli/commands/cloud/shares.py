@@ -15,6 +15,7 @@ helper, matching the `snapshot.py` command group.
 import asyncio
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlencode
 
 import typer
 from rich.console import Console
@@ -26,9 +27,35 @@ from basic_memory.cli.commands.cloud.api_client import (
     make_api_request,
 )
 from basic_memory.config import ConfigManager
+from basic_memory.mcp.async_client import resolve_configured_workspace
 
 console = Console()
 share_app = typer.Typer(help="Manage public share links for notes")
+
+# Header the cloud uses to route a request to a specific tenant's workspace.
+# Mirrors basic_memory.cli.commands.cloud.cloud_utils._workspace_headers: the
+# cloud /api/shares endpoints resolve the workspace from X-Workspace-ID (see
+# resolve_workspace in basic-memory-cloud deps.py), so without it a team
+# workspace project would be evaluated against the caller's default tenant.
+WORKSPACE_ID_HEADER = "X-Workspace-ID"
+
+
+def _workspace_headers(
+    *,
+    project_name: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> dict[str, str]:
+    """Resolve the target workspace and build the routing header, if any.
+
+    Resolution chain (see resolve_configured_workspace): explicit --workspace,
+    then the project's configured workspace_id, then the global default. Returns
+    an empty dict when nothing resolves so the request falls back to the
+    caller's default tenant exactly as before.
+    """
+    resolved = resolve_configured_workspace(project_name=project_name, workspace=workspace)
+    if resolved is None:
+        return {}
+    return {WORKSPACE_ID_HEADER: resolved}
 
 
 def _format_timestamp(iso_timestamp: Optional[str]) -> str:
@@ -88,12 +115,18 @@ def create(
         "-e",
         help="Optional expiration date/time (ISO 8601, e.g. 2025-12-31)",
     ),
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        help="Workspace (slug, name, or tenant_id) when the project name is ambiguous",
+    ),
 ) -> None:
     """Create a public share link for a note.
 
     Examples:
       bm cloud share create my-project notes/my-idea
       bm cloud share create my-project notes/my-idea --expires-at 2025-12-31
+      bm cloud share create my-project notes/my-idea --workspace acme
     """
 
     # Validate --expires-at before any async/API work so a parse error surfaces
@@ -118,6 +151,7 @@ def create(
                 method="POST",
                 url=f"{host_url}/api/shares",
                 json_data=payload,
+                headers=_workspace_headers(project_name=project, workspace=workspace),
             )
 
             data = response.json()
@@ -153,12 +187,18 @@ def list_shares(
         "-p",
         help="Filter shares by project name",
     ),
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        help="Workspace (slug, name, or tenant_id) when the project name is ambiguous",
+    ),
 ) -> None:
     """List public share links.
 
     Examples:
       bm cloud share list
       bm cloud share list --project my-project
+      bm cloud share list --project my-project --workspace acme
     """
 
     async def _list():
@@ -169,13 +209,17 @@ def list_shares(
 
             url = f"{host_url}/api/shares"
             if project:
-                url += f"?project_name={project}"
+                # Encode the filter so project names with query-reserved
+                # characters (&, +, #, spaces) reach the server intact rather
+                # than being parsed as extra query parameters.
+                url += f"?{urlencode({'project_name': project})}"
 
             console.print("[blue]Fetching share links...[/blue]")
 
             response = await make_api_request(
                 method="GET",
                 url=url,
+                headers=_workspace_headers(project_name=project, workspace=workspace),
             )
 
             data = response.json()
@@ -248,6 +292,11 @@ def update(
         "-e",
         help="New expiration date/time (ISO 8601). Use 'none' to clear it.",
     ),
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        help="Workspace (slug, name, or tenant_id) the share belongs to",
+    ),
 ) -> None:
     """Update a share link: enable/disable it or change its expiration.
 
@@ -256,6 +305,7 @@ def update(
       bm cloud share update abc123 --enable
       bm cloud share update abc123 --expires-at 2026-01-01
       bm cloud share update abc123 --expires-at none
+      bm cloud share update abc123 --disable --workspace acme
     """
 
     async def _update():
@@ -294,6 +344,7 @@ def update(
                 method="PATCH",
                 url=f"{host_url}/api/shares/{token}",
                 json_data=payload,
+                headers=_workspace_headers(workspace=workspace),
             )
 
             data = response.json()
@@ -333,12 +384,18 @@ def revoke(
         "-f",
         help="Skip confirmation prompt",
     ),
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        help="Workspace (slug, name, or tenant_id) the share belongs to",
+    ),
 ) -> None:
     """Revoke (delete) a public share link.
 
     Examples:
       bm cloud share revoke abc123
       bm cloud share revoke abc123 --force
+      bm cloud share revoke abc123 --force --workspace acme
     """
 
     async def _revoke():
@@ -358,6 +415,7 @@ def revoke(
             await make_api_request(
                 method="DELETE",
                 url=f"{host_url}/api/shares/{token}",
+                headers=_workspace_headers(workspace=workspace),
             )
 
             console.print(f"[green]Share {token} revoked successfully[/green]")
