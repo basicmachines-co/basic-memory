@@ -3223,3 +3223,72 @@ async def test_resolver_refreshes_index_on_miss(monkeypatch):
     resolved = await resolve_workspace_project_identifier("existing")
     assert resolved.project.permalink == "existing"
     assert calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_keeps_patterns_project_qualified(
+    config_manager,
+    monkeypatch,
+):
+    """Glob patterns are qualified with the project prefix only, never the workspace (#957).
+
+    The search index stores project-qualified permalinks (manual/man3/...), so a
+    workspace-qualified pattern (<ws>/manual/man3*) can never match anything.
+    Direct URLs keep workspace qualification (the link resolver handles them);
+    patterns have no resolver fallback and must match the index form.
+    """
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from basic_memory.mcp.project_context import resolve_project_and_path
+    from basic_memory.schemas.project_info import ProjectItem
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = ContextState()
+    cached_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="manual",
+        path="/tmp/manual",
+        is_default=False,
+    )
+    team_workspace = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team-paul",
+        name="Team Paul",
+        role="editor",
+    )
+    await context.set_state("active_project", cached_project.model_dump())
+    await context.set_state("active_workspace", team_workspace.model_dump())
+
+    async def fake_call_post(*args, **kwargs):
+        raise ToolError("project not found")
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+
+    # Bare pattern: project prefix only — no workspace slug
+    _, resolved_path, _ = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://man3/*",
+        context=ctx(context),
+    )
+    assert resolved_path == "manual/man3/*"
+
+    # Workspace-qualified pattern URL: workspace stripped down to index form
+    _, resolved_path, _ = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://team-paul/manual/man3/*",
+        context=ctx(context),
+    )
+    assert resolved_path == "manual/man3/*"
+
+    # Direct URLs keep the full workspace-qualified canonical path
+    _, resolved_path, _ = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://man3/write-note-3",
+        context=ctx(context),
+    )
+    assert resolved_path == "team-paul/manual/man3/write-note-3"

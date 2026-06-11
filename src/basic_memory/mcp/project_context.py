@@ -468,6 +468,16 @@ def _canonical_memory_path_for_workspace(
     # Outcome: lookups preserve the complete workspace/project canonical permalink.
     if not normalized_remainder:
         normalized_remainder = project_permalink
+
+    # Same index-form rule as _canonical_memory_path_for_active_route (#957):
+    # patterns match project-qualified permalinks, never workspace-qualified ones.
+    if "*" in normalized_remainder:
+        return build_qualified_permalink_reference(
+            project_permalink,
+            normalized_remainder,
+            include_project=True,
+        )
+
     return build_qualified_permalink_reference(
         project_permalink,
         normalized_remainder,
@@ -485,6 +495,21 @@ def _canonical_memory_path_for_active_route(
 ) -> str:
     """Return the canonical permalink path for the currently routed project/workspace."""
     project_prefix = active_project.permalink
+
+    # Trigger: the path contains a glob wildcard (folder/*).
+    # Why: pattern lookups match raw against the search index, which stores
+    #   project-qualified permalinks without the workspace prefix — a
+    #   workspace-qualified pattern can never match anything (#957). Direct
+    #   lookups keep full workspace qualification because the link resolver
+    #   understands it; the pattern path has no resolver fallback.
+    # Outcome: qualify patterns with the project prefix only.
+    if "*" in path:
+        if not include_project:
+            return path
+        if path == project_prefix or path.startswith(f"{project_prefix}/"):
+            return path
+        return f"{project_prefix}/{path}"
+
     workspace_remainder = path
     if include_project and (path == project_prefix or path.startswith(f"{project_prefix}/")):
         # Trigger: the memory URL already names the active project root/prefix
