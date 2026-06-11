@@ -694,6 +694,170 @@ async def test_resolve_workspace_project_identifier_handles_qualified_and_collis
     assert resolved.project.external_id == "personal-project-id"
 
 
+def _patch_index(monkeypatch, workspaces, entries):
+    """Install a fake workspace/project index for resolver tests."""
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import _build_workspace_project_index
+
+    index = _build_workspace_project_index(workspaces, entries)
+
+    async def fake_index(context=None):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_identifier_by_slug_tenant_id_and_name(monkeypatch):
+    """Qualified routes resolve the workspace segment by slug, tenant_id, or display name."""
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        resolve_workspace_project_identifier,
+    )
+
+    acme = _workspace(
+        tenant_id="acme-tenant-uuid",
+        workspace_type="organization",
+        slug="acme-slug",
+        name="Acme Corp",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=acme,
+            project=_project("Meeting Notes", id=1, external_id="acme-project-id"),
+        ),
+    )
+    _patch_index(monkeypatch, (acme,), entries)
+
+    # slug (existing behavior, stays green)
+    by_slug = await resolve_workspace_project_identifier("acme-slug/meeting-notes")
+    assert by_slug.project.external_id == "acme-project-id"
+
+    # tenant_id (exact, opaque id)
+    by_tenant = await resolve_workspace_project_identifier("acme-tenant-uuid/meeting-notes")
+    assert by_tenant.project.external_id == "acme-project-id"
+
+    # display name, case-insensitive
+    by_name = await resolve_workspace_project_identifier("ACME corp/meeting-notes")
+    assert by_name.project.external_id == "acme-project-id"
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_identifier_ambiguous_name_lists_candidates(monkeypatch):
+    """A display name shared by multiple workspaces fails fast naming the candidate slugs."""
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        resolve_workspace_project_identifier,
+    )
+
+    alpha = _workspace(
+        tenant_id="alpha-tenant",
+        workspace_type="organization",
+        slug="research-alpha",
+        name="Research",
+        role="editor",
+    )
+    beta = _workspace(
+        tenant_id="beta-tenant",
+        workspace_type="organization",
+        slug="research-beta",
+        name="Research",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=alpha,
+            project=_project("Notes", id=1, external_id="alpha-project-id"),
+        ),
+        WorkspaceProjectEntry(
+            workspace=beta,
+            project=_project("Notes", id=2, external_id="beta-project-id"),
+        ),
+    )
+    _patch_index(monkeypatch, (alpha, beta), entries)
+
+    with pytest.raises(ValueError) as exc_info:
+        await resolve_workspace_project_identifier("Research/notes")
+
+    message = str(exc_info.value)
+    assert "matched multiple workspaces" in message
+    assert "research-alpha" in message
+    assert "research-beta" in message
+    assert "slug or tenant_id" in message
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_identifier_unknown_lists_tried_forms(monkeypatch):
+    """An unknown workspace identifier reports the slug/tenant_id/name forms that were tried."""
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        resolve_workspace_project_identifier,
+    )
+
+    acme = _workspace(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=acme,
+            project=_project("Notes", id=1, external_id="acme-project-id"),
+        ),
+    )
+    _patch_index(monkeypatch, (acme,), entries)
+
+    with pytest.raises(ValueError) as exc_info:
+        await resolve_workspace_project_identifier("nonexistent/notes")
+
+    message = str(exc_info.value)
+    assert "was not found by slug, tenant_id, or name" in message
+    assert "acme" in message
+
+
+@pytest.mark.asyncio
+async def test_resolve_workspace_identifier_slug_wins_over_name_collision(monkeypatch):
+    """A name that equals another workspace's slug resolves to the slug owner."""
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        resolve_workspace_project_identifier,
+    )
+
+    # slug_owner.slug == "shared"; name_owner.name == "shared" — the slug owner must win.
+    slug_owner = _workspace(
+        tenant_id="slug-owner-tenant",
+        workspace_type="organization",
+        slug="shared",
+        name="Slug Owner",
+        role="editor",
+    )
+    name_owner = _workspace(
+        tenant_id="name-owner-tenant",
+        workspace_type="organization",
+        slug="name-owner-slug",
+        name="shared",
+        role="editor",
+    )
+    entries = (
+        WorkspaceProjectEntry(
+            workspace=slug_owner,
+            project=_project("Notes", id=1, external_id="slug-owner-project-id"),
+        ),
+        WorkspaceProjectEntry(
+            workspace=name_owner,
+            project=_project("Notes", id=2, external_id="name-owner-project-id"),
+        ),
+    )
+    _patch_index(monkeypatch, (slug_owner, name_owner), entries)
+
+    resolved = await resolve_workspace_project_identifier("shared/notes")
+    assert resolved.workspace.slug == "shared"
+    assert resolved.project.external_id == "slug-owner-project-id"
+
+
 @pytest.mark.asyncio
 async def test_detect_project_from_memory_url_prefix_resolves_workspace_slug(monkeypatch):
     import basic_memory.mcp.project_context as project_context

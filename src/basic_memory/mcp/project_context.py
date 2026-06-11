@@ -798,6 +798,67 @@ async def ensure_workspace_project_index(
     return await _ensure_workspace_project_index(context=context)
 
 
+def _match_workspace_identifier(
+    workspaces: tuple[WorkspaceInfo, ...],
+    workspace_identifier: str,
+) -> WorkspaceInfo:
+    """Resolve the first segment of a qualified route to a single workspace.
+
+    The edit_note/write_note contract advertises that the workspace segment may be a
+    slug, tenant_id, or display name. We honor those forms in a fixed priority order so
+    that adding tenant_id/name support never changes the meaning of an identifier that
+    already resolves today:
+
+    1. slug (casefold) — existing behavior, checked first so working routes are stable.
+    2. tenant_id — exact match against the opaque id (no casefolding, mirroring the
+       precedent in ``workspace_matches_exact_identifier``).
+    3. display name (casefold) — names are not guaranteed unique, so a name that matches
+       multiple workspaces is rejected rather than silently picking one.
+    """
+    # Trigger: identifier equals a workspace slug (casefold).
+    # Why: slug is the canonical routing key; resolving it first guarantees a workspace
+    # whose display name collides with another workspace's slug yields to the slug owner.
+    # Outcome: return the slug owner before tenant_id/name are considered.
+    slug_matches = [
+        workspace
+        for workspace in workspaces
+        if workspace.slug.casefold() == workspace_identifier.casefold()
+    ]
+    if slug_matches:
+        return slug_matches[0]
+
+    # Trigger: identifier exactly equals a workspace tenant_id (an opaque id).
+    # Why: tenant_ids are unique, so an exact hit is unambiguous and needs no tie-break.
+    tenant_matches = [
+        workspace for workspace in workspaces if workspace.tenant_id == workspace_identifier
+    ]
+    if tenant_matches:
+        return tenant_matches[0]
+
+    # Trigger: identifier matches one or more workspace display names (casefold).
+    # Why: names are not guaranteed unique; failing fast on collisions keeps routing
+    # deterministic and tells the caller exactly how to disambiguate.
+    name_matches = [
+        workspace
+        for workspace in workspaces
+        if workspace.name.casefold() == workspace_identifier.casefold()
+    ]
+    if len(name_matches) > 1:
+        candidates = ", ".join(workspace.slug for workspace in name_matches)
+        raise ValueError(
+            f"Workspace name '{workspace_identifier}' matched multiple workspaces "
+            f"(slugs: {candidates}). Use the workspace slug or tenant_id to disambiguate."
+        )
+    if name_matches:
+        return name_matches[0]
+
+    available = ", ".join(workspace.slug for workspace in workspaces)
+    raise ValueError(
+        f"Workspace '{workspace_identifier}' was not found by slug, tenant_id, or name. "
+        f"Available workspace slugs: {available}"
+    )
+
+
 async def resolve_workspace_project_identifier(
     project: str,
     context: Optional[Context] = None,
@@ -816,23 +877,14 @@ async def resolve_workspace_project_identifier(
     except ValueError:
         pass
 
-    workspace_slug, project_identifier = _split_qualified_project_identifier(project)
+    workspace_identifier, project_identifier = _split_qualified_project_identifier(project)
     project_permalink = generate_permalink(project_identifier)
 
-    if workspace_slug:
-        workspace_matches = [
-            workspace
-            for workspace in index.workspaces
-            if workspace.slug.casefold() == workspace_slug.casefold()
-        ]
-        if not workspace_matches:
-            available = ", ".join(workspace.slug for workspace in index.workspaces)
-            raise ValueError(
-                f"Workspace '{workspace_slug}' was not found. "
-                f"Available workspace slugs: {available}"
-            )
-
-        workspace = workspace_matches[0]
+    if workspace_identifier:
+        # Honor the documented "slug, name, or tenant_id" contract for the workspace
+        # segment; _match_workspace_identifier raises a clear error on ambiguous names
+        # and unknown identifiers, listing what forms were tried.
+        workspace = _match_workspace_identifier(index.workspaces, workspace_identifier)
         matches = [
             entry
             for entry in index.entries_by_permalink.get(project_permalink, ())
