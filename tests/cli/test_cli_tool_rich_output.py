@@ -438,6 +438,28 @@ def test_read_note_rich_include_frontmatter(mock_mcp):
     assert "hello world" in result.output
 
 
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_rich_no_frontmatter_without_flag(mock_mcp):
+    """read-note WITHOUT --include-frontmatter must not render the frontmatter panel.
+
+    Regression (Bug 2): the JSON payload always contains a non-empty "frontmatter"
+    key, so the previous `if frontmatter:` guard rendered it even without the flag.
+    The flag must be threaded into _display_read_note to gate the panel.
+    """
+    result = _tty_runner(["tool", "read-note", "test-note"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # The note title and content must still appear
+    assert "Test Note" in result.output
+    assert "hello world" in result.output
+    # The frontmatter panel must NOT appear
+    assert "frontmatter" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # build-context – observations rendering (issue #678)
 # ---------------------------------------------------------------------------
@@ -463,3 +485,160 @@ def test_build_context_rich_renders_observations(mock_mcp):
     assert "key fact" in result.output
     # The subtitle should include an observations count
     assert "observations" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Rich markup injection – bracketed user text must survive (Bug 1, issue #678)
+# ---------------------------------------------------------------------------
+
+# Search result whose title contains a bracket expression like "[draft]".
+SEARCH_RESULT_BRACKETED_TITLE = {
+    "total": 1,
+    "current_page": 1,
+    "page_size": 10,
+    "has_more": False,
+    "results": [
+        {
+            "type": "entity",
+            "title": "Spec [draft] v2",
+            "permalink": "specs/spec-draft-v2",
+            "file_path": "specs/Spec [draft] v2.md",
+            "score": 0.90,
+            "matched_chunk": "An important [red] section",
+            "content": None,
+        },
+    ],
+}
+
+# build-context payload where the observation category is "fact" — previously
+# `[fact]` in the obs_label markup was interpreted as an unknown Rich tag and
+# the text was swallowed.
+BUILD_CONTEXT_BRACKETED_OBS = {
+    "results": [
+        {
+            "primary_result": {
+                "type": "entity",
+                "external_id": "xyz",
+                "title": "Joanna",
+                "permalink": "people/joanna",
+                "file_path": "people/Joanna.md",
+                "created_at": "2025-01-01T00:00:00",
+            },
+            "observations": [
+                {
+                    "type": "observation",
+                    "category": "fact",
+                    "content": "Joanna lives in Austin",
+                    "permalink": "people/joanna",
+                    "file_path": "people/Joanna.md",
+                    "created_at": "2025-01-01T00:00:00",
+                }
+            ],
+            "related_results": [],
+        }
+    ],
+    "metadata": {"uri": "people/joanna", "depth": 1},
+    "page": 1,
+    "page_size": 10,
+    "has_more": False,
+}
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_BRACKETED_TITLE,
+)
+def test_search_notes_rich_title_with_brackets_survives(mock_mcp):
+    """Bracketed text in a search result title must appear literally in Rich output.
+
+    Regression (Bug 1): user-sourced titles were interpolated directly into Rich
+    markup strings, so "[draft]" was treated as an unknown style tag and stripped.
+    After escaping, the literal text "[draft]" must be present in the output.
+    """
+    result = _tty_runner(["tool", "search-notes", "spec"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # The full title including the bracket expression must survive
+    assert "[draft]" in result.output
+    # The snippet "[red]" should also survive (not restyle the output)
+    assert "[red]" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_build_context",
+    new_callable=AsyncMock,
+    return_value=BUILD_CONTEXT_BRACKETED_OBS,
+)
+def test_build_context_rich_observation_category_bracket_survives(mock_mcp):
+    """Observation category "[fact]" must appear literally in build-context Rich tree.
+
+    Regression (Bug 1): the obs_label was built as f"[dim][{category}] content[/dim]",
+    which caused the inner "[fact]" to be parsed as an unknown Rich tag and dropped,
+    rendering "Joanna lives in Austin" without the category prefix.
+    After escaping the category, "[fact]" must be present in the tree output.
+    """
+    result = _tty_runner(["tool", "build-context", "memory://people/joanna"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # The observation category prefix must appear literally
+    assert "[fact]" in result.output
+    # The observation content must also appear
+    assert "Joanna lives in Austin" in result.output
+
+
+# ---------------------------------------------------------------------------
+# search-notes – total=0 with non-empty results subtitle (Bug 3, issue #678)
+# ---------------------------------------------------------------------------
+
+# Fixture that mirrors the upstream quirk: total=0 but results is non-empty.
+SEARCH_RESULT_ZERO_TOTAL = {
+    "total": 0,
+    "current_page": 1,
+    "page_size": 10,
+    "has_more": False,
+    "results": [
+        {
+            "type": "entity",
+            "title": "Found Note",
+            "permalink": "notes/found-note",
+            "file_path": "notes/Found Note.md",
+            "score": 0.80,
+            "matched_chunk": "some content",
+            "content": None,
+        },
+        {
+            "type": "entity",
+            "title": "Another Found",
+            "permalink": "notes/another-found",
+            "file_path": "notes/Another Found.md",
+            "score": 0.70,
+            "matched_chunk": "more content",
+            "content": None,
+        },
+    ],
+}
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_ZERO_TOTAL,
+)
+def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
+    """When the API returns total=0 but results is non-empty, subtitle shows real count.
+
+    Regression (Bug 3): result.get("total", len(results)) never triggered its
+    default because the "total" key exists (with value 0), so the subtitle read
+    "0 result(s)" under a table showing rows.  The fix detects a falsy total with
+    non-empty results and falls back to len(results).
+    """
+    result = _tty_runner(["tool", "search-notes", "found"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # Both result rows must appear
+    assert "Found Note" in result.output
+    assert "Another Found" in result.output
+    # The subtitle must show the real count (2), not 0
+    assert "2 result(s)" in result.output
+    assert "0 result(s)" not in result.output

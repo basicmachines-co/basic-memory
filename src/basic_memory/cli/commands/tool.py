@@ -15,6 +15,7 @@ import typer
 from loguru import logger
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape as markup_escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -70,12 +71,23 @@ def _display_search_results(result: dict[str, Any], query: str = "") -> None:
       has_more: bool
     """
     results = result.get("results", [])
-    total = result.get("total", len(results))
+    # Trigger: API returns total=0 even when results is non-empty (upstream quirk).
+    # Why: the key exists with value 0, so result.get("total", len(results)) never
+    #      applies its default, leaving the subtitle as "0 result(s)" under a
+    #      populated table.
+    # Outcome: fall back to len(results) when total is falsy but results is non-empty.
+    raw_total = result.get("total", len(results))
+    total = raw_total if raw_total else len(results)
     # Real key is "current_page"; fall back to "page" for forward-compat.
     page = result.get("current_page") or result.get("page", 1)
     page_size = result.get("page_size", len(results)) or 1
 
-    title = f"Search: [bold cyan]{query}[/bold cyan]" if query else "Search results"
+    # Trigger: query is user-supplied text that may contain Rich markup characters.
+    # Why: interpolating it directly into a markup string causes brackets to be
+    #      parsed as style tags, swallowing or restyling bracketed content.
+    # Outcome: escape the query so its literal characters are always displayed.
+    escaped_query = markup_escape(query) if query else query
+    title = f"Search: [bold cyan]{escaped_query}[/bold cyan]" if query else "Search results"
     subtitle = f"{total} result(s)  •  page {page} of {max(1, -(-total // page_size))}"
 
     if not results:
@@ -91,26 +103,31 @@ def _display_search_results(result: dict[str, Any], query: str = "") -> None:
 
     for item in results:
         item_type = item.get("type", "")
-        item_title = item.get("title") or item.get("permalink", "")
-        permalink = item.get("permalink", "")
+        # Trigger: user-sourced title/permalink may contain bracketed text.
+        # Why: Rich table cells with a style column interpret markup in cell values,
+        #      swallowing brackets (e.g. "Spec [draft] v2" → "Spec  v2").
+        # Outcome: escape every user-sourced cell value before adding to the table.
+        item_title = markup_escape(item.get("title") or item.get("permalink", ""))
+        permalink = markup_escape(item.get("permalink", ""))
         score = item.get("score")
         score_str = f"{score:.2f}" if score is not None else ""
         # Prefer matched_chunk as the most relevant snippet; fall back to content.
         raw_snippet = item.get("matched_chunk") or item.get("content") or ""
         # Truncate to ~200 chars so the table stays readable.
-        snippet = raw_snippet[:200].replace("\n", " ") if raw_snippet else ""
+        snippet = markup_escape(raw_snippet[:200].replace("\n", " ")) if raw_snippet else ""
         table.add_row(item_type, item_title, score_str, permalink, snippet)
 
     console.print(Panel(table, title=title, subtitle=subtitle, expand=False))
 
 
-def _display_read_note(result: dict[str, Any]) -> None:
+def _display_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
     """Render read-note result: header panel + optional frontmatter + rendered Markdown content."""
     title = result.get("title", "")
     permalink = result.get("permalink", "")
     content = result.get("content", "")
     frontmatter: dict[str, Any] = result.get("frontmatter") or {}
 
+    # The header already uses Text.append so title is never markup-interpreted.
     header = Text()
     header.append(title, style="bold cyan")
     if permalink:
@@ -119,15 +136,20 @@ def _display_read_note(result: dict[str, Any]) -> None:
     console.print(Panel(header, expand=False))
 
     # Trigger: --include-frontmatter was passed; the MCP tool populates "frontmatter".
-    # Why: without rendering it here, the explicitly requested metadata is silently
-    #      dropped in the Rich path — users must also know to add --json to see it.
-    # Outcome: print a dim key/value block above the content when frontmatter is present.
-    if frontmatter:
+    # Why: the JSON payload always carries a "frontmatter" key regardless of the flag,
+    #      so checking non-empty alone would render it even without the flag.  The flag
+    #      must be threaded in to gate the panel.
+    # Outcome: print a dim key/value block above the content only when the flag is set.
+    if include_frontmatter and frontmatter:
         fm_table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
         fm_table.add_column("key", style="dim")
         fm_table.add_column("value", style="dim")
         for key, value in frontmatter.items():
-            fm_table.add_row(str(key), str(value))
+            # Trigger: frontmatter keys/values are user-sourced and may contain markup.
+            # Why: Rich table cells with a style column parse markup, so bracketed
+            #      keys or values would be silently consumed or restyled.
+            # Outcome: escape both key and value before adding them to the table.
+            fm_table.add_row(markup_escape(str(key)), markup_escape(str(value)))
         console.print(Panel(fm_table, title="[dim]frontmatter[/dim]", expand=False))
 
     if content:
@@ -154,7 +176,11 @@ def _display_build_context(result: dict[str, Any]) -> None:
     uri = metadata.get("uri", "")
     context_items: list[dict[str, Any]] = list(result.get("results", []))
 
-    label = f"[bold cyan]{uri}[/bold cyan]" if uri else "Context"
+    # Trigger: uri is user-sourced and may contain Rich markup characters.
+    # Why: interpolating it directly into a markup string causes brackets to be
+    #      parsed as style tags, swallowing or restyling bracketed content.
+    # Outcome: escape the uri so its literal characters are always displayed.
+    label = f"[bold cyan]{markup_escape(uri)}[/bold cyan]" if uri else "Context"
     tree = Tree(f"[bold]Context:[/bold] {label}")
 
     if not context_items:
@@ -163,8 +189,13 @@ def _display_build_context(result: dict[str, Any]) -> None:
         for context_result in context_items:
             # --- Primary result node ---
             primary = context_result.get("primary_result", {})
-            p_title = primary.get("title") or primary.get("permalink", "")
-            p_type = primary.get("type", "")
+            # Trigger: p_title and p_type are user-sourced values from the knowledge graph.
+            # Why: embedding them in markup strings without escaping would cause any
+            #      bracketed text (e.g. an entity titled "Spec [draft]") to be consumed
+            #      by the Rich markup parser and silently dropped from output.
+            # Outcome: escape all user values before interpolating into markup strings.
+            p_title = markup_escape(primary.get("title") or primary.get("permalink", ""))
+            p_type = markup_escape(primary.get("type", ""))
             primary_label = f"[cyan]{p_title}[/cyan]"
             if p_type:
                 primary_label = f"[dim]{p_type}[/dim]  {primary_label}"
@@ -185,15 +216,23 @@ def _display_build_context(result: dict[str, Any]) -> None:
                 # Truncate long observations so the tree stays readable.
                 if len(obs_content) > 120:
                     obs_content = obs_content[:117] + "..."
-                obs_label = f"[dim][{category}] {obs_content}[/dim]"
+                # Trigger: category and obs_content are user-sourced strings that may
+                #          contain Rich markup characters.  The category is also wrapped
+                #          in literal "[" "]" brackets in the label, which must be
+                #          escaped too so Rich does not treat "[fact]" as a style tag.
+                # Why: embedding "[fact]" in a markup string causes Rich to parse it as
+                #      an unknown tag and silently drop the text.
+                # Outcome: escape the full "[category] content" fragment including the
+                #          surrounding brackets before embedding it in a styled label.
+                obs_label = f"[dim]{markup_escape(f'[{category}] {obs_content}')}[/dim]"
                 primary_node.add(obs_label)
 
             # --- Related items as children ---
             related: list[dict[str, Any]] = list(context_result.get("related_results", []))
             for rel_item in related:
-                rel_title = rel_item.get("title") or rel_item.get("permalink", "")
-                rel_type = rel_item.get("type", "")
-                relation = rel_item.get("relation_type", "")
+                rel_title = markup_escape(rel_item.get("title") or rel_item.get("permalink", ""))
+                rel_type = markup_escape(rel_item.get("type", ""))
+                relation = markup_escape(rel_item.get("relation_type", ""))
 
                 parts = []
                 if relation:
@@ -226,8 +265,13 @@ def _display_recent_activity(result: list[dict[str, Any]]) -> None:
 
     for item in result:
         item_type = item.get("type", "")
-        item_title = item.get("title") or item.get("permalink", "")
-        permalink = item.get("permalink", "")
+        # Trigger: title, permalink, and timestamps are user-sourced strings from the
+        #          knowledge graph and may contain Rich markup characters.
+        # Why: Rich table cells with a style column parse markup in cell values, so
+        #      bracketed content would be silently consumed or restyled.
+        # Outcome: escape all user-sourced cell values before adding to the table.
+        item_title = markup_escape(item.get("title") or item.get("permalink", ""))
+        permalink = markup_escape(item.get("permalink", ""))
         updated = str(item.get("updated_at") or item.get("created_at") or "")
         table.add_row(item_type, item_title, permalink, updated)
 
@@ -445,7 +489,7 @@ def read_note(
         if json_output or not _use_rich() or isinstance(result, str):
             _print_json(result)
         else:
-            _display_read_note(result)
+            _display_read_note(result, include_frontmatter=include_frontmatter)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
