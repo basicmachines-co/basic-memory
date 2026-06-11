@@ -59,15 +59,23 @@ def _print_json(result: Any) -> None:
 # --- Rich formatters ---
 
 
-def _display_search_results(result: dict[str, Any]) -> None:
-    """Render search-notes results as a Rich table."""
+def _display_search_results(result: dict[str, Any], query: str = "") -> None:
+    """Render search-notes results as a Rich table.
+
+    Real SearchResponse.model_dump() shape:
+      results: list of SearchResult dicts (title, type, permalink, score, matched_chunk, content)
+      current_page: int   (NOT "page")
+      page_size: int
+      total: int
+      has_more: bool
+    """
     results = result.get("results", [])
     total = result.get("total", len(results))
-    query = result.get("query") or ""
-    page = result.get("page", 1)
-    page_size = result.get("page_size", len(results))
+    # Real key is "current_page"; fall back to "page" for forward-compat.
+    page = result.get("current_page") or result.get("page", 1)
+    page_size = result.get("page_size", len(results)) or 1
 
-    title = f"Search results for [bold cyan]{query}[/bold cyan]" if query else "Search results"
+    title = f"Search: [bold cyan]{query}[/bold cyan]" if query else "Search results"
     subtitle = f"{total} result(s)  •  page {page} of {max(1, -(-total // page_size))}"
 
     if not results:
@@ -77,13 +85,21 @@ def _display_search_results(result: dict[str, Any]) -> None:
     table = Table(show_header=True, header_style="bold", expand=False)
     table.add_column("Type", style="dim", width=12)
     table.add_column("Title", style="bold cyan")
+    table.add_column("Score", style="yellow", width=7)
     table.add_column("Permalink", style="green")
+    table.add_column("Snippet", style="dim", max_width=60)
 
     for item in results:
         item_type = item.get("type", "")
         item_title = item.get("title") or item.get("permalink", "")
         permalink = item.get("permalink", "")
-        table.add_row(item_type, item_title, permalink)
+        score = item.get("score")
+        score_str = f"{score:.2f}" if score is not None else ""
+        # Prefer matched_chunk as the most relevant snippet; fall back to content.
+        raw_snippet = item.get("matched_chunk") or item.get("content") or ""
+        # Truncate to ~200 chars so the table stays readable.
+        snippet = raw_snippet[:200].replace("\n", " ") if raw_snippet else ""
+        table.add_row(item_type, item_title, score_str, permalink, snippet)
 
     console.print(Panel(table, title=title, subtitle=subtitle, expand=False))
 
@@ -108,33 +124,59 @@ def _display_read_note(result: dict[str, Any]) -> None:
 
 
 def _display_build_context(result: dict[str, Any]) -> None:
-    """Render build-context result as a Rich tree."""
+    """Render build-context result as a Rich tree.
+
+    Real GraphContext.model_dump() shape:
+      results: list of ContextResult dicts, each with:
+        primary_result: EntitySummary | RelationSummary | ObservationSummary
+        observations:   list of ObservationSummary
+        related_results: list of EntitySummary | RelationSummary | ObservationSummary
+      metadata: {"uri": ..., ...}
+      page/page_size/has_more
+
+    Each summary has: type, title (EntitySummary/RelationSummary), permalink,
+    and relation_type (RelationSummary only).
+    """
     metadata = result.get("metadata", {})
     uri = metadata.get("uri", "")
-    results = result.get("results", [])
-    total = len(results)
+    context_items: list[dict[str, Any]] = list(result.get("results", []))
 
     label = f"[bold cyan]{uri}[/bold cyan]" if uri else "Context"
     tree = Tree(f"[bold]Context:[/bold] {label}")
 
-    if not results:
+    if not context_items:
         tree.add("[dim]No related content found.[/dim]")
     else:
-        for item in results:
-            item_title = item.get("title") or item.get("permalink", "")
-            relation = item.get("relation_type", "")
-            item_type = item.get("type", "")
+        for context_result in context_items:
+            # --- Primary result node ---
+            primary = context_result.get("primary_result", {})
+            p_title = primary.get("title") or primary.get("permalink", "")
+            p_type = primary.get("type", "")
+            primary_label = f"[cyan]{p_title}[/cyan]"
+            if p_type:
+                primary_label = f"[dim]{p_type}[/dim]  {primary_label}"
+            primary_node = tree.add(primary_label)
 
-            parts = []
-            if relation:
-                parts.append(f"[yellow]{relation}[/yellow]")
-            if item_type:
-                parts.append(f"[dim]{item_type}[/dim]")
-            parts.append(f"[cyan]{item_title}[/cyan]")
+            # --- Related items as children ---
+            related: list[dict[str, Any]] = list(context_result.get("related_results", []))
+            for rel_item in related:
+                rel_title = rel_item.get("title") or rel_item.get("permalink", "")
+                rel_type = rel_item.get("type", "")
+                relation = rel_item.get("relation_type", "")
 
-            tree.add(" ".join(parts))
+                parts = []
+                if relation:
+                    parts.append(f"[yellow]{relation}[/yellow]")
+                if rel_type:
+                    parts.append(f"[dim]{rel_type}[/dim]")
+                parts.append(f"[cyan]{rel_title}[/cyan]")
+                primary_node.add(" ".join(parts))
 
-    subtitle = f"{total} related item(s)"
+    # Count total related items across all primary results.
+    total_related = sum(
+        len(cr.get("related_results", [])) for cr in context_items
+    )
+    subtitle = f"{len(context_items)} primary  •  {total_related} related"
     console.print(Panel(tree, subtitle=subtitle, expand=False))
 
 
@@ -858,7 +900,7 @@ def search_notes(
         if json_output or not _use_rich():
             _print_json(result)
         else:
-            _display_search_results(result)
+            _display_search_results(result, query=query or "")
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
