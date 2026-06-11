@@ -109,6 +109,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "content",
         "directory",
         "project",
+        "workspace",
         "project_id",
         "tags",
         "note_type",
