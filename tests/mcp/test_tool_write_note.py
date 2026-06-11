@@ -495,6 +495,7 @@ async def test_write_note_single_line_inline_fence_is_body_issue_972(app, test_p
     )
 
     content = await read_note("meetings/meeting-notes", project=test_project.name)
+    assert isinstance(content, str)
 
     # The literal one-line string survives verbatim in the body...
     assert one_line in content
