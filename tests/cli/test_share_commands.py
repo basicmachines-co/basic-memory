@@ -142,6 +142,10 @@ class TestShareCreateCommand:
 
                 assert result.exit_code == 1
                 assert "Invalid --expires-at" in result.stdout
+                # A parse error must produce a single clean message, not a
+                # spurious "Unexpected error: 1" from the broad handler
+                # re-catching typer.Exit. See issue #880 review.
+                assert "Unexpected error" not in result.stdout
 
     def test_create_share_note_not_found(self):
         runner = CliRunner()

@@ -53,30 +53,3 @@ class BucketSnapshotRestoreResponse(BaseModel):
     restored: list[str]
     snapshot_version: str
     snapshot_id: UUID
-
-
-class PublicShareResponse(BaseModel):
-    """Response model for a public share link.
-
-    Mirrors PublicShareResponse in basic-memory-cloud
-    (apps/cloud/.../schemas/public_share_schemas.py).
-    """
-
-    id: UUID
-    token: str
-    project_name: str
-    note_permalink: str
-    note_external_id: str
-    enabled: bool
-    expires_at: datetime | None
-    share_url: str
-    view_count: int
-    last_viewed_at: datetime | None
-    created_at: datetime
-
-
-class PublicShareListResponse(BaseModel):
-    """Response from listing public shares."""
-
-    shares: list[PublicShareResponse]
-    total: int
