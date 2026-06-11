@@ -107,7 +107,7 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
 | `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for search queries. |
 | `semantic_vector_k` | `BASIC_MEMORY_SEMANTIC_VECTOR_K` | `100` | Candidate count for vector nearest-neighbour retrieval. Higher values improve recall at the cost of latency. |
-| `search_entity_boost_enabled` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_ENABLED` | `false` | Enable the entity-aware ranking boost in hybrid search (see below). Default off pending benchmark validation. |
+| `search_entity_boost_enabled` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_ENABLED` | `false` | Enable the entity-aware ranking boost in hybrid search (see below). Default off: benchmark-validated as inert on LoCoMo and prone to Title-Case false positives. |
 | `search_entity_boost_weight` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_WEIGHT` | `0.15` | Per-matched-term multiplier strength for the entity boost. A candidate matching N query entity terms is scaled by `1 + weight * min(N, max_terms)`. |
 | `search_entity_boost_max_terms` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_MAX_TERMS` | `3` | Maximum number of distinct matched entity terms that contribute to the boost, bounding the multiplier. |
 
@@ -143,8 +143,40 @@ export BASIC_MEMORY_SEARCH_ENTITY_BOOST_WEIGHT=0.15
 export BASIC_MEMORY_SEARCH_ENTITY_BOOST_MAX_TERMS=3
 ```
 
-> **Default off.** This setting is disabled by default pending LoCoMo benchmark
-> validation. Enable it to experiment with entity-heavy corpora.
+> **Default off.** This setting is disabled by default. See the benchmark
+> findings below for why the default stays off and where the boost helps.
+
+### Benchmark findings
+
+The boost was benchmarked against LoCoMo (the
+[basic-memory-benchmarks](https://github.com/basicmachines-co/basic-memory-benchmarks)
+retrieval suite, hybrid mode) and a hand-built adversarial corpus. Two results
+drove the decision to keep the default **off** and leave the weight at `0.15`:
+
+1. **LoCoMo is insensitive to the boost.** Sweeping the weight across
+   `0.15, 0.3, 0.5, 1.0, 2.0` produced *identical* recall@5, recall@10, MRR, and
+   content-hit at every point — no query reordered, no score changed. LoCoMo's
+   documents are titled by conversation/session id and expose speaker names only
+   in body text, never as entity titles or relation names. Because the boost
+   matches query proper nouns against a candidate's **title or linked relation
+   names**, it never fires on this corpus. LoCoMo therefore provides no signal to
+   raise the weight, and the boost neither helps nor harms it.
+
+2. **A capitalization-only heuristic has false positives.** On a corpus where
+   entity terms appear in titles, the boost correctly promotes the right document
+   for clean proper nouns (e.g. `Katze`) and is correctly inert on
+   lowercase-leading identifiers (e.g. `getUserById`, ignored). But **Title-Case
+   queries can regress**: a query like `What Is The Plan For Q3` extracts `Q3` as
+   an entity term, and even at weight `0.15` it promotes a document that
+   *literally* contains "Q3" above the more relevant document that says "third
+   quarter". Since entity detection is lexical (capitalization, no NER), any
+   capitalized non-entity token in a query is a potential false positive.
+
+**Guidance.** Enable the boost only on entity-heavy corpora where your queries
+name entities that are themselves note titles or linked relations (the #951
+"Joanna" case). Prefer natural-case queries (`What are Joanna's hobbies?`) over
+Title-Cased phrasing, which can inject spurious entity terms. Leave it off for
+conversational / body-text-keyed corpora like LoCoMo, where it cannot help.
 
 ## Embedding Providers
 

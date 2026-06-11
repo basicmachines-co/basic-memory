@@ -355,13 +355,17 @@ class BasicMemoryConfig(BaseSettings):
     # document about a different entity.
     # Outcome: when enabled, hybrid fusion multiplies a candidate's fused score by a small
     # bonus for each distinct query entity term it matches lexically (no model inference).
-    # Default OFF pending LoCoMo benchmark validation by the maintainer.
+    # Default OFF: LoCoMo benchmarking showed the boost is inert there (its docs are keyed
+    # by session id, not entity titles) and an adversarial check found Title-Case queries
+    # can inject spurious entity terms (e.g. "Q3") that regress ranking. See
+    # docs/semantic-search.md "Benchmark findings".
     search_entity_boost_enabled: bool = Field(
         default=False,
         description="Enable entity-aware ranking boost in hybrid search. When enabled, "
         "hybrid candidates whose title or linked relation names contain a proper-noun "
         "term from the query are boosted in the final ranking. Lexical-only; adds no "
-        "model inference. Default off pending benchmark validation.",
+        "model inference. Default off: benchmark-validated as inert on LoCoMo and prone "
+        "to Title-Case false positives (see docs/semantic-search.md).",
     )
     search_entity_boost_weight: float = Field(
         default=0.15,
