@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import basic_memory
 from basic_memory.mcp.tools.basic_memory_diagnostics import (
     _redact_config,
+    _redact_url,
     basic_memory_diagnostics,
 )
 
@@ -144,3 +145,112 @@ def test_diagnostics_output_sections():
     assert "## Version" in result
     assert "## System" in result
     assert "## Configuration" in result
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _redact_url helper
+# ---------------------------------------------------------------------------
+
+
+def test_redact_url_strips_password():
+    url = "postgresql://user:secret@localhost/mydb"
+    result = _redact_url(url)
+    assert "secret" not in result
+    assert "user" not in result
+    assert "localhost" in result
+    assert "mydb" in result
+    assert "***" in result
+
+
+def test_redact_url_strips_only_password_when_no_username():
+    # password-only userinfo (unusual but valid per RFC)
+    url = "postgresql://:secret@db.example.com/app"
+    result = _redact_url(url)
+    assert "secret" not in result
+    assert "db.example.com" in result
+
+
+def test_redact_url_preserves_port():
+    url = "postgresql://admin:pw@db.internal:5432/prod"
+    result = _redact_url(url)
+    assert "pw" not in result
+    assert "5432" in result
+    assert "db.internal" in result
+
+
+def test_redact_url_no_credentials_unchanged():
+    url = "postgresql://db.internal:5432/prod"
+    assert _redact_url(url) == url
+
+
+def test_redact_url_non_url_string_unchanged():
+    # Bare file paths / non-URL values must not be mangled.
+    path = "/home/user/.local/share/basic-memory/main.db"
+    assert _redact_url(path) == path
+
+
+# ---------------------------------------------------------------------------
+# _redact_config tests for database_url
+# ---------------------------------------------------------------------------
+
+
+def test_redact_config_scrubs_database_url_credentials():
+    raw = {
+        "default_project": "main",
+        "database_url": "postgresql://dbuser:dbpass@host.example.com:5432/bm",
+        "projects": {},
+    }
+    result = _redact_config(raw)
+    assert "dbpass" not in result["database_url"]
+    assert "dbuser" not in result["database_url"]
+    # Host and db should still be present for diagnostic value.
+    assert "host.example.com" in result["database_url"]
+    assert "bm" in result["database_url"]
+
+
+def test_redact_config_leaves_database_url_without_credentials():
+    raw = {"database_url": "sqlite:////tmp/basic-memory/main.db"}
+    result = _redact_config(raw)
+    assert result["database_url"] == "sqlite:////tmp/basic-memory/main.db"
+
+
+def test_redact_config_drops_secret_fields_independently():
+    raw = {
+        "cloud_api_key": "bmc_top_secret",
+        "database_url": "postgresql://dbuser:dbpassword@host/db",
+        "default_project": "main",
+    }
+    result = _redact_config(raw)
+    assert "cloud_api_key" not in result
+    assert "dbpassword" not in result["database_url"]
+    assert "dbuser" not in result["database_url"]
+    assert "main" == result["default_project"]
+
+
+# ---------------------------------------------------------------------------
+# Integration: database_url redaction surfaces in diagnostic output
+# ---------------------------------------------------------------------------
+
+
+def test_diagnostics_redacts_database_url_password(tmp_path):
+    """Postgres password in database_url must not appear in diagnostic output."""
+    config_data = {
+        "default_project": "main",
+        "database_url": "postgresql://pguser:supersecret@db.internal:5432/basicmemory",
+        "projects": {},
+    }
+    with patch("basic_memory.mcp.tools.basic_memory_diagnostics.ConfigManager") as MockMgr:
+        mock_mgr = MagicMock()
+        mock_mgr.config_dir = tmp_path
+        MockMgr.return_value = mock_mgr
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        result = basic_memory_diagnostics()
+
+    assert "supersecret" not in result
+    assert "pguser" not in result
+    # Host and port remain visible for diagnostics.
+    assert "db.internal" in result
+    assert "5432" in result
