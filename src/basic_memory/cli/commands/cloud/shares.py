@@ -96,18 +96,21 @@ def create(
       bm cloud share create my-project notes/my-idea --expires-at 2025-12-31
     """
 
+    # Validate --expires-at before any async/API work so a parse error surfaces
+    # a single clean message and exits, rather than being re-wrapped by the broad
+    # handler below as "Unexpected error: 1" (typer.Exit subclasses Exception).
+    payload: dict = {
+        "project_name": project,
+        "note_permalink": permalink,
+    }
+    if expires_at is not None:
+        payload["expires_at"] = _parse_expires_at(expires_at)
+
     async def _create():
         try:
             config_manager = ConfigManager()
             config = config_manager.config
             host_url = config.cloud_host.rstrip("/")
-
-            payload: dict = {
-                "project_name": project,
-                "note_permalink": permalink,
-            }
-            if expires_at is not None:
-                payload["expires_at"] = _parse_expires_at(expires_at)
 
             console.print("[blue]Creating share link...[/blue]")
 
@@ -122,6 +125,8 @@ def create(
             console.print("[green]Share link created successfully[/green]")
             _print_share_details(data)
 
+        except typer.Exit:
+            raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
             console.print(f"[yellow]{e.args[0]}[/yellow]\n")
