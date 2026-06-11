@@ -899,6 +899,17 @@ async def search_notes(
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
 
+    # Trigger: list params arrived via a direct function call instead of the MCP layer.
+    # Why: the BeforeValidator annotations only run through MCP/Pydantic validation; direct
+    #      callers (e.g. `bm tool search-notes --type note,task` in cli/commands/tool.py,
+    #      which Typer collects as the one-element list ["note,task"]) would otherwise
+    #      forward the comma string as one literal type that matches nothing (#930).
+    # Outcome: comma-split/list normalization applies on every path; parse_str_list is
+    #          idempotent, so MCP-validated input passes through unchanged.
+    note_types = parse_str_list(note_types) if note_types is not None else []
+    entity_types = parse_str_list(entity_types) if entity_types is not None else []
+    categories = parse_str_list(categories) if categories is not None else []
+
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     # Lowercase note_types so "Chapter" matches the stored "chapter".
     note_types = [t.lower() for t in note_types] if note_types else []

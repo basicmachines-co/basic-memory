@@ -176,3 +176,19 @@ class TestParseStrList:
     def test_dict_passthrough_for_pydantic_rejection(self):
         value = {"a": 1}
         assert parse_str_list(value) is value  # type: ignore[arg-type]
+
+    # --- Non-string list elements pass through unchanged (Codex review fix) ---
+
+    def test_int_list_passthrough_for_pydantic_rejection(self):
+        """Lists with non-string elements must not be stringified ([42] → ['42'])."""
+        value = [42]
+        assert parse_str_list(value) is value  # type: ignore[arg-type]
+
+    def test_mixed_list_passthrough_for_pydantic_rejection(self):
+        """One non-string element poisons the whole list — no partial coercion."""
+        value = ["note", 42]
+        assert parse_str_list(value) is value  # type: ignore[arg-type]
+
+    def test_dict_list_passthrough_for_pydantic_rejection(self):
+        value = [{"a": 1}]
+        assert parse_str_list(value) is value  # type: ignore[arg-type]

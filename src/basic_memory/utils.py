@@ -619,6 +619,13 @@ def parse_str_list(v: Any) -> List[str]:
         return []
 
     if isinstance(v, list):
+        # Trigger: a list element is not a string (e.g. [42] or ["note", 42]).
+        # Why: str(raw) would silently convert 42 → "42" and let invalid caller data pass
+        #   Pydantic validation as a junk filter, producing a silent no-result search.
+        # Outcome: return the list unchanged so Pydantic rejects it with a clear error.
+        if not all(isinstance(raw, str) for raw in v if raw is not None):
+            return v  # type: ignore[return-value]
+
         # Trigger: a list element may itself be a comma-separated string (e.g. some MCP clients
         #   serialise `["note,task"]` when the caller passed `note_types="note,task"`).
         # Outcome: flatten each element by splitting on commas and stripping whitespace.
@@ -626,7 +633,7 @@ def parse_str_list(v: Any) -> List[str]:
             item.strip()
             for raw in v
             if raw is not None
-            for item in str(raw).split(",")
+            for item in raw.split(",")
             if item and item.strip()
         ]
 
