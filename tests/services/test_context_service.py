@@ -645,3 +645,83 @@ async def test_build_context_without_link_resolver(
     url = memory_url.validate_strings("memory://Root")
     context_result = await service.build_context(url)
     assert context_result.metadata.primary_count == 0
+
+
+@pytest.mark.asyncio
+async def test_find_related_carries_to_name_for_unresolved_relations(session_maker, app_config):
+    """Relation rows expose to_name so unresolved forward refs render by name (#955).
+
+    A forward reference (to_id NULL) previously surfaced with no usable target
+    text — build_context printed [[None]] even though the markdown named the
+    target. The context query must select to_name for both resolved and
+    unresolved relation rows.
+    """
+    from basic_memory.repository.entity_repository import EntityRepository
+    from basic_memory.repository.observation_repository import ObservationRepository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+    from basic_memory.config import DatabaseBackend
+    from basic_memory import db
+
+    async with db.scoped_session(session_maker) as db_session:
+        project = Project(name="forward-ref-project", path="/forward-ref")
+        db_session.add(project)
+        await db_session.flush()
+
+        source = Entity(
+            title="write-note(3)",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project.id,
+            permalink="man3/write-note-3",
+            file_path="man3/write-note-3.md",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        resolved_target = Entity(
+            title="bm-note(5)",
+            note_type="document",
+            content_type="text/markdown",
+            project_id=project.id,
+            permalink="man5/bm-note-5",
+            file_path="man5/bm-note-5.md",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        db_session.add_all([source, resolved_target])
+        await db_session.flush()
+
+        resolved = Relation(
+            project_id=project.id,
+            from_id=source.id,
+            to_id=resolved_target.id,
+            to_name="bm-note(5)",
+            relation_type="see_also",
+        )
+        # Forward reference: the target page does not exist yet
+        unresolved = Relation(
+            project_id=project.id,
+            from_id=source.id,
+            to_id=None,
+            to_name="edit-note(3)",
+            relation_type="see_also",
+        )
+        db_session.add_all([resolved, unresolved])
+        await db_session.commit()
+
+        if app_config.database_backend == DatabaseBackend.POSTGRES:
+            search_repo = PostgresSearchRepository(session_maker, project.id)
+        else:
+            search_repo = SQLiteSearchRepository(session_maker, project.id)
+        entity_repo = EntityRepository(session_maker, project.id)
+        obs_repo = ObservationRepository(session_maker, project.id)
+        context_service = ContextService(search_repo, entity_repo, obs_repo)
+
+        related = await context_service.find_related(
+            [("entity", source.id)], max_depth=2
+        )
+        relation_rows = {r.to_name: r for r in related if r.type == "relation"}
+
+        assert "edit-note(3)" in relation_rows, "unresolved relation row missing to_name"
+        assert relation_rows["edit-note(3)"].to_id is None
+        assert relation_rows["bm-note(5)"].to_name == "bm-note(5)"

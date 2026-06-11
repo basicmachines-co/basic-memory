@@ -36,6 +36,7 @@ class ContextResultRow:
     from_id: Optional[int] = None
     to_id: Optional[int] = None
     relation_type: Optional[str] = None
+    to_name: Optional[str] = None
     content: Optional[str] = None
     category: Optional[str] = None
     entity_id: Optional[int] = None
@@ -392,6 +393,7 @@ class ContextService:
                 from_id=row.from_id,
                 to_id=row.to_id,
                 relation_type=row.relation_type,
+                to_name=row.to_name,
                 content=row.content,
                 category=row.category,
                 entity_id=row.entity_id,
@@ -426,6 +428,7 @@ class ContextService:
                 CAST(NULL AS INTEGER) as from_id,
                 CAST(NULL AS INTEGER) as to_id,
                 CAST(NULL AS TEXT) as relation_type,
+                CAST(NULL AS TEXT) as to_name,
                 CAST(NULL AS TEXT) as content,
                 CAST(NULL AS TEXT) as category,
                 CAST(NULL AS INTEGER) as entity_id,
@@ -478,6 +481,10 @@ class ContextService:
                     WHEN step_type = 1 THEN r.relation_type
                     ELSE NULL
                 END as relation_type,
+                CASE
+                    WHEN step_type = 1 THEN r.to_name
+                    ELSE NULL
+                END as to_name,
                 CAST(NULL AS TEXT) as content,
                 CAST(NULL AS TEXT) as category,
                 CAST(NULL AS INTEGER) as entity_id,
@@ -541,6 +548,7 @@ class ContextService:
             from_id,
             to_id,
             relation_type,
+            to_name,
             content,
             category,
             entity_id,
@@ -550,7 +558,7 @@ class ContextService:
         FROM entity_graph
         WHERE depth > 0
         GROUP BY type, id, title, permalink, file_path, from_id, to_id,
-                 relation_type, content, category, entity_id, root_id, created_at
+                 relation_type, to_name, content, category, entity_id, root_id, created_at
         ORDER BY depth, type, id
         LIMIT :max_results
        """)
@@ -579,6 +587,7 @@ class ContextService:
                 NULL as from_id,
                 NULL as to_id,
                 NULL as relation_type,
+                NULL as to_name,
                 NULL as content,
                 NULL as category,
                 NULL as entity_id,
@@ -606,6 +615,7 @@ class ContextService:
                 r.from_id,
                 r.to_id,
                 r.relation_type,
+                r.to_name,
                 NULL as content,
                 NULL as category,
                 NULL as entity_id,
@@ -644,6 +654,7 @@ class ContextService:
                 NULL as from_id,
                 NULL as to_id,
                 NULL as relation_type,
+                NULL as to_name,
                 NULL as content,
                 NULL as category,
                 NULL as entity_id,
@@ -677,6 +688,7 @@ class ContextService:
             from_id,
             to_id,
             relation_type,
+            to_name,
             content,
             category,
             entity_id,
@@ -686,7 +698,7 @@ class ContextService:
         FROM entity_graph
         WHERE depth > 0
         GROUP BY type, id, title, permalink, file_path, from_id, to_id,
-                 relation_type, content, category, entity_id, root_id, created_at
+                 relation_type, to_name, content, category, entity_id, root_id, created_at
         ORDER BY depth, type, id
         LIMIT :max_results
        """)

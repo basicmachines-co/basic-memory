@@ -254,3 +254,53 @@ async def test_build_context_markdown_not_found(client, test_project):
     assert isinstance(result, str)
     assert "No results found" in result
     assert test_project.name in result
+
+
+def test_format_entity_block_renders_unresolved_relations_by_name():
+    """Unresolved forward references render their target text, not [[None]] (#955)."""
+    from datetime import UTC, datetime
+
+    from basic_memory.mcp.tools.build_context import _format_entity_block
+    from basic_memory.schemas.memory import (
+        ContextResult,
+        EntitySummary,
+        RelationSummary,
+    )
+
+    now = datetime.now(UTC)
+    page = EntitySummary(
+        external_id="entity-1",
+        entity_id=1,
+        title="write-note(3)",
+        permalink="man3/write-note-3",
+        content="# write-note(3)",
+        file_path="man3/write-note-3.md",
+        created_at=now,
+    )
+    unresolved = RelationSummary(
+        title="see_also: edit-note(3)",
+        file_path="man3/write-note-3.md",
+        permalink="man3/write-note-3/see-also/edit-note-3",
+        relation_type="see_also",
+        from_entity="write-note(3)",
+        to_entity=None,
+        to_name="edit-note(3)",
+        created_at=now,
+    )
+    resolved = RelationSummary(
+        title="see_also: bm-note(5)",
+        file_path="man3/write-note-3.md",
+        permalink="man3/write-note-3/see-also/bm-note-5",
+        relation_type="see_also",
+        from_entity="write-note(3)",
+        to_entity="bm-note(5)",
+        to_name="bm-note(5)",
+        created_at=now,
+    )
+    block = _format_entity_block(
+        ContextResult(primary_result=page, observations=[], related_results=[unresolved, resolved])
+    )
+
+    assert "- see_also [[edit-note(3)]]" in block
+    assert "- see_also [[bm-note(5)]]" in block
+    assert "[[None]]" not in block

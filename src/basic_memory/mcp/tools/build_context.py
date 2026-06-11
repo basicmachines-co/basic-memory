@@ -54,7 +54,10 @@ def _format_entity_block(result: ContextResult) -> str:
         lines.append("")
         lines.append("### Relations")
         for rel in relation_items:
-            lines.append(f"- {rel.relation_type} [[{rel.to_entity}]]")
+            # Unresolved forward references have no resolved entity yet; fall back
+            # to the literal target text instead of rendering [[None]] (#955)
+            target = rel.to_entity or rel.to_name
+            lines.append(f"- {rel.relation_type} [[{target}]]")
 
     # --- Related entities (non-relation related results) ---
     related_entities: list[EntitySummary | ObservationSummary] = [
