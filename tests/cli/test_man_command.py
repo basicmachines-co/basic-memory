@@ -12,6 +12,13 @@ import basic_memory.cli.commands.man as man_command  # noqa: F401
 runner = CliRunner()
 
 
+def _flattened(output: str) -> str:
+    # rich wraps console output at the terminal width, which differs between
+    # local shells and CI — collapse all whitespace so phrase assertions can't
+    # be split by a line break.
+    return " ".join(output.split())
+
+
 def test_man_install_writes_pages_to_target(tmp_path):
     """Install copies every bundled page into <root>/man1 as valid groff."""
     result = runner.invoke(app, ["man", "install", "--dir", str(tmp_path)])
@@ -25,7 +32,7 @@ def test_man_install_writes_pages_to_target(tmp_path):
     # groff sanity: a real title header and the alias .so include
     assert bm_page.read_text().startswith(".TH BM 1")
     assert alias_page.read_text().strip() == ".so man1/bm.1"
-    assert "Try:" in result.output
+    assert "Try:" in _flattened(result.output)
 
 
 def test_man_install_warns_when_root_not_on_manpath(tmp_path, monkeypatch):
@@ -40,8 +47,8 @@ def test_man_install_warns_when_root_not_on_manpath(tmp_path, monkeypatch):
     result = runner.invoke(app, ["man", "install", "--dir", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert "not on your manpath" in result.output
-    assert "MANPATH" in result.output
+    assert "not on your manpath" in _flattened(result.output)
+    assert "MANPATH" in _flattened(result.output)
 
 
 def test_man_install_stays_quiet_when_manpath_unavailable(tmp_path, monkeypatch):
@@ -54,7 +61,7 @@ def test_man_install_stays_quiet_when_manpath_unavailable(tmp_path, monkeypatch)
     result = runner.invoke(app, ["man", "install", "--dir", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert "not on your manpath" not in result.output
+    assert "not on your manpath" not in _flattened(result.output)
 
 
 def test_man_install_treats_manpath_failure_as_unknown(tmp_path, monkeypatch):
@@ -67,4 +74,4 @@ def test_man_install_treats_manpath_failure_as_unknown(tmp_path, monkeypatch):
     result = runner.invoke(app, ["man", "install", "--dir", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert "not on your manpath" not in result.output
+    assert "not on your manpath" not in _flattened(result.output)
