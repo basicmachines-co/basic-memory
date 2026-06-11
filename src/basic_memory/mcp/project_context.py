@@ -470,8 +470,9 @@ def _canonical_memory_path_for_workspace(
         normalized_remainder = project_permalink
 
     # Same index-form rule as _canonical_memory_path_for_active_route (#957):
-    # patterns match project-qualified permalinks, never workspace-qualified ones.
-    if "*" in normalized_remainder:
+    # without an active workspace permalink context, stored permalinks are
+    # project-qualified and a workspace-prefixed pattern cannot match.
+    if "*" in normalized_remainder and current_workspace_permalink_context() is None:
         return build_qualified_permalink_reference(
             project_permalink,
             normalized_remainder,
@@ -496,14 +497,17 @@ def _canonical_memory_path_for_active_route(
     """Return the canonical permalink path for the currently routed project/workspace."""
     project_prefix = active_project.permalink
 
-    # Trigger: the path contains a glob wildcard (folder/*).
-    # Why: pattern lookups match raw against the search index, which stores
-    #   project-qualified permalinks without the workspace prefix — a
-    #   workspace-qualified pattern can never match anything (#957). Direct
-    #   lookups keep full workspace qualification because the link resolver
-    #   understands it; the pattern path has no resolver fallback.
-    # Outcome: qualify patterns with the project prefix only.
-    if "*" in path:
+    # Trigger: the path contains a glob wildcard (folder/*) and no server-side
+    #   workspace permalink context is active.
+    # Why: patterns match raw against the search index, so they must mirror the
+    #   stored permalink form. The contextvar is what qualified permalinks at
+    #   write time — when it is absent, stored rows are project-qualified and a
+    #   workspace prefix (from the client's cached_workspace display state)
+    #   guarantees zero matches (#957). Direct lookups keep full qualification
+    #   because the link resolver understands it; patterns have no fallback.
+    # Outcome: without the contextvar, qualify patterns with the project prefix
+    #   only; with it, fall through to normal workspace canonicalization.
+    if "*" in path and current_workspace_permalink_context() is None:
         if not include_project:
             return path
         if path == project_prefix or path.startswith(f"{project_prefix}/"):
