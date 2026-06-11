@@ -1,5 +1,6 @@
 """Tests for cloud discovery MCP tools."""
 
+from basic_memory.cli.promo import OSS_DISCOUNT_CODE
 from basic_memory.mcp.tools import cloud_info, release_notes
 
 
@@ -7,8 +8,10 @@ def test_cloud_info_tool_returns_expected_copy():
     result = cloud_info()
 
     assert "# Basic Memory Cloud (optional)" in result
-    assert "{{OSS_DISCOUNT_CODE}}" in result
+    assert OSS_DISCOUNT_CODE in result
     assert "bm cloud login" in result
+    # Regression (#958): the template placeholder must never reach users.
+    assert "{{" not in result
 
 
 def test_release_notes_tool_returns_expected_copy():
@@ -16,5 +19,7 @@ def test_release_notes_tool_returns_expected_copy():
 
     assert "# Release Notes" in result
     assert "2026-02-06" in result
-    assert "{{OSS_DISCOUNT_CODE}}" in result
+    assert OSS_DISCOUNT_CODE in result
     assert "bm cloud login" in result
+    # Regression (#958): the template placeholder must never reach users.
+    assert "{{" not in result
