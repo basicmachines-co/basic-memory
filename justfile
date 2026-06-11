@@ -424,17 +424,38 @@ release version:
     git push -u origin "release/{{version}}"
     gh pr create --title "chore(core): release {{version}}" \
         --body "Version bump for {{version}}. See CHANGELOG.md for release notes."
-    gh pr merge "release/{{version}}" --rebase --delete-branch
+
+    # Trigger: the PR may not be mergeable synchronously (merge gates,
+    # required checks added later, or GitHub still computing mergeability).
+    # Why: the tag must point at the bump commit on main, so the recipe
+    # cannot tag until the merge has actually landed.
+    # Outcome: try a direct rebase-merge, fall back to queueing auto-merge,
+    # then poll main for the rebased bump commit before tagging.
+    if ! gh pr merge "release/{{version}}" --rebase --delete-branch; then
+        echo "⚠️  Direct merge did not complete (merge gates pending?). Queueing auto-merge..."
+        gh pr merge "release/{{version}}" --rebase --delete-branch --auto
+    fi
+
+    echo "⏳ Waiting for the bump commit to land on main..."
+    TAG_COMMIT=""
+    for _ in $(seq 1 60); do
+        git fetch origin main --quiet
+        TAG_COMMIT=$(git log FETCH_HEAD --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
+        [[ -n "$TAG_COMMIT" ]] && break
+        sleep 5
+    done
+    if [[ -z "$TAG_COMMIT" ]]; then
+        echo "❌ Bump commit not on main after 5 minutes (merge still pending?)."
+        echo "   Once the release PR merges, finish the release manually:"
+        echo "   git fetch origin main"
+        echo "   git tag {{version}} \$(git log FETCH_HEAD --fixed-strings --grep \"$COMMIT_SUBJECT\" --format='%H' -1)"
+        echo "   git push origin {{version}}"
+        exit 1
+    fi
 
     git checkout main
     git pull --ff-only origin main
-
-    # Tag the rebased bump commit, wherever it landed on main
-    TAG_COMMIT=$(git log origin/main --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
-    if [[ -z "$TAG_COMMIT" ]]; then
-        echo "❌ Could not find the version bump commit on main. Tag manually."
-        exit 1
-    fi
+    git branch -D "release/{{version}}" 2>/dev/null || true
 
     echo "🏷️  Creating tag {{version}} at $TAG_COMMIT..."
     git tag "{{version}}" "$TAG_COMMIT"
@@ -519,17 +540,38 @@ beta version:
     git push -u origin "release/{{version}}"
     gh pr create --title "chore(core): release {{version}}" \
         --body "Version bump for {{version}} beta."
-    gh pr merge "release/{{version}}" --rebase --delete-branch
+
+    # Trigger: the PR may not be mergeable synchronously (merge gates,
+    # required checks added later, or GitHub still computing mergeability).
+    # Why: the tag must point at the bump commit on main, so the recipe
+    # cannot tag until the merge has actually landed.
+    # Outcome: try a direct rebase-merge, fall back to queueing auto-merge,
+    # then poll main for the rebased bump commit before tagging.
+    if ! gh pr merge "release/{{version}}" --rebase --delete-branch; then
+        echo "⚠️  Direct merge did not complete (merge gates pending?). Queueing auto-merge..."
+        gh pr merge "release/{{version}}" --rebase --delete-branch --auto
+    fi
+
+    echo "⏳ Waiting for the bump commit to land on main..."
+    TAG_COMMIT=""
+    for _ in $(seq 1 60); do
+        git fetch origin main --quiet
+        TAG_COMMIT=$(git log FETCH_HEAD --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
+        [[ -n "$TAG_COMMIT" ]] && break
+        sleep 5
+    done
+    if [[ -z "$TAG_COMMIT" ]]; then
+        echo "❌ Bump commit not on main after 5 minutes (merge still pending?)."
+        echo "   Once the release PR merges, finish the release manually:"
+        echo "   git fetch origin main"
+        echo "   git tag {{version}} \$(git log FETCH_HEAD --fixed-strings --grep \"$COMMIT_SUBJECT\" --format='%H' -1)"
+        echo "   git push origin {{version}}"
+        exit 1
+    fi
 
     git checkout main
     git pull --ff-only origin main
-
-    # Tag the rebased bump commit, wherever it landed on main
-    TAG_COMMIT=$(git log origin/main --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
-    if [[ -z "$TAG_COMMIT" ]]; then
-        echo "❌ Could not find the version bump commit on main. Tag manually."
-        exit 1
-    fi
+    git branch -D "release/{{version}}" 2>/dev/null || true
 
     echo "🏷️  Creating tag {{version}} at $TAG_COMMIT..."
     git tag "{{version}}" "$TAG_COMMIT"
