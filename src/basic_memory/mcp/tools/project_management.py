@@ -525,8 +525,9 @@ async def create_memory_project(
         workspace: Optional cloud workspace selector to create the project in. Slug is
             preferred for AI callers, but tenant_id and unique name are also accepted.
             When omitted, the connection's default workspace is used. Discover values
-            via `list_workspaces`. In local mode the selector is passed through
-            without slug resolution.
+            via `list_workspaces`. A workspace selector implies cloud routing:
+            without cloud credentials the call fails fast instead of silently
+            creating a local project (#954).
         output_format: "text" returns the existing human-readable result text.
             "json" returns structured project creation metadata.
         context: Optional FastMCP context for progress/status logging.
@@ -664,8 +665,9 @@ async def delete_project(
         workspace: Optional cloud workspace selector to delete the project from.
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
-            used. In local mode the selector is passed through without slug
-            resolution, matching create_memory_project behavior.
+            used. A workspace selector implies cloud routing: without cloud
+            credentials the call fails fast, matching create_memory_project
+            behavior (#954).
 
     Returns:
         Confirmation message about project deletion
