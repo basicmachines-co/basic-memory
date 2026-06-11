@@ -165,17 +165,12 @@ def test_redact_url_strips_password():
 def test_redact_url_strips_only_password_when_no_username():
     # password-only userinfo (unusual but valid per RFC)
     url = "postgresql://:secret@db.example.com/app"
-    result = _redact_url(url)
-    assert "secret" not in result
-    assert "db.example.com" in result
+    assert _redact_url(url) == "postgresql://***@db.example.com/app"
 
 
 def test_redact_url_preserves_port():
     url = "postgresql://admin:pw@db.internal:5432/prod"
-    result = _redact_url(url)
-    assert "pw" not in result
-    assert "5432" in result
-    assert "db.internal" in result
+    assert _redact_url(url) == "postgresql://***@db.internal:5432/prod"
 
 
 def test_redact_url_no_credentials_unchanged():
@@ -201,11 +196,8 @@ def test_redact_config_scrubs_database_url_credentials():
         "projects": {},
     }
     result = _redact_config(raw)
-    assert "dbpass" not in result["database_url"]
-    assert "dbuser" not in result["database_url"]
-    # Host and db should still be present for diagnostic value.
-    assert "host.example.com" in result["database_url"]
-    assert "bm" in result["database_url"]
+    # Exact match: credentials replaced, host/port/db preserved for diagnostics.
+    assert result["database_url"] == "postgresql://***@host.example.com:5432/bm"
 
 
 def test_redact_config_leaves_database_url_without_credentials():
