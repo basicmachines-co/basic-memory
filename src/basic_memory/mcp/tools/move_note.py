@@ -357,7 +357,9 @@ delete_note("{identifier}")
 
 
 @mcp.tool(
+    title="Move Note",
     description="Move a note or directory to a new location, updating database and maintaining links.",
+    tags={"notes"},
     annotations={"destructiveHint": False, "openWorldHint": False},
 )
 async def move_note(

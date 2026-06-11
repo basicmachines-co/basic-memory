@@ -7,6 +7,8 @@ from basic_memory.mcp.server import mcp
 
 @mcp.tool(
     "cloud_info",
+    title="Cloud Info",
+    tags={"cloud"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 def cloud_info() -> str:

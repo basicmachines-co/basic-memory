@@ -612,7 +612,9 @@ async def _search_all_projects(
 
 
 @mcp.tool(
+    title="Search Notes",
     description="Search across all content in the knowledge base with advanced syntax support.",
+    tags={"search"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
     annotations={"readOnlyHint": True, "openWorldHint": False},

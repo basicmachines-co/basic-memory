@@ -182,7 +182,9 @@ def _directory_path_for_delete(
 
 
 @mcp.tool(
+    title="Delete Note",
     description="Delete a note or directory by title, permalink, or path",
+    tags={"notes"},
     annotations={"destructiveHint": True, "openWorldHint": False},
 )
 async def delete_note(

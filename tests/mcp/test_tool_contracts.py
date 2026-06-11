@@ -6,7 +6,10 @@ import inspect
 from collections.abc import Callable
 from typing import Any, cast
 
+import pytest
+
 from basic_memory.mcp import tools
+from basic_memory.mcp.server import mcp
 
 
 EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
@@ -157,3 +160,16 @@ def test_mcp_tool_signatures_are_stable():
 
     for tool_name, tool_obj in TOOL_FUNCTIONS.items():
         assert _signature_params(tool_obj) == EXPECTED_TOOL_SIGNATURES[tool_name]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_have_title_and_tags():
+    """Every registered MCP tool must declare a human-readable title and at least one tag.
+
+    This guards against regressions where a new tool is added without the Phase 1
+    FastMCP metadata (title + tags) required by issue #826.
+    """
+    tool_list = await mcp.list_tools()
+    for tool in tool_list:
+        assert tool.title, f"Tool '{tool.name}' is missing a 'title' annotation"
+        assert tool.tags, f"Tool '{tool.name}' is missing 'tags' annotation"

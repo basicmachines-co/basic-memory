@@ -7,6 +7,8 @@ from basic_memory.mcp.server import mcp
 
 @mcp.tool(
     "release_notes",
+    title="Release Notes",
+    tags={"cloud"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 def release_notes() -> str:

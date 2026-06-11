@@ -112,6 +112,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
 
 
 @mcp.tool(
+    title="Build Context",
     description="""Build context from a memory:// URI to continue conversations naturally.
 
     Use this to follow up on previous discussions or explore related topics.
@@ -131,6 +132,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     - "json" (default): Structured JSON with internal fields excluded
     - "text": Compact markdown text for LLM consumption
     """,
+    tags={"navigation", "notes"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def build_context(

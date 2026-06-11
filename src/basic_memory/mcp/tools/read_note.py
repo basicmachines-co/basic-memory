@@ -74,7 +74,9 @@ def _parse_opening_frontmatter(content: str) -> tuple[str, dict | None]:
 
 
 @mcp.tool(
+    title="Read Note",
     description="Read a markdown note by title or permalink.",
+    tags={"notes"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
     annotations={"readOnlyHint": True, "openWorldHint": False},

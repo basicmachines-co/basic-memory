@@ -304,7 +304,9 @@ Error editing note '{identifier}': {error_message}
 
 
 @mcp.tool(
+    title="Edit Note",
     description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section.",
+    tags={"notes"},
     annotations={"destructiveHint": False, "openWorldHint": False},
 )
 async def edit_note(
