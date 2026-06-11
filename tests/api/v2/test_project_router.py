@@ -138,6 +138,37 @@ async def test_set_default_project_by_id(
 
 
 @pytest.mark.asyncio
+async def test_set_default_project_when_none_is_set(
+    client: AsyncClient, test_project: Project, v2_projects_url, project_repository
+):
+    """Regression for #975: setting a default must succeed when none is set.
+
+    This is the bootstrap/recovery case: `bm project default <name>` is exactly
+    the command reached for when no default exists, so the endpoint must not 404.
+    """
+    # Clear any existing default so no row has is_default set.
+    await project_repository.update(test_project.id, {"is_default": None})
+    assert await project_repository.get_default_project() is None
+
+    response = await client.put(f"{v2_projects_url}/{test_project.external_id}/default")
+
+    assert response.status_code == 200
+    status_response = ProjectStatusResponse.model_validate(response.json())
+    assert status_response.status == "success"
+    assert status_response.default is True
+    # No previous default existed, so old_project must be None.
+    assert status_response.old_project is None
+    new_project = _project_item(status_response.new_project)
+    assert new_project.external_id == test_project.external_id
+    assert new_project.is_default is True
+
+    # A follow-up read-back must now return the newly set default.
+    default_project = await project_repository.get_default_project()
+    assert default_project is not None
+    assert default_project.external_id == test_project.external_id
+
+
+@pytest.mark.asyncio
 async def test_set_default_project_not_found(client: AsyncClient, v2_projects_url):
     """Test setting a non-existent project as default returns 404."""
     fake_uuid = "00000000-0000-0000-0000-000000000000"
