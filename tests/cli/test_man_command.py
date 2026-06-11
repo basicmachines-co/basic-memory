@@ -75,3 +75,21 @@ def test_man_install_treats_manpath_failure_as_unknown(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert "not on your manpath" not in _flattened(result.output)
+
+
+def test_man_install_skips_app_initialization(tmp_path, monkeypatch):
+    """man install must not touch the database (PR #971 review).
+
+    Installing offline docs only copies packaged files; a locked or broken
+    local database must not block it, so `man` is in skip_init_commands.
+    """
+    import basic_memory.services.initialization as init_module
+
+    def explode(*args, **kwargs):
+        raise AssertionError("ensure_initialization must not run for `bm man`")
+
+    monkeypatch.setattr(init_module, "ensure_initialization", explode)
+    result = runner.invoke(app, ["man", "install", "--dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "man1" / "bm.1").exists()
