@@ -55,6 +55,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._semantic_embedding_sync_batch_size = (
             self._app_config.semantic_embedding_sync_batch_size
         )
+        self._entity_boost_enabled = self._app_config.search_entity_boost_enabled
+        self._entity_boost_weight = self._app_config.search_entity_boost_weight
+        self._entity_boost_max_terms = self._app_config.search_entity_boost_max_terms
         self._embedding_provider = embedding_provider
         self._sqlite_vec_load_lock = asyncio.Lock()
         self._sqlite_prepare_write_lock = asyncio.Lock()

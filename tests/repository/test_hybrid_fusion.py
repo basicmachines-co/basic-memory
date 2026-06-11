@@ -134,6 +134,115 @@ HYBRID_KWARGS: dict[str, Any] = dict(
 )
 
 
+def _hybrid_kwargs(**overrides: Any) -> dict[str, Any]:
+    """Return HYBRID_KWARGS with overrides applied, typed as dict[str, Any].
+
+    Keeps the splat into the keyword-only _search_hybrid signature type-clean.
+    """
+    merged: dict[str, Any] = {**HYBRID_KWARGS, **overrides}
+    return merged
+
+
+@pytest.mark.asyncio
+async def test_entity_boost_promotes_matching_doc_when_enabled():
+    """With entity boost enabled, an entity-matching doc outranks a higher-similarity
+    non-matching doc.
+
+    Reproduces the #951 cross-conversation confusion: a generic same-topic document
+    (higher raw similarity) initially outranks the gold doc whose title names the
+    queried entity. Enabling the boost flips the order.
+    """
+    repo = ConcreteSearchRepo()
+    repo._entity_boost_enabled = True
+    repo._entity_boost_weight = 0.15
+    repo._entity_boost_max_terms = 3
+
+    # Row 1: generic hobbies doc from the wrong conversation, higher vector similarity.
+    # Row 2: the gold doc whose title names the queried entity "Joanna".
+    fts_results = []
+    vector_results = [
+        FakeRow(id=1, score=0.80, title="Hobbies and pastimes"),
+        FakeRow(id=2, score=0.72, title="Joanna profile"),
+    ]
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(
+            **_hybrid_kwargs(search_text="What are Joanna's hobbies?")
+        )
+
+    # Boost: row 2 -> 0.72 * 1.15 = 0.828 > row 1's 0.80
+    assert [r.id for r in results] == [2, 1]
+    assert results[0].score == pytest.approx(0.72 * 1.15, rel=1e-6)
+    assert results[1].score == pytest.approx(0.80, rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_entity_boost_disabled_preserves_ordering():
+    """With entity boost disabled (default), ordering matches pure similarity."""
+    repo = ConcreteSearchRepo()
+    # Defaults from the base class keep boosting off; assert explicitly.
+    assert repo._entity_boost_enabled is False
+
+    fts_results = []
+    vector_results = [
+        FakeRow(id=1, score=0.80, title="Hobbies and pastimes"),
+        FakeRow(id=2, score=0.72, title="Joanna profile"),
+    ]
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(
+            **_hybrid_kwargs(search_text="What are Joanna's hobbies?")
+        )
+
+    # No boost: original similarity order is preserved, scores unchanged.
+    assert [r.id for r in results] == [1, 2]
+    assert results[0].score == pytest.approx(0.80, rel=1e-6)
+    assert results[1].score == pytest.approx(0.72, rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_entity_boost_promotes_doc_into_limited_window():
+    """Boosting runs before the limit cut, so a matching doc ranked below the cutoff
+    can be promoted into the returned window."""
+    repo = ConcreteSearchRepo()
+    repo._entity_boost_enabled = True
+    repo._entity_boost_weight = 0.6
+    repo._entity_boost_max_terms = 3
+
+    fts_results = []
+    # Three non-matching docs above the gold doc, which matches "Anthony".
+    vector_results = [
+        FakeRow(id=1, score=0.90, title="conversation six"),
+        FakeRow(id=2, score=0.85, title="conversation one"),
+        FakeRow(id=3, score=0.60, title="Anthony introduces himself"),
+    ]
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(
+            **_hybrid_kwargs(search_text="Who is Anthony?", limit=1)
+        )
+
+    # Gold doc boost: 0.60 * 1.6 = 0.96 > row 1's 0.90, so it is promoted into the
+    # top-1 window even though it was ranked third before boosting.
+    assert len(results) == 1
+    assert results[0].id == 3
+
+
 @pytest.mark.asyncio
 async def test_high_fts_score_boosts_ranking():
     """FTS-only: a high normalized score should outscore a low normalized score."""

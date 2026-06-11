@@ -45,6 +45,64 @@ _SQLITE_MAX_PREPARE_WINDOW = 8
 # the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
 type SearchIndexKey = tuple[str, int]
 
+# --- Entity-aware ranking boost (#951) ---
+
+# Match word tokens (allowing internal apostrophes/hyphens) so we can inspect
+# their capitalization to detect proper-noun-like query terms.
+_ENTITY_TERM_TOKEN_PATTERN = re.compile(r"[A-Za-z][A-Za-z'\-]*")
+
+# Common capitalized sentence-starters and interrogatives that look like proper
+# nouns but are not entity references. Kept lowercase for case-insensitive checks.
+# Intentionally small: a candidate term only boosts a row when it actually matches
+# that row's title/relation names, so a stray non-entity term simply does nothing.
+_ENTITY_TERM_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "do",
+        "does",
+        "for",
+        "from",
+        "has",
+        "have",
+        "how",
+        "i",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "the",
+        "their",
+        "they",
+        "this",
+        "to",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "will",
+        "with",
+        "you",
+        "your",
+    }
+)
+
 
 @dataclass
 class VectorSyncBatchResult:
@@ -165,6 +223,13 @@ class SearchRepositoryBase(ABC):
     _semantic_embedding_sync_batch_size: int
     _vector_dimensions: int
     _vector_tables_initialized: bool
+
+    # Entity-aware ranking boost (#951). Defaults keep the feature off for any
+    # subclass or test double that does not explicitly configure it. Concrete
+    # backends overwrite these from BasicMemoryConfig in their __init__.
+    _entity_boost_enabled: bool = False
+    _entity_boost_weight: float = 0.0
+    _entity_boost_max_terms: int = 1
 
     def __init__(self, session_maker: async_sessionmaker[AsyncSession], project_id: int):
         """Initialize with session maker and project_id filter.
@@ -2147,6 +2212,105 @@ class SearchRepositoryBase(ABC):
     # Shared semantic search: hybrid score-based fusion
     # ------------------------------------------------------------------
 
+    # --- Entity-aware ranking boost (#951) ---
+
+    @staticmethod
+    def _extract_query_entity_terms(search_text: Optional[str]) -> set[str]:
+        """Extract candidate entity (proper-noun) terms from a query string.
+
+        Heuristic, lexical only (no model inference): a token is a candidate entity
+        term when it is title-cased or all-caps and is not a common stopword. The
+        result is lowercased so downstream matching is case-insensitive.
+
+        Examples:
+            "What are Joanna's hobbies?" -> {"joanna"}
+            "Who is Anthony?"            -> {"anthony"}
+            "Deborah and Jolene"         -> {"deborah", "jolene"}
+            "what is the weather"        -> set()  (no proper nouns)
+        """
+        if not search_text:
+            return set()
+
+        terms: set[str] = set()
+        for match in _ENTITY_TERM_TOKEN_PATTERN.finditer(search_text):
+            token = match.group(0)
+            # Trigger: token begins with an uppercase letter (Title-Case or ALL-CAPS).
+            # Why: proper nouns and named entities are conventionally capitalized; this
+            # is the cheapest reliable signal without a NER model.
+            # Outcome: lowercase, non-capitalized words are ignored as generic terms.
+            if not token[0].isupper():
+                continue
+            normalized = token.lower()
+            # Strip a trailing possessive so "Joanna's" matches the entity "Joanna".
+            if normalized.endswith("'s"):
+                normalized = normalized[:-2]
+            if normalized in _ENTITY_TERM_STOPWORDS:
+                continue
+            # Single characters (e.g. a stray "I") carry no entity signal.
+            if len(normalized) < 2:
+                continue
+            terms.add(normalized)
+        return terms
+
+    @staticmethod
+    def _row_entity_match_count(row: SearchIndexRow, entity_terms: set[str]) -> int:
+        """Count distinct query entity terms that a candidate row references.
+
+        Matches against the row's own entity name (title) and the names embedded in
+        a relation row's title (``"From -> To"``). These are the fields where Basic
+        Memory's first-class entity names surface, so a match here is strong evidence
+        the candidate is about the queried entity rather than a same-topic document.
+        """
+        if not entity_terms:
+            return 0
+
+        haystack_parts = [row.title or ""]
+        # Relation rows encode linked entity names in their title ("From -> To");
+        # the relation_type itself is not an entity name, so it is excluded.
+        haystack = " ".join(part for part in haystack_parts if part)
+        if not haystack:
+            return 0
+
+        haystack_tokens: set[str] = set()
+        for match in _ENTITY_TERM_TOKEN_PATTERN.finditer(haystack):
+            token = match.group(0).lower()
+            # Mirror the query-side possessive stripping so a doc titled
+            # "Joanna's Hobbies" matches the query entity term "joanna".
+            if token.endswith("'s"):
+                token = token[:-2]
+            haystack_tokens.add(token)
+        return len(entity_terms & haystack_tokens)
+
+    def _apply_entity_boost(
+        self,
+        fused_scores: dict[SearchIndexKey, float],
+        rows_by_key: dict[SearchIndexKey, SearchIndexRow],
+        entity_terms: set[str],
+    ) -> dict[SearchIndexKey, float]:
+        """Multiply fused scores by a per-matched-term bonus for entity-matching rows.
+
+        Trigger: entity boosting is enabled and the query contains proper-noun terms.
+        Why: a candidate whose entity/relation names contain a queried proper noun is a
+        stronger answer than a generic same-topic document (#951 cross-conversation
+        confusion).
+        Outcome: ``score * (1 + weight * min(matches, max_terms))``. Rows that match no
+        query entity term are returned unchanged, so relative order among non-matching
+        rows is preserved.
+        """
+        if not self._entity_boost_enabled or not entity_terms or self._entity_boost_weight <= 0:
+            return fused_scores
+
+        boosted: dict[SearchIndexKey, float] = {}
+        for row_key, score in fused_scores.items():
+            row = rows_by_key.get(row_key)
+            matches = self._row_entity_match_count(row, entity_terms) if row is not None else 0
+            if matches <= 0:
+                boosted[row_key] = score
+                continue
+            capped_matches = min(matches, self._entity_boost_max_terms)
+            boosted[row_key] = score * (1.0 + self._entity_boost_weight * capped_matches)
+        return boosted
+
     async def _search_hybrid(
         self,
         *,
@@ -2249,6 +2413,15 @@ class SearchRepositoryBase(ABC):
             v = vec_scores.get(row_key, 0.0)
             f = fts_scores.get(row_key, 0.0)
             fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
+
+        # Entity-aware ranking boost (#951): runs over the full fused candidate set
+        # before the limit/offset cut, so a boosted entity-matching candidate can be
+        # promoted into the returned window. No-op when the feature is disabled or the
+        # query contains no proper-noun terms, preserving the existing ordering.
+        entity_terms = (
+            self._extract_query_entity_terms(query_text) if self._entity_boost_enabled else set()
+        )
+        fused_scores = self._apply_entity_boost(fused_scores, rows_by_key, entity_terms)
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
         output: list[SearchIndexRow] = []

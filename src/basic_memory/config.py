@@ -346,6 +346,38 @@ class BasicMemoryConfig(BaseSettings):
         "Valid values: text, vector, hybrid. "
         "When unset, defaults to 'hybrid' if semantic search is enabled, otherwise 'text'.",
     )
+    # Entity-aware ranking boost (hybrid retrieval).
+    # Trigger: proper nouns in a query (e.g. "Joanna") carry no extra weight against
+    # generic semantic similarity, so documents from the wrong conversation can outrank
+    # the gold document during hybrid fusion (#951).
+    # Why: entities are first-class in Basic Memory, so a candidate whose title or linked
+    # relation names contain a query proper noun is a stronger answer than a same-topic
+    # document about a different entity.
+    # Outcome: when enabled, hybrid fusion multiplies a candidate's fused score by a small
+    # bonus for each distinct query entity term it matches lexically (no model inference).
+    # Default OFF pending LoCoMo benchmark validation by the maintainer.
+    search_entity_boost_enabled: bool = Field(
+        default=False,
+        description="Enable entity-aware ranking boost in hybrid search. When enabled, "
+        "hybrid candidates whose title or linked relation names contain a proper-noun "
+        "term from the query are boosted in the final ranking. Lexical-only; adds no "
+        "model inference. Default off pending benchmark validation.",
+    )
+    search_entity_boost_weight: float = Field(
+        default=0.15,
+        description="Per-matched-term multiplier strength for the entity-aware ranking "
+        "boost. A candidate matching N distinct query entity terms has its fused score "
+        "multiplied by (1 + weight * N), capped at search_entity_boost_max_terms terms. "
+        "Only applies when search_entity_boost_enabled is true.",
+        ge=0.0,
+    )
+    search_entity_boost_max_terms: int = Field(
+        default=3,
+        description="Maximum number of distinct matched entity terms that contribute to "
+        "the entity-aware ranking boost, bounding the multiplier so a single candidate "
+        "cannot run away with the ranking.",
+        gt=0,
+    )
 
     # Database connection pool configuration (Postgres only)
     db_pool_size: int = Field(

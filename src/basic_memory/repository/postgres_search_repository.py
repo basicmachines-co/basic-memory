@@ -67,6 +67,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._semantic_postgres_prepare_concurrency = (
             self._app_config.semantic_postgres_prepare_concurrency
         )
+        self._entity_boost_enabled = self._app_config.search_entity_boost_enabled
+        self._entity_boost_weight = self._app_config.search_entity_boost_weight
+        self._entity_boost_max_terms = self._app_config.search_entity_boost_max_terms
         self._embedding_provider = embedding_provider
         self._vector_dimensions = 384
         self._vector_tables_initialized = False

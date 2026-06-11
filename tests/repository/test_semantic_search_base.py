@@ -809,3 +809,182 @@ async def test_sync_entity_vectors_batch_logs_resolved_fastembed_runtime_setting
     assert runtime_logs[0]["threads"] == 4
     assert runtime_logs[0]["configured_parallel"] == 2
     assert runtime_logs[0]["effective_parallel"] == 2
+
+
+# --- Entity-aware ranking boost (#951) ---
+
+
+def _make_index_row(
+    *,
+    row_id: int,
+    title: str,
+    row_type: str = SearchItemType.ENTITY.value,
+) -> SearchIndexRow:
+    """Build a real SearchIndexRow for entity-boost matching tests."""
+    now = datetime(2026, 1, 1)
+    return SearchIndexRow(
+        project_id=1,
+        id=row_id,
+        type=row_type,
+        file_path=f"notes/{row_id}.md",
+        created_at=now,
+        updated_at=now,
+        permalink=f"notes/{row_id}",
+        title=title,
+    )
+
+
+class TestExtractQueryEntityTerms:
+    """Verify proper-noun extraction from query strings."""
+
+    def test_extracts_single_proper_noun(self):
+        terms = SearchRepositoryBase._extract_query_entity_terms("What are Joanna's hobbies?")
+        assert terms == {"joanna"}
+
+    def test_extracts_multiple_proper_nouns(self):
+        terms = SearchRepositoryBase._extract_query_entity_terms(
+            "What symbolic gifts do Deborah and Jolene have from their mothers?"
+        )
+        assert terms == {"deborah", "jolene"}
+
+    def test_who_is_anthony(self):
+        terms = SearchRepositoryBase._extract_query_entity_terms("Who is Anthony?")
+        assert terms == {"anthony"}
+
+    def test_all_lowercase_query_has_no_entity_terms(self):
+        terms = SearchRepositoryBase._extract_query_entity_terms("what is the weather today")
+        assert terms == set()
+
+    def test_capitalized_stopword_at_sentence_start_is_ignored(self):
+        # "What" and "Who" are capitalized interrogatives, not entity names.
+        terms = SearchRepositoryBase._extract_query_entity_terms("What does Sarah like?")
+        assert terms == {"sarah"}
+
+    def test_all_caps_token_is_extracted(self):
+        terms = SearchRepositoryBase._extract_query_entity_terms("who works at NASA")
+        assert terms == {"nasa"}
+
+    def test_possessive_is_stripped(self):
+        terms = SearchRepositoryBase._extract_query_entity_terms("Joanna's mother")
+        assert terms == {"joanna"}
+
+    def test_single_capital_letter_is_ignored(self):
+        # "A" lowercases to a stopword; "X" is a non-stopword single letter that
+        # still carries no entity signal and must be dropped by the length guard.
+        terms = SearchRepositoryBase._extract_query_entity_terms("A is for X and Apple")
+        assert terms == {"apple"}
+
+    def test_empty_and_none_inputs(self):
+        assert SearchRepositoryBase._extract_query_entity_terms("") == set()
+        assert SearchRepositoryBase._extract_query_entity_terms(None) == set()
+
+
+class TestRowEntityMatchCount:
+    """Verify lexical match counting between query terms and row entity names."""
+
+    def test_title_match_counts_one(self):
+        row = _make_index_row(row_id=1, title="Joanna's Hobbies")
+        assert SearchRepositoryBase._row_entity_match_count(row, {"joanna"}) == 1
+
+    def test_relation_title_matches_both_endpoints(self):
+        row = _make_index_row(
+            row_id=2,
+            title="Deborah -> Jolene",
+            row_type=SearchItemType.RELATION.value,
+        )
+        count = SearchRepositoryBase._row_entity_match_count(row, {"deborah", "jolene"})
+        assert count == 2
+
+    def test_no_match_returns_zero(self):
+        row = _make_index_row(row_id=3, title="Anthony Profile")
+        assert SearchRepositoryBase._row_entity_match_count(row, {"joanna"}) == 0
+
+    def test_match_is_case_insensitive(self):
+        row = _make_index_row(row_id=4, title="JOANNA notes")
+        assert SearchRepositoryBase._row_entity_match_count(row, {"joanna"}) == 1
+
+    def test_empty_terms_returns_zero(self):
+        row = _make_index_row(row_id=5, title="Joanna")
+        assert SearchRepositoryBase._row_entity_match_count(row, set()) == 0
+
+    def test_missing_title_returns_zero(self):
+        row = _make_index_row(row_id=6, title="")
+        row.title = None
+        assert SearchRepositoryBase._row_entity_match_count(row, {"joanna"}) == 0
+
+    def test_distinct_terms_not_double_counted(self):
+        # A title containing the same term twice still counts as one distinct match.
+        row = _make_index_row(row_id=7, title="Joanna and Joanna")
+        assert SearchRepositoryBase._row_entity_match_count(row, {"joanna"}) == 1
+
+
+class TestApplyEntityBoost:
+    """Verify the entity-boost score math and gating."""
+
+    def _repo(self, *, enabled: bool, weight: float = 0.15, max_terms: int = 3) -> _ConcreteRepo:
+        repo = _ConcreteRepo()
+        repo._entity_boost_enabled = enabled
+        repo._entity_boost_weight = weight
+        repo._entity_boost_max_terms = max_terms
+        return repo
+
+    def test_disabled_returns_scores_unchanged(self):
+        repo = self._repo(enabled=False)
+        key = ("entity", 1)
+        rows = {key: _make_index_row(row_id=1, title="Joanna")}
+        scores = {key: 0.5}
+        assert repo._apply_entity_boost(scores, rows, {"joanna"}) == {key: 0.5}
+
+    def test_matching_row_is_boosted(self):
+        repo = self._repo(enabled=True, weight=0.2)
+        key = ("entity", 1)
+        rows = {key: _make_index_row(row_id=1, title="Joanna")}
+        boosted = repo._apply_entity_boost({key: 0.5}, rows, {"joanna"})
+        assert boosted[key] == pytest.approx(0.5 * 1.2)
+
+    def test_non_matching_row_unchanged(self):
+        repo = self._repo(enabled=True, weight=0.2)
+        key = ("entity", 1)
+        rows = {key: _make_index_row(row_id=1, title="Anthony")}
+        boosted = repo._apply_entity_boost({key: 0.5}, rows, {"joanna"})
+        assert boosted[key] == pytest.approx(0.5)
+
+    def test_boost_can_reorder_lower_scored_match_above_higher_non_match(self):
+        repo = self._repo(enabled=True, weight=0.5)
+        generic_key = ("entity", 1)
+        joanna_key = ("entity", 2)
+        rows = {
+            generic_key: _make_index_row(row_id=1, title="Generic topic about hobbies"),
+            joanna_key: _make_index_row(row_id=2, title="Joanna"),
+        }
+        # The generic row starts higher (0.6) but does not match; "Joanna" (0.5) matches.
+        boosted = repo._apply_entity_boost({generic_key: 0.6, joanna_key: 0.5}, rows, {"joanna"})
+        assert boosted[joanna_key] > boosted[generic_key]
+
+    def test_multiple_matches_scale_boost(self):
+        repo = self._repo(enabled=True, weight=0.1, max_terms=3)
+        key = ("relation", 1)
+        rows = {key: _make_index_row(row_id=1, title="Deborah -> Jolene")}
+        boosted = repo._apply_entity_boost({key: 1.0}, rows, {"deborah", "jolene"})
+        # Two matched terms -> 1 + 0.1 * 2 = 1.2
+        assert boosted[key] == pytest.approx(1.2)
+
+    def test_max_terms_caps_the_boost(self):
+        repo = self._repo(enabled=True, weight=0.1, max_terms=1)
+        key = ("relation", 1)
+        rows = {key: _make_index_row(row_id=1, title="Deborah -> Jolene")}
+        boosted = repo._apply_entity_boost({key: 1.0}, rows, {"deborah", "jolene"})
+        # Capped at 1 term -> 1 + 0.1 * 1 = 1.1
+        assert boosted[key] == pytest.approx(1.1)
+
+    def test_zero_weight_is_noop(self):
+        repo = self._repo(enabled=True, weight=0.0)
+        key = ("entity", 1)
+        rows = {key: _make_index_row(row_id=1, title="Joanna")}
+        assert repo._apply_entity_boost({key: 0.5}, rows, {"joanna"}) == {key: 0.5}
+
+    def test_empty_entity_terms_is_noop(self):
+        repo = self._repo(enabled=True, weight=0.2)
+        key = ("entity", 1)
+        rows = {key: _make_index_row(row_id=1, title="Joanna")}
+        assert repo._apply_entity_boost({key: 0.5}, rows, set()) == {key: 0.5}

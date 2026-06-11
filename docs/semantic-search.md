@@ -107,6 +107,44 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
 | `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for search queries. |
 | `semantic_vector_k` | `BASIC_MEMORY_SEMANTIC_VECTOR_K` | `100` | Candidate count for vector nearest-neighbour retrieval. Higher values improve recall at the cost of latency. |
+| `search_entity_boost_enabled` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_ENABLED` | `false` | Enable the entity-aware ranking boost in hybrid search (see below). Default off pending benchmark validation. |
+| `search_entity_boost_weight` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_WEIGHT` | `0.15` | Per-matched-term multiplier strength for the entity boost. A candidate matching N query entity terms is scaled by `1 + weight * min(N, max_terms)`. |
+| `search_entity_boost_max_terms` | `BASIC_MEMORY_SEARCH_ENTITY_BOOST_MAX_TERMS` | `3` | Maximum number of distinct matched entity terms that contribute to the boost, bounding the multiplier. |
+
+## Entity-Aware Ranking Boost
+
+Hybrid search fuses keyword (FTS) and vector similarity, but proper nouns in a query
+carry no special weight against generic semantic similarity. As a result, a document
+about a *different* entity on the same topic can outrank the document that actually
+names the queried entity — e.g. "What are Joanna's hobbies?" surfacing a generic
+hobbies note ahead of Joanna's note (see
+[#951](https://github.com/basicmachines-co/basic-memory/issues/951)).
+
+When `search_entity_boost_enabled=true`, hybrid retrieval performs a final,
+lexical-only re-scoring pass:
+
+1. It extracts candidate entity terms from the query — capitalized / proper-noun
+   tokens that are not common stopwords (e.g. `Joanna`, `Anthony`, `NASA`).
+2. For each fused candidate, it counts how many distinct query entity terms appear in
+   the candidate's entity name (its title) or in a relation row's linked entity names.
+3. Matching candidates have their fused score multiplied by
+   `1 + weight * min(matches, max_terms)`, so an entity-matching document can be
+   promoted above a higher-similarity non-matching one.
+
+The boost adds **no model inference** — it is pure index/lexical lookup, so per-query
+latency overhead is trivial. It only affects `hybrid` retrieval; `text` and `vector`
+modes are unchanged. Non-matching candidates keep their original scores, so ordering
+among them is preserved.
+
+```bash
+export BASIC_MEMORY_SEARCH_ENTITY_BOOST_ENABLED=true
+# Optional tuning:
+export BASIC_MEMORY_SEARCH_ENTITY_BOOST_WEIGHT=0.15
+export BASIC_MEMORY_SEARCH_ENTITY_BOOST_MAX_TERMS=3
+```
+
+> **Default off.** This setting is disabled by default pending LoCoMo benchmark
+> validation. Enable it to experiment with entity-heavy corpora.
 
 ## Embedding Providers
 
