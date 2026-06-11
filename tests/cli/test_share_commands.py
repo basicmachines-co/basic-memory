@@ -4,7 +4,7 @@ Issue #880: Tests for share create, list, update, revoke commands that surface
 the cloud /api/shares endpoints.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 from typer.testing import CliRunner
@@ -14,6 +14,36 @@ from basic_memory.cli.commands.cloud.api_client import (
     CloudAPIError,
     SubscriptionRequiredError,
 )
+from basic_memory.schemas.cloud import WorkspaceInfo
+
+# A real workspace/tenant UUID is forwarded verbatim as X-Workspace-ID with no
+# workspace lookup; the cloud's resolver only accepts this UUID form.
+TENANT_UUID = "5ccbae40-ca03-43a2-b23d-9931eb130e22"
+
+
+def _workspace(slug: str, tenant_id: str, name: str) -> WorkspaceInfo:
+    """Build a WorkspaceInfo for workspace-resolution tests."""
+    return WorkspaceInfo(
+        tenant_id=tenant_id,
+        workspace_type="organization",
+        slug=slug,
+        name=name,
+        role="owner",
+        is_default=False,
+    )
+
+
+def _patch_available_workspaces(workspaces):
+    """Patch the workspace list fetch used when --workspace is a slug/name.
+
+    Asserts can wrap the returned mock to confirm the lookup was (or was not)
+    performed for a given invocation.
+    """
+    return patch(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        new=AsyncMock(return_value=workspaces),
+    )
+
 
 SHARE_RESPONSE = {
     "id": "11111111-1111-1111-1111-111111111111",
@@ -76,10 +106,11 @@ class TestShareCreateCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                with _patch_workspace("tenant-xyz"):
-                    result = runner.invoke(
-                        app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
-                    )
+                with _patch_workspace(TENANT_UUID):
+                    with _patch_available_workspaces([]) as fetch:
+                        result = runner.invoke(
+                            app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
+                        )
 
                 assert result.exit_code == 0
                 assert "Share link created successfully" in result.stdout
@@ -90,13 +121,15 @@ class TestShareCreateCommand:
                     "project_name": "my-project",
                     "note_permalink": "notes/my-idea",
                 }
-                # Workspace routing: the resolved tenant must travel as the
-                # X-Workspace-ID header so team-workspace projects aren't
-                # evaluated against the caller's default tenant.
-                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
+                # Workspace routing: a resolved tenant UUID travels verbatim as the
+                # X-Workspace-ID header so team-workspace projects aren't evaluated
+                # against the caller's default tenant.
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
+                # A UUID needs no resolution: the workspace list is never fetched.
+                fetch.assert_not_called()
 
-    def test_create_share_explicit_workspace_routes_header(self):
-        """--workspace overrides resolution and is passed through as the header."""
+    def test_create_share_slug_resolves_to_tenant_uuid(self):
+        """A --workspace slug is resolved to the tenant UUID before routing."""
         runner = CliRunner()
 
         mock_response = Mock(spec=httpx.Response)
@@ -116,6 +149,11 @@ class TestShareCreateCommand:
             seen["workspace"] = workspace
             return workspace
 
+        workspaces = [
+            _workspace("basic-memory-7020de4e925843c68c9056c60d101d9e", TENANT_UUID, "Acme Org"),
+            _workspace("other-slug", "11111111-1111-1111-1111-111111111111", "Other"),
+        ]
+
         with patch(
             "basic_memory.cli.commands.cloud.shares.make_api_request",
             side_effect=mock_make_api_request,
@@ -128,22 +166,168 @@ class TestShareCreateCommand:
                     "basic_memory.cli.commands.cloud.shares.resolve_configured_workspace",
                     side_effect=fake_resolve,
                 ):
-                    result = runner.invoke(
-                        app,
-                        [
-                            "cloud",
-                            "share",
-                            "create",
-                            "my-project",
-                            "notes/my-idea",
-                            "--workspace",
-                            "acme",
-                        ],
-                    )
+                    with _patch_available_workspaces(workspaces) as fetch:
+                        result = runner.invoke(
+                            app,
+                            [
+                                "cloud",
+                                "share",
+                                "create",
+                                "my-project",
+                                "notes/my-idea",
+                                "--workspace",
+                                "basic-memory-7020de4e925843c68c9056c60d101d9e",
+                            ],
+                        )
 
                 assert result.exit_code == 0
-                assert seen == {"project_name": "my-project", "workspace": "acme"}
-                assert captured["headers"] == {"X-Workspace-ID": "acme"}
+                assert seen == {
+                    "project_name": "my-project",
+                    "workspace": "basic-memory-7020de4e925843c68c9056c60d101d9e",
+                }
+                # The slug was mapped to the workspace's tenant UUID.
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
+                fetch.assert_awaited_once()
+
+    def test_create_share_display_name_resolves_case_insensitively(self):
+        """A --workspace display name resolves case-insensitively to the tenant UUID."""
+        runner = CliRunner()
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = SHARE_RESPONSE
+
+        captured = {}
+
+        async def mock_make_api_request(*args, **kwargs):
+            captured["headers"] = kwargs.get("headers")
+            return mock_response
+
+        workspaces = [_workspace("acme-slug", TENANT_UUID, "Acme Org")]
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace("acme org"):
+                    with _patch_available_workspaces(workspaces):
+                        result = runner.invoke(
+                            app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
+                        )
+
+                assert result.exit_code == 0
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
+
+    def test_create_share_tenant_id_input_passthrough(self):
+        """A tenant UUID resolved from config is forwarded without a lookup."""
+        runner = CliRunner()
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = SHARE_RESPONSE
+
+        captured = {}
+
+        async def mock_make_api_request(*args, **kwargs):
+            captured["headers"] = kwargs.get("headers")
+            return mock_response
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace(TENANT_UUID):
+                    with _patch_available_workspaces([]) as fetch:
+                        result = runner.invoke(
+                            app,
+                            [
+                                "cloud",
+                                "share",
+                                "create",
+                                "my-project",
+                                "notes/my-idea",
+                                "--workspace",
+                                TENANT_UUID,
+                            ],
+                        )
+
+                assert result.exit_code == 0
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
+                fetch.assert_not_called()
+
+    def test_create_share_ambiguous_name_errors_with_candidate_slugs(self):
+        """A display name matching multiple workspaces errors and lists candidates."""
+        runner = CliRunner()
+
+        async def mock_make_api_request(*args, **kwargs):  # pragma: no cover
+            raise AssertionError("API should not be called when workspace is ambiguous")
+
+        workspaces = [
+            _workspace("acme-prod", TENANT_UUID, "Acme"),
+            _workspace("acme-staging", "11111111-1111-1111-1111-111111111111", "Acme"),
+        ]
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace("Acme"):
+                    with _patch_available_workspaces(workspaces):
+                        result = runner.invoke(
+                            app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
+                        )
+
+                assert result.exit_code == 1
+                assert "ambiguous" in result.stdout
+                # Candidate slugs are listed so the user can disambiguate.
+                assert "acme-prod" in result.stdout
+                assert "acme-staging" in result.stdout
+                # The typer.Exit must not be re-wrapped by the broad handler.
+                assert "Unexpected error" not in result.stdout
+
+    def test_create_share_unknown_workspace_errors_with_available_slugs(self):
+        """An unknown identifier errors and lists the available workspace slugs."""
+        runner = CliRunner()
+
+        async def mock_make_api_request(*args, **kwargs):  # pragma: no cover
+            raise AssertionError("API should not be called for an unknown workspace")
+
+        workspaces = [
+            _workspace("acme-prod", TENANT_UUID, "Acme"),
+            _workspace("widget-co", "11111111-1111-1111-1111-111111111111", "Widget Co"),
+        ]
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace("does-not-exist"):
+                    with _patch_available_workspaces(workspaces):
+                        result = runner.invoke(
+                            app, ["cloud", "share", "create", "my-project", "notes/my-idea"]
+                        )
+
+                assert result.exit_code == 1
+                assert "was not found" in result.stdout
+                assert "acme-prod" in result.stdout
+                assert "widget-co" in result.stdout
+                assert "Unexpected error" not in result.stdout
 
     def test_create_share_no_workspace_sends_no_header(self):
         """When nothing resolves, no routing header is added (default tenant)."""
@@ -400,14 +584,76 @@ class TestShareListCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                with _patch_workspace("tenant-xyz"):
+                with _patch_workspace(TENANT_UUID):
                     result = runner.invoke(
                         app, ["cloud", "share", "list", "--project", "my-project"]
                     )
 
                 assert result.exit_code == 0
                 assert "project_name=my-project" in captured["url"]
-                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
+
+    def test_list_shares_unknown_workspace_errors_without_double_error(self):
+        """An unknown --workspace on list errors cleanly (no 'Unexpected error').
+
+        Exercises the list handler's typer.Exit re-raise: workspace resolution
+        raises typer.Exit, which must not be re-wrapped by the broad handler.
+        """
+        runner = CliRunner()
+
+        async def mock_make_api_request(*args, **kwargs):  # pragma: no cover
+            raise AssertionError("API should not be called for an unknown workspace")
+
+        workspaces = [_workspace("acme-prod", TENANT_UUID, "Acme")]
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace("does-not-exist"):
+                    with _patch_available_workspaces(workspaces):
+                        result = runner.invoke(app, ["cloud", "share", "list"])
+
+                assert result.exit_code == 1
+                assert "was not found" in result.stdout
+                assert "acme-prod" in result.stdout
+                assert "Unexpected error" not in result.stdout
+
+    def test_list_shares_ambiguous_slug_errors_with_candidates(self):
+        """A slug colliding across workspaces errors and lists candidates.
+
+        Exercises the slug tier of _match_workspace_identifier raising on >1 match.
+        """
+        runner = CliRunner()
+
+        async def mock_make_api_request(*args, **kwargs):  # pragma: no cover
+            raise AssertionError("API should not be called when the slug is ambiguous")
+
+        workspaces = [
+            _workspace("shared-slug", TENANT_UUID, "Acme"),
+            _workspace("shared-slug", "11111111-1111-1111-1111-111111111111", "Widget"),
+        ]
+
+        with patch(
+            "basic_memory.cli.commands.cloud.shares.make_api_request",
+            side_effect=mock_make_api_request,
+        ):
+            with patch(
+                "basic_memory.cli.commands.cloud.shares.ConfigManager",
+                return_value=_mock_config_manager(),
+            ):
+                with _patch_workspace("shared-slug"):
+                    with _patch_available_workspaces(workspaces):
+                        result = runner.invoke(app, ["cloud", "share", "list"])
+
+                assert result.exit_code == 1
+                assert "ambiguous" in result.stdout
+                assert TENANT_UUID in result.stdout
+                assert "Unexpected error" not in result.stdout
 
     def test_list_shares_project_filter_url_encoded(self):
         """Project names with query-reserved chars must be percent-encoded.
@@ -493,7 +739,7 @@ class TestShareUpdateCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                with _patch_workspace("tenant-xyz"):
+                with _patch_workspace(TENANT_UUID):
                     result = runner.invoke(
                         app,
                         ["cloud", "share", "update", "abc123", "--disable", "--workspace", "acme"],
@@ -503,7 +749,7 @@ class TestShareUpdateCommand:
                 assert "updated successfully" in result.stdout
                 assert captured["method"] == "PATCH"
                 assert captured["json_data"] == {"enabled": False}
-                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
 
     def test_update_enable(self):
         runner = CliRunner()
@@ -675,7 +921,7 @@ class TestShareRevokeCommand:
                 "basic_memory.cli.commands.cloud.shares.ConfigManager",
                 return_value=_mock_config_manager(),
             ):
-                with _patch_workspace("tenant-xyz"):
+                with _patch_workspace(TENANT_UUID):
                     result = runner.invoke(
                         app,
                         ["cloud", "share", "revoke", "abc123", "--force", "--workspace", "acme"],
@@ -685,7 +931,7 @@ class TestShareRevokeCommand:
                 assert "revoked successfully" in result.stdout
                 assert captured["method"] == "DELETE"
                 assert captured["url"].endswith("/api/shares/abc123")
-                assert captured["headers"] == {"X-Workspace-ID": "tenant-xyz"}
+                assert captured["headers"] == {"X-Workspace-ID": TENANT_UUID}
 
     def test_revoke_cancelled(self):
         runner = CliRunner()
