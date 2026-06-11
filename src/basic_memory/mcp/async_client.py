@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
 import logfire
-from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.config import ConfigManager, ProjectMode, has_cloud_credentials
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -368,7 +368,8 @@ async def get_client(
     1. Factory injection.
     2. Explicit routing flags (--local/--cloud).
     3. Per-project mode routing when project_name is provided.
-    4. Local ASGI transport by default.
+    4. Cloud routing when a workspace selector is provided.
+    5. Local ASGI transport by default.
     """
     if _client_factory:
         async with _client_factory(workspace=workspace) as client:
@@ -425,6 +426,26 @@ async def get_client(
 
         logger.debug(f"Project '{project_name}' is local mode - using ASGI client")
         async with _asgi_client(timeout) as client:
+            yield client
+        return
+
+    # --- Workspace-selector routing ---
+    # Trigger: caller passed a cloud workspace selector and nothing above routed.
+    # Why: a workspace names a cloud tenant — silently serving the request from
+    #   the local ASGI app sent writes to the wrong destination (#954: a cloud
+    #   project create either failed on the cloud-style path or landed locally).
+    # Outcome: route to the cloud proxy when credentials exist; without
+    #   credentials fail fast instead of pretending the operation succeeded.
+    if workspace is not None:
+        if not has_cloud_credentials(config):
+            raise RuntimeError(
+                f"A cloud workspace was requested ('{workspace}') but no cloud "
+                "credentials were found. Run 'bm cloud login' or "
+                "'bm cloud set-key <key>' first, or omit the workspace selector "
+                "for a local operation."
+            )
+        logger.debug(f"Workspace selector '{workspace}' provided - using cloud proxy client")
+        async with _cloud_client(config, timeout, workspace=workspace) as client:
             yield client
         return
 

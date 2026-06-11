@@ -477,10 +477,14 @@ async def _resolve_workspace_routing(
     if workspace is None:
         return None
 
-    explicit_cloud_routing = _explicit_routing() and not _force_local_mode()
+    forced_local = _explicit_routing() and _force_local_mode()
     config = ConfigManager().config
+    # Resolve whenever credentials make workspace discovery possible — not only
+    # under explicit --cloud. A workspace selector implies cloud routing
+    # (get_client routes it to the cloud proxy, #954), and the transport needs
+    # the tenant id in X-Workspace-ID, not a slug or display name.
     should_resolve_workspace = is_factory_mode() or (
-        explicit_cloud_routing and has_cloud_credentials(config)
+        has_cloud_credentials(config) and not forced_local
     )
     if not should_resolve_workspace:
         return workspace
