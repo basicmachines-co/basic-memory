@@ -25,6 +25,35 @@ from basic_memory.workspace_context import current_workspace_permalink_context
 TagType = Union[List[str], str, None]
 
 
+def _compose_workspace_project_route(
+    *,
+    workspace: Optional[str],
+    project: Optional[str],
+    project_id: Optional[str],
+) -> Optional[str]:
+    """Return the explicit project route requested by workspace/project args."""
+    if workspace is None:
+        return project
+
+    cleaned_workspace = workspace.strip().strip("/")
+    if not cleaned_workspace:
+        raise ValueError("workspace must not be empty when provided")
+    if "/" in cleaned_workspace:
+        raise ValueError("workspace must be a single workspace slug, name, or tenant_id")
+    if project_id is not None:
+        raise ValueError("workspace cannot be combined with project_id; use project_id alone")
+    if project is None or not project.strip().strip("/"):
+        raise ValueError("workspace requires an explicit project argument")
+
+    cleaned_project = project.strip().strip("/")
+    if "/" in cleaned_project:
+        raise ValueError(
+            "Use either workspace='workspace' with project='project', "
+            "or project='workspace/project', not both"
+        )
+    return f"{cleaned_workspace}/{cleaned_project}"
+
+
 @mcp.tool(
     title="Write Note",
     description="Create a markdown note. If the note already exists, returns an error by default — pass overwrite=True to replace.",
@@ -40,6 +69,7 @@ async def write_note(
         Field(validation_alias=AliasChoices("directory", "folder", "dir", "path")),
     ],
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     project_id: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
@@ -95,6 +125,8 @@ async def write_note(
                 form (or project_id) to disambiguate. If unknown, use
                 list_memory_projects() to discover available projects and their
                 qualified names.
+        workspace: Workspace slug, name, or tenant_id. When provided with `project`,
+                routes as `workspace/project`. Cannot be combined with `project_id`.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
@@ -171,6 +203,11 @@ async def write_note(
     # Why: lets users set a global default without breaking per-call overrides
     effective_overwrite = (
         overwrite if overwrite is not None else ConfigManager().config.write_note_overwrite_default
+    )
+    project = _compose_workspace_project_route(
+        workspace=workspace,
+        project=project,
+        project_id=project_id,
     )
 
     with logfire.span(
