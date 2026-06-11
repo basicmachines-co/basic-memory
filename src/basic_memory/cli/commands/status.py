@@ -190,9 +190,16 @@ async def run_status(
             if sync_report.total == 0:
                 return project_item.name, sync_report
             if time.monotonic() >= deadline:
+                # Why the hint: indexing is done by the sync coordinator, which
+                # only runs inside a live server (bm mcp / hosted API). In a
+                # CLI-only session nothing will ever drain the pending count,
+                # so this wait cannot succeed — point at the command that
+                # actually indexes (#959).
                 raise StatusTimeout(
                     f"Timed out after {timeout:g}s waiting for '{project_item.name}' "
-                    f"to finish indexing ({sync_report.total} pending change(s) remaining)."
+                    f"to finish indexing ({sync_report.total} pending change(s) remaining). "
+                    f"If no Basic Memory server is running, pending changes are never "
+                    f"indexed — run 'bm reindex --project {project_item.name}' instead."
                 )
             await asyncio.sleep(poll_interval)
 
