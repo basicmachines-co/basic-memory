@@ -229,6 +229,34 @@ async def test_zero_score_produces_zero_fused():
 
 
 @pytest.mark.asyncio
+async def test_cross_type_id_collision_keeps_both_results():
+    """An entity and a relation sharing the same numeric id stay distinct (#982).
+
+    search_index row types have independent id sequences, so fusing on a bare
+    row id merged unrelated rows into one result and dropped the other.
+    """
+    repo = ConcreteSearchRepo()
+
+    fts_results = [FakeRow(id=1, type="entity", score=5.0, title="entity-row")]
+    vector_results = [FakeRow(id=1, type="relation", score=0.8, title="relation-row")]
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(**HYBRID_KWARGS)
+
+    assert {(r.type, r.id) for r in results} == {("entity", 1), ("relation", 1)}
+    # Single-source scores must not earn the dual-source fusion bonus across types.
+    entity_result = next(r for r in results if r.type == "entity")
+    relation_result = next(r for r in results if r.type == "relation")
+    assert entity_result.score == pytest.approx(1.0, rel=1e-6)
+    assert relation_result.score == pytest.approx(0.8, rel=1e-6)
+
+
+@pytest.mark.asyncio
 async def test_fts_only_result_gets_matched_chunk_from_content_snippet():
     """FTS-only results should have matched_chunk_text populated from content_snippet."""
     repo = ConcreteSearchRepo()
