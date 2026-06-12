@@ -1934,24 +1934,25 @@ class SearchRepositoryBase(ABC):
         # Build per-search_index_row similarity scores from chunk-level results.
         # Each chunk_key encodes the search_index row type and id.
         # Track the best similarity per row (for ranking) and all chunks (for context).
-        similarity_by_si_id: dict[int, float] = {}
-        chunks_by_si_id: dict[int, list[tuple[float, str]]] = {}
+        similarity_by_si_key: dict[tuple[str, int], float] = {}
+        chunks_by_si_key: dict[tuple[str, int], list[tuple[float, str]]] = {}
         for row in vector_rows:
             chunk_key = row.get("chunk_key", "")
             distance = float(row["best_distance"])
             similarity = self._distance_to_similarity(distance)
             chunk_text = row.get("chunk_text", "")
             try:
-                _, si_id = self._parse_chunk_key(chunk_key)
+                si_type, si_id = self._parse_chunk_key(chunk_key)
             except (ValueError, IndexError):
                 # Fallback: group by entity_id for chunks without parseable keys
                 continue
-            current = similarity_by_si_id.get(si_id)
+            si_key = (si_type, si_id)
+            current = similarity_by_si_key.get(si_key)
             if current is None or similarity > current:
-                similarity_by_si_id[si_id] = similarity
-            chunks_by_si_id.setdefault(si_id, []).append((similarity, chunk_text))
+                similarity_by_si_key[si_key] = similarity
+            chunks_by_si_key.setdefault(si_key, []).append((similarity, chunk_text))
 
-        if not similarity_by_si_id:
+        if not similarity_by_si_key:
             hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
             _log_vector_summary()
             return []
@@ -1962,17 +1963,17 @@ class SearchRepositoryBase(ABC):
             min_similarity if min_similarity is not None else self._semantic_min_similarity
         )
         if effective_min_similarity > 0.0:
-            similarity_by_si_id = {
-                k: v for k, v in similarity_by_si_id.items() if v >= effective_min_similarity
+            similarity_by_si_key = {
+                k: v for k, v in similarity_by_si_key.items() if v >= effective_min_similarity
             }
-            if not similarity_by_si_id:
+            if not similarity_by_si_key:
                 hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
                 _log_vector_summary()
                 return []
 
         # Fetch the actual search_index rows
-        si_ids = list(similarity_by_si_id.keys())
-        search_index_rows = await self._fetch_search_index_rows_by_ids(si_ids)
+        si_keys = list(similarity_by_si_key.keys())
+        search_index_rows = await self._fetch_search_index_rows_by_ids(si_keys)
 
         # Apply optional filters if requested
         filter_requested = any(
@@ -2003,16 +2004,16 @@ class SearchRepositoryBase(ABC):
                 limit=VECTOR_FILTER_SCAN_LIMIT,
                 offset=0,
             )
-            # Use (id, type) tuples to avoid collisions between different
+            # Use (type, id) tuples to avoid collisions between different
             # search_index row types that share the same auto-increment id.
-            allowed_keys = {(row.id, row.type) for row in filtered_rows if row.id is not None}
+            allowed_keys = {(row.type, row.id) for row in filtered_rows if row.id is not None}
             search_index_rows = {
-                k: v for k, v in search_index_rows.items() if (v.id, v.type) in allowed_keys
+                k: v for k, v in search_index_rows.items() if (v.type, v.id) in allowed_keys
             }
 
         ranked_rows: list[SearchIndexRow] = []
-        for si_id, similarity in similarity_by_si_id.items():
-            row = search_index_rows.get(si_id)
+        for si_key, similarity in similarity_by_si_key.items():
+            row = search_index_rows.get(si_key)
             if row is None:
                 continue
 
@@ -2022,7 +2023,7 @@ class SearchRepositoryBase(ABC):
             if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
                 matched_chunk_text = content_snippet
             else:
-                si_chunks = chunks_by_si_id.get(si_id, [])
+                si_chunks = chunks_by_si_key.get(si_key, [])
                 si_chunks.sort(key=lambda c: c[0], reverse=True)
                 top_texts = [text for _, text in si_chunks[:TOP_CHUNKS_PER_RESULT]]
                 matched_chunk_text = "\n---\n".join(top_texts) if top_texts else None
@@ -2087,11 +2088,12 @@ class SearchRepositoryBase(ABC):
         return result
 
     async def _fetch_search_index_rows_by_ids(
-        self, row_ids: list[int]
-    ) -> dict[int, SearchIndexRow]:
-        """Fetch search_index rows by their primary key (id), any type."""
-        if not row_ids:
+        self, row_keys: list[tuple[str, int]]
+    ) -> dict[tuple[str, int], SearchIndexRow]:
+        """Fetch search_index rows by primary key and return them keyed by (type, id)."""
+        if not row_keys:
             return {}
+        row_ids = sorted({row_id for _, row_id in row_keys})
         placeholders = ",".join(f":id_{idx}" for idx in range(len(row_ids)))
         params: dict[str, Any] = {
             **{f"id_{idx}": rid for idx, rid in enumerate(row_ids)},
@@ -2106,11 +2108,11 @@ class SearchRepositoryBase(ABC):
             WHERE project_id = :project_id
               AND id IN ({placeholders})
         """
-        result: dict[int, SearchIndexRow] = {}
+        result: dict[tuple[str, int], SearchIndexRow] = {}
         async with db.scoped_session(self.session_maker) as session:
             row_result = await session.execute(text(sql), params)
             for row in row_result.fetchall():
-                result[row.id] = SearchIndexRow(
+                result[(row.type, row.id)] = SearchIndexRow(
                     project_id=self.project_id,
                     id=row.id,
                     title=row.title,

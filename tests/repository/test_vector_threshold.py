@@ -160,7 +160,7 @@ async def test_threshold_zero_returns_all():
             repo,
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
-            return_value={i: FakeRow(id=i) for i in range(3)},
+            return_value={("entity", i): FakeRow(id=i) for i in range(3)},
         ),
     ):
         results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
@@ -192,7 +192,7 @@ async def test_threshold_filters_low_scores():
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
             # Only entity_0 (score=0.9) passes the threshold; the fetch only gets id 0
-            return_value={0: FakeRow(id=0)},
+            return_value={("entity", 0): FakeRow(id=0)},
         ),
     ):
         results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
@@ -255,7 +255,7 @@ async def test_per_query_min_similarity_overrides_instance_default():
             repo,
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
-            return_value={i: FakeRow(id=i) for i in range(3)},
+            return_value={("entity", i): FakeRow(id=i) for i in range(3)},
         ),
     ):
         # Override to 0.0 → all results pass through despite instance default of 0.6
@@ -289,7 +289,7 @@ async def test_per_query_min_similarity_tightens_threshold():
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
             # Only id=0 (score=0.9) will be fetched after filtering
-            return_value={0: FakeRow(id=0)},
+            return_value={("entity", 0): FakeRow(id=0)},
         ),
     ):
         # Override to 0.8 → only score=0.9 passes
@@ -321,7 +321,7 @@ async def test_matched_chunk_text_populated_on_vector_results():
             repo,
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
-            return_value={i: FakeRow(id=i) for i in range(2)},
+            return_value={("entity", i): FakeRow(id=i) for i in range(2)},
         ),
     ):
         results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
@@ -331,6 +331,52 @@ async def test_matched_chunk_text_populated_on_vector_results():
     # Each entity has only 1 chunk and no content_snippet, so chunk text is used directly
     assert results[0].matched_chunk_text == "chunk text for entity:0:0"
     assert results[1].matched_chunk_text == "chunk text for entity:1:0"
+
+
+@pytest.mark.asyncio
+async def test_entity_and_relation_with_same_id_both_returned():
+    """Vector hydration keeps row type with id so entity/relation ids cannot collide."""
+    repo = ConcreteSearchRepo()
+    repo._semantic_min_similarity = 0.0
+
+    fake_rows = [
+        {
+            "chunk_key": "entity:4:0",
+            "best_distance": (1.0 / 0.9) - 1.0,
+            "chunk_text": "entity chunk",
+        },
+        {
+            "chunk_key": "relation:4:0",
+            "best_distance": (1.0 / 0.8) - 1.0,
+            "chunk_text": "relation chunk",
+        },
+    ]
+
+    mock_embed = AsyncMock(return_value=[0.0] * 384)
+    repo._embedding_provider = _fake_embedding_provider(mock_embed)
+
+    mock_fetch = AsyncMock(
+        return_value={
+            ("entity", 4): FakeRow(id=4, type="entity"),
+            ("relation", 4): FakeRow(id=4, type="relation"),
+        }
+    )
+
+    with (
+        patch(
+            "basic_memory.repository.search_repository_base.db.scoped_session",
+            fake_scoped_session,
+        ),
+        patch.object(repo, "_ensure_vector_tables", new_callable=AsyncMock),
+        patch.object(repo, "_prepare_vector_session", new_callable=AsyncMock),
+        patch.object(repo, "_run_vector_query", new_callable=AsyncMock, return_value=fake_rows),
+        patch.object(repo, "_fetch_search_index_rows_by_ids", mock_fetch),
+    ):
+        results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
+
+    mock_fetch.assert_awaited_once_with([("entity", 4), ("relation", 4)])
+    assert [(result.type, result.id) for result in results] == [("entity", 4), ("relation", 4)]
+    assert [result.matched_chunk_text for result in results] == ["entity chunk", "relation chunk"]
 
 
 def _make_multi_chunk_vector_rows(si_id: int, scores: list[float]) -> list[dict]:
@@ -379,7 +425,7 @@ async def test_top_n_chunks_joined_in_matched_chunk_text():
             repo,
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
-            return_value={0: FakeRow(id=0, content_snippet=large_content)},
+            return_value={("entity", 0): FakeRow(id=0, content_snippet=large_content)},
         ),
     ):
         results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
@@ -423,7 +469,7 @@ async def test_small_note_returns_full_content_as_matched_chunk():
             repo,
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
-            return_value={0: FakeRow(id=0, content_snippet=small_content)},
+            return_value={("entity", 0): FakeRow(id=0, content_snippet=small_content)},
         ),
     ):
         results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
@@ -457,7 +503,7 @@ async def test_large_note_returns_chunks_not_full_content():
             repo,
             "_fetch_search_index_rows_by_ids",
             new_callable=AsyncMock,
-            return_value={0: FakeRow(id=0, content_snippet=large_content)},
+            return_value={("entity", 0): FakeRow(id=0, content_snippet=large_content)},
         ),
     ):
         results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
