@@ -395,16 +395,17 @@ def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fals
     permalink = result.get("permalink", "")
     content = result.get("content", "")
 
-    header = f"{title}  [{permalink}]" if permalink else title
-    print(header)
-
-    print()
     # Trigger: --include-frontmatter makes the API return the literal file
     # (frontmatter block included) as content.
-    # Why: plain mode should show that file verbatim -- synthesizing a separate
-    #      key/value block would print the frontmatter twice.
-    # Outcome: with the flag, the body IS the frontmatter view; either way trim
-    #      surrounding newlines so the header gap stays a single blank line.
+    # Why: plain mode should show that file verbatim -- the file's own
+    #      frontmatter already carries title/permalink, so a header line and a
+    #      synthesized key/value block would both duplicate it.
+    # Outcome: with the flag, emit ONLY the file; without it, a title/permalink
+    #      header then the body, trimmed to keep the gap a single blank line.
+    if not include_frontmatter:
+        header = f"{title}  [{permalink}]" if permalink else title
+        print(header)
+        print()
     body = content.strip("\n") if content else ""
     if body:
         print(body)

@@ -784,10 +784,11 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
     result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--include-frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    # The literal file: fences and YAML lines exactly as stored
-    assert "---\ntitle: Test Note\ntags:\n- test\n---" in result.output
+    # ONLY the literal file: no header line, output starts at the fence
+    assert "Test Note  [notes/test-note]" not in result.output
+    assert result.output.startswith("---\ntitle: Test Note\ntags:\n- test\n---")
     assert "hello world" in result.output
-    # No duplicated frontmatter from a synthesized block
+    # No duplicated frontmatter from a synthesized block or header
     assert result.output.count("title: Test Note") == 1
 
 
