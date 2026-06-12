@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
 from annotated_types import MinLen, MaxLen
-from dateparser import parse
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator, computed_field
 
@@ -92,6 +91,10 @@ def parse_timeframe(timeframe: str) -> datetime:
         parse_timeframe('1d') -> 2025-06-04 14:50:00-07:00 (24 hours ago with local timezone)
         parse_timeframe('1 week ago') -> 2025-05-29 14:50:00-07:00 (1 week ago with local timezone)
     """
+    # Deferred: dateparser costs ~0.13s to import; schemas load on every CLI
+    # start, but timeframe parsing only happens per request (#886).
+    from dateparser import parse
+
     if timeframe.lower() == "today":
         # For "today", return 1 day ago to ensure we capture recent activity across timezones
         # This handles the case where client and server are in different timezones

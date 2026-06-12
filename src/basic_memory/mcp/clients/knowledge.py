@@ -8,7 +8,10 @@ from typing import Any
 from httpx import AsyncClient
 
 import logfire
-from basic_memory.mcp.tools.utils import call_get, call_post, call_put, call_patch, call_delete
+
+# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
+# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# so each method defers the import to call time instead (#886).
 from basic_memory.schemas.response import (
     EntityResponse,
     DeleteEntitiesResponse,
@@ -57,6 +60,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         with logfire.span(
             "mcp.client.knowledge.create_entity",
             client_name="knowledge",
@@ -89,6 +94,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_put
+
         with logfire.span(
             "mcp.client.knowledge.update_entity",
             client_name="knowledge",
@@ -116,6 +123,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the entity is not found or request fails
         """
+        from basic_memory.mcp.tools.utils import call_get
+
         with logfire.span(
             "mcp.client.knowledge.get_entity",
             client_name="knowledge",
@@ -147,6 +156,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_patch
+
         with logfire.span(
             "mcp.client.knowledge.patch_entity",
             client_name="knowledge",
@@ -174,6 +185,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the entity is not found or request fails
         """
+        from basic_memory.mcp.tools.utils import call_delete
+
         with logfire.span(
             "mcp.client.knowledge.delete_entity",
             client_name="knowledge",
@@ -201,6 +214,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_put
+
         with logfire.span(
             "mcp.client.knowledge.move_entity",
             client_name="knowledge",
@@ -231,6 +246,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         with logfire.span(
             "mcp.client.knowledge.move_directory",
             client_name="knowledge",
@@ -261,6 +278,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         with logfire.span(
             "mcp.client.knowledge.delete_directory",
             client_name="knowledge",
@@ -290,6 +309,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the file does not exist on disk or indexing fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         with logfire.span(
             "mcp.client.knowledge.sync_file",
             client_name="knowledge",
@@ -309,6 +330,8 @@ class KnowledgeClient:
 
     async def get_orphans(self) -> list[GraphNode]:
         """Get entities that have no incoming or outgoing relations."""
+        from basic_memory.mcp.tools.utils import call_get
+
         with logfire.span(
             "mcp.client.knowledge.get_orphans",
             client_name="knowledge",
@@ -338,6 +361,8 @@ class KnowledgeClient:
         Raises:
             ToolError: If the identifier cannot be resolved
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         with logfire.span(
             "mcp.client.knowledge.resolve_entity",
             client_name="knowledge",

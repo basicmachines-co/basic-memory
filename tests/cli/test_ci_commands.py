@@ -219,8 +219,8 @@ def test_setup_does_not_partially_write_generated_files_when_target_exists(
     mock_seed.assert_not_awaited()
 
 
-@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
-@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
 async def test_seed_project_update_schemas_skips_existing_notes_by_default(
     mock_write: AsyncMock,
     mock_search: AsyncMock,
@@ -235,8 +235,8 @@ async def test_seed_project_update_schemas_skips_existing_notes_by_default(
     mock_write.assert_not_awaited()
 
 
-@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
-@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
 async def test_seed_project_update_schemas_refreshes_existing_notes(
     mock_write: AsyncMock,
     mock_search: AsyncMock,
@@ -327,8 +327,8 @@ def test_agent_schema_command_writes_schema(tmp_path: Path) -> None:
     assert schema["title"] == "AgentSynthesis"
 
 
-@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
-@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
 def test_publish_command_upserts_project_update_note(
     mock_write: AsyncMock,
     mock_search: AsyncMock,
@@ -401,8 +401,8 @@ def test_publish_command_upserts_project_update_note(
     )
 
 
-@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
-@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
 def test_publish_command_preserves_existing_note_path_for_idempotency_match(
     mock_write: AsyncMock,
     mock_search: AsyncMock,
@@ -464,8 +464,8 @@ def test_publish_command_preserves_existing_note_path_for_idempotency_match(
     assert kwargs["directory"] == "custom/project-updates"
 
 
-@patch("basic_memory.cli.commands.ci.mcp_search_notes", new_callable=AsyncMock)
-@patch("basic_memory.cli.commands.ci.mcp_write_note", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
+@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
 def test_publish_command_uses_project_id_without_workspace_qualifying_project(
     mock_write: AsyncMock,
     mock_search: AsyncMock,

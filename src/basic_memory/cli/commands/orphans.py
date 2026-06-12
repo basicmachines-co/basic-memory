@@ -5,7 +5,6 @@ from typing import Annotated, Optional
 
 import typer
 from loguru import logger
-from mcp.server.fastmcp.exceptions import ToolError
 from rich.console import Console
 from rich.table import Table
 
@@ -49,6 +48,9 @@ def orphans(
     their relations removed.
     """
     from basic_memory.cli.commands.command_utils import run_with_cleanup
+
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
 
     try:
         validate_routing_flags(local, cloud)

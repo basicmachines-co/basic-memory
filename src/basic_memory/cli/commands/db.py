@@ -1,24 +1,27 @@
 """Database management commands."""
 
+# PEP 563 lazy annotations let signatures reference IndexProgress without importing
+# the indexing stack at module load; reset/reindex import their heavy database and
+# sync dependencies at call time so CLI startup stays fast (#886).
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import TYPE_CHECKING
 
 import psutil
 import typer
 from loguru import logger
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from sqlalchemy.exc import OperationalError
 
-from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
-from basic_memory.indexing import IndexProgress
-from basic_memory.repository import ProjectRepository
-from basic_memory.services.initialization import reconcile_projects_with_config
-from basic_memory.sync.sync_service import get_sync_service
+
+if TYPE_CHECKING:
+    from basic_memory.indexing import IndexProgress
 
 console = Console()
 
@@ -159,6 +162,13 @@ async def _reindex_projects(app_config):
     This ensures all database operations use the same event loop,
     and proper cleanup happens when the function completes.
     """
+    # Deferred: SQLAlchemy, repositories, and the sync stack load only when a
+    # reindex actually runs, not on every CLI start (#886).
+    from basic_memory import db
+    from basic_memory.repository import ProjectRepository
+    from basic_memory.services.initialization import reconcile_projects_with_config
+    from basic_memory.sync.sync_service import get_sync_service
+
     try:
         await reconcile_projects_with_config(app_config)
 
@@ -197,6 +207,12 @@ def reset(
     ),
 ):  # pragma: no cover
     """Reset database (drop all tables and recreate)."""
+    # Deferred: SQLAlchemy and the db module load only when a reset actually
+    # runs, not on every CLI start (#886).
+    from sqlalchemy.exc import OperationalError
+
+    from basic_memory import db
+
     console.print(
         "[yellow]Note:[/yellow] This only deletes the index database. "
         "Your markdown note files will not be affected.\n"
@@ -320,10 +336,15 @@ async def _reindex(
     project: str | None,
 ):
     """Run reindex operations."""
-    from basic_memory.repository import EntityRepository
+    # Deferred: SQLAlchemy, repositories, and the sync stack load only when a
+    # reindex actually runs, not on every CLI start (#886).
+    from basic_memory import db
+    from basic_memory.repository import EntityRepository, ProjectRepository
     from basic_memory.repository.search_repository import create_search_repository
+    from basic_memory.services.initialization import reconcile_projects_with_config
     from basic_memory.services.search_service import SearchService
     from basic_memory.services.file_service import FileService
+    from basic_memory.sync.sync_service import get_sync_service
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown.entity_parser import EntityParser
 

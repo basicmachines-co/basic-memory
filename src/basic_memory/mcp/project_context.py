@@ -8,10 +8,24 @@ The resolve_project_parameter function is a thin wrapper for backwards
 compatibility with existing MCP tools.
 """
 
+# PEP 563 lazy annotations keep `Context` usable in signatures without importing
+# fastmcp at module load — the fastmcp/mcp stack costs ~0.5s of CLI startup (#886).
+from __future__ import annotations
+
 import asyncio
 from contextlib import asynccontextmanager, nullcontext
+from typing import (
+    TYPE_CHECKING,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    cast,
+)
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Awaitable, Callable, List, Optional, Sequence, Tuple, cast
 from uuid import UUID
 
 from httpx import AsyncClient
@@ -19,8 +33,6 @@ from httpx._types import (
     HeaderTypes,
 )
 from loguru import logger
-from fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
 
 import logfire
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, has_cloud_credentials
@@ -45,6 +57,9 @@ from basic_memory.workspace_context import (
     current_workspace_permalink_context,
     workspace_permalink_context,
 )
+
+if TYPE_CHECKING:
+    from fastmcp import Context
 
 # --- Workspace provider injection ---
 # Mirrors the set_client_factory() pattern in async_client.py.
@@ -1332,6 +1347,9 @@ async def resolve_project_and_path(
         # Why: allow project-scoped memory URLs without requiring a separate project parameter
         # Outcome: attempt to resolve the prefix as a project and route to it
         if project_prefix:
+            # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+            from mcp.server.fastmcp.exceptions import ToolError
+
             if cached_project and _project_matches_identifier(cached_project, project_prefix):
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
                 if resolved_project and generate_permalink(resolved_project) != generate_permalink(
@@ -1557,6 +1575,9 @@ async def get_project_client(
         get_client,
         is_factory_mode,
     )
+
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
 
     # When project_id (UUID) is provided, prefer it as the resolution identifier.
     # external_id is unambiguous across workspaces; project name can collide.

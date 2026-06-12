@@ -7,7 +7,9 @@ from typing import Optional, Any
 
 from httpx import AsyncClient
 
-from basic_memory.mcp.tools.utils import call_get
+# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
+# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# so each method defers the import to call time instead (#886).
 
 
 class DirectoryClient:
@@ -55,6 +57,8 @@ class DirectoryClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_get
+
         params: dict = {
             "dir_name": dir_name,
             "depth": depth,

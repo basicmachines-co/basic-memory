@@ -5,7 +5,6 @@ import json
 import time
 from typing import Annotated, Dict, Optional, Set
 
-from mcp.server.fastmcp.exceptions import ToolError
 import typer
 from loguru import logger
 from rich.console import Console
@@ -230,6 +229,9 @@ def status(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     from basic_memory.cli.commands.command_utils import run_with_cleanup
+
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
 
     # Trigger: --wait with a negative --timeout
     # Why: a negative deadline times out on the very first poll, producing a confusing

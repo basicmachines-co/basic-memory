@@ -7,13 +7,9 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from basic_memory.mcp.tools.utils import (
-    call_delete,
-    call_get,
-    call_patch,
-    call_post,
-    call_put,
-)
+# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
+# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# so each method defers the import to call time instead (#886).
 from basic_memory.schemas import ProjectInfoResponse, SyncReportResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
@@ -53,6 +49,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_get
+
         response = await call_get(
             self.http_client,
             "/v2/projects/",
@@ -71,6 +69,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         response = await call_post(
             self.http_client,
             "/v2/projects/",
@@ -93,6 +93,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_delete
+
         url = f"/v2/projects/{project_external_id}"
         if delete_notes:
             url += "?delete_notes=true"
@@ -114,6 +116,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         response = await call_post(
             self.http_client,
             "/v2/projects/resolve",
@@ -133,6 +137,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_put
+
         response = await call_put(
             self.http_client,
             f"/v2/projects/{project_external_id}/default",
@@ -154,6 +160,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_patch
+
         response = await call_patch(
             self.http_client,
             f"/v2/projects/{project_external_id}",
@@ -181,6 +189,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         url = f"/v2/projects/{project_external_id}/sync"
         params = []
         if force_full:
@@ -204,6 +214,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         response = await call_post(
             self.http_client,
             f"/v2/projects/{project_external_id}/status",
@@ -222,6 +234,8 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_get
+
         response = await call_get(
             self.http_client,
             f"/v2/projects/{project_external_id}/info",

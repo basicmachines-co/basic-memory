@@ -86,6 +86,46 @@ def test_bm_version_does_not_import_heavy_modules():
     )
 
 
+def test_bm_cli_import_does_not_load_heavy_stack():
+    """Regression test (#886): registering all CLI commands must stay lightweight.
+
+    Importing basic_memory.cli.main with a normal argv registers every command
+    module. None of them may pull FastAPI, the API app, SQLAlchemy/Alembic, the
+    MCP tool stack, or the markdown/services layers in at import time — those
+    must load lazily when a command actually runs.
+    """
+    heavy_modules = (
+        "fastapi",
+        "sqlalchemy",
+        "alembic",
+        "fastmcp",
+        "mcp",
+        "basic_memory.api.app",
+        "basic_memory.db",
+        "basic_memory.markdown",
+        "basic_memory.mcp.tools",
+        "basic_memory.services",
+    )
+    check_script = (
+        "import sys; "
+        "sys.argv = ['bm', 'tool', 'search-notes', '--help']; "
+        "import basic_memory.cli.main; "
+        f"heavy = [m for m in {heavy_modules!r} if m in sys.modules]; "
+        "print(','.join(heavy) if heavy else 'CLEAN')"
+    )
+    result = subprocess.run(
+        ["uv", "run", "python", "-c", check_script],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        cwd=Path(__file__).parent.parent.parent,
+    )
+    assert result.returncode == 0
+    assert "CLEAN" in result.stdout, (
+        f"Heavy modules loaded during CLI import: {result.stdout.strip()}"
+    )
+
+
 def test_bm_help_does_not_import_api_app():
     """Regression test: 'bm --help' must not build the FastAPI app graph."""
     check_script = (

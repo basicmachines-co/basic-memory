@@ -34,8 +34,10 @@ from basic_memory.ci.project_updates import (
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.mcp.tools import search_notes as mcp_search_notes
-from basic_memory.mcp.tools import write_note as mcp_write_note
+
+# MCP tool functions are imported inside the async helpers below: importing
+# basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
+# SQLAlchemy), which would slow every CLI invocation, including --help (#886).
 
 
 console = Console()
@@ -252,6 +254,10 @@ async def seed_project_update_schemas(
     refresh: bool = False,
 ) -> list[str]:
     """Seed Auto BM schema notes without overwriting customized schemas."""
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import search_notes as mcp_search_notes
+    from basic_memory.mcp.tools import write_note as mcp_write_note
+
     seeded: list[str] = []
     routed_project = _routed_project(project=project, project_id=project_id, workspace=workspace)
     for spec in schema_seed_specs():
@@ -295,6 +301,10 @@ async def publish_project_update_note(
     note: ProjectUpdateNote,
 ) -> dict[str, Any]:
     """Search by idempotency key and then upsert the deterministic note path."""
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import search_notes as mcp_search_notes
+    from basic_memory.mcp.tools import write_note as mcp_write_note
+
     routed_project = _routed_project(
         project=config.project,
         project_id=config.project_id,

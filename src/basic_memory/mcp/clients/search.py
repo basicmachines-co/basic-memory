@@ -8,7 +8,10 @@ from typing import Any
 from httpx import AsyncClient
 
 import logfire
-from basic_memory.mcp.tools.utils import call_post
+
+# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
+# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# so each method defers the import to call time instead (#886).
 from basic_memory.schemas.search import SearchResponse
 
 
@@ -57,6 +60,8 @@ class SearchClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         with logfire.span(
             "mcp.client.search.search",
             client_name="search",
