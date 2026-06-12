@@ -446,6 +446,41 @@ async def test_resolve_project_not_found(client: AsyncClient, v2_projects_url):
 
 
 @pytest.mark.asyncio
+async def test_resolve_project_not_found_fresh_install_names_setup_command(
+    client: AsyncClient, v2_projects_url, project_repository
+):
+    """#974 follow-up: a fresh install fails its first read with a bare not-found.
+
+    config.json bootstraps a "main" default before any reconciliation has created
+    database rows (the one-shot CLI never runs the server lifespan), so resolving
+    the configured default 404s. With an empty projects table the error must point
+    at first-run setup instead of reading like a broken install.
+    """
+    for project in await project_repository.find_all():
+        await project_repository.delete(project.id)
+
+    response = await client.post(f"{v2_projects_url}/resolve", json={"identifier": "main"})
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail.startswith("Project not found: 'main'")
+    assert "basic-memory project add" in detail
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_not_found_with_projects_keeps_plain_message(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """A miss against a populated projects table stays a plain not-found."""
+    response = await client.post(
+        f"{v2_projects_url}/resolve", json={"identifier": "nonexistent-project"}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found: 'nonexistent-project'"
+
+
+@pytest.mark.asyncio
 async def test_resolve_project_empty_identifier(client: AsyncClient, v2_projects_url):
     """Test resolving with empty identifier returns 422."""
     resolve_data = {"identifier": ""}

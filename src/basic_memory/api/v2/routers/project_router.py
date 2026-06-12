@@ -320,7 +320,20 @@ async def resolve_project_identifier(
     )
 
     if not project:
-        raise HTTPException(status_code=404, detail=f"Project not found: '{data.identifier}'")
+        detail = f"Project not found: '{data.identifier}'"
+        # Trigger: resolution missed and the projects table is empty.
+        # Why: a fresh install bootstraps config.json's default project before any
+        #      reconciliation has created database rows (the one-shot CLI never runs
+        #      the server lifespan), so the first read fails on the configured
+        #      default and the bare not-found message reads as a broken install
+        #      rather than a missing first-run step (#974 follow-up).
+        # Outcome: the error names the setup command instead.
+        if not await project_repository.find_all(limit=1, use_load_options=False):
+            detail = (
+                f"{detail}. No projects are set up yet — run "
+                "'basic-memory project add <name> <path>' to create one."
+            )
+        raise HTTPException(status_code=404, detail=detail)
 
     return ProjectResolveResponse(
         external_id=project.external_id,
