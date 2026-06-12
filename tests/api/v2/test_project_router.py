@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from basic_memory.config import ProjectEntry
 from basic_memory.models import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
@@ -52,6 +53,46 @@ async def test_get_project_by_id_not_found(client: AsyncClient, v2_projects_url)
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_add_project_response_reflects_promoted_default(
+    client: AsyncClient,
+    v2_projects_url,
+    app_config,
+    config_manager,
+    config_home,
+    project_repository,
+):
+    """Regression #974/#985: POST response should echo persisted default promotion."""
+    main_home = config_home / "basic-memory"
+    main_home.mkdir(parents=True, exist_ok=True)
+    qa_path = config_home / "qa-notes"
+    qa_path.mkdir(parents=True, exist_ok=True)
+
+    fresh_config = app_config.model_copy(
+        update={
+            "projects": {"main": ProjectEntry(path=str(main_home))},
+            "default_project": "main",
+        }
+    )
+    config_manager.save_config(fresh_config)
+
+    for project in await project_repository.find_all():
+        await project_repository.delete(project.id)
+
+    response = await client.post(
+        f"{v2_projects_url}/",
+        json={"name": "qa", "path": str(qa_path), "set_default": False},
+    )
+
+    assert response.status_code == 201
+    status_response = ProjectStatusResponse.model_validate(response.json())
+    assert status_response.status == "success"
+    assert status_response.default is True
+    new_project = _project_item(status_response.new_project)
+    assert new_project.name == "qa"
+    assert new_project.is_default is True
 
 
 @pytest.mark.asyncio

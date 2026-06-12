@@ -193,7 +193,7 @@ async def add_project(
         return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
             message=f"Project '{new_project.name}' added successfully",
             status="success",
-            default=project_data.set_default,
+            default=new_project.is_default or False,
             new_project=ProjectItem(
                 id=new_project.id,
                 external_id=new_project.external_id,
