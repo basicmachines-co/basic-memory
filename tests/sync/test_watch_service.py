@@ -71,15 +71,18 @@ async def _register_local_projects(
 
 @pytest.mark.asyncio
 async def test_select_projects_to_watch_returns_all_when_unconstrained(
-    app_config: BasicMemoryConfig, project_repository
+    app_config: BasicMemoryConfig, project_repository, tmp_path
 ):
     """Without a --project constraint, every active project is watched."""
+    # Use tmp_path so the project paths are OS-absolute on Windows too — a
+    # POSIX-style "/tmp/alpha" is not absolute on Windows (no drive letter),
+    # and _select_projects_to_watch now skips non-absolute paths (issue #949).
     await _register_local_projects(
         app_config,
         project_repository,
         [
-            {"name": "project-alpha", "path": "/tmp/alpha"},
-            {"name": "project-beta", "path": "/tmp/beta"},
+            {"name": "project-alpha", "path": str(tmp_path / "alpha")},
+            {"name": "project-beta", "path": str(tmp_path / "beta")},
         ],
     )
 
@@ -94,7 +97,7 @@ async def test_select_projects_to_watch_returns_all_when_unconstrained(
 
 @pytest.mark.asyncio
 async def test_select_projects_to_watch_filters_to_constrained_project(
-    app_config: BasicMemoryConfig, project_repository
+    app_config: BasicMemoryConfig, project_repository, tmp_path
 ):
     """With ``constrained_project`` set, only that project is returned.
 
@@ -106,8 +109,8 @@ async def test_select_projects_to_watch_filters_to_constrained_project(
         app_config,
         project_repository,
         [
-            {"name": "project-alpha", "path": "/tmp/alpha"},
-            {"name": "project-beta", "path": "/tmp/beta"},
+            {"name": "project-alpha", "path": str(tmp_path / "alpha")},
+            {"name": "project-beta", "path": str(tmp_path / "beta")},
         ],
     )
 
@@ -124,13 +127,13 @@ async def test_select_projects_to_watch_filters_to_constrained_project(
 
 @pytest.mark.asyncio
 async def test_select_projects_to_watch_empty_when_constrained_project_missing(
-    app_config: BasicMemoryConfig, project_repository
+    app_config: BasicMemoryConfig, project_repository, tmp_path
 ):
     """An unknown constraint yields an empty watch set rather than watching everything."""
     await _register_local_projects(
         app_config,
         project_repository,
-        [{"name": "project-alpha", "path": "/tmp/alpha"}],
+        [{"name": "project-alpha", "path": str(tmp_path / "alpha")}],
     )
 
     service = WatchService(
