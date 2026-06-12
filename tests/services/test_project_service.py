@@ -435,6 +435,52 @@ async def test_add_project_with_set_default_false(project_service: ProjectServic
 
 
 @pytest.mark.asyncio
+async def test_add_project_promotes_when_config_default_missing_from_db(
+    config_home, app_config, config_manager, engine_factory
+):
+    """Regression #974: config default exists only in config, not DB — promote on add."""
+    from basic_memory import config as config_module
+    from basic_memory.config import ProjectConfig, ProjectEntry
+    from basic_memory.markdown.entity_parser import EntityParser
+    from basic_memory.markdown.markdown_processor import MarkdownProcessor
+    from basic_memory.repository.project_repository import ProjectRepository
+    from basic_memory.services.file_service import FileService
+
+    config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
+
+    main_home = config_home / "basic-memory"
+    main_home.mkdir(parents=True, exist_ok=True)
+    qa_path = config_home / "qa-notes"
+    qa_path.mkdir(parents=True, exist_ok=True)
+
+    fresh_config = app_config.model_copy(
+        update={
+            "projects": {"main": ProjectEntry(path=str(main_home))},
+            "default_project": "main",
+        }
+    )
+    config_manager.save_config(fresh_config)
+
+    _, session_maker = engine_factory
+    repo = ProjectRepository(session_maker)
+    for project in await repo.find_all():
+        await repo.delete(project.id)
+
+    file_service = FileService(qa_path, MarkdownProcessor(EntityParser(qa_path)))
+    service = ProjectService(repository=repo, file_service=file_service)
+
+    await service.add_project("qa", str(qa_path), set_default=False)
+
+    assert service.default_project == "qa"
+    qa_project = await repo.get_by_name("qa")
+    assert qa_project is not None
+    assert qa_project.is_default is True
+    assert await repo.get_by_name("main") is None
+
+
+@pytest.mark.asyncio
 async def test_add_project_default_parameter_omitted(project_service: ProjectService):
     """Test adding a project without set_default parameter defaults to False behavior."""
     test_project_name = f"test-default-omitted-{os.urandom(4).hex()}"

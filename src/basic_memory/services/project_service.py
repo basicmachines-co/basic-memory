@@ -256,6 +256,19 @@ class ProjectService:
             await self.repository.set_as_default(created_project.id)
             self.config_manager.set_default_project(name)
             logger.info(f"Project '{name}' set as default")
+        else:
+            config_default = self.config_manager.default_project
+            if config_default is not None:
+                db_default_project = await self.repository.get_by_name(config_default)
+                if db_default_project is None:
+                    await self.repository.set_as_default(created_project.id)
+                    self.config_manager.set_default_project(name)
+                    logger.info(
+                        "Promoted project '%s' to default because configured default '%s' "
+                        "is missing from database",
+                        name,
+                        config_default,
+                    )
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 
