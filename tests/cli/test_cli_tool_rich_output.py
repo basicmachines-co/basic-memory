@@ -28,6 +28,16 @@ READ_NOTE_RESULT = {
     "frontmatter": {"title": "Test Note", "tags": ["test"]},
 }
 
+# With --include-frontmatter the API returns the LITERAL FILE as content
+# (frontmatter block included) alongside the parsed frontmatter dict.
+READ_NOTE_RESULT_WITH_FRONTMATTER = {
+    "title": "Test Note",
+    "permalink": "notes/test-note",
+    "file_path": "notes/Test Note.md",
+    "content": "---\ntitle: Test Note\ntags:\n- test\n---\n\n# Test Note\n\nhello world",
+    "frontmatter": {"title": "Test Note", "tags": ["test"]},
+}
+
 SEARCH_RESULT = {
     # Real SearchResponse.model_dump() uses "current_page", not "page".
     # No "query" key in the response -- the query comes from the CLI argument.
@@ -436,24 +446,29 @@ def test_recent_activity_non_tty_gives_json(mock_mcp):
 @patch(
     "basic_memory.cli.commands.tool.mcp_read_note",
     new_callable=AsyncMock,
-    return_value=READ_NOTE_RESULT,
+    return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
 )
 def test_read_note_rich_include_frontmatter(mock_mcp):
-    """read-note --include-frontmatter renders frontmatter keys in Rich path.
+    """read-note --include-frontmatter renders the panel once, not twice.
 
-    Regression: previously the Rich renderer silently dropped frontmatter even
-    when --include-frontmatter was passed, requiring --json to see the data.
+    Regression 1: the Rich renderer silently dropped frontmatter even with the
+    flag. Regression 2: with the flag, content is the LITERAL FILE, so the
+    frontmatter block must be stripped from the Markdown body or it renders
+    again under the panel.
     """
     result = _tty_runner(["tool", "read-note", "test-note", "--include-frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    # Frontmatter section header should appear
+    # Frontmatter panel appears with key/value data
     assert "frontmatter" in result.output
-    # The frontmatter key and value from READ_NOTE_RESULT should be visible
     assert "tags" in result.output
     assert "test" in result.output
-    # The note content should still appear
+    # The note content still appears
     assert "hello world" in result.output
+    # The frontmatter block is NOT rendered a second time through Markdown:
+    # the raw fence is stripped, and the title key appears only in the panel.
+    assert "---" not in result.output
+    assert result.output.count("title") == 1
 
 
 @patch(
@@ -758,16 +773,22 @@ def test_read_note_plain_output(mock_mcp):
 @patch(
     "basic_memory.cli.commands.tool.mcp_read_note",
     new_callable=AsyncMock,
-    return_value=READ_NOTE_RESULT,
+    return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
 )
 def test_read_note_plain_include_frontmatter(mock_mcp):
-    """read-note --plain --include-frontmatter renders key: value lines."""
+    """read-note --plain --include-frontmatter shows the literal file, once.
+
+    With the flag, content IS the file (frontmatter block included); plain mode
+    prints it verbatim and must not prepend a synthesized key/value block.
+    """
     result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--include-frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert "title: Test Note" in result.output
-    assert "tags:" in result.output
+    # The literal file: fences and YAML lines exactly as stored
+    assert "---\ntitle: Test Note\ntags:\n- test\n---" in result.output
     assert "hello world" in result.output
+    # No duplicated frontmatter from a synthesized block
+    assert result.output.count("title: Test Note") == 1
 
 
 @patch(

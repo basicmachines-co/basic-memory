@@ -36,6 +36,7 @@ from rich.tree import Tree
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager
+from basic_memory.file_utils import has_frontmatter, remove_frontmatter
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 
 # MCP tool functions are imported inside each command: importing
@@ -206,8 +207,16 @@ def _display_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fa
             fm_table.add_row(markup_escape(str(key)), markup_escape(str(value)))
         console.print(Panel(fm_table, title="[dim]frontmatter[/dim]", expand=False))
 
-    if content:
-        console.print(Markdown(content))
+    # Trigger: --include-frontmatter makes the API return the literal file, so
+    # content starts with the frontmatter block the panel above already shows.
+    # Why: rendering it again through Markdown duplicates the frontmatter (and
+    #      Markdown mangles the --- fences into rules/headings).
+    # Outcome: strip the block from the body; the panel is the frontmatter view.
+    body = content
+    if include_frontmatter and content and has_frontmatter(content):
+        body = remove_frontmatter(content)
+    if body and body.strip():
+        console.print(Markdown(body))
     else:
         console.print(Text("(no content)", style="dim"))
 
@@ -377,24 +386,17 @@ def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fals
     title = result.get("title", "")
     permalink = result.get("permalink", "")
     content = result.get("content", "")
-    frontmatter: dict[str, Any] = result.get("frontmatter") or {}
 
     header = f"{title}  [{permalink}]" if permalink else title
     print(header)
 
-    # Trigger: --include-frontmatter was passed and the payload carries frontmatter.
-    # Why: the JSON payload always includes a "frontmatter" key, so the flag (not
-    #      mere presence) gates whether the key/value block is printed -- matching
-    #      the Rich path's gating behavior.
-    # Outcome: a blank line then "key: value" lines above the body.
-    if include_frontmatter and frontmatter:
-        print()
-        for key, value in frontmatter.items():
-            print(f"{key}: {value}")
-
     print()
-    # The API's content field keeps the blank line left by frontmatter
-    # stripping; trim newlines so the header gap stays a single blank line.
+    # Trigger: --include-frontmatter makes the API return the literal file
+    # (frontmatter block included) as content.
+    # Why: plain mode should show that file verbatim -- synthesizing a separate
+    #      key/value block would print the frontmatter twice.
+    # Outcome: with the flag, the body IS the frontmatter view; either way trim
+    #      surrounding newlines so the header gap stays a single blank line.
     body = content.strip("\n") if content else ""
     if body:
         print(body)
