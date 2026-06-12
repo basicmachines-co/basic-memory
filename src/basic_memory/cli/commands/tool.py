@@ -393,8 +393,11 @@ def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fals
             print(f"{key}: {value}")
 
     print()
-    if content:
-        print(content)
+    # The API's content field keeps the blank line left by frontmatter
+    # stripping; trim newlines so the header gap stays a single blank line.
+    body = content.strip("\n") if content else ""
+    if body:
+        print(body)
     else:
         print("(no content)")
 
