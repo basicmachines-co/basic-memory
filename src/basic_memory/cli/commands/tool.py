@@ -389,28 +389,20 @@ def _plain_search_results(result: dict[str, Any], query: str = "") -> None:
             print(f"    {snippet}")
 
 
-def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
-    """Render read-note as a plain title/permalink header, optional frontmatter, then body."""
-    title = result.get("title", "")
-    permalink = result.get("permalink", "")
-    content = result.get("content", "")
+def _plain_read_note(result: dict[str, Any]) -> None:
+    """Render read-note content faithfully: the note body, or the literal file.
 
-    # Trigger: --include-frontmatter makes the API return the literal file
-    # (frontmatter block included) as content.
-    # Why: plain mode should show that file verbatim -- the file's own
-    #      frontmatter already carries title/permalink, so a header line and a
-    #      synthesized key/value block would both duplicate it.
-    # Outcome: with the flag, emit ONLY the file; without it, a title/permalink
-    #      header then the body, trimmed to keep the gap a single blank line.
-    if not include_frontmatter:
-        header = f"{title}  [{permalink}]" if permalink else title
-        print(header)
-        print()
+    Plain mode adds NO decoration: no header line, no synthesized frontmatter
+    block, no placeholder for empty notes. Without --include-frontmatter the
+    API returns the note body; with it, the literal file (frontmatter block
+    included). Either is printed verbatim, trimmed only of the surrounding
+    newline artifacts the API keeps from frontmatter stripping, so the output
+    round-trips (e.g. ``read-note X --plain --include-frontmatter > note.md``).
+    """
+    content = result.get("content", "")
     body = content.strip("\n") if content else ""
     if body:
         print(body)
-    else:
-        print("(no content)")
 
 
 def _plain_build_context(result: dict[str, Any]) -> None:
@@ -679,7 +671,7 @@ def read_note(
         if mode == "json" or isinstance(result, str):
             _print_json(result)
         elif mode == "plain":
-            _plain_read_note(result, include_frontmatter=include_frontmatter)
+            _plain_read_note(result)
         else:
             _display_read_note(result, include_frontmatter=include_frontmatter)
     except ValueError as e:
