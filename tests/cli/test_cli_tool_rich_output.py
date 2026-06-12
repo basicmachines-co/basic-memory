@@ -755,19 +755,14 @@ def test_search_notes_plain_empty(mock_mcp):
     return_value=READ_NOTE_RESULT,
 )
 def test_read_note_plain_output(mock_mcp):
-    """read-note --plain emits a header line and the raw markdown body."""
+    """read-note --plain emits the note body faithfully, with no decoration."""
     result = _tty_runner(["tool", "read-note", "test-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert "Test Note  [notes/test-note]" in result.output
-    # Raw markdown body, not Rich-rendered
-    assert "# Test Note" in result.output
-    assert "hello world" in result.output
-    # No frontmatter without the flag
-    assert "tags:" not in result.output
-    # Exactly one blank line between header and body: the payload's leading
-    # newline (frontmatter-strip artifact) must not stack with the renderer's.
-    assert "Test Note  [notes/test-note]\n\n# Test Note" in result.output
+    # No synthesized header line -- plain mode is the payload, faithfully.
+    assert "[notes/test-note]" not in result.output
+    # The body verbatim, trimmed of the API's frontmatter-strip newline artifact.
+    assert result.output == "# Test Note\n\nhello world\n"
 
 
 @patch(
@@ -798,11 +793,11 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
     return_value={"title": "", "permalink": "", "content": "", "frontmatter": {}},
 )
 def test_read_note_plain_empty_content(mock_mcp):
-    """read-note --plain handles empty content."""
+    """read-note --plain prints nothing for an empty note (no placeholder)."""
     result = _tty_runner(["tool", "read-note", "empty-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert "(no content)" in result.output
+    assert result.output == ""
 
 
 @patch(
