@@ -291,9 +291,11 @@ async def test_delete_entity_with_relations(entity_repository: EntityRepository,
         remaining_relations = result.scalars().all()
         assert len(remaining_relations) == 0
 
-        # Verify target entity still exists
-        target_exists = await entity_repository.find_by_id(target.id)
-        assert target_exists is not None
+    # Verify target entity still exists. Runs outside the session block above:
+    # find_by_id opens its own scoped session, and the serialized in-memory pool
+    # (one connection, see #940) deadlocks on nested session checkouts.
+    target_exists = await entity_repository.find_by_id(target.id)
+    assert target_exists is not None
 
 
 @pytest.mark.asyncio

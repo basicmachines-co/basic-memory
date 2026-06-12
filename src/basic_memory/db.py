@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_scoped_session,
 )
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
@@ -216,19 +216,31 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
                 "isolation_level": None,  # Use autocommit mode
             }
         )
+
+    if db_type == DatabaseType.MEMORY:
+        # Trigger: an in-memory SQLite URL would default to StaticPool, which hands the
+        # same DBAPI connection to every concurrently checked-out session.
+        # Why: concurrent asyncio tasks then share one transaction scope — a rollback
+        # issued by one session (scoped_session exception handling or the pool's
+        # reset-on-return) silently destroys another session's uncommitted writes (#940).
+        # Outcome: a single-connection blocking queue pool keeps the in-memory database
+        # alive for the engine's lifetime while serializing sessions at transaction
+        # granularity, restoring the isolation the repositories assume.
+        engine = create_async_engine(
+            db_url,
+            connect_args=connect_args,
+            poolclass=AsyncAdaptedQueuePool,
+            pool_size=1,
+            max_overflow=0,
+        )
+    elif os.name == "nt":
         # Use NullPool for Windows filesystem databases to avoid connection pooling issues
-        # Important: Do NOT use NullPool for in-memory databases as it will destroy the database
-        # between connections
-        if db_type == DatabaseType.FILESYSTEM:
-            engine = create_async_engine(
-                db_url,
-                connect_args=connect_args,
-                poolclass=NullPool,  # Disable connection pooling on Windows
-                echo=False,
-            )
-        else:
-            # In-memory databases need connection pooling to maintain state
-            engine = create_async_engine(db_url, connect_args=connect_args)
+        engine = create_async_engine(
+            db_url,
+            connect_args=connect_args,
+            poolclass=NullPool,  # Disable connection pooling on Windows
+            echo=False,
+        )
     else:
         engine = create_async_engine(db_url, connect_args=connect_args)
 
