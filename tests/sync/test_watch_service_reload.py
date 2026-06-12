@@ -280,6 +280,47 @@ async def test_run_filters_empty_path_local_mode_project(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_filters_orphan_db_project_absent_from_config(monkeypatch, tmp_path):
+    """A DB row not present in config is skipped even with an absolute path.
+
+    Config is the source of truth. Reconciliation normally deletes orphan rows,
+    but if it is skipped or fails a stale row could remain; watching it would
+    mutate a directory the user already removed from config.
+    """
+    config = BasicMemoryConfig(
+        watch_project_reload_interval=1,
+        projects={
+            "local-project": {"path": str(tmp_path / "local"), "mode": "local"},
+        },
+    )
+    repo = _Repo(
+        projects_return=[
+            Project(id=1, name="local-project", path=str(tmp_path / "local"), permalink="local"),
+            # Absolute path, but no matching entry in config -> stale/orphan row.
+            Project(id=2, name="orphan", path=str(tmp_path / "orphan"), permalink="orphan"),
+        ]
+    )
+    watch_service = _watch_service(config, repo)
+
+    seen_project_names: list[list[str]] = []
+
+    async def watch_cycle_stub(projects, stop_event):
+        seen_project_names.append([p.name for p in projects])
+        watch_service.state.running = False
+        stop_event.set()
+
+    async def fake_write_status():
+        return None
+
+    monkeypatch.setattr(watch_service, "_watch_projects_cycle", watch_cycle_stub)
+    monkeypatch.setattr(watch_service, "write_status", fake_write_status)
+
+    await watch_service.run()
+
+    assert seen_project_names == [["local-project"]]
+
+
+@pytest.mark.asyncio
 async def test_run_continues_after_cycle_error(monkeypatch, tmp_path):
     config = BasicMemoryConfig(
         projects={"test": {"path": str(tmp_path / "test"), "mode": "local"}},

@@ -1245,6 +1245,30 @@ class TestProjectMode:
         assert config.projects["research"].mode == ProjectMode.LOCAL
         assert config.get_project_mode("research") == ProjectMode.LOCAL
 
+    def test_is_locally_syncable_true_for_config_project_with_absolute_path(self, tmp_path):
+        """A project in config with an absolute path is locally syncable."""
+        abs_path = str(tmp_path / "research")
+        config = BasicMemoryConfig(projects={"research": ProjectEntry(path=abs_path)})
+        assert config.is_locally_syncable("research", abs_path) is True
+
+    def test_is_locally_syncable_false_for_empty_path(self):
+        """An empty path resolves to cwd, so it is never locally syncable (#949)."""
+        config = BasicMemoryConfig(projects={"empty": ProjectEntry(path="")})
+        assert config.is_locally_syncable("empty", "") is False
+
+    def test_is_locally_syncable_false_for_relative_path(self):
+        """A relative (slug) path, as used by cloud-only projects, is not syncable."""
+        config = BasicMemoryConfig(projects={"cloud": ProjectEntry(path="cloud-slug")})
+        assert config.is_locally_syncable("cloud", "cloud-slug") is False
+
+    def test_is_locally_syncable_false_for_orphan_not_in_config(self, tmp_path):
+        """A DB row absent from config is not syncable even with an absolute path.
+
+        Config is the source of truth; stale rows must not be synced (#949).
+        """
+        config = BasicMemoryConfig(projects={})
+        assert config.is_locally_syncable("orphan", str(tmp_path / "orphan")) is False
+
     def test_cloud_api_key_defaults_to_none(self):
         """Test that cloud_api_key defaults to None."""
         config = BasicMemoryConfig()

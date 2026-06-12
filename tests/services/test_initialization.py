@@ -265,7 +265,7 @@ async def test_initialize_file_sync_skips_project_with_non_absolute_path(
 
         await initialize_file_sync(updated, quiet=True)
 
-        skip_logs = [m for m in infos if "without an absolute local path" in m]
+        skip_logs = [m for m in infos if "not locally syncable" in m]
         assert skip_logs, "expected a skip log for the empty-path project"
         assert "empty-path" in skip_logs[0]
         assert "good" not in skip_logs[0]

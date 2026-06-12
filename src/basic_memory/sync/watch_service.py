@@ -184,22 +184,24 @@ class WatchService:
              ``--project``, only that project is watched. This keeps concurrent
              MCP processes from producing duplicate watchers that race on the
              same files.
-          2. Projects without an absolute local path are skipped. A non-absolute
-             path (empty string for cloud-only projects, or any relative value)
-             resolves against the process cwd, so watching it would observe and
-             mutate whatever directory the server was launched from (issue #949).
-             Cloud projects with a local bisync copy keep their absolute path and
-             are still watched.
+          2. Projects that are not locally syncable are skipped — those missing
+             from config (config is the source of truth, so stale DB rows must
+             not be watched) or with a non-absolute path (which would resolve
+             against the process cwd and make the watcher observe and mutate the
+             directory the server was launched from). See
+             ``BasicMemoryConfig.is_locally_syncable`` (issue #949). Cloud
+             projects with a local bisync copy keep their absolute path and are
+             still watched.
         """
         projects = await self.project_repository.get_active_projects()
 
         if self.constrained_project:
             projects = [p for p in projects if p.name == self.constrained_project]
 
-        skip = [p.name for p in projects if not Path(p.path).is_absolute()]
+        skip = [p.name for p in projects if not self.app_config.is_locally_syncable(p.name, p.path)]
         if skip:
             projects = [p for p in projects if p.name not in skip]
-            logger.debug(f"Skipping projects without an absolute local path in watch cycle: {skip}")
+            logger.debug(f"Skipping projects that are not locally syncable in watch cycle: {skip}")
 
         return list(projects)
 

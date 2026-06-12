@@ -120,20 +120,14 @@ async def initialize_file_sync(
         active_projects = [p for p in active_projects if p.name == constrained_project]
         logger.info(f"Background sync constrained to project: {constrained_project}")
 
-    # Only projects with an absolute local path are safe to sync.
-    # Trigger: a project whose path is empty or relative.
-    # Why: Path("") and other relative paths resolve against the process cwd, so
-    #   syncing such a project would adopt whatever directory the server was
-    #   launched from as the project root and inject frontmatter into unrelated
-    #   markdown files there (issue #949). Empty paths come from cloud-only
-    #   projects, but also from any hand-edited config that left mode at the
-    #   LOCAL default, so the gate is on the path itself, not the project mode.
-    # Outcome: such projects are excluded from local sync. Cloud projects that
-    #   have a real local bisync copy keep their absolute path and still sync.
-    skip = [p.name for p in active_projects if not Path(p.path).is_absolute()]
+    # Only sync projects that are in config (source of truth) and have an
+    # absolute local path; see BasicMemoryConfig.is_locally_syncable. This keeps
+    # background sync from adopting the process cwd as a project root and
+    # mutating unrelated files (issue #949).
+    skip = [p.name for p in active_projects if not app_config.is_locally_syncable(p.name, p.path)]
     if skip:
         active_projects = [p for p in active_projects if p.name not in skip]
-        logger.info(f"Skipping projects without an absolute local path for sync: {skip}")
+        logger.info(f"Skipping projects that are not locally syncable for sync: {skip}")
 
     # Start sync for all projects as background tasks (non-blocking)
     async def sync_project_background(project: Project):

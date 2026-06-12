@@ -658,6 +658,26 @@ class BasicMemoryConfig(BaseSettings):
         entry = self.projects.get(project_name)
         return entry.mode if entry else ProjectMode.CLOUD
 
+    def is_locally_syncable(self, project_name: str, project_path: str) -> bool:
+        """Whether a project should be synced/watched on the local filesystem.
+
+        Both conditions are required (issue #949):
+
+          * The project is present in config. Config is the source of truth, so a
+            stale database row that was removed from config — but whose deletion
+            has not yet been reconciled, or whose reconciliation failed — must
+            not be synced even though it still has a real directory on disk.
+          * Its path is absolute. An empty or relative path resolves against the
+            process cwd, so syncing it would adopt whatever directory the server
+            was launched from as the project root and mutate unrelated files.
+
+        Cloud-only projects (empty/slug path) and cloud projects with a real
+        local bisync copy (absolute path) are handled correctly by these two
+        conditions, so no separate mode check is needed.
+        """
+        entry = self.projects.get(project_name)
+        return entry is not None and Path(project_path).is_absolute()
+
     def set_project_mode(self, project_name: str, mode: ProjectMode) -> None:
         """Set the routing mode for a project.
 
