@@ -5,6 +5,7 @@ when stdout is piped or --json is supplied.  These tests verify both modes.
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -139,8 +140,22 @@ RECENT_ACTIVITY_RESULT = [
 
 
 def _tty_runner(args, **kwargs):
-    """Invoke CLI as if stdout is a TTY (Rich output enabled)."""
+    """Invoke CLI as if stdout is a TTY (interactive output enabled)."""
     with patch("basic_memory.cli.commands.tool._use_rich", return_value=True):
+        return runner.invoke(cli_app, args, **kwargs)
+
+
+def _tty_runner_with_style(args, style, **kwargs):
+    """Invoke CLI as if stdout is a TTY with a given cli_output_style config value.
+
+    Patches both _use_rich (simulate TTY) and tool.ConfigManager so that
+    _resolve_output_mode reads the configured interactive style.
+    """
+    fake_cm = patch(
+        "basic_memory.cli.commands.tool.ConfigManager",
+        return_value=SimpleNamespace(config=SimpleNamespace(cli_output_style=style)),
+    )
+    with patch("basic_memory.cli.commands.tool._use_rich", return_value=True), fake_cm:
         return runner.invoke(cli_app, args, **kwargs)
 
 
@@ -642,3 +657,299 @@ def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
     # The subtitle must show the real count (2), not 0
     assert "2 result(s)" in result.output
     assert "0 result(s)" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# --plain output mode (issue #678 follow-up)
+# ---------------------------------------------------------------------------
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT,
+)
+def test_search_notes_plain_output(mock_mcp):
+    """search-notes --plain emits undecorated numbered text, not JSON or Rich boxes."""
+    result = _tty_runner(["tool", "search-notes", "test", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # Not JSON
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        json.loads(result.output)
+    # Numbered, greppable entries with titles, scores, and permalinks
+    assert "1. Test Note" in result.output
+    assert "2. Another Note" in result.output
+    assert "notes/test-note" in result.output
+    assert "0.95" in result.output
+    # Snippet line present
+    assert "A snippet about test notes" in result.output
+    # No Rich box-drawing characters
+    assert "─" not in result.output
+    assert "│" not in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_BRACKETED_TITLE,
+)
+def test_search_notes_plain_brackets_survive(mock_mcp):
+    """Literal brackets must survive verbatim in plain output (no markup escaping)."""
+    result = _tty_runner(["tool", "search-notes", "spec", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    # The literal title and snippet brackets must be present unmangled
+    assert "Spec [draft] v2" in result.output
+    assert "[red]" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_ZERO_TOTAL,
+)
+def test_search_notes_plain_zero_total_fallback(mock_mcp):
+    """Plain search output shows the corrected count when the API returns total=0."""
+    result = _tty_runner(["tool", "search-notes", "found", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "2 result(s)" in result.output
+    assert "0 result(s)" not in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_EMPTY,
+)
+def test_search_notes_plain_empty(mock_mcp):
+    """Plain search output handles empty results."""
+    result = _tty_runner(["tool", "search-notes", "nothing", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "No results found." in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_plain_output(mock_mcp):
+    """read-note --plain emits a header line and the raw markdown body."""
+    result = _tty_runner(["tool", "read-note", "test-note", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Test Note  [notes/test-note]" in result.output
+    # Raw markdown body, not Rich-rendered
+    assert "# Test Note" in result.output
+    assert "hello world" in result.output
+    # No frontmatter without the flag
+    assert "tags:" not in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_plain_include_frontmatter(mock_mcp):
+    """read-note --plain --include-frontmatter renders key: value lines."""
+    result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--include-frontmatter"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "title: Test Note" in result.output
+    assert "tags:" in result.output
+    assert "hello world" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value={"title": "", "permalink": "", "content": "", "frontmatter": {}},
+)
+def test_read_note_plain_empty_content(mock_mcp):
+    """read-note --plain handles empty content."""
+    result = _tty_runner(["tool", "read-note", "empty-note", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "(no content)" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_build_context",
+    new_callable=AsyncMock,
+    return_value=BUILD_CONTEXT_RESULT,
+)
+def test_build_context_plain_output(mock_mcp):
+    """build-context --plain emits an ASCII-indented outline with observations."""
+    result = _tty_runner(["tool", "build-context", "memory://notes/test-note", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Context: notes/test-note" in result.output
+    assert "Test Note" in result.output
+    # Observation rendered with literal bracketed category, indented
+    assert "  [fact] This is a key fact about the test note" in result.output
+    # Related item with relation type, indented
+    assert "Related Note" in result.output
+    assert "references" in result.output
+    # Not JSON
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        json.loads(result.output)
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_build_context",
+    new_callable=AsyncMock,
+    return_value=BUILD_CONTEXT_BRACKETED_OBS,
+)
+def test_build_context_plain_bracket_survives(mock_mcp):
+    """Observation category [fact] must appear literally in plain build-context output."""
+    result = _tty_runner(["tool", "build-context", "memory://people/joanna", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "[fact]" in result.output
+    assert "Joanna lives in Austin" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_build_context",
+    new_callable=AsyncMock,
+    return_value=BUILD_CONTEXT_EMPTY,
+)
+def test_build_context_plain_empty(mock_mcp):
+    """build-context --plain handles empty results."""
+    result = _tty_runner(["tool", "build-context", "memory://notes/test-note", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "No related content found." in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    new_callable=AsyncMock,
+    return_value=RECENT_ACTIVITY_RESULT,
+)
+def test_recent_activity_plain_output(mock_mcp):
+    """recent-activity --plain emits "- title (type) permalink updated" lines."""
+    result = _tty_runner(["tool", "recent-activity", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "- Note A (entity) notes/note-a" in result.output
+    assert "- Note B (entity) notes/note-b" in result.output
+    # Not JSON
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        json.loads(result.output)
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    new_callable=AsyncMock,
+    return_value=[],
+)
+def test_recent_activity_plain_empty(mock_mcp):
+    """recent-activity --plain handles empty results."""
+    result = _tty_runner(["tool", "recent-activity", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "No recent activity." in result.output
+
+
+# ---------------------------------------------------------------------------
+# Precedence matrix: --json > --plain > non-TTY (JSON) > TTY (config style)
+# ---------------------------------------------------------------------------
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT,
+)
+def test_json_beats_plain(mock_mcp):
+    """--json wins over --plain... when they are not used together, --json alone is JSON.
+
+    The contradictory combination is tested separately (must error); here we
+    confirm --json on its own produces JSON even in a TTY.
+    """
+    result = _tty_runner(["tool", "search-notes", "test", "--json"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["total"] == 2
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT,
+)
+def test_json_and_plain_together_errors(mock_mcp):
+    """Passing both --json and --plain is a clear, non-zero error."""
+    result = _tty_runner(["tool", "search-notes", "test", "--json", "--plain"])
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_json_and_plain_together_errors(mock_mcp):
+    """read-note also rejects --json --plain together."""
+    result = _tty_runner(["tool", "read-note", "test-note", "--json", "--plain"])
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT,
+)
+def test_plain_forces_plain_when_piped(mock_mcp):
+    """--plain forces plain output even when stdout is NOT a TTY (piped)."""
+    # No _use_rich patch: the default CliRunner stdout is not a TTY, so absent
+    # --plain this would be JSON.  --plain must override that into plain text.
+    result = runner.invoke(cli_app, ["tool", "search-notes", "test", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        json.loads(result.output)
+    assert "1. Test Note" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT,
+)
+def test_tty_config_rich_renders_rich(mock_mcp):
+    """TTY + cli_output_style=rich → Rich output (box-drawing present)."""
+    result = _tty_runner_with_style(["tool", "search-notes", "test"], style="rich")
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        json.loads(result.output)
+    # Rich draws a Panel border
+    assert "─" in result.output or "│" in result.output
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_search",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT,
+)
+def test_tty_config_plain_renders_plain(mock_mcp):
+    """TTY + cli_output_style=plain → plain output (no box-drawing)."""
+    result = _tty_runner_with_style(["tool", "search-notes", "test"], style="plain")
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        json.loads(result.output)
+    assert "1. Test Note" in result.output
+    assert "─" not in result.output
+    assert "│" not in result.output

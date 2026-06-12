@@ -476,6 +476,18 @@ class BasicMemoryConfig(BaseSettings):
         ),
     )
 
+    cli_output_style: Literal["rich", "plain"] = Field(
+        default="rich",
+        description=(
+            "Default human-readable output style for interactive `bm tool` commands "
+            "(search-notes, read-note, build-context, recent-activity) when stdout is a TTY. "
+            "'rich' (default) renders colored Panel/Table/Tree/Markdown output; "
+            "'plain' renders undecorated greppable text with no ANSI colors or box-drawing. "
+            "Overridden per-invocation by --json (raw JSON) or --plain (forces plain). "
+            "Env: BASIC_MEMORY_CLI_OUTPUT_STYLE"
+        ),
+    )
+
     ensure_frontmatter_on_sync: bool = Field(
         default=True,
         description="Ensure markdown files have frontmatter during sync by adding derived title/type/permalink when missing. When combined with disable_permalinks=True, this setting takes precedence for missing-frontmatter files and still writes permalinks.",

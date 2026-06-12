@@ -2,14 +2,26 @@
 
 Every command calls its MCP tool with output_format="json" and prints the result.
 Commands that benefit from human-readable output (search-notes, read-note,
-build-context, recent-activity) default to Rich formatting when stdout is a TTY
-and fall back to raw JSON when piped or when --json is supplied.  This follows
-the same bm status / bm project list precedent.
+build-context, recent-activity) support three output modes:
+
+- **JSON** — raw machine-readable JSON.  Used when ``--json`` is passed, or
+  automatically when stdout is not a TTY (piped/redirected), so scripts stay
+  parseable.  This follows the same bm status / bm project list precedent.
+- **Rich** — colored Panel/Table/Tree/Markdown output.  The default interactive
+  experience when stdout is a TTY.
+- **Plain** — undecorated, greppable text (no ANSI colors, no box-drawing, no
+  markup).  Forced with ``--plain`` even when piped.
+
+Precedence, highest first: ``--json`` > ``--plain`` > non-TTY (JSON) > TTY
+(config ``cli_output_style``, ``rich`` by default).  Passing both ``--json`` and
+``--plain`` is an error.  The interactive default for a TTY is controlled by the
+``cli_output_style`` config option (``rich``/``plain``; env
+``BASIC_MEMORY_CLI_OUTPUT_STYLE``).
 """
 
 import json
 import sys
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 import typer
 from loguru import logger
@@ -23,6 +35,7 @@ from rich.tree import Tree
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.config import ConfigManager
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 
 # MCP tool functions are imported inside each command: importing
@@ -40,16 +53,57 @@ console = Console()
 
 # --- Shared helpers ---
 
+OutputMode = Literal["json", "rich", "plain"]
+
 
 def _use_rich() -> bool:
-    """Return True when stdout is an interactive TTY and Rich output is appropriate.
+    """Return True when stdout is an interactive TTY.
 
-    Trigger: caller did not pass --json and stdout is a TTY.
-    Why: piped output (scripts, jq, etc.) must stay machine-parseable;
-         human-readable formatting is only useful in an interactive terminal.
-    Outcome: Rich output in a terminal; raw JSON when piped or redirected.
+    Why: piped output (scripts, jq, etc.) must stay machine-parseable; the
+         interactive (Rich/plain) renderers are only the default in a terminal.
+    Outcome: a formatted renderer in a terminal; raw JSON when piped or redirected.
+
+    Note: tests patch this to simulate a TTY, so the precedence logic in
+    ``_resolve_output_mode`` routes its terminal check through here.
     """
     return sys.stdout.isatty()
+
+
+def _validate_output_flags(json_output: bool, plain: bool) -> None:
+    """Reject the contradictory --json/--plain combination.
+
+    Trigger: both --json and --plain were passed.
+    Why: they request mutually exclusive output modes (raw JSON vs undecorated
+         human text); silently picking one would hide a user mistake.
+    Outcome: a clear typer error with a non-zero exit.
+    """
+    if json_output and plain:
+        typer.echo("Error: --json and --plain are mutually exclusive.", err=True)
+        raise typer.Exit(1)
+
+
+def _resolve_output_mode(json_output: bool, plain: bool) -> OutputMode:
+    """Resolve the effective output mode from flags, TTY state, and config.
+
+    Precedence, highest first:
+      1. --json            → raw JSON (wins over everything else)
+      2. --plain           → undecorated plain text (even when piped)
+      3. non-TTY stdout    → raw JSON (script compatibility, unchanged)
+      4. TTY               → config ``cli_output_style`` (rich by default)
+
+    Callers must invoke ``_validate_output_flags`` first; this helper assumes the
+    --json/--plain combination has already been rejected.
+    """
+    if json_output:
+        return "json"
+    if plain:
+        return "plain"
+    if not _use_rich():
+        return "json"
+    # Trigger: interactive TTY with no explicit mode flag.
+    # Why: let users choose their default terminal experience without a flag.
+    # Outcome: honor cli_output_style (rich out of the box, plain if configured).
+    return ConfigManager().config.cli_output_style
 
 
 def _print_json(result: Any) -> None:
@@ -278,6 +332,128 @@ def _display_recent_activity(result: list[dict[str, Any]]) -> None:
     console.print(Panel(table, title="Recent Activity", expand=False))
 
 
+# --- Plain formatters ---
+#
+# Plain output is NOT Rich markup: it is undecorated, greppable text printed via
+# the builtin print().  Literal brackets ([draft], [fact]) must survive verbatim,
+# so we deliberately do NOT call rich.markup.escape here -- escaping is only for
+# the Rich path and would corrupt literal brackets in plain text.
+
+
+def _plain_search_results(result: dict[str, Any], query: str = "") -> None:
+    """Render search-notes results as numbered plain-text entries.
+
+    Mirrors the Rich table content: a header line, then one numbered block per
+    result (title / score / permalink) with an indented snippet line.
+    """
+    results = result.get("results", [])
+    # Mirror the Rich path's total fix: the API can return total=0 with a
+    # populated results list, so fall back to len(results) when total is falsy.
+    raw_total = result.get("total", len(results))
+    total = raw_total if raw_total else len(results)
+
+    header = f"Search: {query}" if query else "Search results"
+    print(header)
+    print(f"{total} result(s)")
+
+    if not results:
+        print("No results found.")
+        return
+
+    for index, item in enumerate(results, start=1):
+        item_title = item.get("title") or item.get("permalink", "")
+        permalink = item.get("permalink", "")
+        score = item.get("score")
+        score_str = f"{score:.2f}" if score is not None else ""
+        print(f"{index}. {item_title}  (score: {score_str})  {permalink}")
+        raw_snippet = item.get("matched_chunk") or item.get("content") or ""
+        if raw_snippet:
+            snippet = raw_snippet[:200].replace("\n", " ")
+            print(f"    {snippet}")
+
+
+def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
+    """Render read-note as a plain title/permalink header, optional frontmatter, then body."""
+    title = result.get("title", "")
+    permalink = result.get("permalink", "")
+    content = result.get("content", "")
+    frontmatter: dict[str, Any] = result.get("frontmatter") or {}
+
+    header = f"{title}  [{permalink}]" if permalink else title
+    print(header)
+
+    # Trigger: --include-frontmatter was passed and the payload carries frontmatter.
+    # Why: the JSON payload always includes a "frontmatter" key, so the flag (not
+    #      mere presence) gates whether the key/value block is printed -- matching
+    #      the Rich path's gating behavior.
+    # Outcome: a blank line then "key: value" lines above the body.
+    if include_frontmatter and frontmatter:
+        print()
+        for key, value in frontmatter.items():
+            print(f"{key}: {value}")
+
+    print()
+    if content:
+        print(content)
+    else:
+        print("(no content)")
+
+
+def _plain_build_context(result: dict[str, Any]) -> None:
+    """Render build-context as an ASCII-indented outline.
+
+    Each primary result is a top-level line; its observations and related items
+    are two-space indented beneath it, mirroring the Rich tree content.
+    """
+    metadata = result.get("metadata", {})
+    uri = metadata.get("uri", "")
+    context_items: list[dict[str, Any]] = list(result.get("results", []))
+
+    print(f"Context: {uri}" if uri else "Context")
+
+    if not context_items:
+        print("No related content found.")
+        return
+
+    for context_result in context_items:
+        primary = context_result.get("primary_result", {})
+        p_title = primary.get("title") or primary.get("permalink", "")
+        p_type = primary.get("type", "")
+        primary_line = f"{p_type}  {p_title}" if p_type else p_title
+        print(primary_line)
+
+        observations: list[dict[str, Any]] = list(context_result.get("observations", []))
+        for obs in observations:
+            category = obs.get("category", "")
+            obs_content = obs.get("content", "")
+            if len(obs_content) > 120:
+                obs_content = obs_content[:117] + "..."
+            print(f"  [{category}] {obs_content}")
+
+        related: list[dict[str, Any]] = list(context_result.get("related_results", []))
+        for rel_item in related:
+            rel_title = rel_item.get("title") or rel_item.get("permalink", "")
+            rel_type = rel_item.get("type", "")
+            relation = rel_item.get("relation_type", "")
+            parts = [part for part in (relation, rel_type, rel_title) if part]
+            print(f"  {'  '.join(parts)}")
+
+
+def _plain_recent_activity(result: list[dict[str, Any]]) -> None:
+    """Render recent-activity as plain "- title (type) permalink updated" lines."""
+    if not result:
+        print("No recent activity.")
+        return
+
+    print("Recent Activity")
+    for item in result:
+        item_type = item.get("type", "")
+        item_title = item.get("title") or item.get("permalink", "")
+        permalink = item.get("permalink", "")
+        updated = str(item.get("updated_at") or item.get("created_at") or "")
+        print(f"- {item_title} ({item_type}) {permalink} {updated}".rstrip())
+
+
 def _delete_note_failure_message(result: dict[str, Any]) -> str | None:
     """Return the CLI failure message for delete-note JSON results, if any."""
     error = result.get("error")
@@ -426,6 +602,9 @@ def read_note(
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON instead of formatted display"
     ),
+    plain: bool = typer.Option(
+        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -444,13 +623,16 @@ def read_note(
 ):
     """Read a markdown note from the knowledge base.
 
-    Displays formatted Markdown output by default when run in a terminal.
-    Use --json for raw machine-readable output.
+    Three output modes: Rich formatted Markdown (default in a terminal), plain
+    undecorated text (--plain), and raw JSON (--json, or automatically when
+    piped). The interactive default is set by the cli_output_style config option
+    (rich/plain). --json and --plain are mutually exclusive.
 
     Examples:
 
     bm tool read-note my-note
     bm tool read-note my-note --include-frontmatter
+    bm tool read-note my-note --plain
     bm tool read-note my-note --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
@@ -458,6 +640,7 @@ def read_note(
 
     try:
         validate_routing_flags(local, cloud)
+        _validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -482,12 +665,13 @@ def read_note(
             _print_json(result)
             raise typer.Exit(1)
 
-        # Trigger: --json flag or non-TTY stdout (piped output).
-        # Why: scripts and downstream tools need parseable JSON; Rich markup
-        #      would corrupt those pipelines.
-        # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich() or isinstance(result, str):
+        # A string result (e.g. a not-found message) has no structured shape to
+        # format, so always fall back to JSON regardless of the resolved mode.
+        mode = _resolve_output_mode(json_output, plain)
+        if mode == "json" or isinstance(result, str):
             _print_json(result)
+        elif mode == "plain":
+            _plain_read_note(result, include_frontmatter=include_frontmatter)
         else:
             _display_read_note(result, include_frontmatter=include_frontmatter)
     except ValueError as e:
@@ -656,6 +840,9 @@ def build_context(
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON instead of formatted display"
     ),
+    plain: bool = typer.Option(
+        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -674,13 +861,16 @@ def build_context(
 ):
     """Get context needed to continue a discussion.
 
-    Displays a Rich tree view by default when run in a terminal.
-    Use --json for raw machine-readable output.
+    Three output modes: a Rich tree view (default in a terminal), a plain
+    ASCII-indented outline (--plain), and raw JSON (--json, or automatically when
+    piped). The interactive default is set by the cli_output_style config option
+    (rich/plain). --json and --plain are mutually exclusive.
 
     Examples:
 
     bm tool build-context memory://specs/search
     bm tool build-context specs/search --depth 2 --timeframe 30d
+    bm tool build-context memory://specs/search --plain
     bm tool build-context memory://specs/search --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
@@ -688,6 +878,7 @@ def build_context(
 
     try:
         validate_routing_flags(local, cloud)
+        _validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -704,12 +895,12 @@ def build_context(
                 )
             )
 
-        # Trigger: --json flag or non-TTY stdout (piped output).
-        # Why: scripts and downstream tools need parseable JSON; Rich markup
-        #      would corrupt those pipelines.
-        # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich() or isinstance(result, str):
+        # A string result has no structured shape to format, so fall back to JSON.
+        mode = _resolve_output_mode(json_output, plain)
+        if mode == "json" or isinstance(result, str):
             _print_json(result)
+        elif mode == "plain":
+            _plain_build_context(result)
         else:
             _display_build_context(result)
     except ValueError as e:
@@ -736,6 +927,9 @@ def recent_activity(
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON instead of formatted display"
     ),
+    plain: bool = typer.Option(
+        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -754,14 +948,17 @@ def recent_activity(
 ):
     """Get recent activity across the knowledge base.
 
-    Displays a formatted table by default when run in a terminal.
-    Use --json for raw machine-readable output.
+    Three output modes: a formatted Rich table (default in a terminal), plain
+    undecorated lines (--plain), and raw JSON (--json, or automatically when
+    piped). The interactive default is set by the cli_output_style config option
+    (rich/plain). --json and --plain are mutually exclusive.
 
     Examples:
 
     bm tool recent-activity
     bm tool recent-activity --timeframe 30d --page-size 20
     bm tool recent-activity --type entity --type observation
+    bm tool recent-activity --plain
     bm tool recent-activity --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
@@ -769,6 +966,7 @@ def recent_activity(
 
     try:
         validate_routing_flags(local, cloud)
+        _validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -784,12 +982,12 @@ def recent_activity(
                 )
             )
 
-        # Trigger: --json flag or non-TTY stdout (piped output).
-        # Why: scripts and downstream tools need parseable JSON; Rich markup
-        #      would corrupt those pipelines.
-        # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich() or isinstance(result, str):
+        # A string result has no structured shape to format, so fall back to JSON.
+        mode = _resolve_output_mode(json_output, plain)
+        if mode == "json" or isinstance(result, str):
             _print_json(result)
+        elif mode == "plain":
+            _plain_recent_activity(result)
         else:
             _display_recent_activity(result)
     except ValueError as e:
@@ -858,6 +1056,9 @@ def search_notes(
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON instead of formatted display"
     ),
+    plain: bool = typer.Option(
+        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
+    ),
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
@@ -876,8 +1077,10 @@ def search_notes(
 ):
     """Search across all content in the knowledge base.
 
-    Displays a formatted table by default when run in a terminal.
-    Use --json for raw machine-readable output.
+    Three output modes: a formatted Rich table (default in a terminal), plain
+    numbered text results (--plain), and raw JSON (--json, or automatically when
+    piped). The interactive default is set by the cli_output_style config option
+    (rich/plain). --json and --plain are mutually exclusive.
 
     Examples:
 
@@ -886,6 +1089,7 @@ def search_notes(
     bm tool search-notes --tag python --tag async
     bm tool search-notes --meta status=draft
     bm tool search-notes "auth" --entity-type observation --category requirement
+    bm tool search-notes "my query" --plain
     bm tool search-notes "my query" --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
@@ -893,6 +1097,7 @@ def search_notes(
 
     try:
         validate_routing_flags(local, cloud)
+        _validate_output_flags(json_output, plain)
 
         mode_flags = [permalink, title, vector, hybrid]
         if sum(1 for enabled in mode_flags if enabled) > 1:  # pragma: no cover
@@ -967,12 +1172,11 @@ def search_notes(
             typer.echo(result, err=True)
             raise typer.Exit(1)
 
-        # Trigger: --json flag or non-TTY stdout (piped output).
-        # Why: scripts and downstream tools need parseable JSON; Rich markup
-        #      would corrupt those pipelines.
-        # Outcome: raw JSON for machine consumers; formatted display for humans.
-        if json_output or not _use_rich():
+        mode = _resolve_output_mode(json_output, plain)
+        if mode == "json":
             _print_json(result)
+        elif mode == "plain":
+            _plain_search_results(result, query=query or "")
         else:
             _display_search_results(result, query=query or "")
     except ValueError as e:
