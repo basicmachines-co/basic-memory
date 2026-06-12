@@ -440,7 +440,7 @@ async def test_add_project_promotes_when_config_default_missing_from_db(
 ):
     """Regression #974: config default exists only in config, not DB — promote on add."""
     from basic_memory import config as config_module
-    from basic_memory.config import ProjectConfig, ProjectEntry
+    from basic_memory.config import ProjectEntry
     from basic_memory.markdown.entity_parser import EntityParser
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.repository.project_repository import ProjectRepository
@@ -478,6 +478,52 @@ async def test_add_project_promotes_when_config_default_missing_from_db(
     assert qa_project is not None
     assert qa_project.is_default is True
     assert await repo.get_by_name("main") is None
+
+
+@pytest.mark.asyncio
+async def test_add_project_preserves_existing_db_default(
+    project_service: ProjectService, config_manager: ConfigManager, test_project
+):
+    """The #974 repair must not steal an existing database default.
+
+    Drift state: config's default_project names a project with no database row,
+    but the database still holds a valid default of its own. synchronize_projects
+    resolves this by trusting the database default, so add_project's repair must
+    repoint config at it rather than promoting the just-added project.
+    """
+    config_default = config_manager.default_project
+    assert config_default is not None
+
+    surviving_name = f"test-surviving-default-{os.urandom(4).hex()}"
+    added_name = f"test-no-steal-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        surviving_path = str(Path(temp_dir) / "surviving")
+        os.makedirs(surviving_path, exist_ok=True)
+
+        # A normally-added project that then becomes the database default,
+        # while config's default_project still names the fixture project.
+        await project_service.add_project(surviving_name, surviving_path)
+        surviving = await project_service.repository.get_by_name(surviving_name)
+        assert surviving is not None
+        await project_service.repository.set_as_default(surviving.id)
+
+        # Wedge config: its named default loses its database row.
+        await project_service.repository.delete(test_project.id)
+        assert await project_service.get_project(config_default) is None
+
+        added_path = str(Path(temp_dir) / "added")
+        os.makedirs(added_path, exist_ok=True)
+        await project_service.add_project(added_name, added_path)
+
+        # The surviving database default wins: config is repointed at it and
+        # the newly added project is not promoted.
+        assert config_manager.default_project == surviving_name
+        db_default = await project_service.repository.get_default_project()
+        assert db_default is not None
+        assert db_default.name == surviving_name
+        added = await project_service.repository.get_by_name(added_name)
+        assert added is not None
+        assert added.is_default is not True
 
 
 @pytest.mark.asyncio
