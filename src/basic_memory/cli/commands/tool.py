@@ -190,7 +190,7 @@ def _display_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fa
 
     console.print(Panel(header, expand=False))
 
-    # Trigger: --include-frontmatter was passed; the MCP tool populates "frontmatter".
+    # Trigger: --frontmatter was passed; the MCP tool populates "frontmatter".
     # Why: the JSON payload always carries a "frontmatter" key regardless of the flag,
     #      so checking non-empty alone would render it even without the flag.  The flag
     #      must be threaded in to gate the panel.
@@ -207,7 +207,7 @@ def _display_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fa
             fm_table.add_row(markup_escape(str(key)), markup_escape(str(value)))
         console.print(Panel(fm_table, title="[dim]frontmatter[/dim]", expand=False))
 
-    # Trigger: --include-frontmatter makes the API return the literal file, so
+    # Trigger: --frontmatter makes the API return the literal file, so
     # content starts with the frontmatter block the panel above already shows.
     # Why: rendering it again through Markdown duplicates the frontmatter (and
     #      Markdown mangles the --- fences into rules/headings).
@@ -385,11 +385,11 @@ def _plain_read_note(result: dict[str, Any]) -> None:
     """Render read-note content faithfully: the note body, or the literal file.
 
     Plain mode adds NO decoration: no header line, no synthesized frontmatter
-    block, no placeholder for empty notes. Without --include-frontmatter the
+    block, no placeholder for empty notes. Without --frontmatter the
     API returns the note body; with it, the literal file (frontmatter block
     included). Either is printed verbatim, trimmed only of the surrounding
     newline artifacts the API keeps from frontmatter stripping, so the output
-    round-trips (e.g. ``read-note X --plain --include-frontmatter > note.md``).
+    round-trips (e.g. ``read-note X --plain --frontmatter > note.md``).
     """
     content = result.get("content", "")
     body = content.strip("\n") if content else ""
@@ -595,7 +595,10 @@ def write_note(
 def read_note(
     identifier: str,
     include_frontmatter: bool = typer.Option(
-        False, "--include-frontmatter", help="Include YAML frontmatter in output"
+        False,
+        "--frontmatter",
+        "--include-frontmatter",
+        help="Include YAML frontmatter in output (--include-frontmatter is a deprecated alias)",
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON instead of formatted display"
@@ -629,7 +632,7 @@ def read_note(
     Examples:
 
     bm tool read-note my-note
-    bm tool read-note my-note --include-frontmatter
+    bm tool read-note my-note --frontmatter
     bm tool read-note my-note --plain
     bm tool read-note my-note --json
     """

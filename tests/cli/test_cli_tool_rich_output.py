@@ -456,7 +456,7 @@ def test_read_note_rich_include_frontmatter(mock_mcp):
     frontmatter block must be stripped from the Markdown body or it renders
     again under the panel.
     """
-    result = _tty_runner(["tool", "read-note", "test-note", "--include-frontmatter"])
+    result = _tty_runner(["tool", "read-note", "test-note", "--frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # Frontmatter panel appears with key/value data
@@ -776,7 +776,7 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
     With the flag, content IS the file (frontmatter block included); plain mode
     prints it verbatim and must not prepend a synthesized key/value block.
     """
-    result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--include-frontmatter"])
+    result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # ONLY the literal file: no header line, output starts at the fence
@@ -785,6 +785,19 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
     assert "hello world" in result.output
     # No duplicated frontmatter from a synthesized block or header
     assert result.output.count("title: Test Note") == 1
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
+)
+def test_read_note_include_frontmatter_alias(mock_mcp):
+    """--include-frontmatter still works as a deprecated alias for --frontmatter."""
+    result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--include-frontmatter"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert result.output.startswith("---\ntitle: Test Note")
 
 
 @patch(
