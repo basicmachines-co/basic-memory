@@ -1600,3 +1600,62 @@ class TestAutoUpdateConfig:
             assert loaded.auto_update is False
             assert loaded.update_check_interval == 7200
             assert loaded.auto_update_last_checked_at == checked_at
+
+
+class TestAtomicConfigSave:
+    """Regression tests for #940: saving config must never tear the published file.
+
+    Long-lived readers (the MCP stdio server's mtime-based config reload, the CLI
+    background auto-update thread) re-read config.json while other code saves it.
+    An in-place write truncates the file first, so a concurrent reader can observe
+    empty/partial JSON — and load_config() raises SystemExit on invalid JSON.
+    """
+
+    def test_interrupted_save_preserves_published_config(self, config_home, monkeypatch):
+        """A write that dies mid-stream must leave the existing config untouched."""
+        import json
+
+        from basic_memory.config import save_basic_memory_config
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_file = temp_path / "config.json"
+            config = BasicMemoryConfig(
+                projects={"main": {"path": str(temp_path / "main")}},
+                default_project="main",
+            )
+            save_basic_memory_config(config_file, config)
+            published = config_file.read_text(encoding="utf-8")
+            json.loads(published)  # sanity: complete, valid document
+
+            def torn_write_text(self, content, *args, **kwargs):
+                # Fault injection: the write dies halfway through. For an in-place
+                # write this is exactly the truncated state a concurrent reader
+                # observes mid-save; an atomic save must confine it to a temp file.
+                with open(self, "w", encoding="utf-8") as fh:
+                    fh.write(content[: len(content) // 2])
+                raise OSError("simulated interrupted write")
+
+            monkeypatch.setattr(Path, "write_text", torn_write_text)
+            # save_basic_memory_config logs write failures instead of raising
+            save_basic_memory_config(config_file, config)
+            monkeypatch.undo()
+
+            assert config_file.read_text(encoding="utf-8") == published
+
+    def test_save_leaves_no_temp_files(self, config_home):
+        """The atomic-write temp file must not survive a successful save."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_file = temp_path / "config.json"
+            config = BasicMemoryConfig(
+                projects={"main": {"path": str(temp_path / "main")}},
+                default_project="main",
+            )
+
+            from basic_memory.config import save_basic_memory_config
+
+            save_basic_memory_config(config_file, config)
+
+            assert config_file.exists()
+            assert not list(temp_path.glob("*.tmp"))

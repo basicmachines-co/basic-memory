@@ -89,6 +89,27 @@ class TestRoutingFlagsValidation:
         assert "Cannot specify both --local and --cloud" in result.output
 
 
+def _stub_auto_update(monkeypatch, mcp_mod) -> None:
+    """Keep `bm mcp` stdio tests from running the real background auto-update.
+
+    The command starts a daemon thread before mcp_server.run; unstubbed it hits
+    PyPI and rewrites config.json from a background thread, leaking into later
+    tests in the same process (#940's KeyError flake on test_mcp_sse_forces_local).
+    """
+    from basic_memory.cli.auto_update import AutoUpdateResult, AutoUpdateStatus, InstallSource
+
+    def skipped_auto_update(**kwargs) -> AutoUpdateResult:
+        return AutoUpdateResult(
+            status=AutoUpdateStatus.SKIPPED,
+            source=InstallSource.UNKNOWN,
+            checked=False,
+            update_available=False,
+            updated=False,
+        )
+
+    monkeypatch.setattr(mcp_mod, "run_auto_update", skipped_auto_update)
+
+
 class TestMcpCommandRouting:
     """Tests that MCP routing varies by transport."""
 
@@ -109,8 +130,10 @@ class TestMcpCommandRouting:
 
         monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
         monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
+        _stub_auto_update(monkeypatch, mcp_mod)
 
-        runner.invoke(cli_app, ["mcp"])  # default transport is stdio
+        result = runner.invoke(cli_app, ["mcp"])  # default transport is stdio
+        assert result.exit_code == 0, result.output
 
         # Command should not have set these vars
         assert env_at_run["FORCE_LOCAL"] is None
@@ -132,8 +155,10 @@ class TestMcpCommandRouting:
 
         monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
         monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
+        _stub_auto_update(monkeypatch, mcp_mod)
 
-        runner.invoke(cli_app, ["mcp"])
+        result = runner.invoke(cli_app, ["mcp"])
+        assert result.exit_code == 0, result.output
 
         # Externally-set vars should be preserved
         assert env_at_run["FORCE_CLOUD"] == "true"
@@ -153,7 +178,8 @@ class TestMcpCommandRouting:
         monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
         monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
 
-        runner.invoke(cli_app, ["mcp", "--transport", "streamable-http"])
+        result = runner.invoke(cli_app, ["mcp", "--transport", "streamable-http"])
+        assert result.exit_code == 0, result.output
 
         assert env_at_run["FORCE_LOCAL"] == "true"
         assert env_at_run["EXPLICIT"] == "true"
@@ -172,7 +198,8 @@ class TestMcpCommandRouting:
         monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
         monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
 
-        runner.invoke(cli_app, ["mcp", "--transport", "sse"])
+        result = runner.invoke(cli_app, ["mcp", "--transport", "sse"])
+        assert result.exit_code == 0, result.output
 
         assert env_at_run["FORCE_LOCAL"] == "true"
         assert env_at_run["EXPLICIT"] == "true"

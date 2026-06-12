@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import shutil
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -1099,8 +1100,21 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
         _secure_config_dir(file_path.parent)
         # Use model_dump with mode='json' to serialize datetime objects properly
         config_dict = config.model_dump(mode="json")
-        file_path.write_text(json.dumps(config_dict, indent=2))
-        _secure_config_file(file_path)
+        # Trigger: long-lived readers (MCP stdio server config reload, background
+        # auto-update threads) re-read config.json whenever its mtime changes,
+        # concurrently with CLI commands saving it.
+        # Why: writing the destination in place truncates it first, so a concurrent
+        # reader can observe empty/partial JSON and load_config() exits the process.
+        # Outcome: write a sibling temp file (unique per process/thread so parallel
+        # savers cannot interleave) and publish atomically via os.replace — readers
+        # always see either the old or the new complete document. (#940)
+        tmp_path = file_path.parent / f"{file_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            tmp_path.write_text(json.dumps(config_dict, indent=2))
+            _secure_config_file(tmp_path)
+            os.replace(tmp_path, file_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
     except Exception as e:  # pragma: no cover
         logger.error(f"Failed to save config: {e}")
 
