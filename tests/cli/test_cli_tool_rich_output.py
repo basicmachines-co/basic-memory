@@ -23,7 +23,8 @@ READ_NOTE_RESULT = {
     "title": "Test Note",
     "permalink": "notes/test-note",
     "file_path": "notes/Test Note.md",
-    "content": "# Test Note\n\nhello world",
+    # Real payloads keep the leading newline left by frontmatter stripping.
+    "content": "\n# Test Note\n\nhello world",
     "frontmatter": {"title": "Test Note", "tags": ["test"]},
 }
 
@@ -263,7 +264,9 @@ def test_read_note_json_flag_overrides_tty(mock_mcp):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
     assert data["title"] == "Test Note"
-    assert data["content"] == "# Test Note\n\nhello world"
+    # JSON mode is byte-faithful: the payload's leading newline (frontmatter-strip
+    # artifact) is preserved here even though display modes trim it.
+    assert data["content"] == "\n# Test Note\n\nhello world"
 
 
 @patch(
@@ -747,6 +750,9 @@ def test_read_note_plain_output(mock_mcp):
     assert "hello world" in result.output
     # No frontmatter without the flag
     assert "tags:" not in result.output
+    # Exactly one blank line between header and body: the payload's leading
+    # newline (frontmatter-strip artifact) must not stack with the renderer's.
+    assert "Test Note  [notes/test-note]\n\n# Test Note" in result.output
 
 
 @patch(
