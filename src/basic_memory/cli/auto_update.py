@@ -168,6 +168,20 @@ def _manual_update_hint(source: InstallSource) -> str:
     )
 
 
+def _preload_lazy_console_modules() -> None:
+    """Import modules the post-upgrade output path defers until print time.
+
+    Trigger: an in-place upgrade is about to replace this installation on disk.
+    Why: rich and typer defer some imports until print/excepthook time; once
+    `brew upgrade` / `uv tool upgrade` removes the running version's files,
+    those imports raise ModuleNotFoundError and the final status message
+    crashes the exiting process.
+    Outcome: import the deferred modules now, while the files still exist.
+    """
+    import rich._emoji_codes  # noqa: F401
+    import typer.rich_utils  # noqa: F401
+
+
 def _save_last_checked_timestamp(config_manager: ConfigManager, checked_at: datetime) -> None:
     """Persist the timestamp for the most recent attempted update check."""
     config = config_manager.load_config()
@@ -288,6 +302,7 @@ def run_auto_update(
             else BREW_UPGRADE_TIMEOUT_SECONDS
         )
 
+        _preload_lazy_console_modules()
         install_result = _run_subprocess(
             command,
             timeout_seconds=timeout,

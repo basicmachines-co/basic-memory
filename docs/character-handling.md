@@ -184,8 +184,8 @@ finance/           (lowercase f)
 Use Basic Memory's built-in conflict detection:
 
 ```bash
-# Sync will report conflicts
-basic-memory sync
+# Index local file changes (conflicts are handled during the scan)
+basic-memory reindex
 
 # Check sync status for warnings
 basic-memory status

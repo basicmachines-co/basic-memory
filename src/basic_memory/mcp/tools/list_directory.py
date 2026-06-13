@@ -11,7 +11,9 @@ from basic_memory.mcp.server import mcp
 
 
 @mcp.tool(
+    title="List Directory",
     description="List directory contents with filtering and depth control.",
+    tags={"navigation", "notes"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def list_directory(

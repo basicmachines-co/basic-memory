@@ -3,12 +3,10 @@
 import asyncio
 from typing import Optional, TypeVar, Coroutine, Any
 
-from mcp.server.fastmcp.exceptions import ToolError
 import typer
 
 from rich.console import Console
 
-from basic_memory import db
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
@@ -31,6 +29,9 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     Returns:
         The result of the coroutine
     """
+    # Deferred: basic_memory.db pulls SQLAlchemy + Alembic, which must not load
+    # at CLI import time — only when a command actually runs (#886).
+    from basic_memory import db
 
     async def _with_cleanup() -> T:
         try:
@@ -53,6 +54,8 @@ async def run_sync(
         force_full: If True, force a full scan bypassing watermark optimization
         run_in_background: If True, return immediately; if False, wait for completion
     """
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
 
     # Resolve default project so get_client() can route per-project
     project = project or ConfigManager().default_project
@@ -86,6 +89,9 @@ async def run_sync(
 
 async def get_project_info(project: str):
     """Get project information via API endpoint."""
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
+
     try:
         async with get_client(project_name=project) as client:
             project_item = await get_active_project(client, project, None)

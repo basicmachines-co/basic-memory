@@ -1001,3 +1001,59 @@ async def test_postgres_search_categories_exact_match(session_maker, test_projec
     # Multiple categories union.
     multi = await repo.search(categories=["requirement", "decision"])
     assert {r.id for r in multi} == {70101, 70102}
+
+
+@pytest.mark.asyncio
+async def test_postgres_question_punctuation_and_relaxation(session_maker, test_project):
+    """Question-form queries must produce clean lexemes and a usable relaxation.
+
+    Parity with SQLite: sentence punctuation previously reached tsquery terms,
+    and a strict all-AND miss had no relaxed retry, silently disabling the FTS
+    half of hybrid search for natural-language questions.
+    """
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+
+    # Edge punctuation stripped before lexeme formatting.
+    prepared = repo._prepare_search_term("When did Melanie paint a sunrise?")
+    assert "?" not in prepared
+    assert "sunrise:*" in prepared
+
+    # Relaxation drops stopwords and OR-joins content terms.
+    relaxed = repo._relaxed_tsquery_text("When did Melanie paint a sunrise?")
+    assert relaxed == "Melanie:* | paint:* | sunrise:*"
+
+    # User intent is not second-guessed.
+    assert repo._relaxed_tsquery_text("alpha AND beta") is None
+    assert repo._relaxed_tsquery_text('"exact phrase"') is None
+    assert repo._relaxed_tsquery_text(None) is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_multiword_query_relaxes_on_strict_miss(session_maker, test_project):
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=77,
+            title="Trip plans",
+            content_stems="melanie painted a sunrise over the lake last year",
+            content_snippet="Melanie painted a sunrise over the lake last year.",
+            permalink="docs/trip-plans",
+            file_path="docs/trip-plans.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    # A content word absent from the doc ("hiking") makes the strict
+    # all-terms-AND query miss even after Postgres drops stopwords — without
+    # it, to_tsquery('english', ...) already strips "when/did/a" and matches.
+    strict = await repo.search(search_text="Did Melanie go hiking at sunrise?")
+    assert strict == []
+
+    # The hybrid FTS branch opts in; OR-relaxation surfaces the partial match.
+    results = await repo.search(search_text="Did Melanie go hiking at sunrise?", allow_relaxed=True)
+    assert any(r.id == 77 for r in results)

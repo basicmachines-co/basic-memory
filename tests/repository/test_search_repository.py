@@ -1124,3 +1124,83 @@ async def test_search_categories_exact_match(search_repository, search_entity):
     # Multiple categories union: both observations come back.
     multi = await search_repository.search(categories=["requirement", "decision"])
     assert {r.id for r in multi} == {70001, 70002}
+
+
+@pytest.mark.asyncio
+async def test_question_punctuation_does_not_phrase_quote(search_repository):
+    """Sentence punctuation must not force exact-phrase matching (#hybrid-fts).
+
+    'When did Melanie paint a sunrise?' previously became the FTS5 phrase
+    '"When did Melanie paint a sunrise?"*' — zero rows for any corpus — which
+    silently disabled the FTS half of hybrid search for question queries.
+    """
+    prepared = search_repository._prepare_single_term("When did Melanie paint a sunrise?")
+    assert '"' not in prepared
+    # Prefix syntax differs by backend: FTS5 uses '*', tsquery uses ':*'.
+    if is_postgres_backend(search_repository):
+        assert "sunrise:*" in prepared
+    else:
+        assert "sunrise*" in prepared
+
+
+@pytest.mark.asyncio
+async def test_relaxed_query_drops_stopwords(search_repository):
+    """Relaxation keys on content-bearing terms in each backend's syntax."""
+    if is_postgres_backend(search_repository):
+        relaxed = search_repository._relaxed_tsquery_text("When did Melanie paint a sunrise?")
+        assert relaxed == "Melanie:* | paint:* | sunrise:*"
+    else:
+        relaxed = search_repository._relaxed_fts_text("When did Melanie paint a sunrise?")
+        assert relaxed == "Melanie* OR paint* OR sunrise*"
+
+
+@pytest.mark.asyncio
+async def test_relaxed_query_respects_user_intent(search_repository):
+    # Eligibility matches the service-level relaxation (both backends): quoted,
+    # boolean, short (<3 tokens), and numeric-identifier queries are not relaxed.
+    relaxer = (
+        search_repository._relaxed_tsquery_text
+        if is_postgres_backend(search_repository)
+        else search_repository._relaxed_fts_text
+    )
+    assert relaxer("alpha AND beta") is None
+    assert relaxer('"exact phrase"') is None
+    assert relaxer("single") is None  # < 3 tokens
+    assert relaxer("New Feature") is None  # < 3 tokens (link title)
+    assert relaxer("root note 1") is None  # numeric identifier token
+    assert relaxer("SPEC 16 design") is None  # numeric token
+    assert relaxer(None) is None
+
+
+@pytest.mark.asyncio
+async def test_multiword_query_relaxes_to_or_when_strict_misses(search_repository, search_entity):
+    """A question sharing only SOME words with a doc still surfaces it."""
+    from basic_memory.repository.search_index_row import SearchIndexRow
+    from basic_memory.schemas.search import SearchItemType
+
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="Trip plans",
+        content_snippet="Melanie painted a sunrise over the lake last year.",
+        content_stems="melanie painted a sunrise over the lake last year",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+    )
+    await search_repository.index_item(row)
+
+    # "hiking" is absent from the doc, so strict all-terms-AND misses on both
+    # backends (Postgres's stopword stripping can't rescue it either).
+    strict = await search_repository.search(search_text="Did Melanie go hiking at sunrise?")
+    assert strict == []
+
+    # The hybrid FTS branch opts in; OR-relaxation surfaces the partial match.
+    results = await search_repository.search(
+        search_text="Did Melanie go hiking at sunrise?", allow_relaxed=True
+    )
+    assert any(r.entity_id == search_entity.id for r in results)

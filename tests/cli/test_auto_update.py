@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from typing import Any, cast
@@ -15,6 +16,7 @@ from basic_memory.cli.auto_update import (
     InstallSource,
     _check_homebrew_update_available,
     _is_interactive_session,
+    _preload_lazy_console_modules,
     detect_install_source,
     maybe_run_periodic_auto_update,
     run_auto_update,
@@ -157,6 +159,19 @@ def test_check_homebrew_update_available_exit_code_0_means_up_to_date(monkeypatc
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
     is_outdated, _ = _check_homebrew_update_available(silent=False)
     assert is_outdated is False
+
+
+def test_preload_lazy_console_modules_imports_deferred_modules(monkeypatch):
+    # Regression: the in-place upgrade deletes the running install's files, so
+    # any module rich/typer defers until print time must already be loaded or
+    # the final status message crashes with ModuleNotFoundError.
+    monkeypatch.delitem(sys.modules, "rich._emoji_codes", raising=False)
+    monkeypatch.delitem(sys.modules, "typer.rich_utils", raising=False)
+
+    _preload_lazy_console_modules()
+
+    assert "rich._emoji_codes" in sys.modules
+    assert "typer.rich_utils" in sys.modules
 
 
 def test_homebrew_outdated_triggers_upgrade(monkeypatch, tmp_path):

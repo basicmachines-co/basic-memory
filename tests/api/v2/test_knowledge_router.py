@@ -1,17 +1,23 @@
 """Tests for V2 knowledge graph API routes (ID-based endpoints)."""
 
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 import uuid
 
 import pytest
 from httpx import AsyncClient
 
+from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
+from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.repository.search_repository_base import VectorSyncBatchResult
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
+from basic_memory.services.search_service import SearchService
 
 
 @pytest.mark.asyncio
@@ -955,3 +961,512 @@ async def test_entity_response_includes_user_tracking_fields(client: AsyncClient
     assert "last_updated_by" in body
     assert body["created_by"] is None
     assert body["last_updated_by"] is None
+
+
+## Single-file sync endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_sync_file_indexes_file_on_disk(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """A markdown file written directly to disk becomes resolvable after sync-file (#581)."""
+    note_path = Path(test_project.path) / "incoming" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nWritten directly to disk.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/disk-note.md"},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "incoming/disk-note.md"
+
+    # The file is now resolvable by path, which is what edit_note retries with
+    resolve_response = await client.post(
+        f"{v2_project_url}/knowledge/resolve",
+        json={"identifier": "incoming/disk-note.md", "strict": True},
+    )
+    assert resolve_response.status_code == 200
+    resolved = EntityResolveResponse.model_validate(resolve_response.json())
+    assert resolved.external_id == entity.external_id
+
+
+@pytest.mark.asyncio
+async def test_sync_file_already_indexed_is_idempotent(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file on an already indexed, unchanged file returns the existing entity."""
+    entity_data = {
+        "title": "AlreadyIndexed",
+        "directory": "test",
+        "content": "Already indexed content",
+    }
+    create_response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
+    assert create_response.status_code == 200
+    created = EntityResponseV2.model_validate(create_response.json())
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": created.file_path},
+    )
+    assert response.status_code == 200
+    synced = EntityResponseV2.model_validate(response.json())
+    assert synced.external_id == created.external_id
+    assert synced.file_path == created.file_path
+
+
+@pytest.mark.asyncio
+async def test_sync_file_syncs_vectors_when_semantic_enabled(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    app_config,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """sync-file refreshes semantic vectors for the synced entity.
+
+    Mirrors the inline sync_entity_vectors_batch() pass the project sync flow runs
+    after indexing changed files (SyncService.sync); without it, a note recovered
+    via sync-file stays missing from semantic search until a later edit or full
+    sync. Fixtures run with semantic search disabled, so enable it here and stub
+    the service-level vector batch (like test_search_service.py::test_reindex_vectors
+    stubs the repository batch) to exercise the wiring without the embedding stack.
+    """
+    app_config.semantic_search_enabled = True
+
+    synced_batches: list[list[int]] = []
+
+    async def stub_sync_entity_vectors_batch(
+        self, entity_ids: list[int], progress_callback=None
+    ) -> VectorSyncBatchResult:
+        synced_batches.append(list(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
+
+    # The router builds its SearchService per request, so patch the class method
+    # rather than a fixture instance.
+    monkeypatch.setattr(SearchService, "sync_entity_vectors_batch", stub_sync_entity_vectors_batch)
+
+    note_path = Path(test_project.path) / "incoming" / "semantic-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Semantic Note\n\nNeeds vectors after recovery.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/semantic-note.md"},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+
+    assert synced_batches == [[entity.id]]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_skips_vector_sync_when_semantic_disabled(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    app_config,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """sync-file does not touch the vector pipeline when semantic search is disabled."""
+    assert app_config.semantic_search_enabled is False
+
+    synced_batches: list[list[int]] = []
+
+    async def stub_sync_entity_vectors_batch(
+        self, entity_ids: list[int], progress_callback=None
+    ) -> VectorSyncBatchResult:
+        synced_batches.append(list(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
+
+    monkeypatch.setattr(SearchService, "sync_entity_vectors_batch", stub_sync_entity_vectors_batch)
+
+    note_path = Path(test_project.path) / "incoming" / "plain-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Plain Note\n\nNo vectors needed.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/plain-note.md"},
+    )
+    assert response.status_code == 200
+    assert synced_batches == []
+
+
+@pytest.mark.asyncio
+async def test_sync_file_missing_file_returns_404(client: AsyncClient, v2_project_url):
+    """sync-file fails fast when the file does not exist on disk."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "missing/never-written.md"},
+    )
+    assert response.status_code == 404
+    assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_path_traversal(client: AsyncClient, v2_project_url):
+    """sync-file rejects paths that escape the project root."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "../outside-project.md"},
+    )
+    assert response.status_code == 400
+    assert "project boundaries" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_symlink_escape(
+    client: AsyncClient, v2_project_url, test_project: Project, entity_repository
+):
+    """sync-file rejects paths whose canonical target escapes the project via symlink.
+
+    The exact-cased request ('link/secret.md') is rejected by the pre-canonicalization
+    boundary check: the path exists, so resolve() follows the symlink and detects the
+    escape. The wrong-cased request ('LINK/secret.md') is the regression case — on a
+    case-sensitive filesystem that path does not exist, the pre-check resolves it
+    lexically and passes; canonicalization then matches the real 'link' segment but
+    stops at the project boundary and reports the path as not found (404). On
+    case-insensitive filesystems the pre-check catches both with 400.
+    """
+    project_path = Path(test_project.path)
+    outside_dir = project_path.parent / "sync-file-outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.md").write_text(
+        "# Outside\n\nMust never be indexed.\n", encoding="utf-8"
+    )
+    (project_path / "link").symlink_to(outside_dir, target_is_directory=True)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "link/secret.md"},
+    )
+    assert response.status_code == 400
+    assert "project boundaries" in response.json()["detail"]
+
+    # 400 (pre-check, case-insensitive FS) or 404 (canonicalization stops at the
+    # boundary, case-sensitive FS) — either way the escape is rejected.
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "LINK/secret.md"},
+    )
+    assert response.status_code in (400, 404)
+
+    # Nothing outside the project root was indexed
+    assert await entity_repository.find_all() == []
+
+
+@pytest.mark.asyncio
+async def test_sync_file_symlink_escape_never_scans_outside_directory(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    entity_repository,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Canonicalization never scans directories outside the project root.
+
+    Rejecting the request is not enough: before this fix, the wrong-cased request
+    ('LINK/secret.md') passed the pre-check on a case-sensitive filesystem, and
+    canonicalization followed the escaping 'link' symlink with os.scandir before the
+    post-canonicalization containment check fired — an information touch outside the
+    boundary. We spy on os.scandir and assert the outside directory is never scanned.
+    The spy is what makes this test meaningful on case-insensitive macOS too, where
+    the request is already rejected by the pre-check: the assertion proves no layer
+    scanned past the boundary either way.
+    """
+    project_path = Path(test_project.path)
+    outside_dir = (project_path.parent / "sync-file-outside-scan").resolve()
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    (outside_dir / "secret.md").write_text(
+        "# Outside\n\nMust never be scanned.\n", encoding="utf-8"
+    )
+    (project_path / "link").symlink_to(outside_dir, target_is_directory=True)
+
+    real_scandir = os.scandir
+    scanned: list[Path] = []
+
+    def recording_scandir(path=".", *args, **kwargs):
+        # Record the resolved path so a scandir on the symlinked 'link' directory
+        # shows up as the outside directory it actually reads.
+        scanned.append(Path(path).resolve())
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", recording_scandir)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "LINK/secret.md"},
+    )
+    assert response.status_code in (400, 404)
+    assert outside_dir not in scanned
+
+    assert await entity_repository.find_all() == []
+
+
+@pytest.mark.asyncio
+async def test_sync_file_symlink_escape_never_probes_outside_target(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    entity_repository,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The containment check runs before any filesystem probe that follows symlinks.
+
+    Regression: a wrong-cased request ('SECRET.md') canonicalizes onto an in-project
+    FILE symlink ('secret.md' -> outside target) on a case-sensitive filesystem.
+    Before the fix, the endpoint's is_file() existence probe ran before the
+    resolved-containment check, so it followed the symlink and stat'ed the target
+    outside the project boundary (and the response flipped between 404 and 400
+    depending on whether the external target existed). We spy on Path.is_file and
+    assert no probe ever resolves to the outside target; the escape is always
+    rejected with 400 — by the pre-check on case-insensitive filesystems, by the
+    post-canonicalization containment check on case-sensitive ones.
+    """
+    project_path = Path(test_project.path)
+    outside_dir = (project_path.parent / "sync-file-outside-probe").resolve()
+    outside_dir.mkdir(parents=True, exist_ok=True)
+    outside_target = outside_dir / "secret.md"
+    outside_target.write_text("# Outside\n\nMust never be probed.\n", encoding="utf-8")
+    (project_path / "secret.md").symlink_to(outside_target)
+
+    real_is_file = Path.is_file
+    probed: list[Path] = []
+
+    def recording_is_file(self, *args, **kwargs):
+        # Record the resolved path so a probe on the in-project symlink name shows
+        # up as the outside target it would actually stat.
+        probed.append(self.resolve())
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", recording_is_file)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "SECRET.md"},
+    )
+    assert response.status_code == 400
+    assert "project boundaries" in response.json()["detail"]
+    assert outside_target not in probed
+
+    assert await entity_repository.find_all() == []
+
+
+def test_canonical_file_path_stops_at_project_boundary(tmp_path: Path):
+    """_canonical_file_path bails before descending past the resolved project home.
+
+    Exercised directly (not via the endpoint) so the boundary bail is covered on
+    case-insensitive filesystems too, where the endpoint pre-check rejects the
+    request before canonicalization runs.
+    """
+    home = tmp_path / "project"
+    home.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "secret.md").write_text("# Outside\n", encoding="utf-8")
+    (home / "link").symlink_to(outside_dir, target_is_directory=True)
+
+    assert _canonical_file_path(home, ["link", "secret.md"]) is None
+
+    # Symlinks that stay inside the project keep canonicalizing as before.
+    real_dir = home / "real"
+    real_dir.mkdir()
+    (real_dir / "inside.md").write_text("# Inside\n", encoding="utf-8")
+    (home / "alias").symlink_to(real_dir, target_is_directory=True)
+
+    assert _canonical_file_path(home, ["alias", "inside.md"]) == "alias/inside.md"
+
+
+@pytest.mark.asyncio
+async def test_sync_file_symlink_inside_project_still_indexes(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """A symlinked directory that stays inside the project is still accepted.
+
+    Pre-existing behavior we preserve: the containment check follows the symlink,
+    sees the resolved target inside the project root, and indexes the entity under
+    the requested (symlinked) path — only escapes outside the root are rejected.
+    """
+    project_path = Path(test_project.path)
+    real_dir = project_path / "real"
+    real_dir.mkdir(parents=True, exist_ok=True)
+    (real_dir / "inside.md").write_text("# Inside\n\nReachable via alias.\n", encoding="utf-8")
+    (project_path / "alias").symlink_to(real_dir, target_is_directory=True)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "alias/inside.md"},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "alias/inside.md"
+
+
+@pytest.mark.asyncio
+async def test_sync_file_wrong_cased_path_does_not_create_duplicate(
+    client: AsyncClient, v2_project_url, test_project: Project, entity_repository
+):
+    """A wrong-cased path resolves to the canonical on-disk file without duplicating it.
+
+    On case-insensitive filesystems (macOS/Windows) a wrong-cased path passes existence
+    checks; without canonicalization the indexer would insert a second entity keyed by
+    the wrong-cased path. The endpoint matches real directory entries, so the request
+    behaves identically on case-sensitive and case-insensitive filesystems.
+    """
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nWritten directly to disk.\n", encoding="utf-8")
+
+    first = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "notes/disk-note.md"},
+    )
+    assert first.status_code == 200
+    canonical = EntityResponseV2.model_validate(first.json())
+    assert canonical.file_path == "notes/disk-note.md"
+
+    second = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "notes/Disk-Note.md"},
+    )
+    assert second.status_code == 200
+    synced = EntityResponseV2.model_validate(second.json())
+    assert synced.file_path == "notes/disk-note.md"
+    assert synced.external_id == canonical.external_id
+
+    entities = await entity_repository.find_all()
+    assert [entity.file_path for entity in entities] == ["notes/disk-note.md"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_non_normalized_segments(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file rejects './' and '//' style segments instead of indexing them verbatim."""
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n", encoding="utf-8")
+
+    for non_normalized in ("./notes/disk-note.md", "notes//disk-note.md"):
+        response = await client.post(
+            f"{v2_project_url}/knowledge/sync-file",
+            json={"file_path": non_normalized},
+        )
+        assert response.status_code == 400
+        assert "not normalized" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_directory_returns_404(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file refuses a path that canonicalizes to a directory instead of a file."""
+    (Path(test_project.path) / "just-a-directory").mkdir(parents=True, exist_ok=True)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "just-a-directory"},
+    )
+    assert response.status_code == 404
+    assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_path_through_file_returns_404(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file fails fast when a parent segment resolves to a file, not a directory."""
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "notes/disk-note.md/child.md"},
+    )
+    assert response.status_code == 404
+    assert "File not found on disk" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_hidden_file(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file refuses hidden files, matching the default '.*' ignore pattern."""
+    hidden_path = Path(test_project.path) / ".secrets.md"
+    hidden_path.write_text("# Hidden\n\nShould never be indexed.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": ".secrets.md"},
+    )
+    assert response.status_code == 400
+    assert "ignore rules" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_gitignored_file(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file honors the project .gitignore, matching scan/watch filtering."""
+    project_path = Path(test_project.path)
+    (project_path / ".gitignore").write_text("private/\n", encoding="utf-8")
+    note_path = project_path / "private" / "secret.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Secret\n\nGitignored content.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "private/secret.md"},
+    )
+    assert response.status_code == 400
+    assert "ignore rules" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_bmignored_file(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file honors user .bmignore patterns, matching scan/watch filtering."""
+    bmignore_path = get_bmignore_path()
+    bmignore_path.parent.mkdir(parents=True, exist_ok=True)
+    bmignore_path.write_text("drafts-wip\n", encoding="utf-8")
+
+    note_path = Path(test_project.path) / "drafts-wip" / "scratch.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Scratch\n\nBmignored content.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "drafts-wip/scratch.md"},
+    )
+    assert response.status_code == 400
+    assert "ignore rules" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_file_rejects_non_markdown(
+    client: AsyncClient, v2_project_url, test_project: Project
+):
+    """sync-file only indexes markdown notes."""
+    file_path = Path(test_project.path) / "data" / "records.csv"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("a,b,c\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "data/records.csv"},
+    )
+    assert response.status_code == 400
+    assert "Only markdown files" in response.json()["detail"]

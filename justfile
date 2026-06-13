@@ -3,6 +3,9 @@
 TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--testmon-noselect")
 TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--testmon --testmon-forceselect")
 TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--testmon-noselect")
+# CI shards the Postgres unit suite across parallel jobs via pytest-split
+# (e.g. "--splits 3 --group 2"). Empty locally.
+PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
 
 # Install dependencies
 install:
@@ -43,8 +46,12 @@ test-unit-sqlite: testmon-seed
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-sqlite tests
 
 # Run unit tests against Postgres
+# Exit code 5 (no tests collected) is success: a testmon-selected PR build can
+# leave a pytest-split shard empty.
 test-unit-postgres: testmon-seed
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-postgres tests
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} {{PYTEST_SPLIT_FLAGS}} --testmon-env=unit-postgres tests || test $? -eq 5
 
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)
@@ -376,17 +383,31 @@ release version:
         echo "❌ Tag {{version}} already exists"
         exit 1
     fi
-    
+
+    # Changelog must already be on main (land it via a normal PR first)
+    if ! grep -q "^## {{version}} " CHANGELOG.md; then
+        echo "❌ CHANGELOG.md has no entry for {{version}}. Land one via PR first."
+        exit 1
+    fi
+
     # Run quality checks
     echo "🔍 Running lint  checks..."
     just lint
     just typecheck
-    
+
     # Update all package manifests to the one Basic Memory product version.
     echo "📝 Updating consolidated package versions..."
     just set-version "{{version}}"
 
-    # Commit version update
+    # Trigger: main's ruleset rejects direct pushes ("Changes must be made
+    # through a pull request").
+    # Why: the version bump must land on main before the tag is cut, so it
+    # rides a release PR that is rebase-merged (the repo disallows merge
+    # commits).
+    # Outcome: the bump commit gets a new SHA on main; the tag is created on
+    # that rebased commit, found by its commit subject.
+    COMMIT_SUBJECT="chore: update version to $VERSION_NUM for {{version}} release"
+    git checkout -b "release/{{version}}"
     git add \
         src/basic_memory/__init__.py \
         server.json \
@@ -397,23 +418,58 @@ release version:
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
-    git commit -s -m "chore: update version to $VERSION_NUM for {{version}} release"
-    
-    # Create and push tag
-    echo "🏷️  Creating tag {{version}}..."
-    git tag "{{version}}"
-    
-    echo "📤 Pushing to GitHub..."
-    git push origin main
+    git commit -s -m "$COMMIT_SUBJECT"
+
+    echo "📤 Opening release PR..."
+    git push -u origin "release/{{version}}"
+    gh pr create --title "chore(core): release {{version}}" \
+        --body "Version bump for {{version}}. See CHANGELOG.md for release notes."
+
+    # Trigger: the PR may not be mergeable synchronously (merge gates,
+    # required checks added later, or GitHub still computing mergeability).
+    # Why: the tag must point at the bump commit on main, so the recipe
+    # cannot tag until the merge has actually landed.
+    # Outcome: try a direct rebase-merge, fall back to queueing auto-merge,
+    # then poll main for the rebased bump commit before tagging.
+    if ! gh pr merge "release/{{version}}" --rebase --delete-branch; then
+        echo "⚠️  Direct merge did not complete (merge gates pending?). Queueing auto-merge..."
+        gh pr merge "release/{{version}}" --rebase --delete-branch --auto
+    fi
+
+    echo "⏳ Waiting for the bump commit to land on main..."
+    TAG_COMMIT=""
+    for _ in $(seq 1 60); do
+        git fetch origin main --quiet
+        TAG_COMMIT=$(git log FETCH_HEAD --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
+        [[ -n "$TAG_COMMIT" ]] && break
+        sleep 5
+    done
+    if [[ -z "$TAG_COMMIT" ]]; then
+        echo "❌ Bump commit not on main after 5 minutes (merge still pending?)."
+        echo "   Once the release PR merges, finish the release manually:"
+        echo "   git fetch origin main"
+        echo "   git tag {{version}} \$(git log FETCH_HEAD --fixed-strings --grep \"$COMMIT_SUBJECT\" --format='%H' -1)"
+        echo "   git push origin {{version}}"
+        exit 1
+    fi
+
+    git checkout main
+    git pull --ff-only origin main
+    git branch -D "release/{{version}}" 2>/dev/null || true
+
+    echo "🏷️  Creating tag {{version}} at $TAG_COMMIT..."
+    git tag "{{version}}" "$TAG_COMMIT"
     git push origin "{{version}}"
-    
+
     echo "✅ Release {{version}} created successfully!"
     echo "📦 GitHub Actions will build and publish to PyPI"
     echo "🔗 Monitor at: https://github.com/basicmachines-co/basic-memory/actions"
     echo ""
     echo "📝 REMINDER: Post-release tasks:"
-    echo "   1. docs.basicmemory.com - Add release notes to src/pages/latest-releases.mdx"
-    echo "   2. basicmachines.co - Update version in src/components/sections/hero.tsx"
+    echo "   1. docs.basicmemory.com - Add a What's New page under content/2.whats-new/"
+    echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
+    echo "   2. basicmemory.com - No version number in the site UI; for a significant"
+    echo "      release optionally add a post under src/content/blog/. Skip for patches."
     echo "   3. MCP Registry - Run: mcp-publisher publish"
     echo "   See: .claude/commands/release/release.md for detailed instructions"
 
@@ -460,7 +516,15 @@ beta version:
     echo "📝 Updating consolidated package versions..."
     just set-version "{{version}}"
 
-    # Commit version update
+    # Trigger: main's ruleset rejects direct pushes ("Changes must be made
+    # through a pull request").
+    # Why: the version bump must land on main before the tag is cut, so it
+    # rides a release PR that is rebase-merged (the repo disallows merge
+    # commits).
+    # Outcome: the bump commit gets a new SHA on main; the tag is created on
+    # that rebased commit, found by its commit subject.
+    COMMIT_SUBJECT="chore: update version to $VERSION_NUM for {{version}} beta release"
+    git checkout -b "release/{{version}}"
     git add \
         src/basic_memory/__init__.py \
         server.json \
@@ -471,24 +535,59 @@ beta version:
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
-    git commit -s -m "chore: update version to $VERSION_NUM for {{version}} beta release"
-    
-    # Create and push tag
-    echo "🏷️  Creating tag {{version}}..."
-    git tag "{{version}}"
-    
-    echo "📤 Pushing to GitHub..."
-    git push origin main
+    git commit -s -m "$COMMIT_SUBJECT"
+
+    echo "📤 Opening release PR..."
+    git push -u origin "release/{{version}}"
+    gh pr create --title "chore(core): release {{version}}" \
+        --body "Version bump for {{version}} beta."
+
+    # Trigger: the PR may not be mergeable synchronously (merge gates,
+    # required checks added later, or GitHub still computing mergeability).
+    # Why: the tag must point at the bump commit on main, so the recipe
+    # cannot tag until the merge has actually landed.
+    # Outcome: try a direct rebase-merge, fall back to queueing auto-merge,
+    # then poll main for the rebased bump commit before tagging.
+    if ! gh pr merge "release/{{version}}" --rebase --delete-branch; then
+        echo "⚠️  Direct merge did not complete (merge gates pending?). Queueing auto-merge..."
+        gh pr merge "release/{{version}}" --rebase --delete-branch --auto
+    fi
+
+    echo "⏳ Waiting for the bump commit to land on main..."
+    TAG_COMMIT=""
+    for _ in $(seq 1 60); do
+        git fetch origin main --quiet
+        TAG_COMMIT=$(git log FETCH_HEAD --fixed-strings --grep "$COMMIT_SUBJECT" --format='%H' -1)
+        [[ -n "$TAG_COMMIT" ]] && break
+        sleep 5
+    done
+    if [[ -z "$TAG_COMMIT" ]]; then
+        echo "❌ Bump commit not on main after 5 minutes (merge still pending?)."
+        echo "   Once the release PR merges, finish the release manually:"
+        echo "   git fetch origin main"
+        echo "   git tag {{version}} \$(git log FETCH_HEAD --fixed-strings --grep \"$COMMIT_SUBJECT\" --format='%H' -1)"
+        echo "   git push origin {{version}}"
+        exit 1
+    fi
+
+    git checkout main
+    git pull --ff-only origin main
+    git branch -D "release/{{version}}" 2>/dev/null || true
+
+    echo "🏷️  Creating tag {{version}} at $TAG_COMMIT..."
+    git tag "{{version}}" "$TAG_COMMIT"
     git push origin "{{version}}"
-    
+
     echo "✅ Beta release {{version}} created successfully!"
     echo "📦 GitHub Actions will build and publish to PyPI as pre-release"
     echo "🔗 Monitor at: https://github.com/basicmachines-co/basic-memory/actions"
     echo "📥 Install with: uv tool install basic-memory --pre"
     echo ""
     echo "📝 REMINDER: For stable releases, update documentation sites:"
-    echo "   1. docs.basicmemory.com - Add release notes to src/pages/latest-releases.mdx"
-    echo "   2. basicmachines.co - Update version in src/components/sections/hero.tsx"
+    echo "   1. docs.basicmemory.com - Add a What's New page under content/2.whats-new/"
+    echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
+    echo "   2. basicmemory.com - No version number in the site UI; for a significant"
+    echo "      release optionally add a post under src/content/blog/. Skip for patches."
     echo "   See: .claude/commands/release/release.md for detailed instructions"
 
 # List all available recipes

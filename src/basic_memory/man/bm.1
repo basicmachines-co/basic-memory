@@ -1,0 +1,134 @@
+.TH BM 1 "2026-06-11" "basic-memory" "Basic Memory Manual"
+.SH NAME
+bm \- local-first knowledge base for humans and AI agents
+.SH SYNOPSIS
+.B bm
+.I COMMAND
+.RI [ ARGS ]...
+.br
+.B basic-memory
+.I COMMAND
+.RI [ ARGS ]...
+.SH DESCRIPTION
+.B bm
+manages Basic Memory projects: plain markdown files that form a knowledge
+graph. Files are the source of truth; SQLite provides indexing and
+full-text search; the same operations are exposed to AI agents over the
+Model Context Protocol (MCP) and to humans and scripts through this CLI.
+.PP
+Notes use semantic markdown: observations
+.RB ( "\- [category] text #tag" )
+and relations
+.RB ( "\- relation_type [[Target]]" )
+become queryable graph structure. Projects route independently to the
+local API or to Basic Memory Cloud.
+.SH COMMANDS
+Knowledge operations:
+.TP
+.B bm tool
+CLI access to the MCP tools (write-note, read-note, search-notes,
+build-context, ...). These emit JSON and are the scriptable surface.
+.TP
+.B bm status
+Show sync status between files and the database.
+.TP
+.B bm reindex
+Index local file changes and rebuild search/embeddings. This is the manual
+sync trigger when no MCP server is running.
+.TP
+.B bm doctor
+Run end-to-end file/database consistency checks.
+.TP
+.B bm orphans
+List entities with no relations in the knowledge graph.
+.TP
+.B bm format
+Run configured formatters over note files.
+.PP
+Projects and schemas:
+.TP
+.B bm project
+Add, remove, list projects; set the default; flip a project between local
+and cloud routing.
+.TP
+.B bm schema
+List, validate, infer, and drift-check Picoschema note-type contracts.
+.PP
+Data and cloud:
+.TP
+.B bm import
+Import from ChatGPT, Claude, or memory.json exports. Imports write files;
+run
+.B bm reindex
+afterwards.
+.TP
+.B bm cloud
+Authenticate, sync (push/pull/sync/bisync), snapshots, and team workspace
+administration.
+.PP
+Infrastructure:
+.TP
+.B bm mcp
+Run the MCP server (hosts the live file watcher).
+.TP
+.B bm man
+Manage these man pages
+.RB ( "bm man install" ).
+.TP
+.B bm reset
+Drop and recreate the database (destructive).
+.PP
+Most commands accept
+.B \-\-project
+.I NAME
+to target a project and
+.BR \-\-local / \-\-cloud
+to override routing.
+.SH EXAMPLES
+Write and find a note from the shell:
+.PP
+.nf
+.RS
+echo "# Standup notes" | bm tool write-note \\
+    \-\-title "Standup" \-\-folder notes
+bm tool search-notes "standup"
+.RE
+.fi
+.PP
+Pick up files created outside the tools:
+.PP
+.nf
+.RS
+bm status            # shows pending changes
+bm reindex           # indexes them
+.RE
+.fi
+.SH FILES
+.TP
+.I ~/.basic-memory/config.json
+Projects, default project, per-project routing modes, cloud settings.
+.TP
+.I ~/.basic-memory/memory.db
+SQLite index (derived; safe to rebuild with bm reindex).
+.SH ENVIRONMENT
+.TP
+.B BASIC_MEMORY_FORCE_LOCAL
+Force local routing regardless of cloud mode.
+.TP
+.B BASIC_MEMORY_LOG_LEVEL
+Logging verbosity (e.g. DEBUG).
+.SH SEE ALSO
+Full manual (machine-readable, agent-traversable): the
+.I manual
+Basic Memory project \(em see docs/manual-pages.md in the repository.
+Documentation: https://docs.basicmemory.com
+.PP
+For AI agents: the complete tool reference lives in the manual project as
+section\-3 pages (write-note(3), search-notes(3), ...), queryable via
+.B search_notes
+with
+.BR "metadata_filters={\(dqtype\(dq: \(dqmanpage\(dq}" .
+.SH BUGS
+https://github.com/basicmachines-co/basic-memory/issues
+.SH AUTHORS
+Basic Machines (https://basicmachines.co)

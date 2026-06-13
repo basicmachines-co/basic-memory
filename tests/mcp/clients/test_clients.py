@@ -27,7 +27,6 @@ class TestKnowledgeClient:
     @pytest.mark.asyncio
     async def test_create_entity(self, monkeypatch):
         """Test create_entity calls correct endpoint."""
-        from basic_memory.mcp.clients import knowledge as knowledge_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -47,7 +46,7 @@ class TestKnowledgeClient:
             assert kwargs.get("params") is None
             return mock_response
 
-        monkeypatch.setattr(knowledge_mod, "call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -57,7 +56,6 @@ class TestKnowledgeClient:
     @pytest.mark.asyncio
     async def test_update_entity(self, monkeypatch):
         """Test update_entity calls correct endpoint without fast query params."""
-        from basic_memory.mcp.clients import knowledge as knowledge_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -77,7 +75,7 @@ class TestKnowledgeClient:
             assert kwargs.get("params") is None
             return mock_response
 
-        monkeypatch.setattr(knowledge_mod, "call_put", mock_call_put)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_put", mock_call_put)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -87,7 +85,6 @@ class TestKnowledgeClient:
     @pytest.mark.asyncio
     async def test_patch_entity(self, monkeypatch):
         """Test patch_entity calls correct endpoint without fast query params."""
-        from basic_memory.mcp.clients import knowledge as knowledge_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -107,7 +104,7 @@ class TestKnowledgeClient:
             assert kwargs.get("params") is None
             return mock_response
 
-        monkeypatch.setattr(knowledge_mod, "call_patch", mock_call_patch)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_patch", mock_call_patch)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -117,7 +114,6 @@ class TestKnowledgeClient:
     @pytest.mark.asyncio
     async def test_resolve_entity(self, monkeypatch):
         """Test resolve_entity returns external_id."""
-        from basic_memory.mcp.clients import knowledge as knowledge_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"external_id": "entity-uuid-123"}
@@ -126,7 +122,7 @@ class TestKnowledgeClient:
             assert "/v2/projects/proj-123/knowledge/resolve" in url
             return mock_response
 
-        monkeypatch.setattr(knowledge_mod, "call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -134,9 +130,37 @@ class TestKnowledgeClient:
         assert result == "entity-uuid-123"
 
     @pytest.mark.asyncio
+    async def test_sync_file(self, monkeypatch):
+        """Test sync_file posts the file path to the sync-file endpoint."""
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "permalink": "notes/disk-note",
+            "title": "Disk Note",
+            "file_path": "notes/disk-note.md",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "observations": [],
+            "relations": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
+
+        async def mock_call_post(client, url, **kwargs):
+            assert "/v2/projects/proj-123/knowledge/sync-file" in url
+            assert kwargs.get("json") == {"file_path": "notes/disk-note.md"}
+            return mock_response
+
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+
+        mock_http = MagicMock()
+        client = KnowledgeClient(mock_http, "proj-123")
+        result = await client.sync_file("notes/disk-note.md")
+        assert result.file_path == "notes/disk-note.md"
+
+    @pytest.mark.asyncio
     async def test_get_orphans_validates_response(self, monkeypatch):
         """Orphan responses are validated into GraphNode objects."""
-        from basic_memory.mcp.clients import knowledge as knowledge_mod
         from basic_memory.schemas.v2.graph import GraphNode
 
         mock_response = MagicMock()
@@ -156,7 +180,7 @@ class TestKnowledgeClient:
             assert "/v2/projects/proj-123/knowledge/orphans" in url
             return mock_response
 
-        monkeypatch.setattr(knowledge_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -181,7 +205,6 @@ class TestSearchClient:
     @pytest.mark.asyncio
     async def test_search(self, monkeypatch):
         """Test search calls correct endpoint."""
-        from basic_memory.mcp.clients import search as search_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -195,7 +218,7 @@ class TestSearchClient:
             assert kwargs.get("params") == {"page": 1, "page_size": 10}
             return mock_response
 
-        monkeypatch.setattr(search_mod, "call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         mock_http = MagicMock()
         client = SearchClient(mock_http, "proj-123")
@@ -218,7 +241,6 @@ class TestMemoryClient:
     @pytest.mark.asyncio
     async def test_build_context(self, monkeypatch):
         """Test build_context calls correct endpoint."""
-        from basic_memory.mcp.clients import memory as memory_mod
         from datetime import datetime
 
         mock_response = MagicMock()
@@ -234,7 +256,7 @@ class TestMemoryClient:
             assert "/v2/projects/proj-123/memory/specs/search" in url
             return mock_response
 
-        monkeypatch.setattr(memory_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = MemoryClient(mock_http, "proj-123")
@@ -244,7 +266,6 @@ class TestMemoryClient:
     @pytest.mark.asyncio
     async def test_recent(self, monkeypatch):
         """Test recent calls correct endpoint."""
-        from basic_memory.mcp.clients import memory as memory_mod
         from datetime import datetime
 
         mock_response = MagicMock()
@@ -263,7 +284,7 @@ class TestMemoryClient:
             assert params.get("depth") == 2
             return mock_response
 
-        monkeypatch.setattr(memory_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = MemoryClient(mock_http, "proj-123")
@@ -274,7 +295,6 @@ class TestMemoryClient:
     @pytest.mark.asyncio
     async def test_recent_with_types(self, monkeypatch):
         """Test recent with types filter."""
-        from basic_memory.mcp.clients import memory as memory_mod
         from datetime import datetime
 
         mock_response = MagicMock()
@@ -292,7 +312,7 @@ class TestMemoryClient:
             assert params.get("type") == "note,spec"
             return mock_response
 
-        monkeypatch.setattr(memory_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = MemoryClient(mock_http, "proj-123")
@@ -314,7 +334,6 @@ class TestDirectoryClient:
     @pytest.mark.asyncio
     async def test_list(self, monkeypatch):
         """Test list calls correct endpoint."""
-        from basic_memory.mcp.clients import directory as directory_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = [{"name": "folder", "type": "directory"}]
@@ -323,7 +342,7 @@ class TestDirectoryClient:
             assert "/v2/projects/proj-123/directory/list" in url
             return mock_response
 
-        monkeypatch.setattr(directory_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = DirectoryClient(mock_http, "proj-123")
@@ -346,7 +365,6 @@ class TestResourceClient:
     @pytest.mark.asyncio
     async def test_read(self, monkeypatch):
         """Test read calls correct endpoint."""
-        from basic_memory.mcp.clients import resource as resource_mod
 
         mock_response = MagicMock()
         mock_response.text = "# Note content"
@@ -355,7 +373,7 @@ class TestResourceClient:
             assert "/v2/projects/proj-123/resource/entity-123" in url
             return mock_response
 
-        monkeypatch.setattr(resource_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = ResourceClient(mock_http, "proj-123")
@@ -375,7 +393,6 @@ class TestProjectClient:
     @pytest.mark.asyncio
     async def test_list_projects(self, monkeypatch):
         """Test list_projects calls correct endpoint."""
-        from basic_memory.mcp.clients import project as project_mod
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -395,7 +412,7 @@ class TestProjectClient:
             assert "/v2/projects" in url
             return mock_response
 
-        monkeypatch.setattr(project_mod, "call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = ProjectClient(mock_http)

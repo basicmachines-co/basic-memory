@@ -318,7 +318,7 @@ For MCP stdio, routing is always local.
 | `bm cloud push` | local → cloud | Personal + Team | Upload local changes, additively (git-style) |
 | `bm cloud sync` | local → cloud | Personal only | One-way mirror (cloud becomes identical to local) |
 | `bm cloud bisync` | local ↔ cloud | Personal only | Two-way mirror (recommended for solo use) |
-| `bm cloud check` | — | Personal + Team | Verify files match (no changes) |
+| `bm cloud check` | — | Personal only | Verify mirror integrity (no changes) |
 
 If you collaborate on a shared Team workspace, use **`push`/`pull`** (see [Team Workspaces](#team-workspaces-push--pull-additive-git-style)). If you are the only writer (a Personal workspace), the mirror commands `sync`/`bisync` give you a single source of truth.
 
@@ -459,9 +459,11 @@ bm cloud bisync --name research
 - You edit in multiple places
 - You want automatic conflict resolution
 
-### Verify Sync Integrity
+### Verify Sync Integrity (Personal only)
 
 **Use case:** Check if local and cloud match without making changes.
+
+> **Personal workspaces only.** `check` compares against the Personal workspace mirror remote, like `sync`/`bisync`. On Team workspaces use `bm cloud pull --dry-run` / `bm cloud push --dry-run` to preview differences instead.
 
 ```bash
 bm cloud check --name research
@@ -999,7 +1001,7 @@ bm cloud bisync --name <project> --resync # First time / force baseline
 bm cloud bisync --name <project> --dry-run
 bm cloud bisync --name <project> --verbose
 
-# Integrity check
+# Integrity check - Personal workspaces only
 bm cloud check --name <project>
 bm cloud check --name <project> --one-way
 

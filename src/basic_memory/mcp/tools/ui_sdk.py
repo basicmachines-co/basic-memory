@@ -18,7 +18,9 @@ def _text_block(message: str) -> List[ContentBlock]:
 
 
 @mcp.tool(
+    title="Search Notes (UI)",
     description="Search notes and return an embedded MCP-UI resource (raw HTML).",
+    tags={"search", "ui"},
     output_schema=None,
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
@@ -92,7 +94,9 @@ async def search_notes_ui(
 
 
 @mcp.tool(
+    title="Read Note (UI)",
     description="Read a note and return an embedded MCP-UI resource (raw HTML).",
+    tags={"notes", "ui"},
     output_schema=None,
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )

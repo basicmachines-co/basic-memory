@@ -256,6 +256,41 @@ class ProjectService:
             await self.repository.set_as_default(created_project.id)
             self.config_manager.set_default_project(name)
             logger.info(f"Project '{name}' set as default")
+        else:
+            config_default = self.config_manager.default_project
+            if config_default is not None:
+                db_default_project = await self.repository.get_by_name(config_default)
+                if db_default_project is None:
+                    # Trigger: config names a default project that has no database row
+                    #      (the fresh-config wedge from issue #974).
+                    # Why: synchronize_projects treats an existing database default as
+                    #      authoritative, so a surviving default must win over promoting
+                    #      the just-added project. set_default_project raises for names
+                    #      absent from config — and reconciliation deletes such rows —
+                    #      so a database default unknown to config cannot be repointed to.
+                    # Outcome: config is repointed at a usable database default when one
+                    #      exists; otherwise the added project becomes the default.
+                    db_default = await self.repository.get_default_project()
+                    if (
+                        db_default is not None
+                        and self.config_manager.get_project(db_default.name)[0] is not None
+                    ):
+                        self.config_manager.set_default_project(db_default.name)
+                        logger.info(
+                            "Repointed config default from missing '%s' at existing "
+                            "database default '%s'",
+                            config_default,
+                            db_default.name,
+                        )
+                    else:
+                        await self.repository.set_as_default(created_project.id)
+                        self.config_manager.set_default_project(name)
+                        logger.info(
+                            "Promoted project '%s' to default because configured default '%s' "
+                            "is missing from database",
+                            name,
+                            config_default,
+                        )
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 

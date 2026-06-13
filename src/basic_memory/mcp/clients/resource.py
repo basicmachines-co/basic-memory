@@ -6,7 +6,9 @@ Encapsulates all /v2/projects/{project_id}/resource/* endpoints.
 from httpx import AsyncClient, Response
 
 import logfire
-from basic_memory.mcp.tools.utils import call_get
+# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
+# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# so each method defers the import to call time instead (#886).
 
 
 class ResourceClient:
@@ -49,6 +51,8 @@ class ResourceClient:
         Raises:
             ToolError: If the resource is not found or request fails
         """
+        from basic_memory.mcp.tools.utils import call_get
+
         with logfire.span(
             "mcp.client.resource.read",
             client_name="resource",

@@ -193,7 +193,7 @@ async def add_project(
         return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
             message=f"Project '{new_project.name}' added successfully",
             status="success",
-            default=project_data.set_default,
+            default=new_project.is_default or False,
             new_project=ProjectItem(
                 id=new_project.id,
                 external_id=new_project.external_id,
@@ -320,7 +320,20 @@ async def resolve_project_identifier(
     )
 
     if not project:
-        raise HTTPException(status_code=404, detail=f"Project not found: '{data.identifier}'")
+        detail = f"Project not found: '{data.identifier}'"
+        # Trigger: resolution missed and the projects table is empty.
+        # Why: a fresh install bootstraps config.json's default project before any
+        #      reconciliation has created database rows (the one-shot CLI never runs
+        #      the server lifespan), so the first read fails on the configured
+        #      default and the bare not-found message reads as a broken install
+        #      rather than a missing first-run step (#974 follow-up).
+        # Outcome: the error names the setup command instead.
+        if not await project_repository.find_all(limit=1, use_load_options=False):
+            detail = (
+                f"{detail}. No projects are set up yet — run "
+                "'basic-memory project add <name> <path>' to create one."
+            )
+        raise HTTPException(status_code=404, detail=detail)
 
     return ProjectResolveResponse(
         external_id=project.external_id,
@@ -559,12 +572,10 @@ async def set_default_project_by_id(
     logger.info(f"API v2 request: set_default_project_by_id for project_id={project_id}")
 
     try:
-        # Get the old default project from database
+        # Get the old default project from database. It may be absent during
+        # bootstrap/recovery (no default row yet); that is a valid state, not an
+        # error, so we only echo it back when one exists.
         default_project = await project_repository.get_default_project()
-        if not default_project:
-            raise HTTPException(  # pragma: no cover
-                status_code=404, detail="No default project is currently set"
-            )
 
         # Get the new default project by external_id
         new_default_project = await project_repository.get_by_external_id(project_id)
@@ -576,17 +587,27 @@ async def set_default_project_by_id(
         # Set as default using project name (service layer still uses names internally)
         await project_service.set_default_project(new_default_project.name)
 
-        return ProjectStatusResponse(
-            message=f"Project '{new_default_project.name}' set as default successfully",
-            status="success",
-            default=True,
-            old_project=ProjectItem(
+        # Trigger: a previous default existed
+        # Why: ProjectStatusResponse.old_project is Optional; the no-default
+        #   bootstrap case must succeed with old_project=None
+        # Outcome: response echoes the prior default only when there was one
+        old_project = (
+            ProjectItem(
                 id=default_project.id,
                 external_id=default_project.external_id,
                 name=default_project.name,
                 path=default_project.path,
                 is_default=False,
-            ),
+            )
+            if default_project
+            else None
+        )
+
+        return ProjectStatusResponse(
+            message=f"Project '{new_default_project.name}' set as default successfully",
+            status="success",
+            default=True,
+            old_project=old_project,
             new_project=ProjectItem(
                 id=new_default_project.id,
                 external_id=new_default_project.external_id,

@@ -1,5 +1,114 @@
 # CHANGELOG
 
+## v0.22.1 (2026-06-12)
+
+Follow-up patch to v0.22.0. Fixes project and default-project resolution on
+fresh installs, MCP workspace routing, sync project selection, and CLI startup
+latency, plus a few MCP parity additions.
+
+### Features
+
+- Added a `workspace` parameter to `write_note` for parity with `edit_note`.
+- **#826**: Added `title` and `tags` annotations to all MCP tool decorators
+  (phase 1).
+- **#930**: `search_notes` now comma-splits `note_types`, `entity_types`, and
+  `categories`.
+- **#971**: Added the manual-pages flow — manpage seed schema, flow docs, and
+  verification fixes.
+
+### Bug Fixes
+
+- Fresh installs no longer fail when the projects table is empty: resolve now
+  points them at project setup, the first project is promoted to default when
+  the config default is missing from the database, the promoted default state
+  is returned from the project-create API, and a default can be set when none
+  is currently set. An existing database default is preserved when repairing a
+  missing config default.
+- **#949**: Sync skips projects without an absolute local path and excludes
+  orphan DB projects that are absent from config.
+- **#952 / #981**: Resolved workspace display names and tenant ids in qualified
+  project routes, closing out the manual verification findings.
+- `note_types`/`entity_types`/`categories` are normalized on the direct-call
+  path, with non-string list elements rejected.
+- Vector-search hydration keys on `(type, id)` to prevent id collisions.
+- `file_utils` requires line-anchored frontmatter fences.
+- CLI startup is faster: FastAPI and app imports are deferred out of CLI
+  startup, and rich/typer modules are preloaded before an in-place upgrade.
+- `config.json` is written atomically.
+- In-memory SQLite sessions are serialized so concurrent rollbacks cannot
+  destroy writes.
+
+### Maintenance
+
+- Release recipes route through PRs and wait for the release PR merge to land
+  before tagging; the release runbook is refreshed and stripped of
+  user-specific absolute paths.
+
+## v0.22.0 (2026-06-11)
+
+Team-safe cloud sync. New additive `bm cloud push` and `bm cloud pull`
+commands work safely on shared Team workspaces, while the destructive mirror
+commands are gated to Personal workspaces. Also: a large batch of MCP tool
+fixes, search improvements, and embedding reliability work.
+
+### Features
+
+- **#917**: Added Team-safe `bm cloud push` / `bm cloud pull`. Both are
+  additive (they never delete on the destination) and abort on conflicts by
+  default, git-style, with `--on-conflict {fail|keep-local|keep-cloud|keep-both}`.
+  The destructive `bm cloud sync` / `bm cloud bisync` mirrors are now gated
+  to Personal workspaces.
+- **#920**: Team push/pull uses per-workspace rclone remotes, so remotes and
+  credentials stay scoped to each workspace.
+- **#908**: Search supports an observation category filter.
+- **#809**: Added an experimental LiteLLM embedding provider for semantic
+  search (marked experimental, see **#899**).
+- **#907**: `bm tool write-note` accepts `--type`.
+- **#906**: `bm status` accepts `--wait` and `--timeout`.
+- Added the `bm tool delete-note` command.
+- **#905**: Improved workspace and cloud bisync command discoverability.
+
+### Bug Fixes
+
+- **#931 / #946**: Truncated observation permalinks are disambiguated to
+  prevent search-index collisions, and `build_context` resolves observations
+  by the same permalink the search index uses (**#909**, **#929**).
+- **#934**: `edit_note` recovers when the file exists on disk but is not yet
+  indexed (**#581**).
+- **#911 / #932 / #941**: Comma-separated tags are split consistently in
+  `parse_tags` and the `search_notes` tags parameter, with input normalized
+  for direct callers (**#910**).
+- **#933**: `read_note` accepts `page`/`page_size` for parity with sibling
+  tools (**#883**).
+- **#914 / #904 / #916**: `move_note` resolves `memory://` URLs, stops
+  falsely rejecting same-project moves as cross-project, no longer reports
+  false success across project boundaries, and mismatch guidance points at
+  the landing path.
+- **#915**: Navigation pagination is validated, and `recent_activity` shows
+  the correct project.
+- **#913**: `bm tool` commands align with MCP behavior (error exit codes,
+  overwrite handling, category support, defaults).
+- **#923**: `bm cloud setup` no longer overwrites an existing rclone remote
+  (**#922**).
+- **#912**: The `note_types` search filter is case-insensitive.
+- `build_context` allows cross-project context traversal, `write_note`
+  resolves overwrite conflicts, and sync uses strict deferred relation
+  resolution.
+- Embedding reliability: FastEmbed vectors are L2-normalized (**#843**),
+  corrupt FastEmbed model caches self-heal (**#900**), a single embedding
+  provider is reused per process (**#903**), `sqlite-vec` loads for the
+  embedding-status query (**#901**), and engine disposal no longer crashes
+  on the Postgres backend (**#902**).
+
+### Maintenance
+
+- Leaner, faster CI: testmon-selected branch builds, sharded Postgres jobs,
+  and faster default test fixtures (**#928**, **#938**, **#945**).
+- Documented personal-vs-team cloud sync semantics (**#947**, closes
+  **#851**).
+- Fixed npx skill install docs (**#927**).
+- Added `glama.json` to claim the Glama MCP directory listing (**#953**).
+
 ## v0.21.6 (2026-06-04)
 
 Monorepo consolidation plus a redesigned Claude Code plugin. The satellite

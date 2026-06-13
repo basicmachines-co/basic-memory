@@ -83,8 +83,11 @@ def app_callback(
     # Skip for 'mcp' command - it has its own lifespan that handles initialization
     # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py
     # Skip for 'reset' command - it manages its own database lifecycle
+    # Skip for 'man' - it only copies packaged files; a broken local database
+    # must not block installing the offline docs
     skip_init_commands = {
         "doctor",
+        "man",
         "mcp",
         "status",
         "sync",

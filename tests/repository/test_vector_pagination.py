@@ -62,6 +62,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         min_similarity: float | None = None,
         limit: int = 10,
         offset: int = 0,
+        allow_relaxed: bool = False,
     ) -> list[SearchIndexRow]:
         return []  # pragma: no cover
 
@@ -133,7 +134,7 @@ async def test_page1_scores_gte_page2_scores():
 
     repo._embedding_provider = _EmbeddingProvider()
 
-    fake_index_rows = {i: FakeRow(id=i) for i in range(20)}
+    fake_index_rows = {("entity", i): FakeRow(id=i) for i in range(20)}
 
     async def run_page(offset, limit):
         with (

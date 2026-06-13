@@ -54,7 +54,10 @@ def _format_entity_block(result: ContextResult) -> str:
         lines.append("")
         lines.append("### Relations")
         for rel in relation_items:
-            lines.append(f"- {rel.relation_type} [[{rel.to_entity}]]")
+            # Unresolved forward references have no resolved entity yet; fall back
+            # to the literal target text instead of rendering [[None]] (#955)
+            target = rel.to_entity or rel.to_name
+            lines.append(f"- {rel.relation_type} [[{target}]]")
 
     # --- Related entities (non-relation related results) ---
     related_entities: list[EntitySummary | ObservationSummary] = [
@@ -112,6 +115,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
 
 
 @mcp.tool(
+    title="Build Context",
     description="""Build context from a memory:// URI to continue conversations naturally.
 
     Use this to follow up on previous discussions or explore related topics.
@@ -131,6 +135,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     - "json" (default): Structured JSON with internal fields excluded
     - "text": Compact markdown text for LLM consumption
     """,
+    tags={"navigation", "notes"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def build_context(

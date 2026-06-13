@@ -49,7 +49,7 @@ ENV/
 /docs/.obsidian/
 /examples/.obsidian/
 /examples/.basic-memory/
-
+/docs/assets
 
 # claude action
 claude-output

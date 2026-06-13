@@ -40,6 +40,55 @@ BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
 _SQLITE_MAX_PREPARE_WINDOW = 8
 
+# Interrogative/function words contribute lexical noise when a strict
+# full-text query is relaxed: "when OR did OR a" matches loud wrong documents
+# that displace genuine results from the ranking window.
+RELAXATION_STOPWORDS = frozenset(
+    "a an and are as at be but by did do does for from had has have how i in is it of on "
+    "or that the their they this to was we were what when where which who whom whose why "
+    "will with you your".split()
+)
+
+
+def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
+    """Content-bearing words for OR-relaxing a strict full-text query.
+
+    Returns None when relaxation must not apply. These eligibility rules match
+    SearchService._is_relaxed_fts_fallback_eligible so the hybrid FTS branch
+    relaxes exactly the same query shapes as the service-level FTS path:
+
+    - empty / quoted / explicit-boolean queries (user intent is not
+      second-guessed);
+    - fewer than three alphanumeric tokens (short queries like "New Feature"
+      over-broaden under OR — and in hybrid the relaxed FTS-only rows normalize
+      to 1.0 and can outrank the vector result the user wanted);
+    - any pure-digit token ("root note 1", "SPEC 16") — identifier-like queries
+      over-broaden and create false positives under OR.
+    """
+    if not search_text:
+        return None
+    stripped = search_text.strip()
+    if '"' in stripped or any(op in f" {stripped} " for op in (" AND ", " OR ", " NOT ")):
+        return None
+    # Eligibility checks run on raw alphanumeric tokens (parity with the
+    # service), before stopword filtering.
+    tokens = re.findall(r"[A-Za-z0-9]+", stripped.lower())
+    if len(tokens) < 3 or any(token.isdigit() for token in tokens):
+        return None
+    words = [word.strip("?!.,;:") for word in stripped.split()]
+    words = [
+        word
+        for word in words
+        if word and word.isalnum() and word.lower() not in RELAXATION_STOPWORDS
+    ]
+    return words or None
+
+
+# Entity, observation, and relation rows in search_index carry ids from independent
+# auto-increment sequences, so a bare id is ambiguous across row types. Every map in
+# the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
+type SearchIndexKey = tuple[str, int]
+
 
 @dataclass
 class VectorSyncBatchResult:
@@ -224,6 +273,7 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
+        allow_relaxed: bool = False,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content.
 
@@ -1857,7 +1907,7 @@ class SearchRepositoryBase(ABC):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_chunk_key(chunk_key: str) -> tuple[str, int]:
+    def _parse_chunk_key(chunk_key: str) -> SearchIndexKey:
         """Parse a chunk_key like 'observation:5:0' into (type, search_index_id)."""
         parts = chunk_key.split(":")
         return parts[0], int(parts[1])
@@ -1932,26 +1982,27 @@ class SearchRepositoryBase(ABC):
 
         hydrate_start = time.perf_counter()
         # Build per-search_index_row similarity scores from chunk-level results.
-        # Each chunk_key encodes the search_index row type and id.
+        # Each chunk_key encodes the search_index row type and id; keep both as the
+        # key because different row types can share the same numeric id (#982).
         # Track the best similarity per row (for ranking) and all chunks (for context).
-        similarity_by_si_id: dict[int, float] = {}
-        chunks_by_si_id: dict[int, list[tuple[float, str]]] = {}
+        similarity_by_si_key: dict[SearchIndexKey, float] = {}
+        chunks_by_si_key: dict[SearchIndexKey, list[tuple[float, str]]] = {}
         for row in vector_rows:
             chunk_key = row.get("chunk_key", "")
             distance = float(row["best_distance"])
             similarity = self._distance_to_similarity(distance)
             chunk_text = row.get("chunk_text", "")
             try:
-                _, si_id = self._parse_chunk_key(chunk_key)
+                si_key = self._parse_chunk_key(chunk_key)
             except (ValueError, IndexError):
                 # Fallback: group by entity_id for chunks without parseable keys
                 continue
-            current = similarity_by_si_id.get(si_id)
+            current = similarity_by_si_key.get(si_key)
             if current is None or similarity > current:
-                similarity_by_si_id[si_id] = similarity
-            chunks_by_si_id.setdefault(si_id, []).append((similarity, chunk_text))
+                similarity_by_si_key[si_key] = similarity
+            chunks_by_si_key.setdefault(si_key, []).append((similarity, chunk_text))
 
-        if not similarity_by_si_id:
+        if not similarity_by_si_key:
             hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
             _log_vector_summary()
             return []
@@ -1962,16 +2013,17 @@ class SearchRepositoryBase(ABC):
             min_similarity if min_similarity is not None else self._semantic_min_similarity
         )
         if effective_min_similarity > 0.0:
-            similarity_by_si_id = {
-                k: v for k, v in similarity_by_si_id.items() if v >= effective_min_similarity
+            similarity_by_si_key = {
+                k: v for k, v in similarity_by_si_key.items() if v >= effective_min_similarity
             }
-            if not similarity_by_si_id:
+            if not similarity_by_si_key:
                 hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
                 _log_vector_summary()
                 return []
 
-        # Fetch the actual search_index rows
-        si_ids = list(similarity_by_si_id.keys())
+        # Fetch the actual search_index rows. Colliding (type, id) keys share one
+        # bare id, so deduplicate while preserving first-seen order.
+        si_ids = list(dict.fromkeys(si_id for _, si_id in similarity_by_si_key))
         search_index_rows = await self._fetch_search_index_rows_by_ids(si_ids)
 
         # Apply optional filters if requested
@@ -2003,16 +2055,14 @@ class SearchRepositoryBase(ABC):
                 limit=VECTOR_FILTER_SCAN_LIMIT,
                 offset=0,
             )
-            # Use (id, type) tuples to avoid collisions between different
+            # Use (type, id) tuples to avoid collisions between different
             # search_index row types that share the same auto-increment id.
-            allowed_keys = {(row.id, row.type) for row in filtered_rows if row.id is not None}
-            search_index_rows = {
-                k: v for k, v in search_index_rows.items() if (v.id, v.type) in allowed_keys
-            }
+            allowed_keys = {(row.type, row.id) for row in filtered_rows if row.id is not None}
+            search_index_rows = {k: v for k, v in search_index_rows.items() if k in allowed_keys}
 
         ranked_rows: list[SearchIndexRow] = []
-        for si_id, similarity in similarity_by_si_id.items():
-            row = search_index_rows.get(si_id)
+        for si_key, similarity in similarity_by_si_key.items():
+            row = search_index_rows.get(si_key)
             if row is None:
                 continue
 
@@ -2022,7 +2072,7 @@ class SearchRepositoryBase(ABC):
             if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
                 matched_chunk_text = content_snippet
             else:
-                si_chunks = chunks_by_si_id.get(si_id, [])
+                si_chunks = chunks_by_si_key.get(si_key, [])
                 si_chunks.sort(key=lambda c: c[0], reverse=True)
                 top_texts = [text for _, text in si_chunks[:TOP_CHUNKS_PER_RESULT]]
                 matched_chunk_text = "\n---\n".join(top_texts) if top_texts else None
@@ -2088,8 +2138,12 @@ class SearchRepositoryBase(ABC):
 
     async def _fetch_search_index_rows_by_ids(
         self, row_ids: list[int]
-    ) -> dict[int, SearchIndexRow]:
-        """Fetch search_index rows by their primary key (id), any type."""
+    ) -> dict[SearchIndexKey, SearchIndexRow]:
+        """Fetch search_index rows by id, keyed by (type, id) to disambiguate types.
+
+        A bare id can match one row per type (independent id sequences), so the
+        result must carry every matching row rather than letting one clobber another.
+        """
         if not row_ids:
             return {}
         placeholders = ",".join(f":id_{idx}" for idx in range(len(row_ids)))
@@ -2106,11 +2160,11 @@ class SearchRepositoryBase(ABC):
             WHERE project_id = :project_id
               AND id IN ({placeholders})
         """
-        result: dict[int, SearchIndexRow] = {}
+        result: dict[SearchIndexKey, SearchIndexRow] = {}
         async with db.scoped_session(self.session_maker) as session:
             row_result = await session.execute(text(sql), params)
             for row in row_result.fetchall():
-                result[row.id] = SearchIndexRow(
+                result[(row.type, row.id)] = SearchIndexRow(
                     project_id=self.project_id,
                     id=row.id,
                     title=row.title,
@@ -2156,7 +2210,7 @@ class SearchRepositoryBase(ABC):
     ) -> List[SearchIndexRow]:
         """Fuse FTS and vector results using score-based fusion.
 
-        Uses search_index row id as the fusion key. The formula
+        Uses the search_index (type, id) pair as the fusion key. The formula
         ``max(vec, fts) + FUSION_BONUS * min(vec, fts)`` preserves
         the dominant signal and rewards dual-source agreement.
         """
@@ -2165,6 +2219,9 @@ class SearchRepositoryBase(ABC):
         query_start = time.perf_counter()
         candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
         fts_start = time.perf_counter()
+        # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
+        # branch silently degrades hybrid to vector-only ranking. Fusion plus
+        # bm25 keep relaxed lexical candidates from dominating precision.
         fts_results = await self.search(
             search_text=search_text,
             permalink=permalink,
@@ -2178,6 +2235,7 @@ class SearchRepositoryBase(ABC):
             retrieval_mode=SearchRetrievalMode.FTS,
             limit=candidate_limit,
             offset=0,
+            allow_relaxed=True,
         )
         fts_ms = (time.perf_counter() - fts_start) * 1000
         vector_start = time.perf_counter()
@@ -2199,17 +2257,19 @@ class SearchRepositoryBase(ABC):
         vector_ms = (time.perf_counter() - vector_start) * 1000
         fusion_start = time.perf_counter()
 
-        # --- Score-based fusion keyed on search_index row id ---
+        # --- Score-based fusion keyed on (type, id) ---
+        # A bare row id collides across row types (independent id sequences), so
+        # fusion must key on (type, id) or distinct rows would merge (#982).
         # FTS scores are normalized to [0, 1] (BM25 is unbounded).
         # Vector scores are used raw — already calibrated [0, 1] by _distance_to_similarity().
-        rows_by_id: dict[int, SearchIndexRow] = {}
+        rows_by_key: dict[SearchIndexKey, SearchIndexRow] = {}
 
         # Normalize FTS scores to [0, 1] — handles both SQLite (negative bm25)
         # and Postgres (positive ts_rank) by using absolute values
         fts_abs = [abs(row.score or 0.0) for row in fts_results]
         fts_max = max(fts_abs) if fts_abs else 1.0
 
-        fts_scores: dict[int, float] = {}
+        fts_scores: dict[SearchIndexKey, float] = {}
         for row in fts_results:
             if row.id is None:
                 continue
@@ -2217,32 +2277,32 @@ class SearchRepositoryBase(ABC):
             # Gate: FTS scores below threshold contribute zero
             if norm < FTS_GATE_THRESHOLD:
                 norm = 0.0
-            fts_scores[row.id] = norm
-            rows_by_id[row.id] = row
+            fts_scores[(row.type, row.id)] = norm
+            rows_by_key[(row.type, row.id)] = row
 
-        vec_scores: dict[int, float] = {}
+        vec_scores: dict[SearchIndexKey, float] = {}
         for row in vector_results:
             if row.id is None:
                 continue
             # Trigger: no re-normalization by vec_max
             # Why: vector similarity is already calibrated [0, 1]; re-normalizing
             # inflates weak matches when the entire result set is mediocre
-            vec_scores[row.id] = row.score or 0.0
-            rows_by_id[row.id] = row
+            vec_scores[(row.type, row.id)] = row.score or 0.0
+            rows_by_key[(row.type, row.id)] = row
 
         # Fuse: max(v, f) + FUSION_BONUS * min(v, f)
         # Preserves the dominant signal; bonus rewards dual-source agreement.
         # Output range: [0, 1.3] for dual-source, [0, 1.0] for single-source.
-        fused_scores: dict[int, float] = {}
-        for row_id in fts_scores.keys() | vec_scores.keys():
-            v = vec_scores.get(row_id, 0.0)
-            f = fts_scores.get(row_id, 0.0)
-            fused_scores[row_id] = max(v, f) + FUSION_BONUS * min(v, f)
+        fused_scores: dict[SearchIndexKey, float] = {}
+        for row_key in fts_scores.keys() | vec_scores.keys():
+            v = vec_scores.get(row_key, 0.0)
+            f = fts_scores.get(row_key, 0.0)
+            fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
         output: list[SearchIndexRow] = []
-        for row_id, fused_score in ranked[offset : offset + limit]:
-            row = rows_by_id[row_id]
+        for row_key, fused_score in ranked[offset : offset + limit]:
+            row = rows_by_key[row_key]
             # Trigger: FTS-only results have no matched_chunk_text from vector search.
             # Why: without chunk text, API falls back to truncated content, losing answer text.
             # Outcome: FTS-only results get full content_snippet as matched_chunk.

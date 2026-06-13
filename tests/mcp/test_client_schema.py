@@ -63,7 +63,7 @@ class TestSchemaClientValidate:
             assert kwargs.get("params") == {}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         result = await schema_client.validate()
         assert isinstance(result, ValidationReport)
@@ -88,7 +88,7 @@ class TestSchemaClientValidate:
             assert kwargs["params"]["note_type"] == "person"
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         result = await schema_client.validate(note_type="person")
         assert result.note_type == "person"
@@ -113,7 +113,7 @@ class TestSchemaClientValidate:
             assert kwargs["params"]["identifier"] == "people/alice"
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         result = await schema_client.validate(identifier="people/alice")
         assert result.total_notes == 1
@@ -144,7 +144,7 @@ class TestSchemaClientInfer:
             assert kwargs["params"]["threshold"] == 0.25
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         result = await schema_client.infer("person")
         assert isinstance(result, InferenceReport)
@@ -171,7 +171,7 @@ class TestSchemaClientInfer:
             assert kwargs["params"]["threshold"] == 0.5
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
 
         result = await schema_client.infer("meeting", threshold=0.5)
         assert result.note_type == "meeting"
@@ -197,7 +197,7 @@ class TestSchemaClientDiff:
             assert url == "/v2/projects/test-project-id/schema/diff/person"
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         result = await schema_client.diff("person")
         assert isinstance(result, DriftReport)
@@ -235,7 +235,7 @@ class TestSchemaClientDiff:
         async def mock_call_get(client, url, **kwargs):
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.clients.schema.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         result = await schema_client.diff("person")
         assert len(result.new_fields) == 1

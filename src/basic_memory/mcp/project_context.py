@@ -8,10 +8,24 @@ The resolve_project_parameter function is a thin wrapper for backwards
 compatibility with existing MCP tools.
 """
 
+# PEP 563 lazy annotations keep `Context` usable in signatures without importing
+# fastmcp at module load — the fastmcp/mcp stack costs ~0.5s of CLI startup (#886).
+from __future__ import annotations
+
 import asyncio
 from contextlib import asynccontextmanager, nullcontext
+from typing import (
+    TYPE_CHECKING,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    cast,
+)
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Awaitable, Callable, List, Optional, Sequence, Tuple, cast
 from uuid import UUID
 
 from httpx import AsyncClient
@@ -19,8 +33,6 @@ from httpx._types import (
     HeaderTypes,
 )
 from loguru import logger
-from fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
 
 import logfire
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, has_cloud_credentials
@@ -46,12 +58,23 @@ from basic_memory.workspace_context import (
     workspace_permalink_context,
 )
 
+if TYPE_CHECKING:
+    from fastmcp import Context
+
 # --- Workspace provider injection ---
 # Mirrors the set_client_factory() pattern in async_client.py.
 # The cloud MCP server sets a provider that queries its own database directly,
 # avoiding the control-plane HTTP round-trip that requires local credentials.
 _workspace_provider: Optional[Callable[[], Awaitable[list[WorkspaceInfo]]]] = None
 _WORKSPACE_PROJECT_INDEX_STATE_KEY = "workspace_project_index"
+
+
+class WorkspaceProjectLookupMiss(ValueError):
+    """A project was absent from the workspace index (as opposed to ambiguous).
+
+    Misses are retried once against a freshly rebuilt index, because the
+    session cache may simply predate an out-of-band project creation (#956).
+    """
 
 
 @dataclass(frozen=True)
@@ -460,6 +483,17 @@ def _canonical_memory_path_for_workspace(
     # Outcome: lookups preserve the complete workspace/project canonical permalink.
     if not normalized_remainder:
         normalized_remainder = project_permalink
+
+    # Same index-form rule as _canonical_memory_path_for_active_route (#957):
+    # without an active workspace permalink context, stored permalinks are
+    # project-qualified and a workspace-prefixed pattern cannot match.
+    if "*" in normalized_remainder and current_workspace_permalink_context() is None:
+        return build_qualified_permalink_reference(
+            project_permalink,
+            normalized_remainder,
+            include_project=True,
+        )
+
     return build_qualified_permalink_reference(
         project_permalink,
         normalized_remainder,
@@ -477,6 +511,24 @@ def _canonical_memory_path_for_active_route(
 ) -> str:
     """Return the canonical permalink path for the currently routed project/workspace."""
     project_prefix = active_project.permalink
+
+    # Trigger: the path contains a glob wildcard (folder/*) and no server-side
+    #   workspace permalink context is active.
+    # Why: patterns match raw against the search index, so they must mirror the
+    #   stored permalink form. The contextvar is what qualified permalinks at
+    #   write time — when it is absent, stored rows are project-qualified and a
+    #   workspace prefix (from the client's cached_workspace display state)
+    #   guarantees zero matches (#957). Direct lookups keep full qualification
+    #   because the link resolver understands it; patterns have no fallback.
+    # Outcome: without the contextvar, qualify patterns with the project prefix
+    #   only; with it, fall through to normal workspace canonicalization.
+    if "*" in path and current_workspace_permalink_context() is None:
+        if not include_project:
+            return path
+        if path == project_prefix or path.startswith(f"{project_prefix}/"):
+            return path
+        return f"{project_prefix}/{path}"
+
     workspace_remainder = path
     if include_project and (path == project_prefix or path.startswith(f"{project_prefix}/")):
         # Trigger: the memory URL already names the active project root/prefix
@@ -722,9 +774,15 @@ async def _fetch_workspace_project_entries(
 
 async def _ensure_workspace_project_index(
     context: Optional[Context] = None,
+    *,
+    force_refresh: bool = False,
 ) -> WorkspaceProjectIndex:
-    """Build or load the session-local workspace/project lookup index."""
-    if context:
+    """Build or load the session-local workspace/project lookup index.
+
+    force_refresh bypasses the cached index and rebuilds from discovery —
+    used by resolve_workspace_project_identifier when a lookup misses (#956).
+    """
+    if context and not force_refresh:
         cached_raw = await context.get_state(_WORKSPACE_PROJECT_INDEX_STATE_KEY)
         cached_index = _workspace_project_index_from_state(cached_raw)
         if cached_index is not None:
@@ -798,13 +856,99 @@ async def ensure_workspace_project_index(
     return await _ensure_workspace_project_index(context=context)
 
 
+def _match_workspace_identifier(
+    workspaces: tuple[WorkspaceInfo, ...],
+    workspace_identifier: str,
+) -> WorkspaceInfo:
+    """Resolve the first segment of a qualified route to a single workspace.
+
+    The edit_note/write_note contract advertises that the workspace segment may be a
+    slug, tenant_id, or display name. We honor those forms in a fixed priority order so
+    that adding tenant_id/name support never changes the meaning of an identifier that
+    already resolves today:
+
+    1. slug (casefold) — existing behavior, checked first so working routes are stable.
+    2. tenant_id — exact match against the opaque id (no casefolding, mirroring the
+       precedent in ``workspace_matches_exact_identifier``).
+    3. display name (casefold) — names are not guaranteed unique, so a name that matches
+       multiple workspaces is rejected rather than silently picking one.
+    """
+    # Trigger: identifier equals a workspace slug (casefold).
+    # Why: slug is the canonical routing key; resolving it first guarantees a workspace
+    # whose display name collides with another workspace's slug yields to the slug owner.
+    # Outcome: return the slug owner before tenant_id/name are considered.
+    slug_matches = [
+        workspace
+        for workspace in workspaces
+        if workspace.slug.casefold() == workspace_identifier.casefold()
+    ]
+    if slug_matches:
+        return slug_matches[0]
+
+    # Trigger: identifier exactly equals a workspace tenant_id (an opaque id).
+    # Why: tenant_ids are unique, so an exact hit is unambiguous and needs no tie-break.
+    tenant_matches = [
+        workspace for workspace in workspaces if workspace.tenant_id == workspace_identifier
+    ]
+    if tenant_matches:
+        return tenant_matches[0]
+
+    # Trigger: identifier matches one or more workspace display names (casefold).
+    # Why: names are not guaranteed unique; failing fast on collisions keeps routing
+    # deterministic and tells the caller exactly how to disambiguate.
+    name_matches = [
+        workspace
+        for workspace in workspaces
+        if workspace.name.casefold() == workspace_identifier.casefold()
+    ]
+    if len(name_matches) > 1:
+        candidates = ", ".join(workspace.slug for workspace in name_matches)
+        raise ValueError(
+            f"Workspace name '{workspace_identifier}' matched multiple workspaces "
+            f"(slugs: {candidates}). Use the workspace slug or tenant_id to disambiguate."
+        )
+    if name_matches:
+        return name_matches[0]
+
+    available = ", ".join(workspace.slug for workspace in workspaces)
+    raise ValueError(
+        f"Workspace '{workspace_identifier}' was not found by slug, tenant_id, or name. "
+        f"Available workspace slugs: {available}"
+    )
+
+
 async def resolve_workspace_project_identifier(
     project: str,
     context: Optional[Context] = None,
 ) -> WorkspaceProjectEntry:
     """Resolve a project by external_id (UUID), qualified name, or unqualified name."""
     index = await _ensure_workspace_project_index(context=context)
+    try:
+        return await _resolve_workspace_project_from_index(index, project, context)
+    except WorkspaceProjectLookupMiss:
+        # Trigger: the lookup missed the session-cached index.
+        # Why: a miss is exactly the signal the cache may be stale — projects
+        #   created out-of-band (CLI, a teammate in a shared workspace) post-date
+        #   the index built at session start (#956).
+        # Outcome: rebuild the index once and retry; a second miss is authoritative
+        #   and its error (with the refreshed project list) propagates.
+        logger.info(
+            f"Workspace project lookup missed for '{project}'; refreshing index and retrying"
+        )
+        refreshed = await _ensure_workspace_project_index(context=context, force_refresh=True)
+        return await _resolve_workspace_project_from_index(refreshed, project, context)
 
+
+async def _resolve_workspace_project_from_index(
+    index: WorkspaceProjectIndex,
+    project: str,
+    context: Optional[Context] = None,
+) -> WorkspaceProjectEntry:
+    """Resolve a project against one concrete index snapshot.
+
+    Raises WorkspaceProjectLookupMiss for absent projects (retryable via index
+    refresh) and plain ValueError for ambiguity, which a refresh cannot fix.
+    """
     # Fast path: direct lookup by external_id when the identifier is a UUID
     # Canonicalize via str(UUID(...)) so uppercase, brace-wrapped, or urn:uuid forms
     # all hash to the same lowercase-hyphenated key as the stored external_ids.
@@ -816,23 +960,14 @@ async def resolve_workspace_project_identifier(
     except ValueError:
         pass
 
-    workspace_slug, project_identifier = _split_qualified_project_identifier(project)
+    workspace_identifier, project_identifier = _split_qualified_project_identifier(project)
     project_permalink = generate_permalink(project_identifier)
 
-    if workspace_slug:
-        workspace_matches = [
-            workspace
-            for workspace in index.workspaces
-            if workspace.slug.casefold() == workspace_slug.casefold()
-        ]
-        if not workspace_matches:
-            available = ", ".join(workspace.slug for workspace in index.workspaces)
-            raise ValueError(
-                f"Workspace '{workspace_slug}' was not found. "
-                f"Available workspace slugs: {available}"
-            )
-
-        workspace = workspace_matches[0]
+    if workspace_identifier:
+        # Honor the documented "slug, name, or tenant_id" contract for the workspace
+        # segment; _match_workspace_identifier raises a clear error on ambiguous names
+        # and unknown identifiers, listing what forms were tried.
+        workspace = _match_workspace_identifier(index.workspaces, workspace_identifier)
         matches = [
             entry
             for entry in index.entries_by_permalink.get(project_permalink, ())
@@ -843,7 +978,7 @@ async def resolve_workspace_project_identifier(
                 failed_workspace.tenant_id == workspace.tenant_id
                 for failed_workspace in index.failed_workspaces
             ):
-                raise ValueError(
+                raise WorkspaceProjectLookupMiss(
                     f"Projects for workspace '{workspace.name}' ({workspace.slug}) "
                     "could not be loaded. Retry after workspace discovery recovers."
                 )
@@ -852,7 +987,7 @@ async def resolve_workspace_project_identifier(
                 for entry in index.entries
                 if entry.workspace.tenant_id == workspace.tenant_id
             )
-            raise ValueError(
+            raise WorkspaceProjectLookupMiss(
                 f"Project '{project_identifier}' was not found in workspace "
                 f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
             )
@@ -877,7 +1012,7 @@ async def resolve_workspace_project_identifier(
                 "retry or use a qualified project from an indexed workspace."
             )
         available = ", ".join(entry.qualified_name for entry in index.entries)
-        raise ValueError(
+        raise WorkspaceProjectLookupMiss(
             f"Project '{project}' was not found in indexed cloud workspaces. "
             f"Available projects: {available}.{failed_note}"
         )
@@ -1212,6 +1347,9 @@ async def resolve_project_and_path(
         # Why: allow project-scoped memory URLs without requiring a separate project parameter
         # Outcome: attempt to resolve the prefix as a project and route to it
         if project_prefix:
+            # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+            from mcp.server.fastmcp.exceptions import ToolError
+
             if cached_project and _project_matches_identifier(cached_project, project_prefix):
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
                 if resolved_project and generate_permalink(resolved_project) != generate_permalink(
@@ -1437,6 +1575,9 @@ async def get_project_client(
         get_client,
         is_factory_mode,
     )
+
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
 
     # When project_id (UUID) is provided, prefer it as the resolution identifier.
     # external_id is unambiguous across workspaces; project name can collide.

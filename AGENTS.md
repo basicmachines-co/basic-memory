@@ -300,7 +300,9 @@ See SPEC-16 for full context manager refactor details.
 
 ### Release Process
 
-Releases are driven by `just release` / `just beta` — never by a bare `git tag`. The recipes bump version metadata, run pre-flight checks, commit, tag, and push. GitHub Actions then publishes to PyPI and updates the Homebrew formula.
+Releases are driven by `just release` / `just beta` — never by a bare `git tag`. The recipes bump version metadata, run pre-flight checks, land the bump on `main` through a release PR, tag, and push the tag. GitHub Actions then publishes to PyPI and updates the Homebrew formula.
+
+**Main requires PRs.** The `main` ruleset rejects direct pushes ("Changes must be made through a pull request") and the repo disallows merge commits, so the recipes push a `release/vX.Y.Z` branch, open a PR titled `chore(core): release vX.Y.Z`, rebase-merge it with `gh pr merge --rebase`, then tag the rebased bump commit on `main` (located by its commit subject, since rebasing rewrites the SHA) and push the tag. The CHANGELOG entry for the version must already be on `main` — land it via a normal PR before running the recipe (it pre-flight-checks for a `## vX.Y.Z` heading).
 
 **Stable release:**
 
@@ -308,7 +310,7 @@ Releases are driven by `just release` / `just beta` — never by a bare `git tag
 just release v0.21.3
 ```
 
-The recipe runs `just lint` + `just typecheck`, then updates every release manifest through `scripts/update_versions.py`: `src/basic_memory/__init__.py`, `server.json`, the root Claude marketplace, the Claude Code plugin manifest and local marketplace, the Hermes `plugin.yaml`, and the OpenClaw `package.json`. It commits as `chore: update version to X.Y.Z for vX.Y.Z release`, creates the `vX.Y.Z` tag, and pushes both the commit and the tag to `origin/main`. After the tag lands, the `Release` workflow builds the Python package, publishes to PyPI, creates the GitHub release with auto-generated notes, publishes the OpenClaw npm package, and updates the Homebrew formula. The recipe finishes by printing the post-release tasks the workflow doesn't cover.
+The recipe runs `just lint` + `just typecheck`, then updates every release manifest through `scripts/update_versions.py`: `src/basic_memory/__init__.py`, `server.json`, the root Claude marketplace, the Claude Code plugin manifest and local marketplace, the Hermes `plugin.yaml`, and the OpenClaw `package.json`. It commits as `chore: update version to X.Y.Z for vX.Y.Z release` on a `release/vX.Y.Z` branch, lands it on `main` via a rebase-merged PR, then tags the rebased commit and pushes the tag. After the tag lands, the `Release` workflow builds the Python package, publishes to PyPI, creates the GitHub release with auto-generated notes, publishes the OpenClaw npm package, and updates the Homebrew formula. The recipe finishes by printing the post-release tasks the workflow doesn't cover.
 
 **Beta release:** `just beta v0.21.3b1` — same flow with a beta-suffixed tag. PyPI consumers install with `pip install basic-memory --pre`.
 
@@ -319,8 +321,13 @@ The recipe runs `just lint` + `just typecheck`, then updates every release manif
 **Do not tag releases by hand.** A bare `git tag vX.Y.Z` skips the in-code version bump. Package metadata is still correct (uv-dynamic-versioning derives it from the git tag) but `basic-memory --version` reports the previous release, which is what happened with v0.21.2 → v0.21.3.
 
 **Post-release tasks** the recipe surfaces but doesn't run:
-- `docs.basicmemory.com` — add notes to `src/pages/latest-releases.mdx`
-- `basicmachines.co` — bump version in `src/components/sections/hero.tsx`
+- `docs.basicmemory.com` — add a What's New page under `content/2.whats-new/` and bump the version badge in `content/index.md` (the changelog page auto-fetches GitHub releases; see that repo's CLAUDE.md version-bump checklist)
+- `basicmemory.com` — the marketing site (Astro + React, repo
+  `basicmachines-co/basicmemory.com`, formerly `basicmachines.co`) carries **no
+  hardcoded version number** in its UI, so there is nothing to bump. For a
+  significant release, optionally add a dated announcement post under
+  `src/content/blog/` (model it on an existing `basic-memory-vX-Y-Z-release.md`).
+  Skip entirely for routine patch releases.
 - MCP Registry — `mcp-publisher publish` from the repo root
 
 See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `changelog.md` alongside it) for the full release + post-release runbook, including the slash commands.

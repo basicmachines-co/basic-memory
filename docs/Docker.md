@@ -111,7 +111,7 @@ You can run Basic Memory CLI commands inside the container using `docker exec`:
 docker exec basic-memory-server basic-memory status
 
 # Sync files
-docker exec basic-memory-server basic-memory sync
+docker exec basic-memory-server basic-memory reindex
 
 # Show help
 docker exec basic-memory-server basic-memory --help
@@ -137,7 +137,7 @@ When using Docker volumes, you'll need to configure projects to point to your mo
 
 3. **Sync the new project:**
    ```bash
-   docker exec basic-memory-server basic-memory sync
+   docker exec basic-memory-server basic-memory reindex
    ```
 
 ### Example: Setting up an Obsidian Vault
@@ -157,7 +157,7 @@ docker exec basic-memory-server basic-memory project create obsidian /app/data
 docker exec basic-memory-server basic-memory project set-default obsidian
 
 # Sync to index all files
-docker exec basic-memory-server basic-memory sync
+docker exec basic-memory-server basic-memory reindex
 ```
 
 ### Environment Variables

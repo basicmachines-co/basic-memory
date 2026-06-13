@@ -26,6 +26,7 @@ from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.tool(
+    title="Recent Activity",
     description="""Get recent activity for a project or across all projects.
 
     Timeframe supports natural language formats like:
@@ -36,6 +37,7 @@ from basic_memory.schemas.search import SearchItemType
     - "3 weeks ago"
     Or standard formats like "7d"
     """,
+    tags={"navigation", "notes"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def recent_activity(

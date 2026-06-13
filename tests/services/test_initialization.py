@@ -223,6 +223,57 @@ async def test_initialize_file_sync_no_constraint_when_env_unset(
 
 
 @pytest.mark.asyncio
+async def test_initialize_file_sync_skips_project_with_non_absolute_path(
+    app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
+):
+    """Projects without an absolute local path are excluded from background sync (issue #949).
+
+    A config entry of ``{"path": ""}`` defaults to LOCAL mode and is not
+    recognized as cloud, yet Path("") resolves to the process cwd. Syncing it
+    would inject frontmatter into unrelated files, so it must be skipped.
+    """
+    await db.shutdown_db()
+    try:
+        from basic_memory.config import ProjectEntry
+
+        good = config_home / "good"
+        good.mkdir(parents=True, exist_ok=True)
+
+        updated = app_config.model_copy(
+            update={
+                "projects": {
+                    "good": ProjectEntry(path=str(good)),
+                    # No mode -> defaults to LOCAL, empty (cwd-relative) path.
+                    "empty-path": ProjectEntry(path=""),
+                },
+                "default_project": "good",
+            }
+        )
+        config_manager.save_config(updated)
+
+        await initialize_database(updated)
+        await reconcile_projects_with_config(updated)
+
+        _disable_test_env_short_circuit(monkeypatch)
+        monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+
+        infos: list[str] = []
+        monkeypatch.setattr(
+            "basic_memory.services.initialization.logger.info",
+            lambda message, *args, **kwargs: infos.append(message),
+        )
+
+        await initialize_file_sync(updated, quiet=True)
+
+        skip_logs = [m for m in infos if "not locally syncable" in m]
+        assert skip_logs, "expected a skip log for the empty-path project"
+        assert "empty-path" in skip_logs[0]
+        assert "good" not in skip_logs[0]
+    finally:
+        await db.shutdown_db()
+
+
+@pytest.mark.asyncio
 async def test_initialize_app_no_precedence_warning_when_not_conflicting(
     app_config: BasicMemoryConfig, monkeypatch
 ):

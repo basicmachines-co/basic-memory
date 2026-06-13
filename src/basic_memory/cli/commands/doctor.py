@@ -7,16 +7,12 @@ import uuid
 from pathlib import Path
 
 from loguru import logger
-from mcp.server.fastmcp.exceptions import ToolError
 from rich.console import Console
 import typer
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.markdown.entity_parser import EntityParser
-from basic_memory.markdown.markdown_processor import MarkdownProcessor
-from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import KnowledgeClient, ProjectClient, SearchClient
 from basic_memory.schemas.base import Entity
@@ -29,6 +25,12 @@ console = Console()
 
 async def run_doctor() -> None:
     """Run local consistency checks for file <-> database flows."""
+    # Deferred: the markdown parsing stack is only needed while the checks run,
+    # and importing it at module level slows every CLI invocation (#886).
+    from basic_memory.markdown.entity_parser import EntityParser
+    from basic_memory.markdown.markdown_processor import MarkdownProcessor
+    from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
+
     console.print("[blue]Running Basic Memory doctor checks...[/blue]")
 
     project_name = f"doctor-{uuid.uuid4().hex[:8]}"
@@ -140,6 +142,9 @@ def doctor(
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
     """Run local consistency checks to verify file/database sync."""
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
+
     try:
         validate_routing_flags(local, cloud)
         # Doctor runs local filesystem checks — always default to local routing

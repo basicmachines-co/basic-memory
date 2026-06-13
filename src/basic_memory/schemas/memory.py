@@ -155,6 +155,9 @@ class RelationSummary(BaseModel):
     from_entity_id: Optional[int] = None
     from_entity_external_id: Optional[str] = None
     to_entity: Optional[str] = None
+    # Literal target text from the markdown; present even when the relation is
+    # an unresolved forward reference (to_entity is None until the target exists)
+    to_name: Optional[str] = None
     to_entity_id: Optional[int] = None
     to_entity_external_id: Optional[str] = None
     created_at: Annotated[

@@ -20,9 +20,10 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
-from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
-from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
+
+# MCP tool functions are imported inside each command: importing
+# basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
+# SQLAlchemy), which would slow every CLI invocation, including --help (#886).
 
 console = Console()
 
@@ -189,6 +190,9 @@ def validate(
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
+
     try:
         validate_routing_flags(local, cloud)
         project_name = _resolve_project_name(project)
@@ -272,6 +276,9 @@ def infer(
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
+
     try:
         validate_routing_flags(local, cloud)
         project_name = _resolve_project_name(project)
@@ -352,6 +359,9 @@ def diff(
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
+
     try:
         validate_routing_flags(local, cloud)
         project_name = _resolve_project_name(project)

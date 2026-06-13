@@ -18,6 +18,7 @@ from basic_memory.repository.search_repository import SearchRepository, SearchIn
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
 from basic_memory.utils import generate_permalink
+from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
 
 if TYPE_CHECKING:
     from basic_memory.services.link_resolver import LinkResolver
@@ -36,6 +37,7 @@ class ContextResultRow:
     from_id: Optional[int] = None
     to_id: Optional[int] = None
     relation_type: Optional[str] = None
+    to_name: Optional[str] = None
     content: Optional[str] = None
     category: Optional[str] = None
     entity_id: Optional[int] = None
@@ -143,6 +145,29 @@ class ContextService:
                         primary = await self.search_repository.search(
                             permalink_match=normalized_path, limit=fetch_limit, offset=offset
                         )
+
+                        # Trigger: a workspace-qualified pattern matched nothing while a
+                        #   workspace permalink context is active.
+                        # Why: rows written before workspace canonicalization (or via
+                        #   clients that didn't forward workspace headers) store
+                        #   project-qualified permalinks; a workspace-prefixed pattern
+                        #   can never match those legacy rows (#957).
+                        # Outcome: retry once with the workspace prefix stripped so the
+                        #   pattern matches the index form the rows actually carry.
+                        if not primary:
+                            workspace_slug = workspace_slug_for_canonical_permalinks()
+                            ws_prefix = f"{workspace_slug}/" if workspace_slug else None
+                            if ws_prefix and normalized_path.startswith(ws_prefix):
+                                fallback_path = normalized_path.removeprefix(ws_prefix)
+                                logger.debug(
+                                    f"Pattern search fallback without workspace prefix: "
+                                    f"'{fallback_path}'"
+                                )
+                                primary = await self.search_repository.search(
+                                    permalink_match=fallback_path,
+                                    limit=fetch_limit,
+                                    offset=offset,
+                                )
                     else:
                         normalized_path = generate_permalink(path, split_extension=False)
                         logger.debug(f"Direct lookup for '{normalized_path}'")
@@ -245,9 +270,12 @@ class ContextService:
                                     type="observation",
                                     id=obs.id,
                                     title=f"{obs.category}: {obs.content[:50]}...",
-                                    permalink=generate_permalink(
-                                        f"{primary_item.permalink}/observations/{obs.category}/{obs.content}"
-                                    ),
+                                    # Observation.permalink is the single definition of the
+                                    # synthetic permalink format (200-char truncation plus
+                                    # content digest); rebuilding it inline diverged from the
+                                    # search index for long observations (#929). The parent
+                                    # entity is eager-loaded by ObservationRepository.
+                                    permalink=obs.permalink,
                                     file_path=primary_item.file_path,
                                     content=obs.content,
                                     category=obs.category,
@@ -389,6 +417,7 @@ class ContextService:
                 from_id=row.from_id,
                 to_id=row.to_id,
                 relation_type=row.relation_type,
+                to_name=row.to_name,
                 content=row.content,
                 category=row.category,
                 entity_id=row.entity_id,
@@ -423,6 +452,7 @@ class ContextService:
                 CAST(NULL AS INTEGER) as from_id,
                 CAST(NULL AS INTEGER) as to_id,
                 CAST(NULL AS TEXT) as relation_type,
+                CAST(NULL AS TEXT) as to_name,
                 CAST(NULL AS TEXT) as content,
                 CAST(NULL AS TEXT) as category,
                 CAST(NULL AS INTEGER) as entity_id,
@@ -475,6 +505,10 @@ class ContextService:
                     WHEN step_type = 1 THEN r.relation_type
                     ELSE NULL
                 END as relation_type,
+                CASE
+                    WHEN step_type = 1 THEN r.to_name
+                    ELSE NULL
+                END as to_name,
                 CAST(NULL AS TEXT) as content,
                 CAST(NULL AS TEXT) as category,
                 CAST(NULL AS INTEGER) as entity_id,
@@ -538,6 +572,7 @@ class ContextService:
             from_id,
             to_id,
             relation_type,
+            to_name,
             content,
             category,
             entity_id,
@@ -547,7 +582,7 @@ class ContextService:
         FROM entity_graph
         WHERE depth > 0
         GROUP BY type, id, title, permalink, file_path, from_id, to_id,
-                 relation_type, content, category, entity_id, root_id, created_at
+                 relation_type, to_name, content, category, entity_id, root_id, created_at
         ORDER BY depth, type, id
         LIMIT :max_results
        """)
@@ -576,6 +611,7 @@ class ContextService:
                 NULL as from_id,
                 NULL as to_id,
                 NULL as relation_type,
+                NULL as to_name,
                 NULL as content,
                 NULL as category,
                 NULL as entity_id,
@@ -603,6 +639,7 @@ class ContextService:
                 r.from_id,
                 r.to_id,
                 r.relation_type,
+                r.to_name,
                 NULL as content,
                 NULL as category,
                 NULL as entity_id,
@@ -641,6 +678,7 @@ class ContextService:
                 NULL as from_id,
                 NULL as to_id,
                 NULL as relation_type,
+                NULL as to_name,
                 NULL as content,
                 NULL as category,
                 NULL as entity_id,
@@ -674,6 +712,7 @@ class ContextService:
             from_id,
             to_id,
             relation_type,
+            to_name,
             content,
             category,
             entity_id,
@@ -683,7 +722,7 @@ class ContextService:
         FROM entity_graph
         WHERE depth > 0
         GROUP BY type, id, title, permalink, file_path, from_id, to_id,
-                 relation_type, content, category, entity_id, root_id, created_at
+                 relation_type, to_name, content, category, entity_id, root_id, created_at
         ORDER BY depth, type, id
         LIMIT :max_results
        """)

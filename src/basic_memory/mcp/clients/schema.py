@@ -5,7 +5,9 @@ Encapsulates all /v2/projects/{project_id}/schema/* endpoints.
 
 from httpx import AsyncClient
 
-from basic_memory.mcp.tools.utils import call_post, call_get
+# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
+# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# so each method defers the import to call time instead (#886).
 from basic_memory.schemas.schema import (
     ValidationReport,
     InferenceReport,
@@ -56,6 +58,8 @@ class SchemaClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         params: dict[str, str] = {}
         if note_type:
             params["note_type"] = note_type
@@ -87,6 +91,8 @@ class SchemaClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_post
+
         response = await call_post(
             self.http_client,
             f"{self._base_path}/infer",
@@ -106,6 +112,8 @@ class SchemaClient:
         Raises:
             ToolError: If the request fails
         """
+        from basic_memory.mcp.tools.utils import call_get
+
         response = await call_get(
             self.http_client,
             f"{self._base_path}/diff/{note_type}",

@@ -10,10 +10,18 @@ Key improvements:
 - Simplified caching strategies
 """
 
+import os
+import pathlib
+
 from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
+from basic_memory.ignore_utils import (
+    IGNORED_PATH_REJECTION_DETAIL,
+    load_gitignore_patterns,
+    should_ignore_path,
+)
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -24,6 +32,7 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
+    SyncServiceV2ExternalDep,
     TaskSchedulerDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
@@ -40,8 +49,10 @@ from basic_memory.schemas.v2 import (
     MoveDirectoryRequestV2,
     DeleteDirectoryRequestV2,
     OrphanEntitiesResponse,
+    SyncFileRequest,
 )
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
+from basic_memory.utils import validate_project_path
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
 
@@ -233,6 +244,187 @@ async def resolve_identifier(
             f"API v2 response: resolved '{data.identifier}' to external_id={result.external_id} via {resolution_method}"
         )
 
+        return result
+
+
+## Single-file sync endpoint
+
+
+def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
+    """Resolve the actual on-disk casing of a file path under the project home.
+
+    Trigger: case-insensitive filesystems (macOS/Windows) pass existence checks for
+        wrong-cased paths like 'notes/Disk-Note.md' when the file is 'notes/disk-note.md'.
+    Why: indexing the caller-supplied casing misses the existing DB row keyed by the
+        on-disk path and inserts a duplicate entity under the wrong-cased path.
+    Outcome: each segment is matched against real directory entries — exact name first
+        (so distinct case-variant files on case-sensitive filesystems stay distinct),
+        then a unique case-insensitive match. Returns None when any segment cannot be
+        matched to exactly one entry, including missing files. Traversal stops at the
+        project boundary: a directory whose resolved path escapes the project home is
+        never scanned.
+    """
+    resolved_home = home.resolve()
+    current = home
+    canonical_segments: list[str] = []
+    for segment in segments:
+        # Trigger: a previously matched segment may be a symlink whose target lies
+        #     outside the project root (e.g. wrong-cased 'LINK' matched the on-disk
+        #     'link' -> /tmp/outside on a case-sensitive filesystem).
+        # Why: os.scandir follows symlinked directories, so continuing would read
+        #     directory contents outside the project boundary even though the
+        #     post-canonicalization containment check rejects the request later.
+        # Outcome: bail before scanning the moment resolution escapes the home.
+        if not current.resolve().is_relative_to(resolved_home):
+            return None
+        try:
+            with os.scandir(current) as entries_iter:
+                entries = [entry.name for entry in entries_iter]
+        except OSError:
+            # A parent segment resolved to a non-directory (or vanished): no canonical
+            # path exists for the remaining segments.
+            return None
+        if segment in entries:
+            matched = segment
+        else:
+            matches = [entry for entry in entries if entry.lower() == segment.lower()]
+            if len(matches) != 1:
+                return None
+            matched = matches[0]
+        canonical_segments.append(matched)
+        current = current / matched
+    return "/".join(canonical_segments)
+
+
+@router.post("/sync-file", response_model=EntityResponseV2)
+async def sync_file(
+    data: SyncFileRequest,
+    project_id: ProjectExternalIdPathDep,
+    sync_service: SyncServiceV2ExternalDep,
+    project_config: ProjectConfigV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+    app_config: AppConfigDep,
+) -> EntityResponseV2:
+    """Index a single markdown file that exists on disk but is not indexed yet.
+
+    Recovery path for files written directly to disk before the watcher indexed
+    them (#581): callers such as edit_note can index the exact file and retry
+    identifier resolution without running a full project sync.
+
+    Args:
+        data: Request containing the markdown file path relative to project root
+
+    Returns:
+        The indexed entity
+
+    Raises:
+        HTTPException: 400 if the path escapes the project root, contains
+            non-normalized segments, matches the project ignore rules, or is
+            not markdown, 404 if the file does not exist on disk
+    """
+    with logfire.span(
+        "api.request.knowledge.sync_file",
+        entrypoint="api",
+        domain="knowledge",
+        action="sync_file",
+    ):
+        logger.info(f"API v2 request: sync_file file_path='{data.file_path}'")
+
+        if not validate_project_path(data.file_path, project_config.home):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' is not allowed - "
+                "paths must stay within project boundaries",
+            )
+
+        # Trigger: segments like './' or '//' survive the traversal check above
+        # Why: a non-normalized path would index under a non-canonical DB key
+        # Outcome: reject fail-fast instead of guessing the canonical form
+        segments = data.file_path.replace("\\", "/").split("/")
+        if any(segment in ("", ".") for segment in segments):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' is not normalized - "
+                "segments like './' or '//' are not allowed",
+            )
+
+        # Canonicalize to the actual on-disk casing so the DB lookup below hits the
+        # row keyed by the real path instead of inserting a wrong-cased duplicate.
+        file_path = _canonical_file_path(project_config.home, segments)
+        if file_path is None:
+            raise HTTPException(
+                status_code=404, detail=f"File not found on disk: '{data.file_path}'"
+            )
+        # Trigger: canonicalization rewrote a segment to its on-disk form, and that
+        #     segment may be a symlink. The pre-check above validated the ORIGINAL
+        #     request path — on a case-sensitive filesystem 'LINK/secret.md' does not
+        #     exist, so resolve() cannot follow the real 'link' symlink and the check
+        #     passes even when 'link' points outside the project root.
+        # Why: indexing through an escaping symlink would read and index content
+        #     outside the project boundary — and even an is_file() existence probe on
+        #     the joined path would follow the symlink and stat its target, so
+        #     containment must hold BEFORE any filesystem probe that follows symlinks.
+        #     Path.resolve() only walks symlink names (readlink); it never opens or
+        #     stats the final target, so it is safe to run pre-containment.
+        # Outcome: the canonical path is re-validated and the fully-resolved absolute
+        #     target must stay inside the resolved project home; escapes get a 400
+        #     before the file-existence probe below ever touches the target.
+        resolved_target = (project_config.home / file_path).resolve()
+        if not validate_project_path(file_path, project_config.home) or not (
+            resolved_target.is_relative_to(project_config.home.resolve())
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' is not allowed - "
+                "paths must stay within project boundaries",
+            )
+        # Containment holds, so probing the resolved target cannot leave the project.
+        if not resolved_target.is_file():
+            raise HTTPException(
+                status_code=404, detail=f"File not found on disk: '{data.file_path}'"
+            )
+        # Trigger: the canonical path matches the .bmignore / project .gitignore rules
+        # Why: scan and watch flows filter ignored files before they ever reach the
+        #      indexer; indexing one here would bypass the ignored-file contract and
+        #      make hidden or gitignored content searchable
+        # Outcome: the same should_ignore_path() rules apply to single-file sync
+        ignore_patterns = load_gitignore_patterns(project_config.home)
+        if should_ignore_path(
+            project_config.home / file_path, project_config.home, ignore_patterns
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File path '{data.file_path}' {IGNORED_PATH_REJECTION_DETAIL} "
+                "and cannot be indexed",
+            )
+        if not sync_service.file_service.is_markdown(file_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only markdown files can be indexed: '{data.file_path}'",
+            )
+
+        # Trigger: the file may already have a DB row (e.g. modified on disk after indexing)
+        # Why: the indexer needs to know whether to insert or update the entity
+        # Outcome: new is computed from the database instead of assumed by the caller
+        existing = await sync_service.entity_repository.get_by_file_path(file_path)
+        synced = await sync_service.sync_one_markdown_file(
+            file_path, new=existing is None, index_search=True
+        )
+
+        # Trigger: semantic search is enabled and the entity index was just refreshed
+        # Why: the project sync flow awaits sync_entity_vectors_batch() inline after
+        #      indexing changed files (SyncService.sync); without the single-entity
+        #      equivalent, a note recovered via sync-file stays missing or stale in
+        #      semantic search until a later edit or full project sync
+        # Outcome: vectors refresh synchronously before the response returns,
+        #          mirroring the sync flow instead of the out-of-band scheduler
+        if app_config.semantic_search_enabled:
+            await search_service.sync_entity_vectors_batch([synced.entity.id])
+
+        result = EntityResponseV2.model_validate(synced.entity)
+        logger.info(
+            f"API v2 response: sync_file file_path='{file_path}' external_id={result.external_id}"
+        )
         return result
 
 

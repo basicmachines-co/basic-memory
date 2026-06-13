@@ -435,6 +435,98 @@ async def test_add_project_with_set_default_false(project_service: ProjectServic
 
 
 @pytest.mark.asyncio
+async def test_add_project_promotes_when_config_default_missing_from_db(
+    config_home, app_config, config_manager, engine_factory
+):
+    """Regression #974: config default exists only in config, not DB — promote on add."""
+    from basic_memory import config as config_module
+    from basic_memory.config import ProjectEntry
+    from basic_memory.markdown.entity_parser import EntityParser
+    from basic_memory.markdown.markdown_processor import MarkdownProcessor
+    from basic_memory.repository.project_repository import ProjectRepository
+    from basic_memory.services.file_service import FileService
+
+    config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
+
+    main_home = config_home / "basic-memory"
+    main_home.mkdir(parents=True, exist_ok=True)
+    qa_path = config_home / "qa-notes"
+    qa_path.mkdir(parents=True, exist_ok=True)
+
+    fresh_config = app_config.model_copy(
+        update={
+            "projects": {"main": ProjectEntry(path=str(main_home))},
+            "default_project": "main",
+        }
+    )
+    config_manager.save_config(fresh_config)
+
+    _, session_maker = engine_factory
+    repo = ProjectRepository(session_maker)
+    for project in await repo.find_all():
+        await repo.delete(project.id)
+
+    file_service = FileService(qa_path, MarkdownProcessor(EntityParser(qa_path)))
+    service = ProjectService(repository=repo, file_service=file_service)
+
+    await service.add_project("qa", str(qa_path), set_default=False)
+
+    assert service.default_project == "qa"
+    qa_project = await repo.get_by_name("qa")
+    assert qa_project is not None
+    assert qa_project.is_default is True
+    assert await repo.get_by_name("main") is None
+
+
+@pytest.mark.asyncio
+async def test_add_project_preserves_existing_db_default(
+    project_service: ProjectService, config_manager: ConfigManager, test_project
+):
+    """The #974 repair must not steal an existing database default.
+
+    Drift state: config's default_project names a project with no database row,
+    but the database still holds a valid default of its own. synchronize_projects
+    resolves this by trusting the database default, so add_project's repair must
+    repoint config at it rather than promoting the just-added project.
+    """
+    config_default = config_manager.default_project
+    assert config_default is not None
+
+    surviving_name = f"test-surviving-default-{os.urandom(4).hex()}"
+    added_name = f"test-no-steal-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        surviving_path = str(Path(temp_dir) / "surviving")
+        os.makedirs(surviving_path, exist_ok=True)
+
+        # A normally-added project that then becomes the database default,
+        # while config's default_project still names the fixture project.
+        await project_service.add_project(surviving_name, surviving_path)
+        surviving = await project_service.repository.get_by_name(surviving_name)
+        assert surviving is not None
+        await project_service.repository.set_as_default(surviving.id)
+
+        # Wedge config: its named default loses its database row.
+        await project_service.repository.delete(test_project.id)
+        assert await project_service.get_project(config_default) is None
+
+        added_path = str(Path(temp_dir) / "added")
+        os.makedirs(added_path, exist_ok=True)
+        await project_service.add_project(added_name, added_path)
+
+        # The surviving database default wins: config is repointed at it and
+        # the newly added project is not promoted.
+        assert config_manager.default_project == surviving_name
+        db_default = await project_service.repository.get_default_project()
+        assert db_default is not None
+        assert db_default.name == surviving_name
+        added = await project_service.repository.get_by_name(added_name)
+        assert added is not None
+        assert added.is_default is not True
+
+
+@pytest.mark.asyncio
 async def test_add_project_default_parameter_omitted(project_service: ProjectService):
     """Test adding a project without set_default parameter defaults to False behavior."""
     test_project_name = f"test-default-omitted-{os.urandom(4).hex()}"

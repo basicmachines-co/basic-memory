@@ -14,18 +14,10 @@ from loguru import logger
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.mcp.tools import build_context as mcp_build_context
-from basic_memory.mcp.tools import delete_note as mcp_delete_note
-from basic_memory.mcp.tools import edit_note as mcp_edit_note
-from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
-from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
-from basic_memory.mcp.tools import read_note as mcp_read_note
-from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
-from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
-from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
-from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
-from basic_memory.mcp.tools import search_notes as mcp_search
-from basic_memory.mcp.tools import write_note as mcp_write_note
+
+# MCP tool functions are imported inside each command: importing
+# basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
+# SQLAlchemy), which would slow every CLI invocation, including --help (#886).
 
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
@@ -120,6 +112,9 @@ def write_note(
     bm tool write-note --title "My Note" --folder "notes" --overwrite
     bm tool write-note --title "My Note" --folder "notes" --local
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import write_note as mcp_write_note
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -206,6 +201,9 @@ def read_note(
     bm tool read-note my-note
     bm tool read-note my-note --include-frontmatter
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import read_note as mcp_read_note
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -272,6 +270,9 @@ def delete_note(
     bm tool delete-note notes/old-draft
     bm tool delete-note docs/archive --is-directory
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import delete_note as mcp_delete_note
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -346,6 +347,9 @@ def edit_note(
     bm tool edit-note my-note --operation find_replace --find-text "old" --content "new"
     bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated"
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import edit_note as mcp_edit_note
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -413,6 +417,9 @@ def build_context(
     bm tool build-context memory://specs/search
     bm tool build-context specs/search --depth 2 --timeframe 30d
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import build_context as mcp_build_context
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -476,6 +483,9 @@ def recent_activity(
     bm tool recent-activity --timeframe 30d --page-size 20
     bm tool recent-activity --type entity --type observation
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -582,6 +592,9 @@ def search_notes(
     bm tool search-notes --meta status=draft
     bm tool search-notes "auth" --entity-type observation --category requirement
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import search_notes as mcp_search
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -687,6 +700,9 @@ def list_projects(
     bm tool list-projects
     bm tool list-projects --local
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -720,6 +736,9 @@ def list_workspaces(
     bm tool list-workspaces
     bm tool list-workspaces --cloud
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -772,6 +791,9 @@ def schema_validate(
     bm tool schema-validate people/ada-lovelace.md
     bm tool schema-validate --project research
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -840,6 +862,9 @@ def schema_infer(
     bm tool schema-infer meeting --threshold 0.5
     bm tool schema-infer person --project research
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
+
     try:
         validate_routing_flags(local, cloud)
 
@@ -896,6 +921,9 @@ def schema_diff(
     bm tool schema-diff person
     bm tool schema-diff person --project research
     """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
+
     try:
         validate_routing_flags(local, cloud)
 

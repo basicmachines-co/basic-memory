@@ -1,10 +1,14 @@
 """Tests for the edit_note MCP tool."""
 
+from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools.edit_note import edit_note
+from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.tools.edit_note import _resolve_after_disk_recovery, edit_note
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
 
@@ -1263,3 +1267,264 @@ async def test_edit_note_skips_detection_when_project_id_provided(
     assert isinstance(result, str)
     assert "Edited note (append)" in result
     assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_find_replace_recovers_file_on_disk_not_indexed(client, test_project):
+    """find_replace should index and edit a file written directly to disk (#581)."""
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nstatus: draft\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/disk-note",
+        operation="find_replace",
+        content="status: final",
+        find_text="status: draft",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (find_replace)" in result
+    assert "status: final" in note_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_recovers_identifier_with_md_extension(client, test_project):
+    """An identifier already ending in .md should recover via the exact file path (#581)."""
+    note_path = Path(test_project.path) / "notes" / "exact-path.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Exact Path\n\nversion: v1\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/exact-path.md",
+        operation="find_replace",
+        content="version: v2",
+        find_text="version: v1",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (find_replace)" in result
+    assert "version: v2" in note_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_recovers_identifier_with_markdown_extension(client, test_project):
+    """A .markdown identifier must recover via the exact path, not '<path>.markdown.md' (#581)."""
+    note_path = Path(test_project.path) / "notes" / "alt-suffix.markdown"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Alt Suffix\n\nstate: pending\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/alt-suffix.markdown",
+        operation="find_replace",
+        content="state: done",
+        find_text="state: pending",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (find_replace)" in result
+    assert "state: done" in note_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_refuses_ignored_on_disk_file(client, test_project):
+    """An on-disk file matched by .gitignore must be refused, not shadowed by auto-create."""
+    project_path = Path(test_project.path)
+    (project_path / ".gitignore").write_text("private/\n", encoding="utf-8")
+    note_path = project_path / "private" / "secret.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    original_content = "# Secret\n\nGitignored content.\n"
+    note_path.write_text(original_content, encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="private/secret",
+        operation="append",
+        content="\nShould never be written.",
+    )
+
+    assert isinstance(result, str)
+    assert "ignore rules" in result
+    assert "will not be edited" in result
+    assert "Edited note" not in result
+    assert "Created note" not in result
+
+    # The ignored file is untouched and auto-create did not shadow it with a new entity
+    assert note_path.read_text(encoding="utf-8") == original_content
+    assert [entry.name for entry in (project_path / "private").iterdir()] == ["secret.md"]
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_recovers_file_on_disk_instead_of_autocreate(client, test_project):
+    """append to an unindexed on-disk file should edit it, not auto-create a replacement (#581)."""
+    note_path = Path(test_project.path) / "notes" / "disk-append.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Append\n\nOriginal disk content.\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/disk-append",
+        operation="append",
+        content="\nAppended line.",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert "Created note" not in result
+
+    final_content = note_path.read_text(encoding="utf-8")
+    assert "Original disk content." in final_content
+    assert "Appended line." in final_content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_recovers_markdown_suffix_file_from_stem(client, test_project):
+    """A stem identifier for an on-disk .markdown file edits it, not auto-creates .md (#581).
+
+    Recovery probes the identifier as-is, then '.md', then '.markdown'; without the
+    '.markdown' probe, append would auto-create 'notes/alt-stem.md' next to the real
+    file instead of editing it.
+    """
+    note_path = Path(test_project.path) / "notes" / "alt-stem.markdown"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Alt Stem\n\nOriginal markdown-suffix content.\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/alt-stem",
+        operation="append",
+        content="\nAppended line.",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert "Created note" not in result
+
+    final_content = note_path.read_text(encoding="utf-8")
+    assert "Original markdown-suffix content." in final_content
+    assert "Appended line." in final_content
+    # The real file was edited in place; no shadow .md entity was created beside it
+    assert [entry.name for entry in note_path.parent.iterdir()] == ["alt-stem.markdown"]
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_recovers_wrong_cased_identifier(client, test_project):
+    """A wrong-cased identifier edits the canonical on-disk file after recovery (#581).
+
+    The sync-file endpoint canonicalizes casing by matching real directory entries,
+    so syncing 'notes/Disk-Note.md' indexes 'notes/disk-note.md' identically on
+    case-sensitive (CI) and case-insensitive (macOS) filesystems — no filesystem
+    probe is needed here. The regression: the retry used to strictly re-resolve the
+    raw wrong-cased identifier, which can miss the just-indexed canonical entity;
+    the fix returns the entity identity straight from the sync-file response.
+    """
+    note_path = Path(test_project.path) / "notes" / "disk-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Disk Note\n\nOriginal cased content.\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="notes/Disk-Note",
+        operation="append",
+        content="\nAppended line.",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert "Created note" not in result
+
+    final_content = note_path.read_text(encoding="utf-8")
+    assert "Original cased content." in final_content
+    assert "Appended line." in final_content
+    # The canonical file was edited; no wrong-cased duplicate was created beside it
+    assert [entry.name for entry in note_path.parent.iterdir()] == ["disk-note.md"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_after_disk_recovery_falls_back_to_strict_resolve():
+    """Older servers that omit external_id from sync-file trigger a strict re-resolve.
+
+    The recovery path prefers the entity identity from the sync-file response; when a
+    server predates that field, the only safe option is a strict re-resolve of the
+    raw identifier (which fails loudly on a miss instead of guessing).
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/sync-file"):
+            return httpx.Response(
+                200,
+                json={
+                    "permalink": "notes/old-server-note",
+                    "title": "Old Server Note",
+                    "file_path": "notes/old-server-note.md",
+                    "note_type": "note",
+                    "content_type": "text/markdown",
+                    "observations": [],
+                    "relations": [],
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                },
+            )
+        assert request.url.path.endswith("/resolve")
+        return httpx.Response(200, json={"external_id": "resolved-entity-uuid"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
+        knowledge_client = KnowledgeClient(http_client, "project-external-id")
+        result = await _resolve_after_disk_recovery(knowledge_client, "notes/old-server-note")
+
+    assert result == "resolved-entity-uuid"
+
+
+@pytest.mark.asyncio
+async def test_resolve_after_disk_recovery_propagates_unexpected_errors():
+    """Server-side failures during disk recovery must not be masked as a not-found miss.
+
+    Only 400/404 sync-file rejections mean "nothing to recover"; a 500 (or auth
+    failure) would otherwise be swallowed and edit_note would continue into
+    auto-create with a misleading not-found error.
+    """
+
+    def server_error(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "boom"})
+
+    transport = httpx.MockTransport(server_error)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
+        knowledge_client = KnowledgeClient(http_client, "project-external-id")
+        with pytest.raises(ToolError, match="boom"):
+            await _resolve_after_disk_recovery(knowledge_client, "notes/unlucky-note")
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_traversal_identifier_is_blocked(client, test_project):
+    """A traversal identifier must be rejected by both disk recovery and auto-create."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="../escape-note",
+        operation="append",
+        content="should never be written",
+    )
+
+    assert isinstance(result, str)
+    assert "# Error" in result
+    assert "paths must stay within project boundaries" in result
+    assert not (Path(test_project.path).parent / "escape-note.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_traversal_identifier_json_error(client, test_project):
+    """JSON mode reports a structured security error for traversal identifiers."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="../escape-json-note",
+        operation="append",
+        content="should never be written",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["error"] == "SECURITY_VALIDATION_ERROR"
+    assert result["fileCreated"] is False

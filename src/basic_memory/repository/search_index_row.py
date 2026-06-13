@@ -36,6 +36,7 @@ class SearchIndexRow:
     category: Optional[str] = None  # observations
     from_id: Optional[int] = None  # relations
     to_id: Optional[int] = None  # relations
+    to_name: Optional[str] = None  # relations: literal target text, set even when unresolved
     relation_type: Optional[str] = None  # relations
 
     # Matched chunk text from vector search (the actual content that matched the query)
@@ -94,6 +95,7 @@ class SearchIndexRow:
             else self.metadata,
             "from_id": self.from_id,
             "to_id": self.to_id,
+            "to_name": self.to_name,
             "relation_type": self.relation_type,
             "entity_id": self.entity_id,
             "category": self.category,

@@ -16,6 +16,21 @@ runner = CliRunner()
 
 
 @pytest.mark.parametrize(
+    "command",
+    ["sync", "bisync", "check", "bisync-reset"],
+)
+def test_cloud_mirror_command_help_marks_personal_workspaces_only(command):
+    """Mirror-family help must say Personal-only and point Team users at push/pull (#851)."""
+    result = runner.invoke(app, ["cloud", command, "--help"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Personal workspaces only" in output
+    assert "bm cloud pull" in output
+    assert "bm cloud push" in output
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["cloud", "sync", "--name", "research"],
@@ -625,17 +640,21 @@ def test_get_workspace_for_project_override_no_match_raises(monkeypatch, config_
     assert "No accessible workspace matches 'acme'" in str(exc_info.value)
 
 
-def test_cloud_setup_workspace_configures_named_remote(monkeypatch):
-    """`bm cloud setup --workspace acme` provisions the acme tenant's own remote."""
-    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
-    recorder: dict = {}
-
+def _stub_setup_env(monkeypatch, core, *, remote_exists=False, recorder=None):
+    """Stub the `bm cloud setup` dependency chain for the acme workspace."""
     monkeypatch.setattr(core, "install_rclone", lambda: None)
     monkeypatch.setattr(
         core,
         "get_available_workspaces",
         lambda: _async_value([_workspace("team-tenant", "organization", "acme")]),
     )
+    monkeypatch.setattr(core, "rclone_remote_exists", lambda _remote: remote_exists)
+
+    def _mint(_tenant_id):
+        if recorder is not None:
+            recorder["minted"] = True
+        return _async_value(SimpleNamespace(access_key="ak", secret_key="sk"))
+
     monkeypatch.setattr(
         core,
         "get_mount_info",
@@ -643,22 +662,72 @@ def test_cloud_setup_workspace_configures_named_remote(monkeypatch):
             SimpleNamespace(tenant_id="team-tenant", bucket_name="acme-bucket")
         ),
     )
-    monkeypatch.setattr(
-        core,
-        "generate_mount_credentials",
-        lambda _tenant_id: _async_value(SimpleNamespace(access_key="ak", secret_key="sk")),
-    )
+    monkeypatch.setattr(core, "generate_mount_credentials", _mint)
 
     def _fake_configure(**kwargs):
-        recorder.update(kwargs)
+        if recorder is not None:
+            recorder.update(kwargs)
         return kwargs.get("remote_name")
 
     monkeypatch.setattr(core, "configure_rclone_remote", _fake_configure)
+
+
+def test_cloud_setup_workspace_configures_named_remote(monkeypatch):
+    """`bm cloud setup --workspace acme` provisions the acme tenant's own remote."""
+    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
+    recorder: dict = {}
+    _stub_setup_env(monkeypatch, core, remote_exists=False, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme"])
 
     assert result.exit_code == 0, result.output
     assert recorder["remote_name"] == "basic-memory-cloud-acme"
+
+
+def test_cloud_setup_aborts_when_remote_exists_without_force(monkeypatch):
+    """Setup refuses to overwrite an existing remote, and mints nothing (the #922 footgun)."""
+    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
+    recorder: dict = {}
+    _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme"])
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "basic-memory-cloud-acme' is already configured" in output
+    assert "--force" in output
+    # Aborted before minting credentials or touching the remote.
+    assert "minted" not in recorder
+    assert "remote_name" not in recorder
+
+
+def test_cloud_setup_force_overwrites_existing_remote(monkeypatch):
+    """--force reconfigures an existing remote."""
+    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
+    recorder: dict = {}
+    _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert recorder["remote_name"] == "basic-memory-cloud-acme"
+    assert recorder.get("minted") is True
+
+
+def test_cloud_setup_default_workspace_aborts_when_remote_exists(monkeypatch):
+    """The original footgun: `bm cloud setup` (no --workspace) must not clobber
+    the shared basic-memory-cloud remote without --force."""
+    core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
+    recorder: dict = {}
+    _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "setup"])  # no --workspace → basic-memory-cloud
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "'basic-memory-cloud' is already configured" in output
+    assert "minted" not in recorder  # nothing minted on abort
+    assert "remote_name" not in recorder
 
 
 async def _async_value(value):

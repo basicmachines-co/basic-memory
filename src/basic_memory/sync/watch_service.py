@@ -10,7 +10,7 @@ from typing import List, Optional, Set, Sequence, Callable, Awaitable, TYPE_CHEC
 if TYPE_CHECKING:
     from basic_memory.sync.sync_service import SyncService
 
-from basic_memory.config import BasicMemoryConfig, ProjectMode, WATCH_STATUS_JSON
+from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
@@ -184,24 +184,24 @@ class WatchService:
              ``--project``, only that project is watched. This keeps concurrent
              MCP processes from producing duplicate watchers that race on the
              same files.
-          2. Cloud-only projects without a local bisync copy are skipped so we
-             don't watch a path that does not exist on disk.
+          2. Projects that are not locally syncable are skipped — those missing
+             from config (config is the source of truth, so stale DB rows must
+             not be watched) or with a non-absolute path (which would resolve
+             against the process cwd and make the watcher observe and mutate the
+             directory the server was launched from). See
+             ``BasicMemoryConfig.is_locally_syncable`` (issue #949). Cloud
+             projects with a local bisync copy keep their absolute path and are
+             still watched.
         """
         projects = await self.project_repository.get_active_projects()
 
         if self.constrained_project:
             projects = [p for p in projects if p.name == self.constrained_project]
 
-        cloud_skip: list[str] = []
-        for p in projects:
-            if self.app_config.get_project_mode(p.name) == ProjectMode.CLOUD:
-                entry = self.app_config.projects.get(p.name)
-                if entry and Path(entry.path).is_absolute():
-                    continue  # Cloud project with local bisync copy — keep watching
-                cloud_skip.append(p.name)
-        if cloud_skip:
-            projects = [p for p in projects if p.name not in cloud_skip]
-            logger.debug(f"Skipping cloud-mode projects in watch cycle: {cloud_skip}")
+        skip = [p.name for p in projects if not self.app_config.is_locally_syncable(p.name, p.path)]
+        if skip:
+            projects = [p for p in projects if p.name not in skip]
+            logger.debug(f"Skipping projects that are not locally syncable in watch cycle: {skip}")
 
         return list(projects)
 

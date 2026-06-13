@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Official Basic Memory plugins from the canonical basic-memory repository",
-    "version": "0.21.6"
+    "version": "0.22.1"
   },
   "plugins": [
     {
       "name": "basic-memory",
       "source": "./plugins/claude-code",
       "description": "The bridge between Claude's working memory and Basic Memory's durable knowledge graph \u2014 session briefings, pre-compaction checkpoints, and capture reflexes",
-      "version": "0.21.6",
+      "version": "0.22.1",
       "author": {
         "name": "Basic Machines"
       },

@@ -357,6 +357,8 @@ def _format_project_list_json(
 
 @mcp.tool(
     "list_memory_projects",
+    title="List Memory Projects",
+    tags={"projects"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def list_memory_projects(
@@ -475,10 +477,14 @@ async def _resolve_workspace_routing(
     if workspace is None:
         return None
 
-    explicit_cloud_routing = _explicit_routing() and not _force_local_mode()
+    forced_local = _explicit_routing() and _force_local_mode()
     config = ConfigManager().config
+    # Resolve whenever credentials make workspace discovery possible — not only
+    # under explicit --cloud. A workspace selector implies cloud routing
+    # (get_client routes it to the cloud proxy, #954), and the transport needs
+    # the tenant id in X-Workspace-ID, not a slug or display name.
     should_resolve_workspace = is_factory_mode() or (
-        explicit_cloud_routing and has_cloud_credentials(config)
+        has_cloud_credentials(config) and not forced_local
     )
     if not should_resolve_workspace:
         return workspace
@@ -495,6 +501,8 @@ async def _resolve_workspace_routing(
 
 @mcp.tool(
     "create_memory_project",
+    title="Create Memory Project",
+    tags={"projects"},
     annotations={"destructiveHint": False, "openWorldHint": False},
 )
 async def create_memory_project(
@@ -517,8 +525,9 @@ async def create_memory_project(
         workspace: Optional cloud workspace selector to create the project in. Slug is
             preferred for AI callers, but tenant_id and unique name are also accepted.
             When omitted, the connection's default workspace is used. Discover values
-            via `list_workspaces`. In local mode the selector is passed through
-            without slug resolution.
+            via `list_workspaces`. A workspace selector implies cloud routing:
+            without cloud credentials the call fails fast instead of silently
+            creating a local project (#954).
         output_format: "text" returns the existing human-readable result text.
             "json" returns structured project creation metadata.
         context: Optional FastMCP context for progress/status logging.
@@ -636,6 +645,8 @@ async def create_memory_project(
 
 
 @mcp.tool(
+    title="Delete Project",
+    tags={"projects"},
     annotations={"destructiveHint": True, "openWorldHint": False},
 )
 async def delete_project(
@@ -654,8 +665,9 @@ async def delete_project(
         workspace: Optional cloud workspace selector to delete the project from.
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
-            used. In local mode the selector is passed through without slug
-            resolution, matching create_memory_project behavior.
+            used. A workspace selector implies cloud routing: without cloud
+            credentials the call fails fast, matching create_memory_project
+            behavior (#954).
 
     Returns:
         Confirmation message about project deletion

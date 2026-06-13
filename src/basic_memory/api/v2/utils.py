@@ -147,6 +147,7 @@ async def to_graph_context(
                         from_entity_id=item.from_id,
                         from_entity_external_id=from_ext_id,
                         to_entity=to_title,
+                        to_name=item.to_name,
                         to_entity_id=item.to_id,
                         to_entity_external_id=to_ext_id,
                         created_at=item.created_at,

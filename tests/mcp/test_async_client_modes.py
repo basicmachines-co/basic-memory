@@ -618,3 +618,42 @@ async def test_get_cloud_control_plane_client_raises_without_credentials(config_
     with pytest.raises(RuntimeError, match="Cloud routing requested but no credentials found"):
         async with get_cloud_control_plane_client():
             pass
+
+
+@pytest.mark.asyncio
+async def test_get_client_workspace_selector_routes_to_cloud(config_manager):
+    """A bare workspace selector routes to the cloud proxy, not local ASGI (#954).
+
+    This is the create_memory_project(workspace=...) path on a local MCP
+    server: no factory, no explicit flags, no project_name — the selector
+    alone must imply cloud routing.
+    """
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    config_manager.save_config(cfg)
+
+    async with get_client(workspace="tenant-123") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("X-Workspace-ID") == "tenant-123"
+
+
+@pytest.mark.asyncio
+async def test_get_client_workspace_selector_without_credentials_fails_fast(
+    config_manager, monkeypatch
+):
+    """No credentials + workspace selector must raise, never fall back to local (#954).
+
+    The silent local fallback was the bug: a cloud project create either
+    failed on a cloud-style path or silently created a local project.
+    """
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = None
+    cfg.cloud_client_id = "cid"
+    cfg.cloud_domain = "https://auth.example.test"
+    config_manager.save_config(cfg)
+
+    with pytest.raises(RuntimeError, match="cloud workspace was requested"):
+        async with get_client(workspace="team-slug"):
+            pass

@@ -368,7 +368,7 @@ def test_status_wait_json_timeout_emits_error(
 
 @patch("basic_memory.cli.commands.schema.ConfigManager")
 @patch(
-    "basic_memory.cli.commands.schema.mcp_schema_validate",
+    "basic_memory.mcp.tools.schema_validate",
     new_callable=AsyncMock,
     return_value=VALIDATE_REPORT,
 )
@@ -387,7 +387,7 @@ def test_schema_validate_json(mock_mcp, mock_config_cls):
 
 @patch("basic_memory.cli.commands.schema.ConfigManager")
 @patch(
-    "basic_memory.cli.commands.schema.mcp_schema_validate",
+    "basic_memory.mcp.tools.schema_validate",
     new_callable=AsyncMock,
     return_value={"error": "No schema found for type 'person'"},
 )
@@ -404,7 +404,7 @@ def test_schema_validate_json_error(mock_mcp, mock_config_cls):
 
 @patch("basic_memory.cli.commands.schema.ConfigManager")
 @patch(
-    "basic_memory.cli.commands.schema.mcp_schema_validate",
+    "basic_memory.mcp.tools.schema_validate",
     new_callable=AsyncMock,
     return_value=VALIDATE_REPORT,
 )
@@ -427,7 +427,7 @@ def test_schema_validate_json_strict_exit(mock_mcp, mock_config_cls):
 
 @patch("basic_memory.cli.commands.schema.ConfigManager")
 @patch(
-    "basic_memory.cli.commands.schema.mcp_schema_infer",
+    "basic_memory.mcp.tools.schema_infer",
     new_callable=AsyncMock,
     return_value=INFER_REPORT,
 )
@@ -451,7 +451,7 @@ def test_schema_infer_json(mock_mcp, mock_config_cls):
 
 @patch("basic_memory.cli.commands.schema.ConfigManager")
 @patch(
-    "basic_memory.cli.commands.schema.mcp_schema_diff",
+    "basic_memory.mcp.tools.schema_diff",
     new_callable=AsyncMock,
     return_value=DIFF_REPORT_WITH_DRIFT,
 )

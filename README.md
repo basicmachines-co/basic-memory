@@ -216,14 +216,14 @@ Source: [`plugins/claude-code`](plugins/claude-code).
 ### Shared skills
 
 Framework-agnostic `SKILL.md` files live in [`skills/`](skills). If your
-Skills CLI supports subpath installs:
+Skills CLI supports repository subdirectory sources:
 
 ```bash
-npx skills add basicmachines-co/basic-memory --path skills
+npx skills add basicmachines-co/basic-memory/skills
 ```
 
-If it does not, copy the `memory-*` directories from `skills/` into your
-agent's skills directory as a temporary Phase 1 install path.
+If your installed Skills CLI cannot load that source, update the CLI or copy
+the `memory-*` directories from `skills/` into your agent's skills directory.
 
 ### Hermes
 
@@ -590,7 +590,7 @@ retention).
 | `BASIC_MEMORY_IMPORT_UPLOAD_MAX_BYTES` | `104857600` | Max uploaded import size |
 
 ```bash
-BASIC_MEMORY_LOG_LEVEL=DEBUG basic-memory sync
+BASIC_MEMORY_LOG_LEVEL=DEBUG basic-memory reindex
 tail -f ~/.basic-memory/basic-memory.log
 ```
 

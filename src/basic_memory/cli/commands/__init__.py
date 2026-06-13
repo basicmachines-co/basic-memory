@@ -4,6 +4,7 @@ from . import ci, status, db, doctor, import_memory_json, mcp, import_claude_con
 from . import (
     import_claude_projects,
     import_chatgpt,
+    man,
     tool,
     project,
     format,
@@ -29,4 +30,5 @@ __all__ = [
     "schema",
     "update",
     "workspace",
+    "man",
 ]

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from basic_memory.config import ProjectEntry
 from basic_memory.models import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
@@ -52,6 +53,46 @@ async def test_get_project_by_id_not_found(client: AsyncClient, v2_projects_url)
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_add_project_response_reflects_promoted_default(
+    client: AsyncClient,
+    v2_projects_url,
+    app_config,
+    config_manager,
+    config_home,
+    project_repository,
+):
+    """Regression #974/#985: POST response should echo persisted default promotion."""
+    main_home = config_home / "basic-memory"
+    main_home.mkdir(parents=True, exist_ok=True)
+    qa_path = config_home / "qa-notes"
+    qa_path.mkdir(parents=True, exist_ok=True)
+
+    fresh_config = app_config.model_copy(
+        update={
+            "projects": {"main": ProjectEntry(path=str(main_home))},
+            "default_project": "main",
+        }
+    )
+    config_manager.save_config(fresh_config)
+
+    for project in await project_repository.find_all():
+        await project_repository.delete(project.id)
+
+    response = await client.post(
+        f"{v2_projects_url}/",
+        json={"name": "qa", "path": str(qa_path), "set_default": False},
+    )
+
+    assert response.status_code == 201
+    status_response = ProjectStatusResponse.model_validate(response.json())
+    assert status_response.status == "success"
+    assert status_response.default is True
+    new_project = _project_item(status_response.new_project)
+    assert new_project.name == "qa"
+    assert new_project.is_default is True
 
 
 @pytest.mark.asyncio
@@ -135,6 +176,37 @@ async def test_set_default_project_by_id(
     assert new_project.is_default is True
     assert old_project.external_id == test_project.external_id
     assert old_project.is_default is False
+
+
+@pytest.mark.asyncio
+async def test_set_default_project_when_none_is_set(
+    client: AsyncClient, test_project: Project, v2_projects_url, project_repository
+):
+    """Regression for #975: setting a default must succeed when none is set.
+
+    This is the bootstrap/recovery case: `bm project default <name>` is exactly
+    the command reached for when no default exists, so the endpoint must not 404.
+    """
+    # Clear any existing default so no row has is_default set.
+    await project_repository.update(test_project.id, {"is_default": None})
+    assert await project_repository.get_default_project() is None
+
+    response = await client.put(f"{v2_projects_url}/{test_project.external_id}/default")
+
+    assert response.status_code == 200
+    status_response = ProjectStatusResponse.model_validate(response.json())
+    assert status_response.status == "success"
+    assert status_response.default is True
+    # No previous default existed, so old_project must be None.
+    assert status_response.old_project is None
+    new_project = _project_item(status_response.new_project)
+    assert new_project.external_id == test_project.external_id
+    assert new_project.is_default is True
+
+    # A follow-up read-back must now return the newly set default.
+    default_project = await project_repository.get_default_project()
+    assert default_project is not None
+    assert default_project.external_id == test_project.external_id
 
 
 @pytest.mark.asyncio
@@ -371,6 +443,41 @@ async def test_resolve_project_not_found(client: AsyncClient, v2_projects_url):
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_not_found_fresh_install_names_setup_command(
+    client: AsyncClient, v2_projects_url, project_repository
+):
+    """#974 follow-up: a fresh install fails its first read with a bare not-found.
+
+    config.json bootstraps a "main" default before any reconciliation has created
+    database rows (the one-shot CLI never runs the server lifespan), so resolving
+    the configured default 404s. With an empty projects table the error must point
+    at first-run setup instead of reading like a broken install.
+    """
+    for project in await project_repository.find_all():
+        await project_repository.delete(project.id)
+
+    response = await client.post(f"{v2_projects_url}/resolve", json={"identifier": "main"})
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail.startswith("Project not found: 'main'")
+    assert "basic-memory project add" in detail
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_not_found_with_projects_keeps_plain_message(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """A miss against a populated projects table stays a plain not-found."""
+    response = await client.post(
+        f"{v2_projects_url}/resolve", json={"identifier": "nonexistent-project"}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found: 'nonexistent-project'"
 
 
 @pytest.mark.asyncio

@@ -13,15 +13,46 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # Required CI records pytest-testmon data but still runs the full selected suite.
-  # The selective mode stays on explicit developer flows such as `just testmon`.
-  BASIC_MEMORY_TESTMON_FLAGS: "--testmon-noselect"
+  # Branch builds (PRs arrive as push events — this workflow has no
+  # pull_request trigger) select only impacted tests from the cached testmon
+  # baseline (branch cache falling back to main's full-run recording). Pushes
+  # to main run the full suite with --testmon-noselect to refresh the baseline.
+  BASIC_MEMORY_TESTMON_FLAGS: ${{ github.ref_name == 'main' && '--testmon-noselect' || '--testmon --testmon-forceselect' }}
 
 jobs:
+  changes:
+    # Docs/workflow-only changes skip the entire test matrix while the workflow
+    # still concludes successfully, so the BM Bossbot gate (workflow_run on
+    # Tests success) keeps firing and the PR stays mergeable.
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # Tests only runs on push events; for branch pushes compare against
+          # main (merge-base), for main pushes dorny diffs the push range.
+          base: main
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'test-int/**'
+              - 'alembic/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'justfile'
+              - '.github/workflows/test.yml'
+
   static-checks:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Static Checks (Python 3.12)
     timeout-minutes: 20
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
@@ -57,15 +88,17 @@ jobs:
           just lint
 
   test-sqlite-unit:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test SQLite Unit (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.12"
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.13"
           # Python 3.14 unit tests are the longest full-suite slice; keep this
           # one on GitHub-hosted runners after Depot terminated it mid-suite.
@@ -118,17 +151,19 @@ jobs:
           just test-unit-sqlite
 
   test-sqlite-integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.12"
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.13"
-          - os: depot-ubuntu-24.04
+          - os: ubuntu-latest
             python-version: "3.14"
           - os: windows-latest
             python-version: "3.12"
@@ -177,21 +212,20 @@ jobs:
           just test-int-sqlite
 
   test-postgres-unit:
-    name: Test Postgres Unit (Python ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/3)
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: "3.12"
-            os: depot-ubuntu-24.04
-          - python-version: "3.13"
-            os: depot-ubuntu-24.04
-          # Match the SQLite unit slice: this full Python 3.14 path outlived
-          # the Depot runner and was terminated mid-suite.
-          - python-version: "3.14"
-            os: ubuntu-latest
-    runs-on: ${{ matrix.os }}
+        # Shard the largest suite across parallel jobs: each shard is a full job
+        # with its own Postgres service running 1/3 of the collection.
+        # Postgres runs on the latest Python only — the SQLite matrix carries
+        # Python-version coverage; Postgres carries backend coverage.
+        group: [1, 2, 3]
+        python-version: ["3.14"]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -233,9 +267,10 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
             ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-main-
             ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-
 
@@ -249,19 +284,20 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-unit-postgres
+          BASIC_MEMORY_PYTEST_SPLIT_FLAGS="--splits 3 --group ${{ matrix.group }}" just test-unit-postgres
 
   test-postgres-integration:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test Postgres Integration (Python ${{ matrix.python-version }})
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: "3.12"
-          - python-version: "3.13"
-          - python-version: "3.14"
-    runs-on: depot-ubuntu-24.04
+        # Latest Python only: SQLite carries version coverage, Postgres carries
+        # backend coverage.
+        python-version: ["3.14"]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -322,9 +358,11 @@ jobs:
           just test-int-postgres
 
   test-semantic:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6

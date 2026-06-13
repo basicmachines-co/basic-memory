@@ -11,7 +11,13 @@ from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager, has_cloud_credentials
-from basic_memory.utils import build_canonical_permalink, coerce_dict, coerce_list, parse_tags
+from basic_memory.utils import (
+    build_canonical_permalink,
+    coerce_dict,
+    parse_str_list,
+    parse_tags,
+    strict_search_tags,
+)
 from basic_memory.mcp.async_client import (
     _explicit_routing,
     _force_local_mode,
@@ -606,7 +612,9 @@ async def _search_all_projects(
 
 
 @mcp.tool(
+    title="Search Notes",
     description="Search across all content in the knowledge base with advanced syntax support.",
+    tags={"search"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
     annotations={"readOnlyHint": True, "openWorldHint": False},
@@ -643,24 +651,30 @@ async def search_notes(
     # Plural-vs-singular trips models constantly. Accept the singular too.
     note_types: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        # parse_str_list, not coerce_list: "note,task" must split into ["note", "task"]
+        # consistent with how tags are handled (#910/#930). coerce_list wraps the whole
+        # comma string as the single literal type ["note,task"], which matches nothing.
+        BeforeValidator(parse_str_list),
         Field(default=None, validation_alias=AliasChoices("note_types", "note_type", "types")),
         "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
+        "Accepts a list, a comma-separated string (e.g. 'note,task'), or a JSON-array string. "
         "Case-insensitive.",
     ] = None,
     entity_types: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        BeforeValidator(parse_str_list),
         Field(default=None, validation_alias=AliasChoices("entity_types", "entity_type")),
         "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
         "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
-        "'Chapter' here — use note_types instead.",
+        "'Chapter' here — use note_types instead. "
+        "Accepts a list, a comma-separated string (e.g. 'entity,observation'), or a JSON-array string.",
     ] = None,
     categories: Annotated[
         List[str] | None,
-        BeforeValidator(coerce_list),
+        BeforeValidator(parse_str_list),
         Field(default=None, validation_alias=AliasChoices("categories", "category")),
         "Filter observation results to these exact categories (e.g. ['requirement']). "
+        "Accepts a list, a comma-separated string (e.g. 'requirement,decision'), or a JSON-array string. "
         "Pair with entity_types=['observation'] to return only observations whose "
         "category matches exactly — not every row mentioning the word.",
     ] = None,
@@ -676,13 +690,15 @@ async def search_notes(
         Dict[str, Any] | None,
         BeforeValidator(coerce_dict),
     ] = None,
-    # parse_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to match the
-    # tag: query shorthand below and write_note's documented tags convention (#910).
-    # coerce_list would wrap the comma string as the single literal tag ["a,b"],
-    # which matches nothing.
+    # strict_search_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to
+    # match the tag: query shorthand below and write_note's documented tags convention
+    # (#910). coerce_list would wrap the comma string as the single literal tag
+    # ["a,b"], which matches nothing. Unlike bare parse_tags, the strict wrapper only
+    # splits str/list/None and lets Pydantic reject other types (42, {"a": 1}) with a
+    # clear validation error instead of stringifying them into junk tags.
     tags: Annotated[
         List[str] | None,
-        BeforeValidator(parse_tags),
+        BeforeValidator(strict_search_tags),
     ] = None,
     status: Optional[str] = None,
     min_similarity: Annotated[
@@ -812,6 +828,11 @@ async def search_notes(
         Formatted markdown text (output_format="text"), dict (output_format="json"),
         or helpful error guidance string if search fails
 
+        Pagination note: `total` is exact only for text/title/permalink searches.
+        Vector and hybrid searches skip the count query (it would cost a second
+        semantic retrieval pass) and report `total: 0` even when results are
+        returned — use `has_more` for pagination in those modes.
+
     Examples:
         # Basic text search
         results = await search_notes("project planning")
@@ -885,6 +906,17 @@ async def search_notes(
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
 
+    # Trigger: list params arrived via a direct function call instead of the MCP layer.
+    # Why: the BeforeValidator annotations only run through MCP/Pydantic validation; direct
+    #      callers (e.g. `bm tool search-notes --type note,task` in cli/commands/tool.py,
+    #      which Typer collects as the one-element list ["note,task"]) would otherwise
+    #      forward the comma string as one literal type that matches nothing (#930).
+    # Outcome: comma-split/list normalization applies on every path; parse_str_list is
+    #          idempotent, so MCP-validated input passes through unchanged.
+    note_types = parse_str_list(note_types) if note_types is not None else []
+    entity_types = parse_str_list(entity_types) if entity_types is not None else []
+    categories = parse_str_list(categories) if categories is not None else []
+
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     # Lowercase note_types so "Chapter" matches the stored "chapter".
     note_types = [t.lower() for t in note_types] if note_types else []
@@ -892,6 +924,15 @@ async def search_notes(
     # Categories are matched exactly against the indexed observation category,
     # so preserve their original casing (unlike the lowercased note_types).
     categories = categories or []
+
+    # Trigger: tags arrived via a direct function call instead of the MCP layer.
+    # Why: the BeforeValidator above only runs through MCP/Pydantic validation; direct
+    #      callers (e.g. `bm tool search-notes --tag a,b` in cli/commands/tool.py, which
+    #      Typer collects as the one-element list ["a,b"]) would otherwise forward the
+    #      comma string as one literal tag that matches nothing (#910).
+    # Outcome: comma-split/list normalization applies on every path; parse_tags is
+    #          idempotent, so MCP-validated input passes through unchanged.
+    tags = parse_tags(tags) or None
 
     # Parse tag:<value> shorthand at tool level so it works with all search modes.
     # Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing".

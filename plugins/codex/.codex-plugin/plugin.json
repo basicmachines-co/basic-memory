@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.21.6",
+  "version": "0.22.1",
   "description": "A Codex-native bridge to Basic Memory for durable engineering context, decisions, and resumable checkpoints.",
   "author": {
     "name": "Basic Machines",

@@ -54,6 +54,21 @@ class EntityResolveResponse(BaseModel):
     )
 
 
+class SyncFileRequest(BaseModel):
+    """Request to index a single markdown file that exists on disk.
+
+    Used as a recovery path when an identifier fails resolution but maps to a
+    file written directly to disk that the watcher has not indexed yet (#581).
+    """
+
+    file_path: str = Field(
+        ...,
+        description="Markdown file path to index (relative to project root)",
+        min_length=1,
+        max_length=500,
+    )
+
+
 class MoveEntityRequestV2(BaseModel):
     """V2 request schema for moving an entity to a new file location.
 
