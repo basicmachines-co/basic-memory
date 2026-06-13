@@ -48,7 +48,12 @@ fi
 # the brief. Python is a guaranteed dependency (basic-memory requires it) and
 # avoids brittle shell JSON wrangling. The payload and binary path cross over via
 # the environment to sidestep argument-quoting issues.
-BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
+# Resolve the hook script's own directory so the inline Python can find the
+# shared envelope module. __file__ is '<stdin>' inside a heredoc, so the Python
+# code can't locate itself — we pass the real path.
+hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+BM_HOOK_INPUT="$input" BM_BIN="$BM" BM_HOOK_DIR="$hook_dir" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
 import re
@@ -56,6 +61,25 @@ import shlex
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+
+# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# SessionStart is read-only (no note writes), so the envelope is only used for
+# local event logging when captureEvents is enabled.
+# Constraint: __file__ is '<stdin>' inside a bash heredoc, so the hook script's
+#             real directory is passed in via the BM_HOOK_DIR environment variable.
+_hook_dir = os.environ.get("BM_HOOK_DIR", "")
+if _hook_dir:
+    _shared_dir = os.path.join(_hook_dir, "..", "..", "shared")
+    sys.path.insert(0, os.path.normpath(_shared_dir))
+try:
+    from harness_envelope import (
+        SESSION_STARTED,
+        append_to_event_log,
+        create_envelope,
+    )
+    _HAS_ENVELOPE = True
+except ImportError:
+    _HAS_ENVELOPE = False
 
 def command_argv(configured):
     """Preserve one literal executable path, otherwise parse a shell-style command."""
@@ -154,6 +178,8 @@ recall_prompt = cfg.get("recallPrompt") or default_prompt
 # Without this, setup writes them but they never reach Claude (dead config).
 placement_conventions = (cfg.get("placementConventions") or "").strip()
 capture_folder = (cfg.get("captureFolder") or "sessions").strip()
+capture_events = bool(cfg.get("captureEvents", False))
+session_id = payload.get("session_id") or ""
 
 # --- Resolve the shared/team read set ---
 # secondaryProjects (read-only recall sources) + teamProjects keys (share targets,
@@ -330,4 +356,24 @@ elif not primary_project:
 
 lines += ["", "---", recall_prompt]
 print("\n".join(lines))
+
+# --- Log the session_started event locally (opt-in) ---
+# Trigger: captureEvents is enabled and the envelope module is available.
+# Why: the local event log records session starts for later coalescing by memory
+#      routines (SPEC-61). This is separate from the brief printed above — it's
+#      durable metadata, not context for the current session.
+# Outcome: a JSONL line is appended to <cwd>/.basic-memory/events.jsonl.
+if _HAS_ENVELOPE and capture_events and primary_project:
+    try:
+        envelope = create_envelope(
+            event_type=SESSION_STARTED,
+            source="claude-code",
+            session_id=session_id or "unknown",
+            cwd=cwd,
+            project_hint=primary_project,
+            hook_name="SessionStart",
+        )
+        append_to_event_log(envelope, cwd)
+    except Exception:
+        pass  # event logging failure is non-fatal
 PY
