@@ -1048,10 +1048,12 @@ async def test_postgres_multiword_query_relaxes_on_strict_miss(session_maker, te
         )
     )
 
-    # Default path stays strict: zero results, exactly as before.
-    strict = await repo.search(search_text="When did Melanie paint a sunrise?")
+    # A content word absent from the doc ("hiking") makes the strict
+    # all-terms-AND query miss even after Postgres drops stopwords — without
+    # it, to_tsquery('english', ...) already strips "when/did/a" and matches.
+    strict = await repo.search(search_text="Did Melanie go hiking at sunrise?")
     assert strict == []
 
-    # The hybrid FTS branch opts in; relaxation surfaces the doc.
-    results = await repo.search(search_text="When did Melanie paint a sunrise?", allow_relaxed=True)
+    # The hybrid FTS branch opts in; OR-relaxation surfaces the partial match.
+    results = await repo.search(search_text="Did Melanie go hiking at sunrise?", allow_relaxed=True)
     assert any(r.id == 77 for r in results)

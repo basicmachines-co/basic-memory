@@ -1136,23 +1136,37 @@ async def test_question_punctuation_does_not_phrase_quote(search_repository):
     """
     prepared = search_repository._prepare_single_term("When did Melanie paint a sunrise?")
     assert '"' not in prepared
-    assert "sunrise*" in prepared
+    # Prefix syntax differs by backend: FTS5 uses '*', tsquery uses ':*'.
+    if is_postgres_backend(search_repository):
+        assert "sunrise:*" in prepared
+    else:
+        assert "sunrise*" in prepared
 
 
 @pytest.mark.asyncio
-async def test_relaxed_fts_text_builds_or_query(search_repository):
-    relaxed = search_repository._relaxed_fts_text("When did Melanie paint a sunrise?")
-    # Stopwords dropped: relaxation keys on content-bearing terms only.
-    assert relaxed == "Melanie* OR paint* OR sunrise*"
+async def test_relaxed_query_drops_stopwords(search_repository):
+    """Relaxation keys on content-bearing terms in each backend's syntax."""
+    if is_postgres_backend(search_repository):
+        relaxed = search_repository._relaxed_tsquery_text("When did Melanie paint a sunrise?")
+        assert relaxed == "Melanie:* | paint:* | sunrise:*"
+    else:
+        relaxed = search_repository._relaxed_fts_text("When did Melanie paint a sunrise?")
+        assert relaxed == "Melanie* OR paint* OR sunrise*"
 
 
 @pytest.mark.asyncio
-async def test_relaxed_fts_text_respects_user_intent(search_repository):
-    # Explicit boolean and quoted queries are not second-guessed.
-    assert search_repository._relaxed_fts_text("alpha AND beta") is None
-    assert search_repository._relaxed_fts_text('"exact phrase"') is None
-    assert search_repository._relaxed_fts_text("single") == "single*"
-    assert search_repository._relaxed_fts_text(None) is None
+async def test_relaxed_query_respects_user_intent(search_repository):
+    # Explicit boolean and quoted queries are not second-guessed (both backends).
+    if is_postgres_backend(search_repository):
+        relaxer = search_repository._relaxed_tsquery_text
+        single = "single:*"
+    else:
+        relaxer = search_repository._relaxed_fts_text
+        single = "single*"
+    assert relaxer("alpha AND beta") is None
+    assert relaxer('"exact phrase"') is None
+    assert relaxer("single") == single
+    assert relaxer(None) is None
 
 
 @pytest.mark.asyncio
@@ -1177,12 +1191,13 @@ async def test_multiword_query_relaxes_to_or_when_strict_misses(search_repositor
     )
     await search_repository.index_item(row)
 
-    # Default path stays strict: zero results, exactly as before.
-    strict = await search_repository.search(search_text="When did Melanie paint a sunrise?")
+    # "hiking" is absent from the doc, so strict all-terms-AND misses on both
+    # backends (Postgres's stopword stripping can't rescue it either).
+    strict = await search_repository.search(search_text="Did Melanie go hiking at sunrise?")
     assert strict == []
 
-    # The hybrid FTS branch opts in; relaxation surfaces the doc.
+    # The hybrid FTS branch opts in; OR-relaxation surfaces the partial match.
     results = await search_repository.search(
-        search_text="When did Melanie paint a sunrise?", allow_relaxed=True
+        search_text="Did Melanie go hiking at sunrise?", allow_relaxed=True
     )
     assert any(r.entity_id == search_entity.id for r in results)

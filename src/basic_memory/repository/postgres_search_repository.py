@@ -243,17 +243,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
         for char in special_chars:
             cleaned_term = cleaned_term.replace(char, " ")
 
-        # Sentence punctuation carries no lexical signal in tsquery either;
-        # strip it from word edges so question-form queries produce clean
-        # lexemes (parity with the SQLite FTS5 preparation).
-        if " " in cleaned_term:
-            cleaned_term = " ".join(
-                word.strip("?!.,;") for word in cleaned_term.split() if word.strip("?!.,;")
-            )
-
         # Handle multi-word queries
         if " " in cleaned_term:
-            words = [w for w in cleaned_term.split() if w.strip()]
+            # Strip sentence punctuation from word edges so question-form
+            # queries produce clean lexemes (parity with SQLite FTS5 prep).
+            # The tsquery tokenizer ignores this punctuation anyway; leaving it
+            # in only risks tsquery syntax errors. Interior characters are kept.
+            words = [w.strip("?!.,;") for w in cleaned_term.split()]
+            words = [w for w in words if w]
             if not words:
                 # All characters were special chars, search won't match anything
                 # Return a safe search term that won't cause syntax errors
@@ -266,8 +263,11 @@ class PostgresSearchRepository(SearchRepositoryBase):
             # Join with AND operator
             return " & ".join(prepared_words)
 
-        # Single word
-        cleaned_term = cleaned_term.strip()
+        # Single word: strip edge punctuation; guard the now-empty case so a
+        # bare ":*"/"" never reaches tsquery.
+        cleaned_term = cleaned_term.strip().strip("?!.,;")
+        if not cleaned_term:
+            return "NOSPECIALCHARS:*"
         if is_prefix:
             return f"{cleaned_term}:*"
         else:
