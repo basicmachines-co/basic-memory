@@ -1,7 +1,7 @@
 {
   "name": "basic-memory",
   "description": "The bridge between Claude's working memory and Basic Memory's durable knowledge graph \u2014 session briefings, pre-compaction checkpoints, and capture reflexes",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "author": {
     "name": "Basic Machines"
   },
