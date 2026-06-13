@@ -53,13 +53,27 @@ RELAXATION_STOPWORDS = frozenset(
 def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
     """Content-bearing words for OR-relaxing a strict full-text query.
 
-    Returns None when relaxation must not apply: empty input, quoted phrases,
-    or explicit boolean queries (user intent is not second-guessed).
+    Returns None when relaxation must not apply. These eligibility rules match
+    SearchService._is_relaxed_fts_fallback_eligible so the hybrid FTS branch
+    relaxes exactly the same query shapes as the service-level FTS path:
+
+    - empty / quoted / explicit-boolean queries (user intent is not
+      second-guessed);
+    - fewer than three alphanumeric tokens (short queries like "New Feature"
+      over-broaden under OR — and in hybrid the relaxed FTS-only rows normalize
+      to 1.0 and can outrank the vector result the user wanted);
+    - any pure-digit token ("root note 1", "SPEC 16") — identifier-like queries
+      over-broaden and create false positives under OR.
     """
     if not search_text:
         return None
     stripped = search_text.strip()
     if '"' in stripped or any(op in f" {stripped} " for op in (" AND ", " OR ", " NOT ")):
+        return None
+    # Eligibility checks run on raw alphanumeric tokens (parity with the
+    # service), before stopword filtering.
+    tokens = re.findall(r"[A-Za-z0-9]+", stripped.lower())
+    if len(tokens) < 3 or any(token.isdigit() for token in tokens):
         return None
     words = [word.strip("?!.,;:") for word in stripped.split()]
     words = [

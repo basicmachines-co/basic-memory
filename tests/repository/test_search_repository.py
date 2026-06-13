@@ -1156,16 +1156,19 @@ async def test_relaxed_query_drops_stopwords(search_repository):
 
 @pytest.mark.asyncio
 async def test_relaxed_query_respects_user_intent(search_repository):
-    # Explicit boolean and quoted queries are not second-guessed (both backends).
-    if is_postgres_backend(search_repository):
-        relaxer = search_repository._relaxed_tsquery_text
-        single = "single:*"
-    else:
-        relaxer = search_repository._relaxed_fts_text
-        single = "single*"
+    # Eligibility matches the service-level relaxation (both backends): quoted,
+    # boolean, short (<3 tokens), and numeric-identifier queries are not relaxed.
+    relaxer = (
+        search_repository._relaxed_tsquery_text
+        if is_postgres_backend(search_repository)
+        else search_repository._relaxed_fts_text
+    )
     assert relaxer("alpha AND beta") is None
     assert relaxer('"exact phrase"') is None
-    assert relaxer("single") == single
+    assert relaxer("single") is None  # < 3 tokens
+    assert relaxer("New Feature") is None  # < 3 tokens (link title)
+    assert relaxer("root note 1") is None  # numeric identifier token
+    assert relaxer("SPEC 16 design") is None  # numeric token
     assert relaxer(None) is None
 
 
