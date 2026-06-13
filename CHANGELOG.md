@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## v0.22.1 (2026-06-12)
+
+Follow-up patch to v0.22.0. Fixes project and default-project resolution on
+fresh installs, MCP workspace routing, sync project selection, and CLI startup
+latency, plus a few MCP parity additions.
+
+### Features
+
+- Added a `workspace` parameter to `write_note` for parity with `edit_note`.
+- **#826**: Added `title` and `tags` annotations to all MCP tool decorators
+  (phase 1).
+- **#930**: `search_notes` now comma-splits `note_types`, `entity_types`, and
+  `categories`.
+- **#971**: Added the manual-pages flow — manpage seed schema, flow docs, and
+  verification fixes.
+
+### Bug Fixes
+
+- Fresh installs no longer fail when the projects table is empty: resolve now
+  points them at project setup, the first project is promoted to default when
+  the config default is missing from the database, the promoted default state
+  is returned from the project-create API, and a default can be set when none
+  is currently set. An existing database default is preserved when repairing a
+  missing config default.
+- **#949**: Sync skips projects without an absolute local path and excludes
+  orphan DB projects that are absent from config.
+- **#952 / #981**: Resolved workspace display names and tenant ids in qualified
+  project routes, closing out the manual verification findings.
+- `note_types`/`entity_types`/`categories` are normalized on the direct-call
+  path, with non-string list elements rejected.
+- Vector-search hydration keys on `(type, id)` to prevent id collisions.
+- `file_utils` requires line-anchored frontmatter fences.
+- CLI startup is faster: FastAPI and app imports are deferred out of CLI
+  startup, and rich/typer modules are preloaded before an in-place upgrade.
+- `config.json` is written atomically.
+- In-memory SQLite sessions are serialized so concurrent rollbacks cannot
+  destroy writes.
+
+### Maintenance
+
+- Release recipes route through PRs and wait for the release PR merge to land
+  before tagging; the release runbook is refreshed and stripped of
+  user-specific absolute paths.
+
 ## v0.22.0 (2026-06-11)
 
 Team-safe cloud sync. New additive `bm cloud push` and `bm cloud pull`
