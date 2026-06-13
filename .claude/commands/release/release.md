@@ -116,22 +116,24 @@ After PyPI release is published, update the MCP registry:
 
 #### Website Updates
 
-**1. basicmachines.co** (sibling `basicmachines.co` repo)
-   - **Goal**: Update version number displayed on the homepage
-   - **Location**: Search for "Basic Memory v0." in the codebase to find version displays
-   - **What to update**:
-     - Hero section heading that shows "Basic Memory v{VERSION}"
-     - "What's New in v{VERSION}" section heading
-     - Feature highlights array (look for array of features with title/description)
-   - **Process**:
+**1. basicmemory.com** (sibling `basicmemory.com` repo —
+`basicmachines-co/basicmemory.com`, formerly `basicmachines.co`)
+   - **No version bump needed.** The marketing site is an Astro + React app and
+     carries **no hardcoded Basic Memory version number** anywhere in its UI
+     (`hero.tsx` and the rest of the site have no version string). The old
+     instruction to bump `src/components/sections/hero.tsx` is obsolete — that
+     file no longer holds a version. Release announcements are dated blog posts,
+     not an in-place edit.
+   - **Skip entirely for patch releases.**
+   - **Significant releases only — optional announcement post**:
      1. Pull latest from GitHub: `git pull origin main`
      2. Create release branch: `git checkout -b release/v{VERSION}`
-     3. Search codebase for current version number (e.g., "v0.16.1")
-     4. Update version numbers to new release version
-     5. Update feature highlights with 3-5 key features from this release (extract from CHANGELOG.md)
-     6. Commit changes: `git commit -m "chore: update to v{VERSION}"`
-     7. Push branch: `git push origin release/v{VERSION}`
-   - **Deploy**: Follow deployment process for basicmachines.co
+     3. Add a dated post under `src/content/blog/` modeled on an existing
+        release post (e.g. `basic-memory-v0-19-0-release.md`), summarizing 3–5
+        headline features from `CHANGELOG.md`
+     4. Commit (`git commit -s -m "..."`), push, and open a PR against
+        `basicmachines-co/basicmemory.com`
+   - **Deploy**: follow that repo's deployment process.
 
 **2. docs.basicmemory.com** (sibling `docs.basicmemory.com` repo)
    - **Goal**: Add a What's New page for the release and bump the homepage badge

@@ -322,7 +322,12 @@ The recipe runs `just lint` + `just typecheck`, then updates every release manif
 
 **Post-release tasks** the recipe surfaces but doesn't run:
 - `docs.basicmemory.com` — add a What's New page under `content/2.whats-new/` and bump the version badge in `content/index.md` (the changelog page auto-fetches GitHub releases; see that repo's CLAUDE.md version-bump checklist)
-- `basicmachines.co` — bump version in `src/components/sections/hero.tsx`
+- `basicmemory.com` — the marketing site (Astro + React, repo
+  `basicmachines-co/basicmemory.com`, formerly `basicmachines.co`) carries **no
+  hardcoded version number** in its UI, so there is nothing to bump. For a
+  significant release, optionally add a dated announcement post under
+  `src/content/blog/` (model it on an existing `basic-memory-vX-Y-Z-release.md`).
+  Skip entirely for routine patch releases.
 - MCP Registry — `mcp-publisher publish` from the repo root
 
 See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `changelog.md` alongside it) for the full release + post-release runbook, including the slash commands.

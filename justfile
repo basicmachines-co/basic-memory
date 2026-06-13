@@ -468,7 +468,8 @@ release version:
     echo "📝 REMINDER: Post-release tasks:"
     echo "   1. docs.basicmemory.com - Add a What's New page under content/2.whats-new/"
     echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
-    echo "   2. basicmachines.co - Update version in src/components/sections/hero.tsx"
+    echo "   2. basicmemory.com - No version number in the site UI; for a significant"
+    echo "      release optionally add a post under src/content/blog/. Skip for patches."
     echo "   3. MCP Registry - Run: mcp-publisher publish"
     echo "   See: .claude/commands/release/release.md for detailed instructions"
 
@@ -585,7 +586,8 @@ beta version:
     echo "📝 REMINDER: For stable releases, update documentation sites:"
     echo "   1. docs.basicmemory.com - Add a What's New page under content/2.whats-new/"
     echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
-    echo "   2. basicmachines.co - Update version in src/components/sections/hero.tsx"
+    echo "   2. basicmemory.com - No version number in the site UI; for a significant"
+    echo "      release optionally add a post under src/content/blog/. Skip for patches."
     echo "   See: .claude/commands/release/release.md for detailed instructions"
 
 # List all available recipes
