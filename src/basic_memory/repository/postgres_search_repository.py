@@ -18,6 +18,7 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     VectorChunkState,
+    relaxed_query_words,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -176,6 +177,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # For non-Boolean queries, prepare single term
         return self._prepare_single_term(term, is_prefix)
 
+    @staticmethod
+    def _relaxed_tsquery_text(search_text: Optional[str]) -> Optional[str]:
+        """OR-relaxed tsquery expression for a failed strict query, or None."""
+        words = relaxed_query_words(search_text)
+        if not words:
+            return None
+        return " | ".join(f"{word}:*" for word in words)
+
     def _prepare_boolean_query(self, query: str) -> str:
         """Convert Boolean query to tsquery format.
 
@@ -233,6 +242,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
         cleaned_term = term
         for char in special_chars:
             cleaned_term = cleaned_term.replace(char, " ")
+
+        # Sentence punctuation carries no lexical signal in tsquery either;
+        # strip it from word edges so question-form queries produce clean
+        # lexemes (parity with the SQLite FTS5 preparation).
+        if " " in cleaned_term:
+            cleaned_term = " ".join(
+                word.strip("?!.,;") for word in cleaned_term.split() if word.strip("?!.,;")
+            )
 
         # Handle multi-word queries
         if " " in cleaned_term:
@@ -908,6 +925,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
+        allow_relaxed: bool = False,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using PostgreSQL tsvector."""
         # --- Dispatch vector / hybrid modes (shared logic) ---
@@ -982,6 +1000,20 @@ class PostgresSearchRepository(SearchRepositoryBase):
             async with db.scoped_session(self.session_maker) as session:
                 result = await session.execute(text(sql), params)
                 rows = result.fetchall()
+                # Trigger: multi-word natural-language query matched nothing
+                # under the default all-terms-AND tsquery semantics.
+                # Why: questions rarely have every word in one document;
+                # without relaxation the FTS half of hybrid search contributes
+                # zero candidates (parity with the SQLite path).
+                # Outcome: one retry with OR-joined prefix lexemes; ts_rank
+                # still ranks multi-term matches first.
+                relaxed = (
+                    self._relaxed_tsquery_text(search_text) if allow_relaxed and not rows else None
+                )
+                if relaxed and params.get("text"):
+                    params["text"] = relaxed
+                    result = await session.execute(text(sql), params)
+                    rows = result.fetchall()
         except Exception as e:
             if self._is_tsquery_syntax_error(e):
                 logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")

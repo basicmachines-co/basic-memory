@@ -40,6 +40,36 @@ BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
 _SQLITE_MAX_PREPARE_WINDOW = 8
 
+# Interrogative/function words contribute lexical noise when a strict
+# full-text query is relaxed: "when OR did OR a" matches loud wrong documents
+# that displace genuine results from the ranking window.
+RELAXATION_STOPWORDS = frozenset(
+    "a an and are as at be but by did do does for from had has have how i in is it of on "
+    "or that the their they this to was we were what when where which who whom whose why "
+    "will with you your".split()
+)
+
+
+def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
+    """Content-bearing words for OR-relaxing a strict full-text query.
+
+    Returns None when relaxation must not apply: empty input, quoted phrases,
+    or explicit boolean queries (user intent is not second-guessed).
+    """
+    if not search_text:
+        return None
+    stripped = search_text.strip()
+    if '"' in stripped or any(op in f" {stripped} " for op in (" AND ", " OR ", " NOT ")):
+        return None
+    words = [word.strip("?!.,;:") for word in stripped.split()]
+    words = [
+        word
+        for word in words
+        if word and word.isalnum() and word.lower() not in RELAXATION_STOPWORDS
+    ]
+    return words or None
+
+
 # Entity, observation, and relation rows in search_index carry ids from independent
 # auto-increment sequences, so a bare id is ambiguous across row types. Every map in
 # the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
@@ -229,6 +259,7 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
+        allow_relaxed: bool = False,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content.
 
@@ -2174,6 +2205,9 @@ class SearchRepositoryBase(ABC):
         query_start = time.perf_counter()
         candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
         fts_start = time.perf_counter()
+        # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
+        # branch silently degrades hybrid to vector-only ranking. Fusion plus
+        # bm25 keep relaxed lexical candidates from dominating precision.
         fts_results = await self.search(
             search_text=search_text,
             permalink=permalink,
@@ -2187,6 +2221,7 @@ class SearchRepositoryBase(ABC):
             retrieval_mode=SearchRetrievalMode.FTS,
             limit=candidate_limit,
             offset=0,
+            allow_relaxed=True,
         )
         fts_ms = (time.perf_counter() - fts_start) * 1000
         vector_start = time.perf_counter()

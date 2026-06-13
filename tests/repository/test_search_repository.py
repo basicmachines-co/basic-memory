@@ -1124,3 +1124,65 @@ async def test_search_categories_exact_match(search_repository, search_entity):
     # Multiple categories union: both observations come back.
     multi = await search_repository.search(categories=["requirement", "decision"])
     assert {r.id for r in multi} == {70001, 70002}
+
+
+@pytest.mark.asyncio
+async def test_question_punctuation_does_not_phrase_quote(search_repository):
+    """Sentence punctuation must not force exact-phrase matching (#hybrid-fts).
+
+    'When did Melanie paint a sunrise?' previously became the FTS5 phrase
+    '"When did Melanie paint a sunrise?"*' — zero rows for any corpus — which
+    silently disabled the FTS half of hybrid search for question queries.
+    """
+    prepared = search_repository._prepare_single_term("When did Melanie paint a sunrise?")
+    assert '"' not in prepared
+    assert "sunrise*" in prepared
+
+
+@pytest.mark.asyncio
+async def test_relaxed_fts_text_builds_or_query(search_repository):
+    relaxed = search_repository._relaxed_fts_text("When did Melanie paint a sunrise?")
+    # Stopwords dropped: relaxation keys on content-bearing terms only.
+    assert relaxed == "Melanie* OR paint* OR sunrise*"
+
+
+@pytest.mark.asyncio
+async def test_relaxed_fts_text_respects_user_intent(search_repository):
+    # Explicit boolean and quoted queries are not second-guessed.
+    assert search_repository._relaxed_fts_text("alpha AND beta") is None
+    assert search_repository._relaxed_fts_text('"exact phrase"') is None
+    assert search_repository._relaxed_fts_text("single") == "single*"
+    assert search_repository._relaxed_fts_text(None) is None
+
+
+@pytest.mark.asyncio
+async def test_multiword_query_relaxes_to_or_when_strict_misses(search_repository, search_entity):
+    """A question sharing only SOME words with a doc still surfaces it."""
+    from basic_memory.repository.search_index_row import SearchIndexRow
+    from basic_memory.schemas.search import SearchItemType
+
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="Trip plans",
+        content_snippet="Melanie painted a sunrise over the lake last year.",
+        content_stems="melanie painted a sunrise over the lake last year",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+    )
+    await search_repository.index_item(row)
+
+    # Default path stays strict: zero results, exactly as before.
+    strict = await search_repository.search(search_text="When did Melanie paint a sunrise?")
+    assert strict == []
+
+    # The hybrid FTS branch opts in; relaxation surfaces the doc.
+    results = await search_repository.search(
+        search_text="When did Melanie paint a sunrise?", allow_relaxed=True
+    )
+    assert any(r.entity_id == search_entity.id for r in results)

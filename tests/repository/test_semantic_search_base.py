@@ -89,6 +89,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         min_similarity: float | None = None,
         limit: int = 10,
         offset: int = 0,
+        allow_relaxed: bool = False,
     ) -> list[SearchIndexRow]:
         return []
 
