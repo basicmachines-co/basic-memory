@@ -192,4 +192,5 @@ class NoteContentRepository(Repository[NoteContent]):
             return False
 
         await session.delete(note_content)
+        await session.flush()
         return True
