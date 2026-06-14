@@ -8,6 +8,7 @@ from textwrap import dedent
 import pytest
 from sqlalchemy import text
 
+from basic_memory import db
 from basic_memory.file_utils import compute_checksum
 from basic_memory.indexing import IndexFileMetadata, IndexProgress
 from basic_memory.sync.sync_service import MAX_CONSECUTIVE_FAILURES
@@ -66,10 +67,10 @@ async def test_sync_batches_changed_files_emits_typed_progress_and_resolves_forw
     async def on_progress(update: IndexProgress) -> None:
         progress_updates.append(update)
 
-    async def spy_get_permalink_map() -> dict[str, str]:
+    async def spy_get_permalink_map(session) -> dict[str, str]:
         nonlocal permalink_map_calls
         permalink_map_calls += 1
-        return await original_get_permalink_map()
+        return await original_get_permalink_map(session)
 
     entity_repository.get_file_path_to_permalink_map = spy_get_permalink_map
     try:
@@ -89,8 +90,10 @@ async def test_sync_batches_changed_files_emits_typed_progress_and_resolves_forw
     assert progress_updates[-1].batches_completed == 2
     assert permalink_map_calls == 1
 
-    source = await entity_repository.get_by_file_path("notes/source.md")
-    target = await entity_repository.get_by_file_path("notes/target.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, "notes/source.md")
+        target = await entity_repository.get_by_file_path(session, "notes/target.md")
+
     assert source is not None
     assert target is not None
     assert len(source.outgoing_relations) == 1

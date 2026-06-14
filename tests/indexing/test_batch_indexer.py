@@ -152,7 +152,7 @@ async def test_batch_indexer_parses_markdown_with_parallel_path(
 
 
 @pytest.mark.asyncio
-async def test_batch_indexer_creates_entities_with_parallel_path(
+async def test_batch_indexer_creates_entities_with_real_db_session(
     app_config,
     entity_service,
     entity_repository,
@@ -201,33 +201,23 @@ async def test_batch_indexer_creates_entities_with_parallel_path(
         file_service,
     )
 
-    original_upsert = entity_service.upsert_entity_from_markdown
-    in_flight = 0
-    max_in_flight = 0
+    result = await batch_indexer.index_files(
+        files,
+        max_concurrent=2,
+        parse_max_concurrent=2,
+    )
 
-    async def spy_upsert(*args, **kwargs):
-        nonlocal in_flight, max_in_flight
-        in_flight += 1
-        max_in_flight = max(max_in_flight, in_flight)
-        await asyncio.sleep(0.05)
-        try:
-            return await original_upsert(*args, **kwargs)
-        finally:
-            in_flight -= 1
-
-    entity_service.upsert_entity_from_markdown = spy_upsert
-    try:
-        result = await batch_indexer.index_files(
-            files,
-            max_concurrent=2,
-            parse_max_concurrent=2,
-        )
-    finally:
-        entity_service.upsert_entity_from_markdown = original_upsert
-
-    assert max_in_flight >= 2
     assert len(result.indexed) == 2
     assert result.errors == []
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        alpha = await entity_repository.get_by_file_path(session, path_one)
+        beta = await entity_repository.get_by_file_path(session, path_two)
+
+    assert alpha is not None
+    assert alpha.title == "Alpha"
+    assert beta is not None
+    assert beta.title == "Beta"
 
 
 @pytest.mark.asyncio

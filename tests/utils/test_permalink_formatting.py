@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
 from basic_memory.sync.sync_service import SyncService
@@ -65,12 +66,14 @@ Testing permalink generation.
     # Verify permalinks - with project-prefixed permalinks enabled,
     # auto-generated permalinks include the project slug prefix
     project_prefix = generate_permalink(project_config.name)
-    for filename, expected_permalink in test_cases:
-        entity = await entity_service.repository.get_by_file_path(filename)
-        expected_full = f"{project_prefix}/{expected_permalink}"
-        assert entity.permalink == expected_full, (
-            f"File {filename} should have permalink {expected_full}"
-        )
+    async with db.scoped_session(entity_service.session_maker) as session:
+        for filename, expected_permalink in test_cases:
+            entity = await entity_service.repository.get_by_file_path(session, filename)
+            assert entity is not None
+            expected_full = f"{project_prefix}/{expected_permalink}"
+            assert entity.permalink == expected_full, (
+                f"File {filename} should have permalink {expected_full}"
+            )
 
 
 @pytest.mark.parametrize(

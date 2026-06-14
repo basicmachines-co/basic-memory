@@ -135,6 +135,23 @@ class ScanResult:
     errors: Dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _ScanProjectState:
+    """Project watermark state needed to choose the filesystem scan strategy."""
+
+    last_file_count: int | None
+    last_scan_timestamp: float | None
+
+
+@dataclass(frozen=True)
+class _ScanEntityState:
+    """Entity fields needed for mtime/size/checksum comparison during scan."""
+
+    mtime: float | None
+    size: int | None
+    checksum: str | None
+
+
 class _FileServiceIndexWriter(IndexFileWriter):
     """Adapt FileService frontmatter updates to the indexing writer protocol."""
 
@@ -754,6 +771,47 @@ class SyncService:
             )
         )
 
+    async def _get_project_scan_state(self) -> _ScanProjectState:
+        """Load project watermark fields without holding a session across filesystem work."""
+        if self.entity_repository.project_id is None:
+            raise ValueError("Entity repository has no project_id set")
+
+        async with self._session_scope() as session:
+            project = await self.project_repository.find_by_id(
+                session, self.entity_repository.project_id
+            )
+            if project is None:
+                raise ValueError(f"Project not found: {self.entity_repository.project_id}")
+
+            return _ScanProjectState(
+                last_file_count=project.last_file_count,
+                last_scan_timestamp=project.last_scan_timestamp,
+            )
+
+    async def _get_entity_scan_state(self, file_path: str) -> _ScanEntityState | None:
+        """Load entity comparison fields for one path in a short session."""
+        async with self._session_scope() as session:
+            entity = await self.entity_repository.get_by_file_path(session, file_path)
+            if entity is None:
+                return None
+
+            return _ScanEntityState(
+                mtime=entity.mtime,
+                size=entity.size,
+                checksum=entity.checksum,
+            )
+
+    async def _find_file_paths_by_checksum(self, checksum: str) -> list[str]:
+        """Return file paths with this checksum without keeping entities attached."""
+        async with self._session_scope() as session:
+            entities = await self.entity_repository.find_by_checksum(session, checksum)
+            return [entity.file_path for entity in entities]
+
+    async def _get_all_file_paths(self) -> list[str]:
+        """Load all indexed file paths in a short session."""
+        async with self._session_scope() as session:
+            return await self.entity_repository.get_all_file_paths(session)
+
     async def scan(self, directory, force_full: bool = False):
         """Smart scan using watermark and file count for large project optimization.
 
@@ -782,195 +840,185 @@ class SyncService:
         report = SyncReport()
 
         # Get current project to check watermark
-        if self.entity_repository.project_id is None:
-            raise ValueError("Entity repository has no project_id set")
+        project_state = await self._get_project_scan_state()
 
-        async with self._session_scope() as session:
-            project = await self.project_repository.find_by_id(
-                session, self.entity_repository.project_id
-            )
-            if project is None:
-                raise ValueError(f"Project not found: {self.entity_repository.project_id}")
+        with logfire.span("sync.project.select_scan_strategy", force_full=force_full):
+            # Step 1: Quick file count
+            logger.debug("Counting files in directory")
+            current_count = await self._quick_count_files(directory)
+            logger.debug(f"Found {current_count} files in directory")
 
-            with logfire.span("sync.project.select_scan_strategy", force_full=force_full):
-                # Step 1: Quick file count
-                logger.debug("Counting files in directory")
-                current_count = await self._quick_count_files(directory)
-                logger.debug(f"Found {current_count} files in directory")
+            # Step 2: Determine scan strategy based on watermark and file count
+            if force_full:
+                # User explicitly requested full scan → bypass watermark optimization
+                scan_type = "full_forced"
+                logger.info("Force full scan requested, bypassing watermark optimization")
+                scan_coro = self._scan_directory_full(directory)
 
-                # Step 2: Determine scan strategy based on watermark and file count
-                if force_full:
-                    # User explicitly requested full scan → bypass watermark optimization
-                    scan_type = "full_forced"
-                    logger.info("Force full scan requested, bypassing watermark optimization")
-                    scan_coro = self._scan_directory_full(directory)
+            elif project_state.last_file_count is None:
+                # First sync ever → full scan
+                scan_type = "full_initial"
+                logger.info("First sync for this project, performing full scan")
+                scan_coro = self._scan_directory_full(directory)
 
-                elif project.last_file_count is None:
-                    # First sync ever → full scan
-                    scan_type = "full_initial"
-                    logger.info("First sync for this project, performing full scan")
-                    scan_coro = self._scan_directory_full(directory)
+            elif current_count < project_state.last_file_count:
+                # Files deleted → need full scan to detect which ones
+                scan_type = "full_deletions"
+                logger.info(
+                    f"File count decreased ({project_state.last_file_count} → {current_count}), "
+                    f"running full scan to detect deletions"
+                )
+                scan_coro = self._scan_directory_full(directory)
 
-                elif current_count < project.last_file_count:
-                    # Files deleted → need full scan to detect which ones
-                    scan_type = "full_deletions"
-                    logger.info(
-                        f"File count decreased ({project.last_file_count} → {current_count}), "
-                        f"running full scan to detect deletions"
-                    )
-                    scan_coro = self._scan_directory_full(directory)
-
-                elif project.last_scan_timestamp is not None:
-                    # Incremental scan: only files modified since last scan
-                    scan_type = "incremental"
-                    logger.debug(
-                        f"Running incremental scan for files modified since {project.last_scan_timestamp}"
-                    )
-                    scan_coro = self._scan_directory_modified_since(
-                        directory, project.last_scan_timestamp
-                    )
-
-                else:
-                    # Fallback to full scan (no watermark available)
-                    scan_type = "full_fallback"
-                    logger.warning("No scan watermark available, falling back to full scan")
-                    scan_coro = self._scan_directory_full(directory)
-
-            with logfire.span("sync.project.filesystem_scan", scan_type=scan_type):
-                file_paths_to_scan = await scan_coro
-                if scan_type == "incremental":
-                    logger.debug(
-                        f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
-                    )
-
-                # Step 3: Process each file with mtime-based comparison
-                scanned_paths: Set[str] = set()
-                changed_checksums: Dict[str, str] = {}
-
+            elif project_state.last_scan_timestamp is not None:
+                # Incremental scan: only files modified since last scan
+                scan_type = "incremental"
                 logger.debug(
-                    f"Processing {len(file_paths_to_scan)} files with mtime-based comparison"
+                    f"Running incremental scan for files modified since "
+                    f"{project_state.last_scan_timestamp}"
+                )
+                scan_coro = self._scan_directory_modified_since(
+                    directory, project_state.last_scan_timestamp
                 )
 
-                for rel_path in file_paths_to_scan:
-                    scanned_paths.add(rel_path)
+            else:
+                # Fallback to full scan (no watermark available)
+                scan_type = "full_fallback"
+                logger.warning("No scan watermark available, falling back to full scan")
+                scan_coro = self._scan_directory_full(directory)
 
-                    # Get file stats
-                    abs_path = directory / rel_path
-                    if not abs_path.exists():
-                        # File was deleted between scan and now (race condition)
-                        continue
+        with logfire.span("sync.project.filesystem_scan", scan_type=scan_type):
+            file_paths_to_scan = await scan_coro
+            if scan_type == "incremental":
+                logger.debug(
+                    f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
+                )
 
-                    stat_info = abs_path.stat()
+            # Step 3: Process each file with mtime-based comparison
+            scanned_paths: Set[str] = set()
+            changed_checksums: Dict[str, str] = {}
 
-                    # Indexed lookup - single file query (not full table scan)
-                    db_entity = await self.entity_repository.get_by_file_path(session, rel_path)
+            logger.debug(f"Processing {len(file_paths_to_scan)} files with mtime-based comparison")
 
-                    if db_entity is None:
-                        # New file - need checksum for move detection
-                        checksum = await self.file_service.compute_checksum(rel_path)
-                        report.new.add(rel_path)
+            for rel_path in file_paths_to_scan:
+                scanned_paths.add(rel_path)
+
+                # Get file stats
+                abs_path = directory / rel_path
+                if not abs_path.exists():
+                    # File was deleted between scan and now (race condition)
+                    continue
+
+                stat_info = abs_path.stat()
+
+                # Indexed lookup - single file query (not full table scan)
+                db_entity = await self._get_entity_scan_state(rel_path)
+
+                if db_entity is None:
+                    # New file - need checksum for move detection
+                    checksum = await self.file_service.compute_checksum(rel_path)
+                    report.new.add(rel_path)
+                    changed_checksums[rel_path] = checksum
+                    logger.trace(f"New file detected: {rel_path}")
+                    continue
+
+                # File exists in DB - check if mtime/size changed
+                db_mtime = db_entity.mtime
+                db_size = db_entity.size
+                fs_mtime = stat_info.st_mtime
+                fs_size = stat_info.st_size
+
+                # Compare mtime and size (like rsync/rclone)
+                # Allow small epsilon for float comparison (0.01s = 10ms)
+                mtime_changed = db_mtime is None or abs(fs_mtime - db_mtime) > 0.01
+                size_changed = db_size is None or fs_size != db_size
+
+                if mtime_changed or size_changed:
+                    # File modified - compute checksum
+                    checksum = await self.file_service.compute_checksum(rel_path)
+                    db_checksum = db_entity.checksum
+
+                    # Only mark as modified if checksum actually differs
+                    # (handles cases where mtime changed but content didn't, e.g., git operations)
+                    if checksum != db_checksum:
+                        report.modified.add(rel_path)
                         changed_checksums[rel_path] = checksum
-                        logger.trace(f"New file detected: {rel_path}")
+                        logger.trace(
+                            f"Modified file detected: {rel_path}, "
+                            f"mtime_changed={mtime_changed}, size_changed={size_changed}"
+                        )
+                else:
+                    # File unchanged - no checksum needed
+                    logger.trace(f"File unchanged (mtime/size match): {rel_path}")
+
+            # Step 4: Detect moves (for both full and incremental scans)
+            # Check if any "new" files are actually moves by matching checksums
+            with logfire.span("sync.project.detect_moves", new_count=len(report.new)):
+                for new_path in list(
+                    report.new
+                ):  # Use list() to allow modification during iteration
+                    new_checksum = changed_checksums.get(new_path)
+                    if not new_checksum:
                         continue
 
-                    # File exists in DB - check if mtime/size changed
-                    db_mtime = db_entity.mtime
-                    db_size = db_entity.size
-                    fs_mtime = stat_info.st_mtime
-                    fs_size = stat_info.st_size
+                    # Look for existing entity with same checksum but different path
+                    # This could be a move or a copy
+                    existing_file_paths = await self._find_file_paths_by_checksum(new_checksum)
 
-                    # Compare mtime and size (like rsync/rclone)
-                    # Allow small epsilon for float comparison (0.01s = 10ms)
-                    mtime_changed = db_mtime is None or abs(fs_mtime - db_mtime) > 0.01
-                    size_changed = db_size is None or fs_size != db_size
-
-                    if mtime_changed or size_changed:
-                        # File modified - compute checksum
-                        checksum = await self.file_service.compute_checksum(rel_path)
-                        db_checksum = db_entity.checksum
-
-                        # Only mark as modified if checksum actually differs
-                        # (handles cases where mtime changed but content didn't, e.g., git operations)
-                        if checksum != db_checksum:
-                            report.modified.add(rel_path)
-                            changed_checksums[rel_path] = checksum
-                            logger.trace(
-                                f"Modified file detected: {rel_path}, "
-                                f"mtime_changed={mtime_changed}, size_changed={size_changed}"
-                            )
-                    else:
-                        # File unchanged - no checksum needed
-                        logger.trace(f"File unchanged (mtime/size match): {rel_path}")
-
-                # Step 4: Detect moves (for both full and incremental scans)
-                # Check if any "new" files are actually moves by matching checksums
-                with logfire.span("sync.project.detect_moves", new_count=len(report.new)):
-                    for new_path in list(
-                        report.new
-                    ):  # Use list() to allow modification during iteration
-                        new_checksum = changed_checksums.get(new_path)
-                        if not new_checksum:
+                    for candidate_file_path in existing_file_paths:
+                        if candidate_file_path == new_path:
+                            # Same path, skip (shouldn't happen for "new" files but be safe)
                             continue
 
-                        # Look for existing entity with same checksum but different path
-                        # This could be a move or a copy
-                        existing_entities = await self.entity_repository.find_by_checksum(
-                            session, new_checksum
-                        )
+                        # Check if the old path still exists on disk
+                        old_path_abs = directory / candidate_file_path
+                        if old_path_abs.exists():
+                            # Original still exists → this is a copy, not a move
+                            logger.trace(
+                                f"File copy detected (not move): "
+                                f"{candidate_file_path} copied to {new_path}"
+                            )
+                            continue
 
-                        for candidate in existing_entities:
-                            if candidate.file_path == new_path:
-                                # Same path, skip (shouldn't happen for "new" files but be safe)
+                        # Original doesn't exist → this is a move!
+                        report.moves[candidate_file_path] = new_path
+                        report.new.remove(new_path)
+                        logger.trace(f"Move detected: {candidate_file_path} -> {new_path}")
+                        break  # Only match first candidate
+
+            # Step 5: Detect deletions (only for full scans)
+            # Incremental scans can't reliably detect deletions since they only see modified files
+            if scan_type in ("full_initial", "full_deletions", "full_fallback", "full_forced"):
+                with logfire.span("sync.project.detect_deletions", scan_type=scan_type):
+                    # Use optimized query for just file paths (not full entities)
+                    db_file_paths = await self._get_all_file_paths()
+                    logger.debug(f"Found {len(db_file_paths)} db paths for deletion detection")
+
+                    for db_path in db_file_paths:
+                        if db_path not in scanned_paths:
+                            # File in DB but not on filesystem
+                            # Check if it was already detected as a move
+                            if db_path in report.moves:
+                                # Already handled as a move, skip
                                 continue
 
-                            # Check if the old path still exists on disk
-                            old_path_abs = directory / candidate.file_path
-                            if old_path_abs.exists():
-                                # Original still exists → this is a copy, not a move
-                                logger.trace(
-                                    f"File copy detected (not move): {candidate.file_path} copied to {new_path}"
-                                )
-                                continue
+                            # File was deleted
+                            report.deleted.add(db_path)
+                            logger.trace(f"Deleted file detected: {db_path}")
 
-                            # Original doesn't exist → this is a move!
-                            report.moves[candidate.file_path] = new_path
-                            report.new.remove(new_path)
-                            logger.trace(f"Move detected: {candidate.file_path} -> {new_path}")
-                            break  # Only match first candidate
+            # Store checksums for files that need syncing
+            report.checksums = changed_checksums
+            report.scanned_paths = scanned_paths
 
-                # Step 5: Detect deletions (only for full scans)
-                # Incremental scans can't reliably detect deletions since they only see modified files
-                if scan_type in ("full_initial", "full_deletions", "full_fallback", "full_forced"):
-                    with logfire.span("sync.project.detect_deletions", scan_type=scan_type):
-                        # Use optimized query for just file paths (not full entities)
-                        db_file_paths = await self.entity_repository.get_all_file_paths(session)
-                        logger.debug(f"Found {len(db_file_paths)} db paths for deletion detection")
+            scan_duration_ms = int((time.time() - scan_start_time) * 1000)
 
-                        for db_path in db_file_paths:
-                            if db_path not in scanned_paths:
-                                # File in DB but not on filesystem
-                                # Check if it was already detected as a move
-                                if db_path in report.moves:
-                                    # Already handled as a move, skip
-                                    continue
-
-                                # File was deleted
-                                report.deleted.add(db_path)
-                                logger.trace(f"Deleted file detected: {db_path}")
-
-                # Store checksums for files that need syncing
-                report.checksums = changed_checksums
-                report.scanned_paths = scanned_paths
-
-                scan_duration_ms = int((time.time() - scan_start_time) * 1000)
-
-                logger.info(
-                    f"Completed {scan_type} scan for directory {directory} in {scan_duration_ms}ms, "
-                    f"found {report.total} changes (new={len(report.new)}, "
-                    f"modified={len(report.modified)}, deleted={len(report.deleted)}, "
-                    f"moves={len(report.moves)})"
-                )
-                return report
+            logger.info(
+                f"Completed {scan_type} scan for directory {directory} in {scan_duration_ms}ms, "
+                f"found {report.total} changes (new={len(report.new)}, "
+                f"modified={len(report.modified)}, deleted={len(report.deleted)}, "
+                f"moves={len(report.moves)})"
+            )
+            return report
 
     async def sync_file(
         self, path: str, new: bool = True

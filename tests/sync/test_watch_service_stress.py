@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from watchfiles import Change
 
+from basic_memory import db
+
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
     """Create a test file with given content."""
@@ -18,7 +20,7 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 
 @pytest.mark.asyncio
 async def test_handle_large_batch_of_file_adds(
-    watch_service, project_config, test_project, entity_repository
+    watch_service, project_config, sync_service, test_project, entity_repository
 ):
     """Watcher handles 50+ file creations in a single batch."""
     project_dir = project_config.home
@@ -42,10 +44,11 @@ Content for batch note {i} with unique text.
 
     # Verify all files were synced
     synced_count = 0
-    for i in range(file_count):
-        entity = await entity_repository.get_by_file_path(f"batch_note_{i:03d}.md")
-        if entity is not None:
-            synced_count += 1
+    async with db.scoped_session(sync_service.session_maker) as session:
+        for i in range(file_count):
+            entity = await entity_repository.get_by_file_path(session, f"batch_note_{i:03d}.md")
+            if entity is not None:
+                synced_count += 1
 
     assert synced_count == file_count, f"Only {synced_count}/{file_count} files synced"
 
@@ -109,24 +112,25 @@ New content for note {i}.
     await watch_service.handle_changes(test_project, mixed_changes)
 
     # Verify: modified files still exist with updated content
-    for i in range(3):
-        entity = await entity_repository.get_by_file_path(f"mixed_note_{i:03d}.md")
-        assert entity is not None, f"Modified entity {i} should still exist"
+    async with db.scoped_session(sync_service.session_maker) as session:
+        for i in range(3):
+            entity = await entity_repository.get_by_file_path(session, f"mixed_note_{i:03d}.md")
+            assert entity is not None, f"Modified entity {i} should still exist"
 
-    # Verify: deleted files are gone
-    for i in range(3, 6):
-        entity = await entity_repository.get_by_file_path(f"mixed_note_{i:03d}.md")
-        assert entity is None, f"Deleted entity {i} should be gone"
+        # Verify: deleted files are gone
+        for i in range(3, 6):
+            entity = await entity_repository.get_by_file_path(session, f"mixed_note_{i:03d}.md")
+            assert entity is None, f"Deleted entity {i} should be gone"
 
-    # Verify: new files were added
-    for i in range(10, 15):
-        entity = await entity_repository.get_by_file_path(f"mixed_note_{i:03d}.md")
-        assert entity is not None, f"New entity {i} should exist"
+        # Verify: new files were added
+        for i in range(10, 15):
+            entity = await entity_repository.get_by_file_path(session, f"mixed_note_{i:03d}.md")
+            assert entity is not None, f"New entity {i} should exist"
 
 
 @pytest.mark.asyncio
 async def test_rapid_modifications_to_same_file(
-    watch_service, project_config, test_project, entity_repository
+    watch_service, project_config, sync_service, test_project, entity_repository
 ):
     """Watcher handles multiple rapid changes to the same file."""
     project_dir = project_config.home
@@ -155,7 +159,9 @@ Version {version}.
         await watch_service.handle_changes(test_project, {(Change.modified, str(path))})
 
     # The entity should exist and reflect the final state
-    entity = await entity_repository.get_by_file_path("rapid_note.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "rapid_note.md")
+
     assert entity is not None
     assert entity.title == "rapid_note"
 

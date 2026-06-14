@@ -65,10 +65,10 @@ async def test_sync_emits_phase_spans(sync_service, project_config, monkeypatch)
     async def fake_quick_count_files(directory):
         return 3
 
-    async def fake_find_by_id(project_id):
+    async def fake_find_by_id(session, project_id):
         return SimpleNamespace(id=project_id)
 
-    async def fake_update(project_id, values):
+    async def fake_update(session, project_id, values):
         return None
 
     monkeypatch.setattr(logfire, "span", fake_span)

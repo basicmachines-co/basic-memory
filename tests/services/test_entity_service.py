@@ -2534,6 +2534,7 @@ async def test_delete_directory_all_already_deleted(entity_service: EntityServic
 @pytest.mark.asyncio
 async def test_delete_directory_entity_deleted_between_query_and_delete(
     entity_service: EntityService,
+    session_maker,
 ):
     """Simulates the real race condition: entity exists in prefix query but is deleted
     by a concurrent request before delete_entity is called."""
@@ -2542,7 +2543,9 @@ async def test_delete_directory_entity_deleted_between_query_and_delete(
     created = await entity_service.create_entity(entity_data)
 
     # Get the entities via prefix query (as delete_directory does)
-    entities = await entity_service.repository.find_by_directory_prefix("race-dir")
+    async with db.scoped_session(session_maker) as session:
+        entities = await entity_service.repository.find_by_directory_prefix(session, "race-dir")
+
     assert len(entities) == 1
 
     # Now delete the entity behind the scenes (simulating a concurrent request)

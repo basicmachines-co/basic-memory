@@ -163,18 +163,17 @@ def test_reindex_embeddings_only_preserves_incremental_default(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reindex_project_full_passes_force_full_to_sync_and_reports_mode(monkeypatch):
+async def test_reindex_project_full_passes_force_full_to_sync_and_reports_mode(
+    monkeypatch,
+    session_maker,
+):
     app_config = _stub_app_config()
     project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
-    session_maker = object()
     sync_service = SimpleNamespace(sync=AsyncMock())
     printed_lines: list[str] = []
 
     class StubProjectRepository:
-        def __init__(self, _session_maker):
-            self._session_maker = _session_maker
-
-        async def get_active_projects(self):
+        async def get_active_projects(self, session):
             return [project]
 
     class SilentProgress:
@@ -236,25 +235,25 @@ async def test_reindex_project_full_passes_force_full_to_sync_and_reports_mode(m
 
 
 @pytest.mark.asyncio
-async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(monkeypatch):
+async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
+    monkeypatch,
+    session_maker,
+):
     app_config = _stub_app_config()
     project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
-    session_maker = object()
     printed_lines: list[str] = []
     vector_reindex_calls: list[dict[str, object]] = []
 
     class StubProjectRepository:
-        def __init__(self, _session_maker):
-            self._session_maker = _session_maker
-
-        async def get_active_projects(self):
+        async def get_active_projects(self, session):
             return [project]
 
     class StubSearchService:
-        def __init__(self, search_repository, entity_repository, file_service):
+        def __init__(self, search_repository, entity_repository, file_service, *, session_maker):
             self.search_repository = search_repository
             self.entity_repository = entity_repository
             self.file_service = file_service
+            self.session_maker = session_maker
 
         async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
             vector_reindex_calls.append(

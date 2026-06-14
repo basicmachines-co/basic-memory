@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, UTC
 import pytest
 import pytest_asyncio
 
+from basic_memory import db
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import memory_url, memory_url_path
 from basic_memory.schemas.search import SearchItemType
@@ -15,11 +16,15 @@ from basic_memory.models.project import Project
 
 @pytest_asyncio.fixture
 async def context_service(
-    search_repository, entity_repository, observation_repository, link_resolver
+    search_repository, entity_repository, observation_repository, link_resolver, session_maker
 ):
     """Create context service for testing."""
     return ContextService(
-        search_repository, entity_repository, observation_repository, link_resolver=link_resolver
+        search_repository,
+        entity_repository,
+        observation_repository,
+        link_resolver=link_resolver,
+        session_maker=session_maker,
     )
 
 
@@ -49,7 +54,7 @@ async def test_find_connected_depth_limit(context_service, test_graph):
 
 @pytest.mark.asyncio
 async def test_find_connected_timeframe(
-    context_service, test_graph, search_repository, entity_repository, app_config
+    context_service, test_graph, search_repository, entity_repository, app_config, session_maker
 ):
     """Test timeframe filtering.
     This tests how traversal is affected by the item dates.
@@ -70,13 +75,18 @@ async def test_find_connected_timeframe(
     # Update entity table timestamps directly
     # Root entity uses old date
     root_entity = test_graph["root"]
-    await entity_repository.update(root_entity.id, {"created_at": old_date, "updated_at": old_date})
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.update(
+            session, root_entity.id, {"created_at": old_date, "updated_at": old_date}
+        )
 
-    # Connected entity uses recent date
-    connected_entity = test_graph["connected1"]
-    await entity_repository.update(
-        connected_entity.id, {"created_at": recent_date, "updated_at": recent_date}
-    )
+        # Connected entity uses recent date
+        connected_entity = test_graph["connected1"]
+        await entity_repository.update(
+            session,
+            connected_entity.id,
+            {"created_at": recent_date, "updated_at": recent_date},
+        )
 
     # Also update search_index for test consistency
     await search_repository.index_item(
@@ -639,10 +649,15 @@ async def test_build_context_fallback_not_found(context_service):
 
 @pytest.mark.asyncio
 async def test_build_context_without_link_resolver(
-    search_repository, entity_repository, observation_repository, test_graph
+    search_repository, entity_repository, observation_repository, test_graph, session_maker
 ):
     """Test that build_context still works without a link_resolver (no fallback)."""
-    service = ContextService(search_repository, entity_repository, observation_repository)
+    service = ContextService(
+        search_repository,
+        entity_repository,
+        observation_repository,
+        session_maker=session_maker,
+    )
 
     # Exact permalink lookup should still work
     url = memory_url.validate_strings("memory://test-project/test/root")

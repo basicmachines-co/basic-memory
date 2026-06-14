@@ -1,6 +1,5 @@
 """Service for managing entities in the database."""
 
-import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -1091,18 +1090,19 @@ class EntityService(BaseService[EntityModel]):
                     # Exact target resolution is useful for local sync, but expensive for cloud
                     # one-file jobs. Cloud can write unresolved rows and let a relation repair pass
                     # fill in to_id later.
-                    resolved_entities = await asyncio.gather(
-                        *(
-                            self.link_resolver.resolve_link(
-                                rel.target,
-                                strict=True,
-                                load_relations=False,
-                                session=active_session,
+                    resolved_entities = []
+                    for rel in markdown.relations:
+                        try:
+                            resolved_entities.append(
+                                await self.link_resolver.resolve_link(
+                                    rel.target,
+                                    strict=True,
+                                    load_relations=False,
+                                    session=active_session,
+                                )
                             )
-                            for rel in markdown.relations
-                        ),
-                        return_exceptions=True,
-                    )
+                        except Exception as exc:
+                            resolved_entities.append(exc)
                 else:
                     resolved_entities = [None] * len(markdown.relations)
 
@@ -1111,8 +1111,9 @@ class EntityService(BaseService[EntityModel]):
                 for rel, resolved in zip(markdown.relations, resolved_entities):
                     # Handle exceptions from gather and None results
                     target_entity: Optional[Entity] = None
-                    if not isinstance(resolved, BaseException):
-                        # asyncio.gather(..., return_exceptions=True) can return any BaseException.
+                    if not isinstance(resolved, Exception):
+                        # Relation target resolution keeps exceptions as values so a failed lookup
+                        # becomes an unresolved forward reference instead of aborting the write.
                         target_entity = resolved
 
                     if target_entity is None and not resolve_targets:

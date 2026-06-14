@@ -5,7 +5,13 @@ import builtins
 import pytest
 from watchfiles import Change
 
+from basic_memory import db
 from basic_memory.config import ProjectEntry
+
+
+async def get_synced_entity(sync_service, file_path: str):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await sync_service.entity_repository.get_by_file_path(session, file_path)
 
 
 def test_filter_changes_valid_path(watch_service, project_config):
@@ -142,7 +148,7 @@ Initial content for atomic write test
     await sync_service.sync(project_dir)
 
     # Get initial entity state
-    initial_entity = await sync_service.entity_repository.get_by_file_path("vim_test.md")
+    initial_entity = await get_synced_entity(sync_service, "vim_test.md")
     assert initial_entity is not None
     initial_checksum = initial_entity.checksum
 
@@ -165,7 +171,7 @@ Modified content after atomic write
     await watch_service.handle_changes(test_project, changes)
 
     # Verify the entity still exists and was updated (not deleted)
-    entity = await sync_service.entity_repository.get_by_file_path("vim_test.md")
+    entity = await get_synced_entity(sync_service, "vim_test.md")
     assert entity is not None
     assert entity.id == initial_entity.id  # Same entity
     assert entity.checksum != initial_checksum  # Checksum should be updated
@@ -221,11 +227,11 @@ Content for testing
     await watch_service.handle_changes(test_project, changes)
 
     # Verify atomic_file was treated as modification (still exists in DB)
-    atomic_entity = await sync_service.entity_repository.get_by_file_path("atomic_test.md")
+    atomic_entity = await get_synced_entity(sync_service, "atomic_test.md")
     assert atomic_entity is not None
 
     # Verify delete_file was truly deleted (no longer exists in DB)
-    delete_entity = await sync_service.entity_repository.get_by_file_path("delete_test.md")
+    delete_entity = await get_synced_entity(sync_service, "delete_test.md")
     assert delete_entity is None
 
     # Check events were recorded correctly
@@ -273,7 +279,7 @@ This note links to [[Target Note]].
     await sync_service.sync(project_dir)
 
     # Get initial state
-    main_entity = await sync_service.entity_repository.get_by_file_path("main.md")
+    main_entity = await get_synced_entity(sync_service, "main.md")
     assert main_entity is not None
     initial_relations = len(main_entity.relations)
 
@@ -298,7 +304,7 @@ This note links to [[Target Note]] multiple times.
     await watch_service.handle_changes(test_project, changes)
 
     # Verify entity still exists and relations were updated
-    updated_entity = await sync_service.entity_repository.get_by_file_path("main.md")
+    updated_entity = await get_synced_entity(sync_service, "main.md")
     assert updated_entity is not None
     assert updated_entity.id == main_entity.id
 
