@@ -4,6 +4,7 @@ import pytest
 from httpx import AsyncClient
 from pathlib import Path
 
+from basic_memory import db
 from basic_memory.models import Project
 
 
@@ -18,7 +19,8 @@ async def create_test_entity(
     await file_service.write_file(file_path, test_content)
 
     # Create entity
-    entity = await entity_repository.create(entity_data)
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.create(session, entity_data)
 
     # Index for search
     await search_service.index_entity(entity)

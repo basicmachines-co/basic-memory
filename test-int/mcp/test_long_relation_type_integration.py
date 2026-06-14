@@ -17,6 +17,7 @@ relation rather than preserving prose as a custom relation type.
 import pytest
 from fastmcp import Client
 
+from basic_memory import db
 from basic_memory.repository.relation_repository import RelationRepository
 
 
@@ -73,9 +74,10 @@ async def test_edit_note_handles_long_prose_around_wikilink(
         assert "Edited note (append)" in edit_result.content[0].text
 
     _, session_maker = engine_factory
-    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
-    links_to_relations = await relation_repository.find_by_type("links_to")
-    prose_type_relations = await relation_repository.find_by_type(long_prose)
+    relation_repository = RelationRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        links_to_relations = await relation_repository.find_by_type(session, "links_to")
+        prose_type_relations = await relation_repository.find_by_type(session, long_prose)
 
     assert any(relation.to_name == "Some Note Title" for relation in links_to_relations)
     assert not prose_type_relations

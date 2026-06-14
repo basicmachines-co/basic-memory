@@ -11,6 +11,21 @@ from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetri
 from basic_memory.services.search_service import _strip_nul
 
 
+async def _create_entity(session_maker, entity_repo, data):
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repo.create(session, data)
+
+
+async def _create_observation(session_maker, obs_repo, data):
+    async with db.scoped_session(session_maker) as session:
+        return await obs_repo.create(session, data)
+
+
+async def _get_entity_by_permalink(session_maker, entity_repo, permalink):
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repo.get_by_permalink(session, permalink)
+
+
 @pytest.mark.asyncio
 async def test_search_permalink(search_service, test_graph):
     """Exact permalink"""
@@ -860,7 +875,7 @@ async def test_search_by_frontmatter_tags(search_service, session_maker, test_pr
     """Test that entities can be found by searching for their frontmatter tags."""
     from basic_memory.repository import EntityRepository
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Create entity with tags
     from datetime import datetime
@@ -877,7 +892,7 @@ async def test_search_by_frontmatter_tags(search_service, session_maker, test_pr
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     await search_service.index_entity(entity, content="")
 
@@ -912,7 +927,7 @@ async def test_search_by_frontmatter_tags_string_format(
     """Test that entities with string format tags can be found in search."""
     from basic_memory.repository import EntityRepository
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Create entity with tags in string format
     from datetime import datetime
@@ -929,7 +944,7 @@ async def test_search_by_frontmatter_tags_string_format(
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     await search_service.index_entity(entity, content="")
 
@@ -951,7 +966,7 @@ async def test_search_special_characters_in_title(search_service, session_maker,
     """Test that entities with special characters in titles can be searched without FTS5 syntax errors."""
     from basic_memory.repository import EntityRepository
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Create entities with special characters that could cause FTS5 syntax errors
     special_titles = [
@@ -982,7 +997,7 @@ async def test_search_special_characters_in_title(search_service, session_maker,
             "updated_at": datetime.now(),
         }
 
-        entity = await entity_repo.create(entity_data)
+        entity = await _create_entity(session_maker, entity_repo, entity_data)
         entities.append(entity)
 
     # Index all entities
@@ -1008,7 +1023,7 @@ async def test_search_title_with_parentheses_specific(search_service, session_ma
     """Test searching specifically for title with parentheses to reproduce FTS5 error."""
     from basic_memory.repository import EntityRepository
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Create the problematic entity
     from datetime import datetime
@@ -1025,7 +1040,7 @@ async def test_search_title_with_parentheses_specific(search_service, session_ma
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     # Index the entity
     await search_service.index_entity(entity, content="")
@@ -1044,7 +1059,7 @@ async def test_search_title_via_repository_direct(search_service, session_maker,
     """Test searching via search repository directly to isolate the FTS5 error."""
     from basic_memory.repository import EntityRepository
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Create the problematic entity
     from datetime import datetime
@@ -1061,7 +1076,7 @@ async def test_search_title_via_repository_direct(search_service, session_maker,
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     # Index the entity
     await search_service.index_entity(entity, content="")
@@ -1093,8 +1108,8 @@ async def test_index_entity_with_duplicate_observations(
     from basic_memory.repository import EntityRepository, ObservationRepository
     from datetime import datetime
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
+    obs_repo = ObservationRepository(project_id=test_project.id)
 
     # Create entity
     entity_data = {
@@ -1109,19 +1124,23 @@ async def test_index_entity_with_duplicate_observations(
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     # Create duplicate observations - same category and content
     duplicate_content = "This is a duplicated observation"
-    await obs_repo.create(
-        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content},
     )
-    await obs_repo.create(
-        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content},
     )
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
-    entity = await entity_repo.get_by_permalink("test/duplicate-obs")
+    entity = await _get_entity_by_permalink(session_maker, entity_repo, "test/duplicate-obs")
     assert entity is not None
 
     # Verify we have duplicate observations
@@ -1149,8 +1168,8 @@ async def test_index_entity_dedupes_observations_by_permalink(
     from basic_memory.repository import EntityRepository, ObservationRepository
     from datetime import datetime
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
+    obs_repo = ObservationRepository(project_id=test_project.id)
 
     # Create entity
     entity_data = {
@@ -1165,22 +1184,30 @@ async def test_index_entity_dedupes_observations_by_permalink(
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     # Create three observations: two duplicates and one unique
     duplicate_content = "Duplicate observation content"
     unique_content = "Unique observation content"
 
-    await obs_repo.create(
-        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content},
     )
-    await obs_repo.create(
-        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content},
     )
-    await obs_repo.create({"entity_id": entity.id, "category": "note", "content": unique_content})
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "note", "content": unique_content},
+    )
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
-    entity = await entity_repo.get_by_permalink("test/dedupe-test")
+    entity = await _get_entity_by_permalink(session_maker, entity_repo, "test/dedupe-test")
     assert entity is not None
     assert len(entity.observations) == 3
 
@@ -1208,8 +1235,8 @@ async def test_index_entity_multiple_categories_same_content(
     from basic_memory.repository import EntityRepository, ObservationRepository
     from datetime import datetime
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
+    obs_repo = ObservationRepository(project_id=test_project.id)
 
     # Create entity
     entity_data = {
@@ -1224,15 +1251,23 @@ async def test_index_entity_multiple_categories_same_content(
         "updated_at": datetime.now(),
     }
 
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     # Create observations with same content but different categories
     shared_content = "Shared content across categories"
-    await obs_repo.create({"entity_id": entity.id, "category": "tech", "content": shared_content})
-    await obs_repo.create({"entity_id": entity.id, "category": "design", "content": shared_content})
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "tech", "content": shared_content},
+    )
+    await _create_observation(
+        session_maker,
+        obs_repo,
+        {"entity_id": entity.id, "category": "design", "content": shared_content},
+    )
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
-    entity = await entity_repo.get_by_permalink("test/multi-category")
+    entity = await _get_entity_by_permalink(session_maker, entity_repo, "test/multi-category")
     assert entity is not None
     assert len(entity.observations) == 2
 
@@ -1262,8 +1297,8 @@ async def test_index_entity_long_observations_shared_prefix_both_searchable(
     from basic_memory.repository import EntityRepository, ObservationRepository
     from datetime import datetime
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
+    obs_repo = ObservationRepository(project_id=test_project.id)
 
     entity_data = {
         "title": "Long Observation Collision Entity",
@@ -1276,28 +1311,32 @@ async def test_index_entity_long_observations_shared_prefix_both_searchable(
         "created_at": datetime.now(),
         "updated_at": datetime.now(),
     }
-    entity = await entity_repo.create(entity_data)
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
 
     # Identical for the first 210 chars (beyond the 200-char truncation point),
     # differing only in the trailing unique marker
     shared_prefix = "x" * 210
-    await obs_repo.create(
+    await _create_observation(
+        session_maker,
+        obs_repo,
         {
             "entity_id": entity.id,
             "category": "note",
             "content": f"{shared_prefix} ALPHA_UNIQUE_MARKER",
-        }
+        },
     )
-    await obs_repo.create(
+    await _create_observation(
+        session_maker,
+        obs_repo,
         {
             "entity_id": entity.id,
             "category": "note",
             "content": f"{shared_prefix} BETA_UNIQUE_MARKER",
-        }
+        },
     )
 
     # Reload entity with observations (get_by_permalink eagerly loads observations)
-    entity = await entity_repo.get_by_permalink("test/long-obs-collision")
+    entity = await _get_entity_by_permalink(session_maker, entity_repo, "test/long-obs-collision")
     assert entity is not None
     assert len(entity.observations) == 2
 
@@ -1344,7 +1383,7 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
     from basic_memory.repository import EntityRepository
     from basic_memory.repository.search_repository import SearchRepository
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     entity_data = {
         "title": "NUL Test Entity",
@@ -1357,8 +1396,8 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
         "created_at": datetime.now(),
         "updated_at": datetime.now(),
     }
-    entity = await entity_repo.create(entity_data)
-    entity = await entity_repo.get_by_permalink("test/nul-test")
+    entity = await _create_entity(session_maker, entity_repo, entity_data)
+    entity = await _get_entity_by_permalink(session_maker, entity_repo, "test/nul-test")
     assert entity is not None
 
     # Index with NUL-containing content (simulates rclone-preallocated file)
@@ -1382,7 +1421,7 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
     from basic_memory.repository.search_repository_base import VectorSyncBatchResult
     from datetime import datetime
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Test fixtures disable semantic search, and delete_stale_vector_rows is the one call
     # in this flow that requires the semantic stack — stub it so the test exercises the
@@ -1402,7 +1441,9 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
     # Create some entities
     created_entity_ids: list[int] = []
     for i in range(3):
-        entity = await entity_repo.create(
+        entity = await _create_entity(
+            session_maker,
+            entity_repo,
             {
                 "title": f"Vector Test Entity {i}",
                 "note_type": "note",
@@ -1413,7 +1454,7 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
                 "project_id": test_project.id,
                 "created_at": datetime.now(),
                 "updated_at": datetime.now(),
-            }
+            },
         )
         created_entity_ids.append(entity.id)
         await search_service.index_entity(entity, content=f"Content for entity {i}")
@@ -1468,7 +1509,7 @@ async def test_reindex_vectors_no_callback(
     from basic_memory.repository.search_repository_base import VectorSyncBatchResult
     from datetime import datetime
 
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repo = EntityRepository(project_id=test_project.id)
 
     # Test fixtures disable semantic search, and delete_stale_vector_rows is the one call
     # in this flow that requires the semantic stack — stub it so the test exercises the
@@ -1485,7 +1526,9 @@ async def test_reindex_vectors_no_callback(
         raising=False,
     )
 
-    entity = await entity_repo.create(
+    entity = await _create_entity(
+        session_maker,
+        entity_repo,
         {
             "title": "No Callback Entity",
             "note_type": "note",
@@ -1496,7 +1539,7 @@ async def test_reindex_vectors_no_callback(
             "project_id": test_project.id,
             "created_at": datetime.now(),
             "updated_at": datetime.now(),
-        }
+        },
     )
     await search_service.index_entity(entity, content="Test content")
 

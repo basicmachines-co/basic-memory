@@ -438,7 +438,7 @@ async def entity_repository(
     session_maker: async_sessionmaker[AsyncSession], test_project: Project
 ) -> EntityRepository:
     """Create an EntityRepository instance with project context."""
-    return EntityRepository(session_maker, project_id=test_project.id)
+    return EntityRepository(project_id=test_project.id)
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -446,7 +446,7 @@ async def observation_repository(
     session_maker: async_sessionmaker[AsyncSession], test_project: Project
 ) -> ObservationRepository:
     """Create an ObservationRepository instance with project context."""
-    return ObservationRepository(session_maker, project_id=test_project.id)
+    return ObservationRepository(project_id=test_project.id)
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -454,7 +454,7 @@ async def relation_repository(
     session_maker: async_sessionmaker[AsyncSession], test_project: Project
 ) -> RelationRepository:
     """Create a RelationRepository instance with project context."""
-    return RelationRepository(session_maker, project_id=test_project.id)
+    return RelationRepository(project_id=test_project.id)
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -462,7 +462,7 @@ async def project_repository(
     session_maker: async_sessionmaker[AsyncSession],
 ) -> ProjectRepository:
     """Create a ProjectRepository instance."""
-    return ProjectRepository(session_maker)
+    return ProjectRepository()
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -476,8 +476,9 @@ async def test_project(config_home, engine_factory) -> Project:
         "is_default": True,  # Explicitly set as the default project (for cli operations)
     }
     engine, session_maker = engine_factory
-    project_repository = ProjectRepository(session_maker)
-    project = await project_repository.create(project_data)
+    project_repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        project = await project_repository.create(session, project_data)
     return project
 
 
@@ -493,6 +494,7 @@ async def entity_service(
     file_service: FileService,
     link_resolver: LinkResolver,
     app_config: BasicMemoryConfig,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> EntityService:
     """Create EntityService."""
     return EntityService(
@@ -503,6 +505,7 @@ async def entity_service(
         file_service=file_service,
         link_resolver=link_resolver,
         app_config=app_config,
+        session_maker=session_maker,
     )
 
 
@@ -521,9 +524,13 @@ def markdown_processor(entity_parser: EntityParser) -> MarkdownProcessor:
 
 
 @pytest.fixture
-def link_resolver(entity_repository: EntityRepository, search_service: SearchService):
+def link_resolver(
+    entity_repository: EntityRepository,
+    search_service: SearchService,
+    session_maker: async_sessionmaker[AsyncSession],
+):
     """Create parser instance."""
-    return LinkResolver(entity_repository, search_service)
+    return LinkResolver(entity_repository, search_service, session_maker=session_maker)
 
 
 @pytest.fixture
@@ -542,6 +549,7 @@ async def sync_service(
     relation_repository: RelationRepository,
     search_service: SearchService,
     file_service: FileService,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> SyncService:
     """Create sync service for testing."""
     return SyncService(
@@ -553,14 +561,20 @@ async def sync_service(
         entity_parser=entity_parser,
         search_service=search_service,
         file_service=file_service,
+        session_maker=session_maker,
     )
 
 
 @pytest_asyncio.fixture
-async def directory_service(entity_repository, project_config) -> DirectoryService:
+async def directory_service(
+    entity_repository,
+    project_config,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> DirectoryService:
     """Create directory service for testing."""
     return DirectoryService(
         entity_repository=entity_repository,
+        session_maker=session_maker,
     )
 
 
@@ -589,15 +603,24 @@ async def search_service(
     search_repository,
     entity_repository: EntityRepository,
     file_service: FileService,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> SearchService:
     """Create and initialize search service"""
-    service = SearchService(search_repository, entity_repository, file_service)
+    service = SearchService(
+        search_repository,
+        entity_repository,
+        file_service,
+        session_maker=session_maker,
+    )
     await service.init_search_index()
     return service
 
 
 @pytest_asyncio.fixture(scope="function")
-async def sample_entity(entity_repository: EntityRepository) -> Entity:
+async def sample_entity(
+    entity_repository: EntityRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> Entity:
     """Create a sample entity for testing."""
     entity_data = {
         "project_id": entity_repository.project_id,
@@ -609,16 +632,22 @@ async def sample_entity(entity_repository: EntityRepository) -> Entity:
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
-    return await entity_repository.create(entity_data)
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repository.create(session, entity_data)
 
 
 @pytest_asyncio.fixture
 async def project_service(
     project_repository: ProjectRepository,
     file_service: FileService,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> ProjectService:
     """Create ProjectService with repository and file service for directory operations."""
-    return ProjectService(repository=project_repository, file_service=file_service)
+    return ProjectService(
+        repository=project_repository,
+        file_service=file_service,
+        session_maker=session_maker,
+    )
 
 
 @pytest_asyncio.fixture
@@ -653,6 +682,7 @@ async def test_graph(
     search_service,
     file_service,
     entity_service,
+    session_maker,
 ):
     """Create a test knowledge graph with entities, relations and observations."""
 
@@ -720,8 +750,9 @@ async def test_graph(
     )
 
     # get latest
-    entities = await entity_repository.find_all()
-    relations = await relation_repository.find_all()
+    async with db.scoped_session(session_maker) as session:
+        entities = await entity_repository.find_all(session)
+        relations = await relation_repository.find_all(session)
 
     # Index everything for search
     for entity in entities:
@@ -738,7 +769,12 @@ async def test_graph(
 
 
 @pytest.fixture
-def watch_service(app_config: BasicMemoryConfig, project_repository, sync_service) -> WatchService:
+def watch_service(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    sync_service,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> WatchService:
     """Create WatchService with injected sync_service factory.
 
     The sync_service_factory allows tests to use the fixture-provided sync_service
@@ -752,6 +788,7 @@ def watch_service(app_config: BasicMemoryConfig, project_repository, sync_servic
     return WatchService(
         app_config=app_config,
         project_repository=project_repository,
+        session_maker=session_maker,
         sync_service_factory=sync_service_factory,
     )
 

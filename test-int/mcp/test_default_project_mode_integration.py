@@ -13,7 +13,9 @@ import pytest
 from fastmcp import Client
 from unittest.mock import patch
 
+from basic_memory import db
 from basic_memory.config import ConfigManager, BasicMemoryConfig
+from basic_memory.repository.project_repository import ProjectRepository
 
 
 @pytest.mark.asyncio
@@ -53,19 +55,19 @@ async def test_explicit_project_overrides_default(
     """Test that explicit project parameter overrides default_project."""
 
     engine, session_maker = engine_factory
-    from basic_memory.repository.project_repository import ProjectRepository
 
-    project_repository = ProjectRepository(session_maker)
-
-    other_project = await project_repository.create(
-        {
-            "name": "other-project",
-            "description": "Second project for testing",
-            "path": str(config_home / "other-project"),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
+    project_repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        other_project = await project_repository.create(
+            session,
+            {
+                "name": "other-project",
+                "description": "Second project for testing",
+                "path": str(config_home / "other-project"),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
 
     mock_config = BasicMemoryConfig(
         default_project=test_project.name,
@@ -128,19 +130,19 @@ async def test_cli_constraint_overrides_default_project(
     """Test that CLI --project constraint overrides default_project."""
 
     engine, session_maker = engine_factory
-    from basic_memory.repository.project_repository import ProjectRepository
 
-    project_repository = ProjectRepository(session_maker)
-
-    other_project = await project_repository.create(
-        {
-            "name": "cli-project",
-            "description": "Project for CLI constraint testing",
-            "path": str(config_home / "cli-project"),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
+    project_repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        other_project = await project_repository.create(
+            session,
+            {
+                "name": "cli-project",
+                "description": "Project for CLI constraint testing",
+                "path": str(config_home / "cli-project"),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
 
     os.environ["BASIC_MEMORY_MCP_PROJECT"] = other_project.name
 
@@ -250,29 +252,31 @@ async def test_project_resolution_hierarchy(
     """Test the complete three-tier project resolution hierarchy."""
 
     engine, session_maker = engine_factory
-    from basic_memory.repository.project_repository import ProjectRepository
 
-    project_repository = ProjectRepository(session_maker)
+    project_repository = ProjectRepository()
 
     default_project = test_project
-    cli_project = await project_repository.create(
-        {
-            "name": "cli-hierarchy-project",
-            "description": "Project for CLI hierarchy testing",
-            "path": str(config_home / "cli-hierarchy-project"),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
-    explicit_project = await project_repository.create(
-        {
-            "name": "explicit-hierarchy-project",
-            "description": "Project for explicit hierarchy testing",
-            "path": str(config_home / "explicit-hierarchy-project"),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
+    async with db.scoped_session(session_maker) as session:
+        cli_project = await project_repository.create(
+            session,
+            {
+                "name": "cli-hierarchy-project",
+                "description": "Project for CLI hierarchy testing",
+                "path": str(config_home / "cli-hierarchy-project"),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
+        explicit_project = await project_repository.create(
+            session,
+            {
+                "name": "explicit-hierarchy-project",
+                "description": "Project for explicit hierarchy testing",
+                "path": str(config_home / "explicit-hierarchy-project"),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
 
     mock_config = BasicMemoryConfig(
         default_project=default_project.name,

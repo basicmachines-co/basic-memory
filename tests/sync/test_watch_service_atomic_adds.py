@@ -8,6 +8,7 @@ from basic_memory.sync.watch_service import WatchService
 async def test_handle_changes_reclassifies_added_existing_files_as_modified(
     app_config,
     project_repository,
+    session_maker,
     sync_service,
     test_project,
     project_config,
@@ -25,6 +26,7 @@ async def test_handle_changes_reclassifies_added_existing_files_as_modified(
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
+        session_maker=session_maker,
         quiet=True,
         sync_service_factory=sync_service_factory,
     )

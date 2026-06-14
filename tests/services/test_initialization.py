@@ -90,15 +90,16 @@ async def test_reconcile_projects_with_config_creates_projects_and_default(
         _, session_maker = await db.get_or_create_db(
             updated.database_path, db_type=db.DatabaseType.FILESYSTEM
         )
-        repo = ProjectRepository(session_maker)
+        repo = ProjectRepository()
 
-        active = await repo.get_active_projects()
-        names = {p.name for p in active}
-        assert names.issuperset({"proj-a", "proj-b"})
+        async with db.scoped_session(session_maker) as session:
+            active = await repo.get_active_projects(session)
+            names = {p.name for p in active}
+            assert names.issuperset({"proj-a", "proj-b"})
 
-        default = await repo.get_default_project()
-        assert default is not None
-        assert default.name == "proj-b"
+            default = await repo.get_default_project(session)
+            assert default is not None
+            assert default.name == "proj-b"
     finally:
         await db.shutdown_db()
 

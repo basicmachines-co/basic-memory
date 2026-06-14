@@ -5,6 +5,7 @@ This test verifies issue #452 - Imported conversations not indexed correctly.
 
 import pytest
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig
 from basic_memory.importers.claude_conversations_importer import ClaudeConversationsImporter
 from basic_memory.markdown import EntityParser
@@ -91,7 +92,8 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     await sync_service.sync(base_path, project_config.name)
 
     # Verify entity in database
-    entities = await entity_repository.find_all()
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entities = await entity_repository.find_all(session)
     assert len(entities) == 1, f"Expected 1 entity, got {len(entities)}"
 
     entity = entities[0]

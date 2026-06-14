@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory import db
+from basic_memory.models.project import Project
 from basic_memory.schemas import (
     ProjectInfoResponse,
     ProjectStatistics,
@@ -14,6 +16,36 @@ from basic_memory.schemas import (
 )
 from basic_memory.services.project_service import ProjectService
 from basic_memory.config import ConfigManager, DatabaseBackend
+
+
+async def _get_project(project_service: ProjectService, name: str) -> Project | None:
+    async with db.scoped_session(project_service.session_maker) as session:
+        return await project_service.repository.get_by_name(session, name)
+
+
+async def _get_default_project(project_service: ProjectService) -> Project | None:
+    async with db.scoped_session(project_service.session_maker) as session:
+        return await project_service.repository.get_default_project(session)
+
+
+async def _find_projects(project_service: ProjectService) -> list[Project]:
+    async with db.scoped_session(project_service.session_maker) as session:
+        return list(await project_service.repository.find_all(session))
+
+
+async def _create_project(project_service: ProjectService, data: dict) -> Project:
+    async with db.scoped_session(project_service.session_maker) as session:
+        return await project_service.repository.create(session, data)
+
+
+async def _set_default_project(project_service: ProjectService, project_id: int) -> Project | None:
+    async with db.scoped_session(project_service.session_maker) as session:
+        return await project_service.repository.set_as_default(session, project_id)
+
+
+async def _delete_project(project_service: ProjectService, project_id: int) -> bool:
+    async with db.scoped_session(project_service.session_maker) as session:
+        return await project_service.repository.delete(session, project_id)
 
 
 def test_projects_property(project_service: ProjectService):
@@ -208,7 +240,7 @@ async def test_add_project_async(project_service: ProjectService):
             assert Path(project_service.projects[test_project_name]) == test_project_path
 
             # Verify it was added to the database
-            project = await project_service.repository.get_by_name(test_project_name)
+            project = await _get_project(project_service, test_project_name)
             assert project is not None
             assert project.name == test_project_name
             assert Path(project.path) == test_project_path
@@ -220,7 +252,7 @@ async def test_add_project_async(project_service: ProjectService):
 
             # Ensure it was removed from both config and DB
             assert test_project_name not in project_service.projects
-            project = await project_service.repository.get_by_name(test_project_name)
+            project = await _get_project(project_service, test_project_name)
             assert project is None
 
 
@@ -249,20 +281,20 @@ async def test_set_default_project_async(project_service: ProjectService, test_p
             assert project_service.default_project == test_project_name
 
             # Verify it's set as default in database
-            project = await project_service.repository.get_by_name(test_project_name)
+            project = await _get_project(project_service, test_project_name)
             assert project is not None
             assert project.is_default is True
 
             # Make sure old default is no longer default
             if original_default:
-                old_default_project = await project_service.repository.get_by_name(original_default)
+                old_default_project = await _get_project(project_service, original_default)
                 if old_default_project:
                     assert old_default_project.is_default is not True
 
         finally:
             # Restore original default (only if it exists in database)
             if original_default:
-                original_project = await project_service.repository.get_by_name(original_default)
+                original_project = await _get_project(project_service, original_default)
                 if original_project:
                     await project_service.set_default_project(original_default)
 
@@ -321,7 +353,7 @@ async def test_set_default_project_config_db_mismatch(
 
             # Verify it's in config but not in database
             assert test_project_name in project_service.projects
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is None
 
             # Try to set as default - should raise ValueError since project not in database
@@ -350,9 +382,7 @@ async def test_add_project_with_set_default_true(project_service: ProjectService
         try:
             # Get original default project from database
             original_default_project = (
-                await project_service.repository.get_by_name(original_default)
-                if original_default
-                else None
+                await _get_project(project_service, original_default) if original_default else None
             )
 
             # Add project with set_default=True
@@ -363,19 +393,19 @@ async def test_add_project_with_set_default_true(project_service: ProjectService
             # Verify new project is set as default in both config and database
             assert project_service.default_project == test_project_name
 
-            new_project = await project_service.repository.get_by_name(test_project_name)
+            new_project = await _get_project(project_service, test_project_name)
             assert new_project is not None
             assert new_project.is_default is True
 
             # Verify original default is no longer default in database
             if original_default_project:
                 assert original_default is not None
-                refreshed_original = await project_service.repository.get_by_name(original_default)
+                refreshed_original = await _get_project(project_service, original_default)
                 assert refreshed_original is not None
                 assert refreshed_original.is_default is not True
 
             # Verify only one project has is_default=True
-            all_projects = await project_service.repository.find_all()
+            all_projects = await _find_projects(project_service)
             default_projects = [p for p in all_projects if p.is_default is True]
             assert len(default_projects) == 1
             assert default_projects[0].name == test_project_name
@@ -383,7 +413,7 @@ async def test_add_project_with_set_default_true(project_service: ProjectService
         finally:
             # Restore original default (only if it exists in database)
             if original_default:
-                original_project = await project_service.repository.get_by_name(original_default)
+                original_project = await _get_project(project_service, original_default)
                 if original_project:
                     await project_service.set_default_project(original_default)
 
@@ -415,15 +445,13 @@ async def test_add_project_with_set_default_false(project_service: ProjectServic
             assert project_service.default_project == original_default
 
             # Verify new project is NOT set as default
-            new_project = await project_service.repository.get_by_name(test_project_name)
+            new_project = await _get_project(project_service, test_project_name)
             assert new_project is not None
             assert new_project.is_default is not True
 
             # Verify original default is still default
             original_default_project = (
-                await project_service.repository.get_by_name(original_default)
-                if original_default
-                else None
+                await _get_project(project_service, original_default) if original_default else None
             )
             if original_default_project:
                 assert original_default_project.is_default is True
@@ -464,20 +492,23 @@ async def test_add_project_promotes_when_config_default_missing_from_db(
     config_manager.save_config(fresh_config)
 
     _, session_maker = engine_factory
-    repo = ProjectRepository(session_maker)
-    for project in await repo.find_all():
-        await repo.delete(project.id)
+    repo = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        for project in await repo.find_all(session):
+            await repo.delete(session, project.id)
 
     file_service = FileService(qa_path, MarkdownProcessor(EntityParser(qa_path)))
-    service = ProjectService(repository=repo, file_service=file_service)
+    service = ProjectService(
+        repository=repo, session_maker=session_maker, file_service=file_service
+    )
 
     await service.add_project("qa", str(qa_path), set_default=False)
 
     assert service.default_project == "qa"
-    qa_project = await repo.get_by_name("qa")
+    qa_project = await _get_project(service, "qa")
     assert qa_project is not None
     assert qa_project.is_default is True
-    assert await repo.get_by_name("main") is None
+    assert await _get_project(service, "main") is None
 
 
 @pytest.mark.asyncio
@@ -503,12 +534,12 @@ async def test_add_project_preserves_existing_db_default(
         # A normally-added project that then becomes the database default,
         # while config's default_project still names the fixture project.
         await project_service.add_project(surviving_name, surviving_path)
-        surviving = await project_service.repository.get_by_name(surviving_name)
+        surviving = await _get_project(project_service, surviving_name)
         assert surviving is not None
-        await project_service.repository.set_as_default(surviving.id)
+        await _set_default_project(project_service, surviving.id)
 
         # Wedge config: its named default loses its database row.
-        await project_service.repository.delete(test_project.id)
+        await _delete_project(project_service, test_project.id)
         assert await project_service.get_project(config_default) is None
 
         added_path = str(Path(temp_dir) / "added")
@@ -518,10 +549,10 @@ async def test_add_project_preserves_existing_db_default(
         # The surviving database default wins: config is repointed at it and
         # the newly added project is not promoted.
         assert config_manager.default_project == surviving_name
-        db_default = await project_service.repository.get_default_project()
+        db_default = await _get_default_project(project_service)
         assert db_default is not None
         assert db_default.name == surviving_name
-        added = await project_service.repository.get_by_name(added_name)
+        added = await _get_project(project_service, added_name)
         assert added is not None
         assert added.is_default is not True
 
@@ -547,7 +578,7 @@ async def test_add_project_default_parameter_omitted(project_service: ProjectSer
             assert project_service.default_project == original_default
 
             # Verify new project is NOT set as default
-            new_project = await project_service.repository.get_by_name(test_project_name)
+            new_project = await _get_project(project_service, test_project_name)
             assert new_project is not None
             assert new_project.is_default is not True
 
@@ -567,10 +598,11 @@ async def test_ensure_single_default_project_enforcement_logic(
     assert callable(getattr(project_service, "_ensure_single_default_project"))
 
     # Call the enforcement method - should work without error
-    await project_service._ensure_single_default_project()
+    async with db.scoped_session(project_service.session_maker) as session:
+        await project_service._ensure_single_default_project(session)
 
     # Verify there is exactly one default project after enforcement
-    all_projects = await project_service.repository.find_all()
+    all_projects = await _find_projects(project_service)
     default_projects = [p for p in all_projects if p.is_default is True]
     assert len(default_projects) == 1  # Should have exactly one default
 
@@ -593,18 +625,18 @@ async def test_synchronize_projects_calls_ensure_single_default(project_service:
 
             # Verify it's in config but not in database
             assert test_project_name in project_service.projects
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is None
 
             # Call synchronize_projects (this should call _ensure_single_default_project)
             await project_service.synchronize_projects()
 
             # Verify project is now in database
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is not None
 
             # Verify default project enforcement was applied
-            all_projects = await project_service.repository.find_all()
+            all_projects = await _find_projects(project_service)
             default_projects = [p for p in all_projects if p.is_default is True]
             assert len(default_projects) <= 1  # Should be exactly 1 or 0
 
@@ -651,16 +683,14 @@ async def test_synchronize_projects_normalizes_project_names(project_service: Pr
             assert project_service.projects[expected_normalized_name] == test_project_path
 
             # Verify the project was added to database with normalized name
-            db_project = await project_service.repository.get_by_name(expected_normalized_name)
+            db_project = await _get_project(project_service, expected_normalized_name)
             assert db_project is not None
             assert db_project.name == expected_normalized_name
             assert db_project.path == test_project_path
             assert db_project.permalink == expected_normalized_name
 
             # Verify the unnormalized name is not in database
-            unnormalized_db_project = await project_service.repository.get_by_name(
-                unnormalized_name
-            )
+            unnormalized_db_project = await _get_project(project_service, unnormalized_name)
             assert unnormalized_db_project is None
 
         finally:
@@ -678,9 +708,9 @@ async def test_synchronize_projects_normalizes_project_names(project_service: Pr
                             pass
 
                         # Remove from database
-                        db_project = await project_service.repository.get_by_name(name)
+                        db_project = await _get_project(project_service, name)
                         if db_project:
-                            await project_service.repository.delete(db_project.id)
+                            await _delete_project(project_service, db_project.id)
 
 
 @pytest.mark.asyncio
@@ -703,7 +733,7 @@ async def test_move_project(project_service: ProjectService):
             assert test_project_name in project_service.projects
             assert Path(project_service.projects[test_project_name]) == old_path
 
-            project = await project_service.repository.get_by_name(test_project_name)
+            project = await _get_project(project_service, test_project_name)
             assert project is not None
             assert Path(project.path) == old_path
 
@@ -714,7 +744,7 @@ async def test_move_project(project_service: ProjectService):
             assert Path(project_service.projects[test_project_name]) == new_path
 
             # Verify database was updated
-            updated_project = await project_service.repository.get_by_name(test_project_name)
+            updated_project = await _get_project(project_service, test_project_name)
             assert updated_project is not None
             assert Path(updated_project.path) == new_path
 
@@ -758,7 +788,7 @@ async def test_move_project_db_mismatch(project_service: ProjectService):
 
             # Verify it's in config but not in database
             assert test_project_name in project_service.projects
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is None
 
             # Try to move project - should fail and restore config
@@ -799,7 +829,7 @@ async def test_move_project_expands_path(project_service: ProjectService):
             # Verify the path was expanded to absolute
             assert project_service.projects[test_project_name] == expected_absolute_path
 
-            updated_project = await project_service.repository.get_by_name(test_project_name)
+            updated_project = await _get_project(project_service, test_project_name)
             assert updated_project is not None
             assert updated_project.path == expected_absolute_path
 
@@ -844,7 +874,7 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(project_service
             assert project_service.projects[normalized_name] == test_project_path
 
             # Verify the project exists in database with correct normalized name
-            db_project = await project_service.repository.get_by_name(normalized_name)
+            db_project = await _get_project(project_service, normalized_name)
             assert db_project is not None
             assert db_project.name == normalized_name
             assert db_project.path == test_project_path
@@ -868,9 +898,9 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(project_service
                         except Exception:
                             pass
 
-                        db_project = await project_service.repository.get_by_name(name)
+                        db_project = await _get_project(project_service, name)
                         if db_project:
-                            await project_service.repository.delete(db_project.id)
+                            await _delete_project(project_service, db_project.id)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
@@ -1352,10 +1382,10 @@ async def test_synchronize_projects_removes_db_only_projects(project_service: Pr
                 "permalink": test_project_name.lower().replace(" ", "-"),
                 "is_active": True,
             }
-            await project_service.repository.create(project_data)
+            await _create_project(project_service, project_data)
 
             # Verify it exists in DB but not in config
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is not None
             assert test_project_name not in project_service.projects
 
@@ -1364,7 +1394,7 @@ async def test_synchronize_projects_removes_db_only_projects(project_service: Pr
             await project_service.synchronize_projects()
 
             # Verify project was removed from database
-            db_project_after = await project_service.repository.get_by_name(test_project_name)
+            db_project_after = await _get_project(project_service, test_project_name)
             assert db_project_after is None, (
                 "Project should be removed from DB when not in config (config is source of truth)"
             )
@@ -1374,9 +1404,9 @@ async def test_synchronize_projects_removes_db_only_projects(project_service: Pr
 
         finally:
             # Clean up if needed
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             if db_project:
-                await project_service.repository.delete(db_project.id)
+                await _delete_project(project_service, db_project.id)
 
 
 @pytest.mark.asyncio
@@ -1404,7 +1434,7 @@ async def test_remove_project_with_delete_notes_false(project_service: ProjectSe
 
             # Verify project is removed from config/db
             assert test_project_name not in project_service.projects
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is None
 
             # Verify directory and files still exist
@@ -1441,7 +1471,7 @@ async def test_remove_project_with_delete_notes_true(project_service: ProjectSer
 
             # Verify project is removed from config/db
             assert test_project_name not in project_service.projects
-            db_project = await project_service.repository.get_by_name(test_project_name)
+            db_project = await _get_project(project_service, test_project_name)
             assert db_project is None
 
             # Verify directory and files are deleted
@@ -1464,7 +1494,7 @@ async def test_remove_project_delete_notes_missing_directory(project_service: Pr
 
         # Verify project exists in config/db
         assert test_project_name in project_service.projects
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is not None
 
         # Remove project with delete_notes=True (should not fail even if dir doesn't exist)
@@ -1472,7 +1502,7 @@ async def test_remove_project_delete_notes_missing_directory(project_service: Pr
 
         # Verify project is removed from config/db
         assert test_project_name not in project_service.projects
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is None
 
     finally:
@@ -1506,7 +1536,7 @@ async def test_remove_project_postgres_backend_uses_database_not_config(
         await project_service.add_project(test_project_name, test_project_path, set_default=False)
 
         # Verify project exists and is NOT default in database
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is not None
         assert db_project.is_default is not True  # Should be None or False
 
@@ -1523,7 +1553,7 @@ async def test_remove_project_postgres_backend_uses_database_not_config(
         await project_service.remove_project(test_project_name, delete_notes=False)
 
         # Verify project was removed from database
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is None
 
     finally:
@@ -1566,7 +1596,7 @@ async def test_remove_project_local_mode_checks_both_config_and_database(
         await project_service.add_project(test_project_name, test_project_path, set_default=False)
 
         # Verify project exists and is NOT default in database
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is not None
         assert db_project.is_default is not True
 
@@ -1582,7 +1612,7 @@ async def test_remove_project_local_mode_checks_both_config_and_database(
             await project_service.remove_project(test_project_name, delete_notes=False)
 
         # Verify project still exists in database
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is not None
 
     finally:
@@ -1619,7 +1649,7 @@ async def test_remove_project_rejects_database_default_in_both_modes(
         await project_service.add_project(test_project_name, test_project_path, set_default=True)
 
         # Verify project is default in database
-        db_project = await project_service.repository.get_by_name(test_project_name)
+        db_project = await _get_project(project_service, test_project_name)
         assert db_project is not None
         assert db_project.is_default is True
 
@@ -1650,15 +1680,15 @@ async def test_remove_project_rejects_database_default_in_both_modes(
 
         # Set original default back in database so we can clean up
         if original_default:
-            original_project = await project_service.repository.get_by_name(original_default)
+            original_project = await _get_project(project_service, original_default)
             if original_project:
-                await project_service.repository.set_as_default(original_project.id)
+                await _set_default_project(project_service, original_project.id)
 
         # Cleanup test project
         if test_project_name in project_service.projects:
             try:
                 # Clear default in DB first
-                db_project = await project_service.repository.get_by_name(test_project_name)
+                db_project = await _get_project(project_service, test_project_name)
                 if db_project and db_project.is_default:
                     # Find another project to make default
                     pass  # Let the config_manager handle it

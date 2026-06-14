@@ -12,6 +12,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
+from basic_memory import db
+
 
 # --- Topic vocabulary ---
 # Each topic has primary terms (strongly associated) and secondary terms
@@ -395,16 +397,18 @@ Related concepts: {keyword_line}.
         else:
             content = build_benchmark_content(topic, terms, note_index)
 
-        entity = await search_service.entity_repository.create(
-            {
-                "title": f"{topic.title()} Benchmark Note {note_index}",
-                "note_type": "benchmark",
-                "entity_metadata": {"tags": ["benchmark", topic], "status": "active"},
-                "content_type": "text/markdown",
-                "permalink": permalink,
-                "file_path": f"{permalink}.md",
-            }
-        )
+        async with db.scoped_session(search_service.session_maker) as session:
+            entity = await search_service.entity_repository.create(
+                session,
+                {
+                    "title": f"{topic.title()} Benchmark Note {note_index}",
+                    "note_type": "benchmark",
+                    "entity_metadata": {"tags": ["benchmark", topic], "status": "active"},
+                    "content_type": "text/markdown",
+                    "permalink": permalink,
+                    "file_path": f"{permalink}.md",
+                },
+            )
         await search_service.index_entity_data(entity, content=content)
 
         # Sync vector embeddings when semantic search is enabled

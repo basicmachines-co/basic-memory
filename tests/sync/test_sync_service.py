@@ -10,6 +10,7 @@ import os
 
 import pytest
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
@@ -36,20 +37,54 @@ async def touch_file(path: Path) -> None:
     path.write_text(content)
 
 
+async def _get_sync_entity_by_file_path(sync_service: SyncService, file_path: str):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await sync_service.entity_repository.get_by_file_path(session, file_path)
+
+
+async def _add_sync_entity(sync_service: SyncService, entity: Entity) -> Entity:
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await sync_service.entity_repository.add(session, entity)
+
+
+async def _add_service_entity(entity_service: EntityService, entity: Entity) -> Entity:
+    async with db.scoped_session(entity_service.session_maker) as session:
+        return await entity_service.repository.add(session, entity)
+
+
+async def _find_service_entities(entity_service: EntityService):
+    async with db.scoped_session(entity_service.session_maker) as session:
+        return list(await entity_service.repository.find_all(session))
+
+
+async def _get_sync_entity_by_permalink(sync_service: SyncService, permalink: str):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await sync_service.entity_service.repository.get_by_permalink(session, permalink)
+
+
+async def _get_entity_by_permalink(
+    sync_service: SyncService, entity_repository: EntityRepository, permalink: str
+):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await entity_repository.get_by_permalink(session, permalink)
+
+
 async def force_full_scan(sync_service: SyncService) -> None:
     """Force next sync to do a full scan by clearing watermark (for testing moves/deletions)."""
     if sync_service.entity_repository.project_id is not None:
-        project = await sync_service.project_repository.find_by_id(
-            sync_service.entity_repository.project_id
-        )
-        if project:
-            await sync_service.project_repository.update(
-                project.id,
-                {
-                    "last_scan_timestamp": None,
-                    "last_file_count": None,
-                },
+        async with db.scoped_session(sync_service.session_maker) as session:
+            project = await sync_service.project_repository.find_by_id(
+                session, sync_service.entity_repository.project_id
             )
+            if project:
+                await sync_service.project_repository.update(
+                    session,
+                    project.id,
+                    {
+                        "last_scan_timestamp": None,
+                        "last_file_count": None,
+                    },
+                )
 
 
 @pytest.mark.asyncio
@@ -233,7 +268,6 @@ Content
         to_name=target.title,
         relation_type="relates_to",
     )
-    await sync_service.relation_repository.add(resolved_relation)
 
     # Create an unresolved relation that will resolve to target
     unresolved_relation = Relation(
@@ -242,7 +276,9 @@ Content
         to_name="target",  # Will resolve to target entity
         relation_type="relates_to",
     )
-    await sync_service.relation_repository.add(unresolved_relation)
+    async with db.scoped_session(sync_service.session_maker) as session:
+        await sync_service.relation_repository.add(session, resolved_relation)
+        await sync_service.relation_repository.add(session, unresolved_relation)
     unresolved_id = unresolved_relation.id
 
     # Verify we have the unresolved relation
@@ -257,11 +293,10 @@ Content
     await sync_service.resolve_relations()
 
     # Verify the unresolved relation was deleted
-    deleted = await sync_service.relation_repository.find_by_id(unresolved_id)
+    async with db.scoped_session(sync_service.session_maker) as session:
+        deleted = await sync_service.relation_repository.find_by_id(session, unresolved_id)
+        unresolved = await sync_service.relation_repository.find_unresolved_relations(session)
     assert deleted is None
-
-    # Verify no unresolved relations remain
-    unresolved = await sync_service.relation_repository.find_unresolved_relations()
     assert len(unresolved) == 0
 
     # Verify only the resolved relation remains
@@ -310,13 +345,13 @@ A test concept.
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
-    await entity_service.repository.add(other)
+    await _add_service_entity(entity_service, other)
 
     # Run sync
     await sync_service.sync(project_config.home)
 
     # Verify results
-    entities = await entity_service.repository.find_all()
+    entities = await _find_service_entities(entity_service)
     assert len(entities) == 1
 
     # Find new entity
@@ -346,7 +381,7 @@ async def test_sync_hidden_file(
     await sync_service.sync(project_config.home)
 
     # Verify results
-    entities = await entity_service.repository.find_all()
+    entities = await _find_service_entities(entity_service)
     assert len(entities) == 0
 
 
@@ -380,9 +415,7 @@ modified: 2024-01-01
     await sync_service.sync(project_config.home)
 
     # Verify entity created but no relations
-    entity = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/depends-on-future"
-    )
+    entity = await _get_sync_entity_by_permalink(sync_service, "concept/depends-on-future")
     assert entity is not None
     assert len(entity.relations) == 2
     assert entity.relations[0].to_name == "concept/not_created_yet"
@@ -441,8 +474,8 @@ modified: 2024-01-01
     await sync_service.sync(project_config.home)
 
     # Verify both entities and their relations
-    entity_a = await sync_service.entity_service.repository.get_by_permalink("concept/entity-a")
-    entity_b = await sync_service.entity_service.repository.get_by_permalink("concept/entity-b")
+    entity_a = await _get_sync_entity_by_permalink(sync_service, "concept/entity-a")
+    entity_b = await _get_sync_entity_by_permalink(sync_service, "concept/entity-b")
 
     # outgoing relations
     assert len(entity_a.outgoing_relations) == 1
@@ -512,9 +545,7 @@ modified: 2024-01-01
     await sync_service.sync(project_config.home)
 
     # Verify duplicates are handled
-    entity = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/duplicate-relations"
-    )
+    entity = await _get_sync_entity_by_permalink(sync_service, "concept/duplicate-relations")
 
     # Count relations by type
     relation_counts = {}
@@ -554,9 +585,7 @@ modified: 2024-01-01
     await sync_service.sync(project_config.home)
 
     # Verify observations
-    entity = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/invalid-category"
-    )
+    entity = await _get_sync_entity_by_permalink(sync_service, "concept/invalid-category")
 
     assert len(entity.observations) == 3
     categories = [obs.category for obs in entity.observations]
@@ -635,9 +664,9 @@ modified: 2024-01-01
     await sync_service.sync(project_config.home)
 
     # Verify all relations are created correctly regardless of order
-    entity_a = await sync_service.entity_service.repository.get_by_permalink("concept/entity-a")
-    entity_b = await sync_service.entity_service.repository.get_by_permalink("concept/entity-b")
-    entity_c = await sync_service.entity_service.repository.get_by_permalink("concept/entity-c")
+    entity_a = await _get_sync_entity_by_permalink(sync_service, "concept/entity-a")
+    entity_b = await _get_sync_entity_by_permalink(sync_service, "concept/entity-b")
+    entity_c = await _get_sync_entity_by_permalink(sync_service, "concept/entity-c")
 
     # Verify outgoing relations by checking actual targets
     a_outgoing_targets = {rel.to_id for rel in entity_a.outgoing_relations}
@@ -711,13 +740,13 @@ modified: 2024-01-01
     await asyncio.gather(sync_service.sync(project_config.home), modify_file())
 
     # Verify final state
-    doc = await sync_service.entity_service.repository.get_by_permalink("changing")
+    doc = await _get_sync_entity_by_permalink(sync_service, "changing")
     assert doc is not None
 
     # if we failed in the middle of a sync, the next one should fix it.
     if doc.checksum is None:
         await sync_service.sync(project_config.home)
-        doc = await sync_service.entity_service.repository.get_by_permalink("changing")
+        doc = await _get_sync_entity_by_permalink(sync_service, "changing")
         assert doc.checksum is not None
 
 
@@ -756,7 +785,7 @@ Testing permalink generation.
     await sync_service.sync(project_config.home)
 
     # Verify permalinks
-    entities = await entity_service.repository.find_all()
+    entities = await _find_service_entities(entity_service)
     for filename, expected_permalink in test_files.items():
         # Find entity for this file
         entity = next(e for e in entities if e.file_path == filename)
@@ -780,7 +809,10 @@ async def test_handle_entity_deletion(
     await sync_service.handle_delete(root_entity.file_path)
 
     # Verify entity is gone from db
-    assert await entity_repository.get_by_permalink(root_entity.permalink) is None
+    assert (
+        await _get_entity_by_permalink(sync_service, entity_repository, root_entity.permalink)
+        is None
+    )
 
     # Verify entity is gone from search index
     entity_results = await search_service.search(SearchQuery(text=root_entity.title))
@@ -995,7 +1027,7 @@ async def test_sync_null_checksum_cleanup(
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
-    await entity_service.repository.add(entity)
+    await _add_service_entity(entity_service, entity)
 
     # Create corresponding file
     content = """
@@ -1222,7 +1254,7 @@ async def test_sync_frontmatter_created_if_missing_when_enabled(
     assert "type: note" in file_content
     assert f"permalink: {project_prefix}/one" in file_content
 
-    entity = await sync_service.entity_repository.get_by_file_path("one.md")
+    entity = await _get_sync_entity_by_file_path(sync_service, "one.md")
     assert entity is not None
     assert entity.permalink == f"{project_prefix}/one"
 
@@ -1248,7 +1280,7 @@ async def test_sync_frontmatter_created_if_missing_overrides_disable_permalinks(
     project_prefix = generate_permalink(project_config.name)
     assert f"permalink: {project_prefix}/override" in file_content
 
-    entity = await sync_service.entity_repository.get_by_file_path("override.md")
+    entity = await _get_sync_entity_by_file_path(sync_service, "override.md")
     assert entity is not None
     assert entity.permalink == f"{project_prefix}/override"
 
@@ -1320,13 +1352,11 @@ async def test_sync_non_markdown_files(sync_service, project_config, test_files)
     assert test_files["image"].name in [f for f in report.new]
 
     # Verify entities were created
-    pdf_entity = await sync_service.entity_repository.get_by_file_path(str(test_files["pdf"].name))
+    pdf_entity = await _get_sync_entity_by_file_path(sync_service, str(test_files["pdf"].name))
     assert pdf_entity is not None, "PDF entity should have been created"
     assert pdf_entity.content_type == "application/pdf"
 
-    image_entity = await sync_service.entity_repository.get_by_file_path(
-        str(test_files["image"].name)
-    )
+    image_entity = await _get_sync_entity_by_file_path(sync_service, str(test_files["image"].name))
     assert image_entity.content_type == "image/png"
 
 
@@ -1355,10 +1385,8 @@ async def test_sync_non_markdown_files_modified(
     pdf_file_content, pdf_checksum = await file_service.read_file(test_files["pdf"].name)
     image_file_content, img_checksum = await file_service.read_file(test_files["image"].name)
 
-    pdf_entity = await sync_service.entity_repository.get_by_file_path(str(test_files["pdf"].name))
-    image_entity = await sync_service.entity_repository.get_by_file_path(
-        str(test_files["image"].name)
-    )
+    pdf_entity = await _get_sync_entity_by_file_path(sync_service, str(test_files["pdf"].name))
+    image_entity = await _get_sync_entity_by_file_path(sync_service, str(test_files["image"].name))
 
     assert pdf_entity.checksum == pdf_checksum
     assert image_entity.checksum == img_checksum
@@ -1384,7 +1412,7 @@ async def test_sync_non_markdown_files_move(sync_service, project_config, test_f
     assert len(report2.moves) == 1
 
     # Verify entity is updated
-    pdf_entity = await sync_service.entity_repository.get_by_file_path("moved_pdf.pdf")
+    pdf_entity = await _get_sync_entity_by_file_path(sync_service, "moved_pdf.pdf")
     assert pdf_entity is not None
     assert pdf_entity.permalink is None
 
@@ -1404,7 +1432,7 @@ async def test_sync_non_markdown_files_deleted(sync_service, project_config, tes
     assert len(report2.deleted) == 1
 
     # Verify entity is deleted
-    pdf_entity = await sync_service.entity_repository.get_by_file_path("moved_pdf.pdf")
+    pdf_entity = await _get_sync_entity_by_file_path(sync_service, "moved_pdf.pdf")
     assert pdf_entity is None
 
 
@@ -1429,7 +1457,7 @@ async def test_sync_non_markdown_files_move_with_delete(
     await sync_service.sync(project_config.home)
 
     # Verify the changes
-    moved_entity = await sync_service.entity_repository.get_by_file_path("doc.pdf")
+    moved_entity = await _get_sync_entity_by_file_path(sync_service, "doc.pdf")
     assert moved_entity is not None
     assert moved_entity.permalink is None
 
@@ -1499,7 +1527,8 @@ This is a test file for race condition handling.
 
     # Create an existing entity with the same file_path to force a real DB IntegrityError
     # on the "add" call (same effect as the race-condition branch).
-    await sync_service.entity_repository.add(
+    await _add_sync_entity(
+        sync_service,
         Entity(
             note_type="file",
             file_path=rel_path,
@@ -1510,7 +1539,7 @@ This is a test file for race condition handling.
             content_type="text/markdown",
             mtime=None,
             size=None,
-        )
+        ),
     )
 
     # Call sync_regular_file (new=True) - should fall back to update path
@@ -1821,7 +1850,7 @@ async def test_sync_handles_file_not_found_gracefully(
     await sync_service.sync(project_dir)
 
     # Verify entity was created
-    entity = await sync_service.entity_repository.get_by_file_path("missing_file.md")
+    entity = await _get_sync_entity_by_file_path(sync_service, "missing_file.md")
     assert entity is not None
     assert entity.permalink == "missing-file"
 
@@ -1833,7 +1862,7 @@ async def test_sync_handles_file_not_found_gracefully(
     await sync_service.sync_file("missing_file.md", new=False)
 
     # Entity should be deleted from database
-    entity = await sync_service.entity_repository.get_by_file_path("missing_file.md")
+    entity = await _get_sync_entity_by_file_path(sync_service, "missing_file.md")
     assert entity is None, "Orphaned entity should be deleted when file is not found"
 
 

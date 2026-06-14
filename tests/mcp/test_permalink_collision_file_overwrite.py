@@ -18,6 +18,7 @@ import pytest
 from pathlib import Path
 from textwrap import dedent
 
+from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.sync.sync_service import SyncService
 from basic_memory.config import ProjectConfig
@@ -28,17 +29,19 @@ from basic_memory.utils import generate_permalink
 async def force_full_scan(sync_service: SyncService) -> None:
     """Force next sync to do a full scan by clearing watermark (for testing moves/deletions)."""
     if sync_service.entity_repository.project_id is not None:
-        project = await sync_service.project_repository.find_by_id(
-            sync_service.entity_repository.project_id
-        )
-        if project:
-            await sync_service.project_repository.update(
-                project.id,
-                {
-                    "last_scan_timestamp": None,
-                    "last_file_count": None,
-                },
+        async with db.scoped_session(sync_service.session_maker) as session:
+            project = await sync_service.project_repository.find_by_id(
+                session, sync_service.entity_repository.project_id
             )
+            if project:
+                await sync_service.project_repository.update(
+                    session,
+                    project.id,
+                    {
+                        "last_scan_timestamp": None,
+                        "last_file_count": None,
+                    },
+                )
 
 
 @pytest.mark.asyncio

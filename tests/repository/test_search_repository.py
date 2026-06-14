@@ -39,7 +39,7 @@ async def search_entity(session_maker, test_project: Project):
 
 
 @pytest_asyncio.fixture
-async def second_project(project_repository):
+async def second_project(project_repository, session_maker):
     """Create a second project for testing project isolation."""
     project_data = {
         "name": "Second Test Project",
@@ -48,7 +48,8 @@ async def second_project(project_repository):
         "is_active": True,
         "is_default": None,
     }
-    return await project_repository.create(project_data)
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.create(session, project_data)
 
 
 @pytest_asyncio.fixture

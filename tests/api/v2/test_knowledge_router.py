@@ -8,6 +8,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from basic_memory import db
 from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
 from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
@@ -18,6 +19,16 @@ from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
 from basic_memory.services.search_service import SearchService
+
+
+async def _find_all_entities(entity_repository, session_maker):
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repository.find_all(session)
+
+
+async def _get_entity_by_external_id(entity_repository, session_maker, external_id: str):
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repository.get_by_external_id(session, external_id)
 
 
 @pytest.mark.asyncio
@@ -62,30 +73,33 @@ async def test_resolve_identifier_returns_target_project_external_id_for_cross_p
     v2_project_url,
 ):
     """Cross-project resolves should expose the owning project external ID."""
-    project_repository = ProjectRepository(session_maker)
-    other_project = await project_repository.create(
-        {
-            "name": "other-project",
-            "description": "Secondary project",
-            "path": str(tmp_path / "other-project"),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
+    project_repository = ProjectRepository()
     now = datetime.now(timezone.utc)
-    other_entity_repository = EntityRepository(session_maker, project_id=other_project.id)
-    target = await other_entity_repository.add(
-        EntityModel(
-            title="Cross Project Note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="docs/Cross Project Note.md",
-            permalink=f"{other_project.permalink}/docs/cross-project-note",
-            created_at=now,
-            updated_at=now,
-            project_id=other_project.id,
+    async with db.scoped_session(session_maker) as session:
+        other_project = await project_repository.create(
+            session,
+            {
+                "name": "other-project",
+                "description": "Secondary project",
+                "path": str(tmp_path / "other-project"),
+                "is_active": True,
+                "is_default": False,
+            },
         )
-    )
+        other_entity_repository = EntityRepository(project_id=other_project.id)
+        target = await other_entity_repository.add(
+            session,
+            EntityModel(
+                title="Cross Project Note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="docs/Cross Project Note.md",
+                permalink=f"{other_project.permalink}/docs/cross-project-note",
+                created_at=now,
+                updated_at=now,
+                project_id=other_project.id,
+            ),
+        )
 
     response = await client.post(
         f"{v2_project_url}/knowledge/resolve",
@@ -196,6 +210,7 @@ async def test_get_entity_by_id_allows_long_relation_type(
     client: AsyncClient,
     v2_project_url,
     relation_repository,
+    session_maker,
 ):
     """GET entity should not fail when stored relation_type exceeds 200 characters."""
     source_response = await client.post(
@@ -226,14 +241,16 @@ async def test_get_entity_by_id_allows_long_relation_type(
         "that is much longer than 200 characters but should still serialize cleanly."
     )
 
-    await relation_repository.create(
-        {
-            "from_id": source_entity.id,
-            "to_id": target_entity.id,
-            "to_name": target_entity.title,
-            "relation_type": long_relation_type,
-        }
-    )
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.create(
+            session,
+            {
+                "from_id": source_entity.id,
+                "to_id": target_entity.id,
+                "to_name": target_entity.title,
+                "relation_type": long_relation_type,
+            },
+        )
 
     response = await client.get(f"{v2_project_url}/knowledge/entities/{source_entity.external_id}")
 
@@ -430,7 +447,7 @@ async def test_update_entity_by_id(
 
 @pytest.mark.asyncio
 async def test_update_entity_by_id_does_not_duplicate(
-    client: AsyncClient, v2_project_url, entity_repository
+    client: AsyncClient, v2_project_url, entity_repository, session_maker
 ):
     """PUT updates the existing external_id without creating duplicates."""
     create_data = {
@@ -453,14 +470,14 @@ async def test_update_entity_by_id_does_not_duplicate(
     )
     assert response.status_code == 200
 
-    entities = await entity_repository.find_all()
+    entities = await _find_all_entities(entity_repository, session_maker)
     assert len(entities) == 1
     assert entities[0].external_id == created_entity.external_id
 
 
 @pytest.mark.asyncio
 async def test_put_entity_with_fast_param_returns_fully_indexed_row(
-    client: AsyncClient, v2_project_url, entity_repository
+    client: AsyncClient, v2_project_url, entity_repository, session_maker
 ):
     """PUT ignores the legacy fast param and still returns a fully indexed row."""
     external_id = str(uuid.uuid4())
@@ -488,7 +505,7 @@ async def test_put_entity_with_fast_param_returns_fully_indexed_row(
     assert len(created_entity.observations) == 1
     assert len(created_entity.relations) == 1
 
-    db_entity = await entity_repository.get_by_external_id(external_id)
+    db_entity = await _get_entity_by_external_id(entity_repository, session_maker, external_id)
     assert db_entity is not None
 
 
@@ -1127,7 +1144,7 @@ async def test_sync_file_rejects_path_traversal(client: AsyncClient, v2_project_
 
 @pytest.mark.asyncio
 async def test_sync_file_rejects_symlink_escape(
-    client: AsyncClient, v2_project_url, test_project: Project, entity_repository
+    client: AsyncClient, v2_project_url, test_project: Project, entity_repository, session_maker
 ):
     """sync-file rejects paths whose canonical target escapes the project via symlink.
 
@@ -1163,7 +1180,7 @@ async def test_sync_file_rejects_symlink_escape(
     assert response.status_code in (400, 404)
 
     # Nothing outside the project root was indexed
-    assert await entity_repository.find_all() == []
+    assert await _find_all_entities(entity_repository, session_maker) == []
 
 
 @pytest.mark.asyncio
@@ -1172,6 +1189,7 @@ async def test_sync_file_symlink_escape_never_scans_outside_directory(
     v2_project_url,
     test_project: Project,
     entity_repository,
+    session_maker,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Canonicalization never scans directories outside the project root.
@@ -1211,7 +1229,7 @@ async def test_sync_file_symlink_escape_never_scans_outside_directory(
     assert response.status_code in (400, 404)
     assert outside_dir not in scanned
 
-    assert await entity_repository.find_all() == []
+    assert await _find_all_entities(entity_repository, session_maker) == []
 
 
 @pytest.mark.asyncio
@@ -1220,6 +1238,7 @@ async def test_sync_file_symlink_escape_never_probes_outside_target(
     v2_project_url,
     test_project: Project,
     entity_repository,
+    session_maker,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """The containment check runs before any filesystem probe that follows symlinks.
@@ -1260,7 +1279,7 @@ async def test_sync_file_symlink_escape_never_probes_outside_target(
     assert "project boundaries" in response.json()["detail"]
     assert outside_target not in probed
 
-    assert await entity_repository.find_all() == []
+    assert await _find_all_entities(entity_repository, session_maker) == []
 
 
 def test_canonical_file_path_stops_at_project_boundary(tmp_path: Path):
@@ -1315,7 +1334,7 @@ async def test_sync_file_symlink_inside_project_still_indexes(
 
 @pytest.mark.asyncio
 async def test_sync_file_wrong_cased_path_does_not_create_duplicate(
-    client: AsyncClient, v2_project_url, test_project: Project, entity_repository
+    client: AsyncClient, v2_project_url, test_project: Project, entity_repository, session_maker
 ):
     """A wrong-cased path resolves to the canonical on-disk file without duplicating it.
 
@@ -1345,7 +1364,7 @@ async def test_sync_file_wrong_cased_path_does_not_create_duplicate(
     assert synced.file_path == "notes/disk-note.md"
     assert synced.external_id == canonical.external_id
 
-    entities = await entity_repository.find_all()
+    entities = await _find_all_entities(entity_repository, session_maker)
     assert [entity.file_path for entity in entities] == ["notes/disk-note.md"]
 
 

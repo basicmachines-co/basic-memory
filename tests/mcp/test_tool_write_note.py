@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from basic_memory import db
 from basic_memory import config as config_module
 from basic_memory.mcp.tools import write_note, read_note, delete_note
 from basic_memory.mcp.tools.write_note import _compose_workspace_project_route
@@ -19,29 +20,38 @@ from basic_memory.utils import normalize_newlines
 
 def test_write_note_workspace_project_route_passthrough_without_workspace():
     """Without workspace, the project string passes through unchanged."""
-    assert _compose_workspace_project_route(
-        workspace=None,
-        project="my-project",
-        project_id=None,
-    ) == "my-project"
+    assert (
+        _compose_workspace_project_route(
+            workspace=None,
+            project="my-project",
+            project_id=None,
+        )
+        == "my-project"
+    )
 
 
 def test_write_note_workspace_project_route_combines_workspace_and_project():
     """workspace + project are joined as 'workspace/project'."""
-    assert _compose_workspace_project_route(
-        workspace="acme",
-        project="docs",
-        project_id=None,
-    ) == "acme/docs"
+    assert (
+        _compose_workspace_project_route(
+            workspace="acme",
+            project="docs",
+            project_id=None,
+        )
+        == "acme/docs"
+    )
 
 
 def test_write_note_workspace_project_route_passes_qualified_project_unchanged():
     """A pre-qualified 'workspace/project' string passes through when workspace is None."""
-    assert _compose_workspace_project_route(
-        workspace=None,
-        project="acme/docs",
-        project_id=None,
-    ) == "acme/docs"
+    assert (
+        _compose_workspace_project_route(
+            workspace=None,
+            project="acme/docs",
+            project_id=None,
+        )
+        == "acme/docs"
+    )
 
 
 @pytest.mark.parametrize(
@@ -439,8 +449,9 @@ async def test_write_note_verbose(app, test_project, engine_factory):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     _, session_maker = engine_factory
-    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
-    relations = await relation_repository.find_by_type("relates to")
+    relation_repository = RelationRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_by_type(session, "relates to")
     assert any(relation.to_name == "Knowledge" for relation in relations)
 
 
@@ -1441,7 +1452,7 @@ class TestWriteNoteOverwriteGuard:
 
     @pytest.mark.asyncio
     async def test_write_note_overwrite_resolves_by_file_path_strictly(
-        self, app, test_project, entity_repository, monkeypatch
+        self, app, test_project, entity_repository, session_maker, monkeypatch
     ):
         """Regression: overwrite=True must resolve the conflicting entity by
         file_path with strict=True, not by permalink with fuzzy fallback.
@@ -1479,7 +1490,8 @@ class TestWriteNoteOverwriteGuard:
             content="# Overview\n\nVersion A",
         )
         canonical_permalink = f"{test_project.name}/features/foo/overview"
-        canonical = await entity_repository.get_by_permalink(canonical_permalink)
+        async with db.scoped_session(session_maker) as session:
+            canonical = await entity_repository.get_by_permalink(session, canonical_permalink)
         assert canonical is not None
         canonical_id = canonical.id
 
@@ -1498,7 +1510,8 @@ class TestWriteNoteOverwriteGuard:
         assert captured.get("strict") is True
 
         # And the canonical row was updated in place — no duplicate -1/-2 row.
-        canonical_after = await entity_repository.get_by_permalink(canonical_permalink)
+        async with db.scoped_session(session_maker) as session:
+            canonical_after = await entity_repository.get_by_permalink(session, canonical_permalink)
         assert canonical_after is not None
         assert canonical_after.id == canonical_id
 
@@ -1507,7 +1520,10 @@ class TestWriteNoteOverwriteGuard:
         assert "Version A" not in content
 
         for suffix in ("-1", "-2"):
-            stray = await entity_repository.get_by_permalink(f"{canonical_permalink}{suffix}")
+            async with db.scoped_session(session_maker) as session:
+                stray = await entity_repository.get_by_permalink(
+                    session, f"{canonical_permalink}{suffix}"
+                )
             assert stray is None, (
                 f"overwrite=True minted a stray '{suffix}' suffix on the canonical permalink"
             )

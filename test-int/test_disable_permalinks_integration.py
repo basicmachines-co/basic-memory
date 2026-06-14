@@ -2,6 +2,7 @@
 
 import pytest
 
+from basic_memory import db
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.repository import (
     EntityRepository,
@@ -31,9 +32,9 @@ async def test_disable_permalinks_create_entity(tmp_path, engine_factory, app_co
     app_config.ensure_frontmatter_on_sync = False
 
     # Setup repositories
-    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
-    observation_repository = ObservationRepository(session_maker, project_id=test_project.id)
-    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
+    entity_repository = EntityRepository(project_id=test_project.id)
+    observation_repository = ObservationRepository(project_id=test_project.id)
+    relation_repository = RelationRepository(project_id=test_project.id)
 
     # Use database-specific search repository
     if app_config.database_backend == DatabaseBackend.POSTGRES:
@@ -45,9 +46,11 @@ async def test_disable_permalinks_create_entity(tmp_path, engine_factory, app_co
     entity_parser = EntityParser(tmp_path)
     markdown_processor = MarkdownProcessor(entity_parser)
     file_service = FileService(tmp_path, markdown_processor)
-    search_service = SearchService(search_repository, entity_repository, file_service)
+    search_service = SearchService(
+        search_repository, entity_repository, file_service, session_maker
+    )
     await search_service.init_search_index()
-    link_resolver = LinkResolver(entity_repository, search_service)
+    link_resolver = LinkResolver(entity_repository, search_service, session_maker)
 
     entity_service = EntityService(
         entity_parser=entity_parser,
@@ -56,6 +59,7 @@ async def test_disable_permalinks_create_entity(tmp_path, engine_factory, app_co
         relation_repository=relation_repository,
         file_service=file_service,
         link_resolver=link_resolver,
+        session_maker=session_maker,
         app_config=app_config,
     )
 
@@ -96,9 +100,9 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory, app_co
     test_file.write_text("# Test Note\nThis is test content.")
 
     # Setup repositories
-    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
-    observation_repository = ObservationRepository(session_maker, project_id=test_project.id)
-    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
+    entity_repository = EntityRepository(project_id=test_project.id)
+    observation_repository = ObservationRepository(project_id=test_project.id)
+    relation_repository = RelationRepository(project_id=test_project.id)
 
     # Use database-specific search repository
     if app_config.database_backend == DatabaseBackend.POSTGRES:
@@ -106,15 +110,17 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory, app_co
     else:
         search_repository = SQLiteSearchRepository(session_maker, project_id=test_project.id)
 
-    project_repository = ProjectRepository(session_maker)
+    project_repository = ProjectRepository()
 
     # Setup services
     entity_parser = EntityParser(tmp_path)
     markdown_processor = MarkdownProcessor(entity_parser)
     file_service = FileService(tmp_path, markdown_processor)
-    search_service = SearchService(search_repository, entity_repository, file_service)
+    search_service = SearchService(
+        search_repository, entity_repository, file_service, session_maker
+    )
     await search_service.init_search_index()
-    link_resolver = LinkResolver(entity_repository, search_service)
+    link_resolver = LinkResolver(entity_repository, search_service, session_maker)
 
     entity_service = EntityService(
         entity_parser=entity_parser,
@@ -123,6 +129,7 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory, app_co
         relation_repository=relation_repository,
         file_service=file_service,
         link_resolver=link_resolver,
+        session_maker=session_maker,
         app_config=app_config,
     )
 
@@ -135,6 +142,7 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory, app_co
         relation_repository=relation_repository,
         search_service=search_service,
         file_service=file_service,
+        session_maker=session_maker,
     )
 
     # Run sync
@@ -151,7 +159,8 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory, app_co
     assert "# Test Note" in content
 
     # Verify entity in database has no permalink
-    entities = await entity_repository.find_all()
+    async with db.scoped_session(session_maker) as session:
+        entities = await entity_repository.find_all(session)
     assert len(entities) == 1
     assert entities[0].permalink is None
     # Title is extracted from filename when no frontmatter, or from frontmatter when present

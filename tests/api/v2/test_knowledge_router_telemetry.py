@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -51,6 +51,11 @@ def _fake_entity(*, external_id: str = "entity-123", file_path: str = "notes/tes
 
 def _assert_only_root_span(spans: list[tuple[str, dict]], expected_name: str) -> None:
     assert [name for name, _ in spans] == [expected_name]
+
+
+@asynccontextmanager
+async def _fake_scoped_session(session_maker):
+    yield object()
 
 
 @pytest.mark.asyncio
@@ -103,6 +108,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
 async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(logfire, "span", fake_span)
+    monkeypatch.setattr(knowledge_router_module.db, "scoped_session", _fake_scoped_session)
 
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
@@ -121,7 +127,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
             return None
 
     class FakeEntityRepository:
-        async def get_by_external_id(self, external_id):
+        async def get_by_external_id(self, session, external_id):
             return entity
 
     class FakeTaskScheduler:
@@ -142,6 +148,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         entity_service=cast(Any, FakeEntityService()),
         search_service=cast(Any, FakeSearchService()),
         entity_repository=cast(Any, FakeEntityRepository()),
+        session_maker=cast(Any, object()),
         task_scheduler=FakeTaskScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
@@ -155,6 +162,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
 async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(logfire, "span", fake_span)
+    monkeypatch.setattr(knowledge_router_module.db, "scoped_session", _fake_scoped_session)
 
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
@@ -173,7 +181,7 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
             return None
 
     class FakeEntityRepository:
-        async def get_by_external_id(self, external_id):
+        async def get_by_external_id(self, session, external_id):
             return entity
 
     class FakeTaskScheduler:
@@ -186,6 +194,7 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         entity_service=cast(Any, FakeEntityService()),
         search_service=cast(Any, FakeSearchService()),
         entity_repository=cast(Any, FakeEntityRepository()),
+        session_maker=cast(Any, object()),
         task_scheduler=FakeTaskScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,

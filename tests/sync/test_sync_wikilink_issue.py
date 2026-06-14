@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory import db
 from basic_memory.sync.sync_service import SyncService
 
 
@@ -16,17 +17,19 @@ async def create_test_file(path: Path, content: str) -> None:
 async def force_full_scan(sync_service: SyncService) -> None:
     """Force next sync to do a full scan by clearing watermark (for testing moves/deletions)."""
     if sync_service.entity_repository.project_id is not None:
-        project = await sync_service.project_repository.find_by_id(
-            sync_service.entity_repository.project_id
-        )
-        if project:
-            await sync_service.project_repository.update(
-                project.id,
-                {
-                    "last_scan_timestamp": None,
-                    "last_file_count": None,
-                },
+        async with db.scoped_session(sync_service.session_maker) as session:
+            project = await sync_service.project_repository.find_by_id(
+                session, sync_service.entity_repository.project_id
             )
+            if project:
+                await sync_service.project_repository.update(
+                    session,
+                    project.id,
+                    {
+                        "last_scan_timestamp": None,
+                        "last_file_count": None,
+                    },
+                )
 
 
 @pytest.mark.asyncio

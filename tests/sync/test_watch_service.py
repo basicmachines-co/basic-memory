@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from watchfiles import Change
 
+from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.models.project import Project
 from basic_memory.sync.watch_service import WatchService, WatchServiceState
@@ -27,7 +28,9 @@ def test_watch_service_init(watch_service, project_config):
     assert watch_service.status_path.parent.exists()
 
 
-def test_watch_service_status_path_honors_basic_memory_config_dir(tmp_path, monkeypatch):
+def test_watch_service_status_path_honors_basic_memory_config_dir(
+    tmp_path, monkeypatch, session_maker
+):
     """Regression guard for #742: watch-status.json follows BASIC_MEMORY_CONFIG_DIR.
 
     WatchService previously hardcoded ``Path.home() / ".basic-memory"`` which
@@ -38,14 +41,18 @@ def test_watch_service_status_path_honors_basic_memory_config_dir(tmp_path, monk
     monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_dir))
 
     app_config = BasicMemoryConfig(projects={"main": {"path": str(tmp_path / "project")}})
-    service = WatchService(app_config=app_config, project_repository=MagicMock())
+    service = WatchService(
+        app_config=app_config,
+        project_repository=MagicMock(),
+        session_maker=session_maker,
+    )
 
     assert service.status_path == custom_dir / WATCH_STATUS_JSON
     assert service.status_path.parent.exists()
 
 
 async def _register_local_projects(
-    app_config: BasicMemoryConfig, project_repository, specs
+    app_config: BasicMemoryConfig, project_repository, session_maker, specs
 ) -> None:
     """Register projects as local in both the DB and app_config.
 
@@ -57,21 +64,23 @@ async def _register_local_projects(
     from basic_memory.config import ProjectEntry
 
     for spec in specs:
-        await project_repository.create(
-            {
-                "name": spec["name"],
-                "description": spec["name"],
-                "path": spec["path"],
-                "is_active": True,
-                "is_default": False,
-            }
-        )
+        async with db.scoped_session(session_maker) as session:
+            await project_repository.create(
+                session,
+                {
+                    "name": spec["name"],
+                    "description": spec["name"],
+                    "path": spec["path"],
+                    "is_active": True,
+                    "is_default": False,
+                },
+            )
         app_config.projects[spec["name"]] = ProjectEntry(path=spec["path"], mode=ProjectMode.LOCAL)
 
 
 @pytest.mark.asyncio
 async def test_select_projects_to_watch_returns_all_when_unconstrained(
-    app_config: BasicMemoryConfig, project_repository, tmp_path
+    app_config: BasicMemoryConfig, project_repository, session_maker, tmp_path
 ):
     """Without a --project constraint, every active project is watched."""
     # Use tmp_path so the project paths are OS-absolute on Windows too — a
@@ -80,13 +89,18 @@ async def test_select_projects_to_watch_returns_all_when_unconstrained(
     await _register_local_projects(
         app_config,
         project_repository,
+        session_maker,
         [
             {"name": "project-alpha", "path": str(tmp_path / "alpha")},
             {"name": "project-beta", "path": str(tmp_path / "beta")},
         ],
     )
 
-    service = WatchService(app_config=app_config, project_repository=project_repository)
+    service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
 
     projects = await service._select_projects_to_watch()
     names = {p.name for p in projects}
@@ -97,7 +111,7 @@ async def test_select_projects_to_watch_returns_all_when_unconstrained(
 
 @pytest.mark.asyncio
 async def test_select_projects_to_watch_filters_to_constrained_project(
-    app_config: BasicMemoryConfig, project_repository, tmp_path
+    app_config: BasicMemoryConfig, project_repository, session_maker, tmp_path
 ):
     """With ``constrained_project`` set, only that project is returned.
 
@@ -108,6 +122,7 @@ async def test_select_projects_to_watch_filters_to_constrained_project(
     await _register_local_projects(
         app_config,
         project_repository,
+        session_maker,
         [
             {"name": "project-alpha", "path": str(tmp_path / "alpha")},
             {"name": "project-beta", "path": str(tmp_path / "beta")},
@@ -117,6 +132,7 @@ async def test_select_projects_to_watch_filters_to_constrained_project(
     service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
+        session_maker=session_maker,
         constrained_project="project-beta",
     )
 
@@ -127,18 +143,20 @@ async def test_select_projects_to_watch_filters_to_constrained_project(
 
 @pytest.mark.asyncio
 async def test_select_projects_to_watch_empty_when_constrained_project_missing(
-    app_config: BasicMemoryConfig, project_repository, tmp_path
+    app_config: BasicMemoryConfig, project_repository, session_maker, tmp_path
 ):
     """An unknown constraint yields an empty watch set rather than watching everything."""
     await _register_local_projects(
         app_config,
         project_repository,
+        session_maker,
         [{"name": "project-alpha", "path": str(tmp_path / "alpha")}],
     )
 
     service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
+        session_maker=session_maker,
         constrained_project="does-not-exist",
     )
 
@@ -214,7 +232,8 @@ Test content
     await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    entity = await entity_repository.get_by_file_path("new_note.md")
+    async with db.scoped_session(watch_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "new_note.md")
     assert entity is not None
     assert entity.title == "new_note"
 
@@ -263,7 +282,8 @@ Modified content
     await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    entity = await sync_service.entity_repository.get_by_file_path("test_note.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entity = await sync_service.entity_repository.get_by_file_path(session, "test_note.md")
     assert entity is not None
 
     # Check event was recorded
@@ -301,7 +321,8 @@ Test content
     await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    entity = await sync_service.entity_repository.get_by_file_path("to_delete.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entity = await sync_service.entity_repository.get_by_file_path(session, "to_delete.md")
     assert entity is None
 
     # Check event was recorded
@@ -328,7 +349,11 @@ Test content
 
     # Initial sync
     await sync_service.sync(project_dir)
-    initial_entity = await sync_service.entity_repository.get_by_file_path("old/test_move.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        initial_entity = await sync_service.entity_repository.get_by_file_path(
+            session, "old/test_move.md"
+        )
+    assert initial_entity is not None
 
     # Move file
     new_path = project_dir / "new" / "moved_file.md"
@@ -342,12 +367,18 @@ Test content
     await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    moved_entity = await sync_service.entity_repository.get_by_file_path("new/moved_file.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        moved_entity = await sync_service.entity_repository.get_by_file_path(
+            session, "new/moved_file.md"
+        )
     assert moved_entity is not None
     assert moved_entity.id == initial_entity.id  # Same entity, new path
 
     # Original path should no longer exist
-    old_entity = await sync_service.entity_repository.get_by_file_path("old/test_move.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        old_entity = await sync_service.entity_repository.get_by_file_path(
+            session, "old/test_move.md"
+        )
     assert old_entity is None
 
     # Check event was recorded
@@ -393,8 +424,9 @@ async def test_handle_concurrent_changes(watch_service, project_config, test_pro
     await watch_service.handle_changes(test_project, changes)
 
     # Verify both files were processed
-    entity1 = await sync_service.entity_repository.get_by_file_path("note1.md")
-    entity2 = await sync_service.entity_repository.get_by_file_path("note2.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entity1 = await sync_service.entity_repository.get_by_file_path(session, "note1.md")
+        entity2 = await sync_service.entity_repository.get_by_file_path(session, "note2.md")
 
     assert entity1 is not None
     assert entity2 is not None
@@ -442,12 +474,16 @@ Test content for rapid moves
     await watch_service.handle_changes(test_project, changes)
 
     # Verify final state
-    final_entity = await sync_service.entity_repository.get_by_file_path("final.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        final_entity = await sync_service.entity_repository.get_by_file_path(session, "final.md")
     assert final_entity is not None
 
     # Intermediate paths should not exist
-    original_entity = await sync_service.entity_repository.get_by_file_path("original.md")
-    temp_entity = await sync_service.entity_repository.get_by_file_path("temp.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        original_entity = await sync_service.entity_repository.get_by_file_path(
+            session, "original.md"
+        )
+        temp_entity = await sync_service.entity_repository.get_by_file_path(session, "temp.md")
     assert original_entity is None
     assert temp_entity is None
 
@@ -477,7 +513,10 @@ Test content for rapid moves
     await watch_service.handle_changes(test_project, changes)
 
     # Verify final state
-    original_entity = await sync_service.entity_repository.get_by_file_path("original.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        original_entity = await sync_service.entity_repository.get_by_file_path(
+            session, "original.md"
+        )
     assert original_entity is None  # delete event is handled
 
 
@@ -535,7 +574,10 @@ This is a test file in a directory
 
     # The file path should be untouched since we're ignoring directory events
     # We'd need a separate event for the file itself to be updated
-    old_entity = await sync_service.entity_repository.get_by_file_path("old_dir/test_file.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        old_entity = await sync_service.entity_repository.get_by_file_path(
+            session, "old_dir/test_file.md"
+        )
 
     # The original entity should still exist since we only renamed the directory
     # but didn't process updates to the file itself
@@ -599,7 +641,10 @@ async def test_handle_changes_skips_deleted_project(
     await sync_service.sync(project_dir)
 
     # Verify entity was created
-    entity_before = await sync_service.entity_repository.get_by_file_path("test_note.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entity_before = await sync_service.entity_repository.get_by_file_path(
+            session, "test_note.md"
+        )
     assert entity_before is not None
 
     # Create a second project directly in the database and set it as default
@@ -611,8 +656,9 @@ async def test_handle_changes_skips_deleted_project(
         "permalink": "other-project",
         "is_active": True,
     }
-    other_project = await project_service.repository.create(project_data)
-    await project_service.repository.set_as_default(other_project.id)
+    async with db.scoped_session(project_service.session_maker) as session:
+        other_project = await project_service.repository.create(session, project_data)
+        await project_service.repository.set_as_default(session, other_project.id)
 
     # Also add to config
     config = project_service.config_manager.load_config()
@@ -645,7 +691,10 @@ async def test_handle_changes_skips_deleted_project(
     # Verify that the entity was NOT re-created or updated
     # Since the project was deleted, the database should still have the old state
     # or the entity should be gone entirely if cleanup happened
-    entity_after = await sync_service.entity_repository.get_by_file_path("test_note.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        entity_after = await sync_service.entity_repository.get_by_file_path(
+            session, "test_note.md"
+        )
 
     # The entity might be deleted or unchanged, but it should not be updated with new content
     if entity_after is not None:

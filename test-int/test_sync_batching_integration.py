@@ -7,6 +7,7 @@ from textwrap import dedent
 
 import pytest
 
+from basic_memory import db
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.repository import (
     EntityRepository,
@@ -40,18 +41,20 @@ async def _build_sync_service(
 ) -> SyncService:
     _, session_maker = engine_factory
 
-    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
-    observation_repository = ObservationRepository(session_maker, project_id=test_project.id)
-    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
-    project_repository = ProjectRepository(session_maker)
+    entity_repository = EntityRepository(project_id=test_project.id)
+    observation_repository = ObservationRepository(project_id=test_project.id)
+    relation_repository = RelationRepository(project_id=test_project.id)
+    project_repository = ProjectRepository()
     search_repository = create_search_repository(session_maker, project_id=test_project.id)
 
     entity_parser = EntityParser(project_root)
     markdown_processor = MarkdownProcessor(entity_parser)
     file_service = FileService(project_root, markdown_processor)
-    search_service = SearchService(search_repository, entity_repository, file_service)
+    search_service = SearchService(
+        search_repository, entity_repository, file_service, session_maker
+    )
     await search_service.init_search_index()
-    link_resolver = LinkResolver(entity_repository, search_service)
+    link_resolver = LinkResolver(entity_repository, search_service, session_maker)
 
     entity_service = EntityService(
         entity_parser=entity_parser,
@@ -60,6 +63,7 @@ async def _build_sync_service(
         relation_repository=relation_repository,
         file_service=file_service,
         link_resolver=link_resolver,
+        session_maker=session_maker,
         app_config=app_config,
     )
 
@@ -72,6 +76,7 @@ async def _build_sync_service(
         project_repository=project_repository,
         search_service=search_service,
         file_service=file_service,
+        session_maker=session_maker,
     )
 
 
@@ -134,9 +139,10 @@ async def test_sync_batching_handles_large_single_file_batches_and_resolves_forw
         force_full=True,
     )
 
-    alpha = await sync_service.entity_repository.get_by_file_path("notes/alpha.md")
-    large = await sync_service.entity_repository.get_by_file_path("notes/large.md")
-    target = await sync_service.entity_repository.get_by_file_path("notes/target.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        alpha = await sync_service.entity_repository.get_by_file_path(session, "notes/alpha.md")
+        large = await sync_service.entity_repository.get_by_file_path(session, "notes/large.md")
+        target = await sync_service.entity_repository.get_by_file_path(session, "notes/target.md")
 
     assert report.total == 3
     assert alpha is not None
@@ -193,8 +199,9 @@ async def test_sync_batching_circuit_breaker_skips_unchanged_broken_markdown_aft
         force_full=True,
     )
 
-    good = await sync_service.entity_repository.get_by_file_path("notes/good.md")
-    broken = await sync_service.entity_repository.get_by_file_path("notes/broken.md")
+    async with db.scoped_session(sync_service.session_maker) as session:
+        good = await sync_service.entity_repository.get_by_file_path(session, "notes/good.md")
+        broken = await sync_service.entity_repository.get_by_file_path(session, "notes/broken.md")
 
     assert [skipped.path for skipped in report.skipped_files] == ["notes/broken.md"]
     assert good is not None

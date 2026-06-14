@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory import db
 from basic_memory.services.project_service import ProjectService
 
 
@@ -30,19 +31,22 @@ async def test_get_project_from_database(project_service: ProjectService):
                 "is_active": True,
                 "is_default": False,
             }
-            await project_service.repository.create(project_data)
+            async with db.scoped_session(project_service.session_maker) as session:
+                await project_service.repository.create(session, project_data)
 
             # Verify we can get the project
-            project = await project_service.repository.get_by_name(test_project_name)
+            async with db.scoped_session(project_service.session_maker) as session:
+                project = await project_service.repository.get_by_name(session, test_project_name)
             assert project is not None
             assert project.name == test_project_name
             assert project.path == test_path
 
         finally:
             # Clean up
-            project = await project_service.repository.get_by_name(test_project_name)
-            if project:
-                await project_service.repository.delete(project.id)
+            async with db.scoped_session(project_service.session_maker) as session:
+                project = await project_service.repository.get_by_name(session, test_project_name)
+                if project:
+                    await project_service.repository.delete(session, project.id)
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@ from basic_memory.repository.project_repository import ProjectRepository
 
 
 @pytest_asyncio.fixture
-async def sample_project(project_repository: ProjectRepository) -> Project:
+async def sample_project(project_repository: ProjectRepository, session_maker) -> Project:
     """Create a sample project for testing."""
     project_data = {
         "name": "Sample Project",
@@ -24,11 +24,12 @@ async def sample_project(project_repository: ProjectRepository) -> Project:
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
-    return await project_repository.create(project_data)
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.create(session, project_data)
 
 
 @pytest.mark.asyncio
-async def test_create_project(project_repository: ProjectRepository):
+async def test_create_project(project_repository: ProjectRepository, session_maker):
     """Test creating a new project."""
     project_data = {
         "name": "Sample Project",
@@ -37,86 +38,98 @@ async def test_create_project(project_repository: ProjectRepository):
         "is_active": True,
         "is_default": False,
     }
-    project = await project_repository.create(project_data)
+    async with db.scoped_session(session_maker) as session:
+        project = await project_repository.create(session, project_data)
 
-    # Verify returned object
-    assert project.id is not None
-    assert project.name == "Sample Project"
-    assert project.description == "A sample project"
-    assert project.path == "/sample/project/path"
-    assert project.is_active is True
-    assert project.is_default is False
-    assert isinstance(project.created_at, datetime)
-    assert isinstance(project.updated_at, datetime)
+        # Verify returned object
+        assert project.id is not None
+        assert project.name == "Sample Project"
+        assert project.description == "A sample project"
+        assert project.path == "/sample/project/path"
+        assert project.is_active is True
+        assert project.is_default is False
+        assert isinstance(project.created_at, datetime)
+        assert isinstance(project.updated_at, datetime)
 
-    # Verify permalink was generated correctly
-    assert project.permalink == "sample-project"
+        # Verify permalink was generated correctly
+        assert project.permalink == "sample-project"
 
-    # Verify in database
-    found = await project_repository.find_by_id(project.id)
-    assert found is not None
-    assert found.id == project.id
-    assert found.name == project.name
-    assert found.description == project.description
-    assert found.path == project.path
-    assert found.permalink == "sample-project"
-    assert found.is_active is True
-    assert found.is_default is False
+        # Verify in database
+        found = await project_repository.find_by_id(session, project.id)
+        assert found is not None
+        assert found.id == project.id
+        assert found.name == project.name
+        assert found.description == project.description
+        assert found.path == project.path
+        assert found.permalink == "sample-project"
+        assert found.is_active is True
+        assert found.is_default is False
 
 
 @pytest.mark.asyncio
-async def test_get_by_name(project_repository: ProjectRepository, sample_project: Project):
+async def test_get_by_name(
+    project_repository: ProjectRepository, sample_project: Project, session_maker
+):
     """Test getting a project by name."""
     # Test exact match
-    found = await project_repository.get_by_name(sample_project.name)
-    assert found is not None
-    assert found.id == sample_project.id
-    assert found.name == sample_project.name
+    async with db.scoped_session(session_maker) as session:
+        found = await project_repository.get_by_name(session, sample_project.name)
+        assert found is not None
+        assert found.id == sample_project.id
+        assert found.name == sample_project.name
 
-    # Test non-existent name
-    found = await project_repository.get_by_name("Non-existent Project")
-    assert found is None
+        # Test non-existent name
+        found = await project_repository.get_by_name(session, "Non-existent Project")
+        assert found is None
 
 
 @pytest.mark.asyncio
-async def test_get_by_permalink(project_repository: ProjectRepository, sample_project: Project):
+async def test_get_by_permalink(
+    project_repository: ProjectRepository, sample_project: Project, session_maker
+):
     """Test getting a project by permalink."""
     # Verify the permalink value
     assert sample_project.permalink == "sample-project"
 
     # Test exact match
-    found = await project_repository.get_by_permalink(sample_project.permalink)
-    assert found is not None
-    assert found.id == sample_project.id
-    assert found.permalink == sample_project.permalink
+    async with db.scoped_session(session_maker) as session:
+        found = await project_repository.get_by_permalink(session, sample_project.permalink)
+        assert found is not None
+        assert found.id == sample_project.id
+        assert found.permalink == sample_project.permalink
 
-    # Test non-existent permalink
-    found = await project_repository.get_by_permalink("non-existent-project")
-    assert found is None
+        # Test non-existent permalink
+        found = await project_repository.get_by_permalink(session, "non-existent-project")
+        assert found is None
 
 
 @pytest.mark.asyncio
-async def test_get_by_path(project_repository: ProjectRepository, sample_project: Project):
+async def test_get_by_path(
+    project_repository: ProjectRepository, sample_project: Project, session_maker
+):
     """Test getting a project by path."""
     # Test exact match
-    found = await project_repository.get_by_path(sample_project.path)
-    assert found is not None
-    assert found.id == sample_project.id
-    assert found.path == sample_project.path
+    async with db.scoped_session(session_maker) as session:
+        found = await project_repository.get_by_path(session, sample_project.path)
+        assert found is not None
+        assert found.id == sample_project.id
+        assert found.path == sample_project.path
 
-    # Test with Path object
-    found = await project_repository.get_by_path(Path(sample_project.path))
-    assert found is not None
-    assert found.id == sample_project.id
-    assert found.path == sample_project.path
+        # Test with Path object
+        found = await project_repository.get_by_path(session, Path(sample_project.path))
+        assert found is not None
+        assert found.id == sample_project.id
+        assert found.path == sample_project.path
 
-    # Test non-existent path
-    found = await project_repository.get_by_path("/non/existent/path")
-    assert found is None
+        # Test non-existent path
+        found = await project_repository.get_by_path(session, "/non/existent/path")
+        assert found is None
 
 
 @pytest.mark.asyncio
-async def test_get_default_project(project_repository: ProjectRepository, test_project: Project):
+async def test_get_default_project(
+    project_repository: ProjectRepository, test_project: Project, session_maker
+):
     """Test getting the default project."""
     # We already have a default project from the test_project fixture
     # So just create a non-default project
@@ -128,55 +141,62 @@ async def test_get_default_project(project_repository: ProjectRepository, test_p
         "is_default": None,  # Not the default project
     }
 
-    await project_repository.create(non_default_project_data)
+    async with db.scoped_session(session_maker) as session:
+        await project_repository.create(session, non_default_project_data)
 
-    # Get default project
-    default_project = await project_repository.get_default_project()
-    assert default_project is not None
-    assert default_project.is_default is True
+        # Get default project
+        default_project = await project_repository.get_default_project(session)
+        assert default_project is not None
+        assert default_project.is_default is True
 
 
 @pytest.mark.asyncio
-async def test_get_default_project_with_false_values(project_repository: ProjectRepository):
+async def test_get_default_project_with_false_values(
+    project_repository: ProjectRepository, session_maker
+):
     """Test that get_default_project ignores projects with is_default=False.
 
     Regression test for bug where is_not(None) matched both True and False,
     causing MultipleResultsFound when multiple projects had different boolean values.
     """
     # Create projects with explicit is_default values
-    project_true = await project_repository.create(
-        {
-            "name": "Default Project",
-            "path": "/default/path",
-            "is_default": True,
-        }
-    )
+    async with db.scoped_session(session_maker) as session:
+        project_true = await project_repository.create(
+            session,
+            {
+                "name": "Default Project",
+                "path": "/default/path",
+                "is_default": True,
+            },
+        )
 
-    await project_repository.create(
-        {
-            "name": "Not Default Project",
-            "path": "/not-default/path",
-            "is_default": False,
-        }
-    )
+        await project_repository.create(
+            session,
+            {
+                "name": "Not Default Project",
+                "path": "/not-default/path",
+                "is_default": False,
+            },
+        )
 
-    await project_repository.create(
-        {
-            "name": "Null Default Project",
-            "path": "/null/path",
-            "is_default": None,
-        }
-    )
+        await project_repository.create(
+            session,
+            {
+                "name": "Null Default Project",
+                "path": "/null/path",
+                "is_default": None,
+            },
+        )
 
-    # Should return only the project with is_default=True
-    default = await project_repository.get_default_project()
-    assert default is not None
-    assert default.id == project_true.id
-    assert default.name == "Default Project"
+        # Should return only the project with is_default=True
+        default = await project_repository.get_default_project(session)
+        assert default is not None
+        assert default.id == project_true.id
+        assert default.name == "Default Project"
 
 
 @pytest.mark.asyncio
-async def test_get_active_projects(project_repository: ProjectRepository):
+async def test_get_active_projects(project_repository: ProjectRepository, session_maker):
     """Test getting all active projects."""
     # Create active and inactive projects
     active_project_data = {
@@ -192,27 +212,30 @@ async def test_get_active_projects(project_repository: ProjectRepository):
         "is_active": False,
     }
 
-    await project_repository.create(active_project_data)
-    await project_repository.create(inactive_project_data)
+    async with db.scoped_session(session_maker) as session:
+        await project_repository.create(session, active_project_data)
+        await project_repository.create(session, inactive_project_data)
 
-    # Get active projects
-    active_projects = await project_repository.get_active_projects()
-    assert len(active_projects) >= 1  # Could be more from other tests
+        # Get active projects
+        active_projects = await project_repository.get_active_projects(session)
+        assert len(active_projects) >= 1  # Could be more from other tests
 
-    # Verify that all returned projects are active
-    for project in active_projects:
-        assert project.is_active is True
+        # Verify that all returned projects are active
+        for project in active_projects:
+            assert project.is_active is True
 
-    # Verify active project is included
-    active_names = [p.name for p in active_projects]
-    assert "Active Project" in active_names
+        # Verify active project is included
+        active_names = [p.name for p in active_projects]
+        assert "Active Project" in active_names
 
-    # Verify inactive project is not included
-    assert "Inactive Project" not in active_names
+        # Verify inactive project is not included
+        assert "Inactive Project" not in active_names
 
 
 @pytest.mark.asyncio
-async def test_set_as_default(project_repository: ProjectRepository, test_project: Project):
+async def test_set_as_default(
+    project_repository: ProjectRepository, test_project: Project, session_maker
+):
     """Test setting a project as default."""
     # The test_project fixture is already the default
     # Create a non-default project
@@ -226,30 +249,33 @@ async def test_set_as_default(project_repository: ProjectRepository, test_projec
 
     # Get the existing default project
     project1 = test_project
-    project2 = await project_repository.create(project2_data)
+    async with db.scoped_session(session_maker) as session:
+        project2 = await project_repository.create(session, project2_data)
 
-    # Verify initial state
-    assert project1.is_default is True
-    assert project2.is_default is None
+        # Verify initial state
+        assert project1.is_default is True
+        assert project2.is_default is None
 
-    # Set project2 as default
-    updated_project2 = await project_repository.set_as_default(project2.id)
-    assert updated_project2 is not None
-    assert updated_project2.is_default is True
+        # Set project2 as default
+        updated_project2 = await project_repository.set_as_default(session, project2.id)
+        assert updated_project2 is not None
+        assert updated_project2.is_default is True
 
-    # Verify project1 is no longer default
-    project1_updated = await project_repository.find_by_id(project1.id)
-    assert project1_updated is not None
-    assert project1_updated.is_default is None
+        # Verify project1 is no longer default
+        project1_updated = await project_repository.find_by_id(session, project1.id)
+        assert project1_updated is not None
+        assert project1_updated.is_default is None
 
-    # Verify project2 is now default
-    project2_updated = await project_repository.find_by_id(project2.id)
-    assert project2_updated is not None
-    assert project2_updated.is_default is True
+        # Verify project2 is now default
+        project2_updated = await project_repository.find_by_id(session, project2.id)
+        assert project2_updated is not None
+        assert project2_updated.is_default is True
 
 
 @pytest.mark.asyncio
-async def test_update_project(project_repository: ProjectRepository, sample_project: Project):
+async def test_update_project(
+    project_repository: ProjectRepository, sample_project: Project, session_maker
+):
     """Test updating a project."""
     # Update project
     updated_data = {
@@ -257,80 +283,92 @@ async def test_update_project(project_repository: ProjectRepository, sample_proj
         "description": "Updated description",
         "path": "/updated/path",
     }
-    updated_project = await project_repository.update(sample_project.id, updated_data)
+    async with db.scoped_session(session_maker) as session:
+        updated_project = await project_repository.update(session, sample_project.id, updated_data)
 
-    # Verify returned object
-    assert updated_project is not None
-    assert updated_project.id == sample_project.id
-    assert updated_project.name == "Updated Project Name"
-    assert updated_project.description == "Updated description"
-    assert updated_project.path == "/updated/path"
+        # Verify returned object
+        assert updated_project is not None
+        assert updated_project.id == sample_project.id
+        assert updated_project.name == "Updated Project Name"
+        assert updated_project.description == "Updated description"
+        assert updated_project.path == "/updated/path"
 
-    # Verify permalink was updated based on new name
-    assert updated_project.permalink == "updated-project-name"
+        # Verify permalink was updated based on new name
+        assert updated_project.permalink == "updated-project-name"
 
-    # Verify in database
-    found = await project_repository.find_by_id(sample_project.id)
-    assert found is not None
-    assert found.name == "Updated Project Name"
-    assert found.description == "Updated description"
-    assert found.path == "/updated/path"
-    assert found.permalink == "updated-project-name"
+        # Verify in database
+        found = await project_repository.find_by_id(session, sample_project.id)
+        assert found is not None
+        assert found.name == "Updated Project Name"
+        assert found.description == "Updated description"
+        assert found.path == "/updated/path"
+        assert found.permalink == "updated-project-name"
 
-    # Verify we can find by the new permalink
-    found_by_permalink = await project_repository.get_by_permalink("updated-project-name")
-    assert found_by_permalink is not None
-    assert found_by_permalink.id == sample_project.id
+        # Verify we can find by the new permalink
+        found_by_permalink = await project_repository.get_by_permalink(
+            session, "updated-project-name"
+        )
+        assert found_by_permalink is not None
+        assert found_by_permalink.id == sample_project.id
 
 
 @pytest.mark.asyncio
-async def test_delete_project(project_repository: ProjectRepository, sample_project: Project):
+async def test_delete_project(
+    project_repository: ProjectRepository, sample_project: Project, session_maker
+):
     """Test deleting a project."""
     # Delete project
-    result = await project_repository.delete(sample_project.id)
-    assert result is True
+    async with db.scoped_session(session_maker) as session:
+        result = await project_repository.delete(session, sample_project.id)
+        assert result is True
 
-    # Verify deletion
-    deleted = await project_repository.find_by_id(sample_project.id)
-    assert deleted is None
+        # Verify deletion
+        deleted = await project_repository.find_by_id(session, sample_project.id)
+        assert deleted is None
 
-    # Verify with direct database query
-    async with db.scoped_session(project_repository.session_maker) as session:
+        # Verify with direct database query
         query = select(Project).filter(Project.id == sample_project.id)
         result = await session.execute(query)
         assert result.scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio
-async def test_delete_nonexistent_project(project_repository: ProjectRepository):
+async def test_delete_nonexistent_project(project_repository: ProjectRepository, session_maker):
     """Test deleting a project that doesn't exist."""
-    result = await project_repository.delete(999)  # Non-existent ID
+    async with db.scoped_session(session_maker) as session:
+        result = await project_repository.delete(session, 999)  # Non-existent ID
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_update_path(project_repository: ProjectRepository, sample_project: Project):
+async def test_update_path(
+    project_repository: ProjectRepository, sample_project: Project, session_maker
+):
     """Test updating a project's path."""
     new_path = "/new/project/path"
 
     # Update the project path
-    updated_project = await project_repository.update_path(sample_project.id, new_path)
+    async with db.scoped_session(session_maker) as session:
+        updated_project = await project_repository.update_path(session, sample_project.id, new_path)
 
-    # Verify returned object
-    assert updated_project is not None
-    assert updated_project.id == sample_project.id
-    assert updated_project.path == new_path
-    assert updated_project.name == sample_project.name  # Other fields unchanged
+        # Verify returned object
+        assert updated_project is not None
+        assert updated_project.id == sample_project.id
+        assert updated_project.path == new_path
+        assert updated_project.name == sample_project.name  # Other fields unchanged
 
-    # Verify in database
-    found = await project_repository.find_by_id(sample_project.id)
-    assert found is not None
-    assert found.path == new_path
-    assert found.name == sample_project.name
+        # Verify in database
+        found = await project_repository.find_by_id(session, sample_project.id)
+        assert found is not None
+        assert found.path == new_path
+        assert found.name == sample_project.name
 
 
 @pytest.mark.asyncio
-async def test_update_path_nonexistent_project(project_repository: ProjectRepository):
+async def test_update_path_nonexistent_project(
+    project_repository: ProjectRepository, session_maker
+):
     """Test updating path for a project that doesn't exist."""
-    result = await project_repository.update_path(999, "/some/path")  # Non-existent ID
+    async with db.scoped_session(session_maker) as session:
+        result = await project_repository.update_path(session, 999, "/some/path")  # Non-existent ID
     assert result is None

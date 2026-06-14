@@ -6,6 +6,7 @@ from textwrap import dedent
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig
 from basic_memory.repository import EntityRepository
 from basic_memory.sync.sync_service import SyncService
@@ -20,6 +21,18 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
     """Create a test file with given content."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
+
+
+async def _find_entities(sync_service: SyncService, entity_repository: EntityRepository):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return list(await entity_repository.find_all(session))
+
+
+async def _get_entity_by_file_path(
+    sync_service: SyncService, entity_repository: EntityRepository, file_path: str
+):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await entity_repository.get_by_file_path(session, file_path)
 
 
 class TestUtilityFunctions:
@@ -155,15 +168,15 @@ class TestSyncConflictHandling:
         await sync_service.sync(project_config.home)
 
         # Verify both entities exist
-        entities = await entity_repository.find_all()
+        entities = await _find_entities(sync_service, entity_repository)
         assert len(entities) == 2
 
         # Now simulate a move where doc1.md tries to move to doc2.md's location
         # This should be handled gracefully, not throw an IntegrityError
 
         # First, get the entities
-        entity1 = await entity_repository.get_by_file_path("doc1.md")
-        entity2 = await entity_repository.get_by_file_path("doc2.md")
+        entity1 = await _get_entity_by_file_path(sync_service, entity_repository, "doc1.md")
+        entity2 = await _get_entity_by_file_path(sync_service, entity_repository, "doc2.md")
 
         assert entity1 is not None
         assert entity2 is not None
@@ -210,7 +223,7 @@ class TestSyncConflictHandling:
         await sync_service.sync(project_config.home)
 
         # Verify both entities were created with unique permalinks
-        entities = await entity_repository.find_all()
+        entities = await _find_entities(sync_service, entity_repository)
         assert len(entities) == 2
 
         # Check that permalinks are unique
@@ -255,7 +268,7 @@ class TestSyncConflictHandling:
         await sync_service.sync(project_config.home)
 
         # Verify entities were created
-        entities = await entity_repository.find_all()
+        entities = await _find_entities(sync_service, entity_repository)
 
         # On case-insensitive file systems (macOS, Windows), only one entity will be created
         # On case-sensitive file systems (Linux), two entities will be created
@@ -296,9 +309,9 @@ class TestSyncConflictHandling:
         # This is the kind of scenario that caused the original bug
 
         # Get the entities
-        entity_a = await entity_repository.get_by_file_path("file-a.md")
-        entity_b = await entity_repository.get_by_file_path("file-b.md")
-        entity_temp = await entity_repository.get_by_file_path("temp.md")
+        entity_a = await _get_entity_by_file_path(sync_service, entity_repository, "file-a.md")
+        entity_b = await _get_entity_by_file_path(sync_service, entity_repository, "file-b.md")
+        entity_temp = await _get_entity_by_file_path(sync_service, entity_repository, "temp.md")
 
         assert all([entity_a, entity_b, entity_temp])
 
@@ -308,7 +321,7 @@ class TestSyncConflictHandling:
             # If this doesn't raise an exception, the conflict was resolved
 
             # Verify the state is consistent
-            updated_entities = await entity_repository.find_all()
+            updated_entities = await _find_entities(sync_service, entity_repository)
             file_paths = [entity.file_path for entity in updated_entities]
 
             # Should not have duplicate file paths

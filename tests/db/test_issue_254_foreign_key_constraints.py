@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory import db
 from basic_memory.services.project_service import ProjectService
 
 
@@ -52,15 +53,9 @@ async def test_issue_254_foreign_key_constraint_fix(project_service: ProjectServ
         from basic_memory.repository.observation_repository import ObservationRepository
         from basic_memory.repository.relation_repository import RelationRepository
 
-        entity_repo = EntityRepository(
-            project_service.repository.session_maker, project_id=project.id
-        )
-        obs_repo = ObservationRepository(
-            project_service.repository.session_maker, project_id=project.id
-        )
-        rel_repo = RelationRepository(
-            project_service.repository.session_maker, project_id=project.id
-        )
+        entity_repo = EntityRepository(project_id=project.id)
+        obs_repo = ObservationRepository(project_id=project.id)
+        rel_repo = RelationRepository(project_id=project.id)
 
         # Create entity
         entity_data = {
@@ -74,23 +69,24 @@ async def test_issue_254_foreign_key_constraint_fix(project_service: ProjectServ
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),
         }
-        entity = await entity_repo.create(entity_data)
+        async with db.scoped_session(project_service.session_maker) as session:
+            entity = await entity_repo.create(session, entity_data)
 
-        # Create observation linked to entity
-        observation_data = {
-            "entity_id": entity.id,
-            "content": "This observation should be cascade deleted",
-            "category": "test",
-        }
-        observation = await obs_repo.create(observation_data)
+            # Create observation linked to entity
+            observation_data = {
+                "entity_id": entity.id,
+                "content": "This observation should be cascade deleted",
+                "category": "test",
+            }
+            observation = await obs_repo.create(session, observation_data)
 
-        # Create relation involving the entity
-        relation_data = {
-            "from_id": entity.id,
-            "to_name": "some-other-entity",
-            "relation_type": "relates-to",
-        }
-        relation = await rel_repo.create(relation_data)
+            # Create relation involving the entity
+            relation_data = {
+                "from_id": entity.id,
+                "to_name": "some-other-entity",
+                "relation_type": "relates-to",
+            }
+            relation = await rel_repo.create(session, relation_data)
 
         # Step 3: Attempt to remove the project
         # This is where issue #254 manifested - should NOT raise "FOREIGN KEY constraint failed"
@@ -112,14 +108,15 @@ async def test_issue_254_foreign_key_constraint_fix(project_service: ProjectServ
         assert removed_project is None, "Project should have been removed"
 
         # Step 5: Verify related data was cascade deleted
-        remaining_entity = await entity_repo.find_by_id(entity.id)
-        assert remaining_entity is None, "Entity should have been cascade deleted"
+        async with db.scoped_session(project_service.session_maker) as session:
+            remaining_entity = await entity_repo.find_by_id(session, entity.id)
+            assert remaining_entity is None, "Entity should have been cascade deleted"
 
-        remaining_observation = await obs_repo.find_by_id(observation.id)
-        assert remaining_observation is None, "Observation should have been cascade deleted"
+            remaining_observation = await obs_repo.find_by_id(session, observation.id)
+            assert remaining_observation is None, "Observation should have been cascade deleted"
 
-        remaining_relation = await rel_repo.find_by_id(relation.id)
-        assert remaining_relation is None, "Relation should have been cascade deleted"
+            remaining_relation = await rel_repo.find_by_id(session, relation.id)
+            assert remaining_relation is None, "Relation should have been cascade deleted"
 
 
 @pytest.mark.asyncio
@@ -141,9 +138,7 @@ async def test_issue_254_reproduction(project_service: ProjectService):
 
         from basic_memory.repository.entity_repository import EntityRepository
 
-        entity_repo = EntityRepository(
-            project_service.repository.session_maker, project_id=project.id
-        )
+        entity_repo = EntityRepository(project_id=project.id)
 
         entity_data = {
             "title": "Reproduction Entity",
@@ -156,7 +151,8 @@ async def test_issue_254_reproduction(project_service: ProjectService):
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),
         }
-        await entity_repo.create(entity_data)
+        async with db.scoped_session(project_service.session_maker) as session:
+            await entity_repo.create(session, entity_data)
 
         # This should eventually work without errors once issue #254 is fixed
         # with pytest.raises(Exception) as exc_info:

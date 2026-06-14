@@ -26,7 +26,7 @@ class _Repo:
     def __post_init__(self):
         self.calls = 0
 
-    async def get_active_projects(self):
+    async def get_active_projects(self, _session):
         self.calls += 1
         if self.projects_side_effect is not None:
             idx = min(self.calls - 1, len(self.projects_side_effect) - 1)
@@ -34,15 +34,15 @@ class _Repo:
         return self.projects_return or []
 
 
-def _watch_service(config: BasicMemoryConfig, repo: _Repo) -> WatchService:
-    return WatchService(config, cast(Any, repo), quiet=True)
+def _watch_service(config: BasicMemoryConfig, repo: _Repo, session_maker) -> WatchService:
+    return WatchService(config, cast(Any, repo), session_maker, quiet=True)
 
 
 @pytest.mark.asyncio
-async def test_schedule_restart_uses_config_interval(monkeypatch):
+async def test_schedule_restart_uses_config_interval(monkeypatch, session_maker):
     config = BasicMemoryConfig(watch_project_reload_interval=2)
     repo = _Repo()
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     stop_event = asyncio.Event()
     slept: list[int] = []
@@ -60,10 +60,10 @@ async def test_schedule_restart_uses_config_interval(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_watch_projects_cycle_handles_empty_project_list(monkeypatch):
+async def test_watch_projects_cycle_handles_empty_project_list(monkeypatch, session_maker):
     config = BasicMemoryConfig()
     repo = _Repo()
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     stop_event = asyncio.Event()
     stop_event.set()
@@ -91,10 +91,10 @@ async def test_watch_projects_cycle_handles_empty_project_list(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_handles_no_projects(monkeypatch):
+async def test_run_handles_no_projects(monkeypatch, session_maker):
     config = BasicMemoryConfig()
     repo = _Repo(projects_return=[])
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     slept: list[int] = []
 
@@ -116,7 +116,7 @@ async def test_run_handles_no_projects(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path):
+async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path, session_maker):
     # Projects must be registered in app_config.projects as local-mode, otherwise
     # _select_projects_to_watch() treats unknown names as CLOUD and filters them
     # out, which would short-circuit through the empty-projects guard in run().
@@ -136,7 +136,7 @@ async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path):
             ],
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     cycle_count = 0
 
@@ -160,7 +160,7 @@ async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_filters_cloud_only_projects_each_cycle(monkeypatch, tmp_path):
+async def test_run_filters_cloud_only_projects_each_cycle(monkeypatch, tmp_path, session_maker):
     """Cloud-only projects (slug path, no local directory) are filtered out."""
     config = BasicMemoryConfig(
         watch_project_reload_interval=1,
@@ -175,7 +175,7 @@ async def test_run_filters_cloud_only_projects_each_cycle(monkeypatch, tmp_path)
             Project(id=2, name="cloud-only", path="cloud-slug", permalink="cloud-only"),
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     seen_project_names: list[list[str]] = []
 
@@ -196,7 +196,7 @@ async def test_run_filters_cloud_only_projects_each_cycle(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_run_keeps_cloud_projects_with_local_bisync(monkeypatch, tmp_path):
+async def test_run_keeps_cloud_projects_with_local_bisync(monkeypatch, tmp_path, session_maker):
     """Cloud projects with an absolute path (local bisync copy) are kept for watching."""
     config = BasicMemoryConfig(
         watch_project_reload_interval=1,
@@ -216,7 +216,7 @@ async def test_run_keeps_cloud_projects_with_local_bisync(monkeypatch, tmp_path)
             ),
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     seen_project_names: list[list[str]] = []
 
@@ -237,7 +237,7 @@ async def test_run_keeps_cloud_projects_with_local_bisync(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_run_filters_empty_path_local_mode_project(monkeypatch, tmp_path):
+async def test_run_filters_empty_path_local_mode_project(monkeypatch, tmp_path, session_maker):
     """A project with an empty path is skipped even when mode is LOCAL (issue #949).
 
     ProjectEntry.mode defaults to LOCAL, so a hand-edited config entry of
@@ -259,7 +259,7 @@ async def test_run_filters_empty_path_local_mode_project(monkeypatch, tmp_path):
             Project(id=2, name="empty-path", path="", permalink="empty-path"),
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     seen_project_names: list[list[str]] = []
 
@@ -280,7 +280,9 @@ async def test_run_filters_empty_path_local_mode_project(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_filters_orphan_db_project_absent_from_config(monkeypatch, tmp_path):
+async def test_run_filters_orphan_db_project_absent_from_config(
+    monkeypatch, tmp_path, session_maker
+):
     """A DB row not present in config is skipped even with an absolute path.
 
     Config is the source of truth. Reconciliation normally deletes orphan rows,
@@ -300,7 +302,7 @@ async def test_run_filters_orphan_db_project_absent_from_config(monkeypatch, tmp
             Project(id=2, name="orphan", path=str(tmp_path / "orphan"), permalink="orphan"),
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     seen_project_names: list[list[str]] = []
 
@@ -321,14 +323,14 @@ async def test_run_filters_orphan_db_project_absent_from_config(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_run_continues_after_cycle_error(monkeypatch, tmp_path):
+async def test_run_continues_after_cycle_error(monkeypatch, tmp_path, session_maker):
     config = BasicMemoryConfig(
         projects={"test": {"path": str(tmp_path / "test"), "mode": "local"}},
     )
     repo = _Repo(
         projects_return=[Project(id=1, name="test", path=str(tmp_path / "test"), permalink="test")]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     call_count = 0
     slept: list[int] = []
@@ -358,14 +360,14 @@ async def test_run_continues_after_cycle_error(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_timer_task_cancelled_properly(monkeypatch, tmp_path):
+async def test_timer_task_cancelled_properly(monkeypatch, tmp_path, session_maker):
     config = BasicMemoryConfig(
         projects={"test": {"path": str(tmp_path / "test"), "mode": "local"}},
     )
     repo = _Repo(
         projects_return=[Project(id=1, name="test", path=str(tmp_path / "test"), permalink="test")]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     created_tasks: list[asyncio.Task] = []
     real_create_task = asyncio.create_task
@@ -399,7 +401,7 @@ async def test_timer_task_cancelled_properly(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_new_project_addition_scenario(monkeypatch, tmp_path):
+async def test_new_project_addition_scenario(monkeypatch, tmp_path, session_maker):
     config = BasicMemoryConfig(
         projects={
             "existing": {"path": str(tmp_path / "existing"), "mode": "local"},
@@ -416,7 +418,7 @@ async def test_new_project_addition_scenario(monkeypatch, tmp_path):
     ]
 
     repo = _Repo(projects_side_effect=[initial_projects, initial_projects, updated_projects])
-    watch_service = _watch_service(config, repo)
+    watch_service = _watch_service(config, repo, session_maker)
 
     cycle_count = 0
     project_lists_used: list[list[Project]] = []

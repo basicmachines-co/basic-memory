@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from basic_memory import db
 from basic_memory.config import ProjectEntry
 from basic_memory.models import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
@@ -15,6 +16,31 @@ from basic_memory.schemas.v2 import ProjectResolveResponse
 def _project_item(project: ProjectItem | None) -> ProjectItem:
     assert project is not None
     return project
+
+
+async def _find_projects(project_repository, session_maker):
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.find_all(session)
+
+
+async def _delete_project(project_repository, session_maker, project_id: int) -> bool:
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.delete(session, project_id)
+
+
+async def _get_project_by_name(project_repository, session_maker, name: str):
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.get_by_name(session, name)
+
+
+async def _get_default_project(project_repository, session_maker):
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.get_default_project(session)
+
+
+async def _update_project(project_repository, session_maker, project_id: int, data: dict):
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.update(session, project_id, data)
 
 
 @pytest.mark.asyncio
@@ -63,6 +89,7 @@ async def test_add_project_response_reflects_promoted_default(
     config_manager,
     config_home,
     project_repository,
+    session_maker,
 ):
     """Regression #974/#985: POST response should echo persisted default promotion."""
     main_home = config_home / "basic-memory"
@@ -78,8 +105,8 @@ async def test_add_project_response_reflects_promoted_default(
     )
     config_manager.save_config(fresh_config)
 
-    for project in await project_repository.find_all():
-        await project_repository.delete(project.id)
+    for project in await _find_projects(project_repository, session_maker):
+        await _delete_project(project_repository, session_maker, project.id)
 
     response = await client.post(
         f"{v2_projects_url}/",
@@ -153,14 +180,21 @@ async def test_update_project_not_found(client: AsyncClient, v2_projects_url, tm
 
 @pytest.mark.asyncio
 async def test_set_default_project_by_id(
-    client: AsyncClient, test_project: Project, v2_projects_url, project_repository, project_service
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+    project_repository,
+    project_service,
+    session_maker,
 ):
     """Test setting a project as default by external_id."""
     # Create a second project to test setting default
     await project_service.add_project("second-project", "/tmp/second-project")
 
     # Get the created project from the repository to get its external_id
-    created_project = await project_repository.get_by_name("second-project")
+    created_project = await _get_project_by_name(
+        project_repository, session_maker, "second-project"
+    )
     assert created_project is not None
 
     # Set the second project as default
@@ -180,7 +214,7 @@ async def test_set_default_project_by_id(
 
 @pytest.mark.asyncio
 async def test_set_default_project_when_none_is_set(
-    client: AsyncClient, test_project: Project, v2_projects_url, project_repository
+    client: AsyncClient, test_project: Project, v2_projects_url, project_repository, session_maker
 ):
     """Regression for #975: setting a default must succeed when none is set.
 
@@ -188,8 +222,8 @@ async def test_set_default_project_when_none_is_set(
     the command reached for when no default exists, so the endpoint must not 404.
     """
     # Clear any existing default so no row has is_default set.
-    await project_repository.update(test_project.id, {"is_default": None})
-    assert await project_repository.get_default_project() is None
+    await _update_project(project_repository, session_maker, test_project.id, {"is_default": None})
+    assert await _get_default_project(project_repository, session_maker) is None
 
     response = await client.put(f"{v2_projects_url}/{test_project.external_id}/default")
 
@@ -204,7 +238,7 @@ async def test_set_default_project_when_none_is_set(
     assert new_project.is_default is True
 
     # A follow-up read-back must now return the newly set default.
-    default_project = await project_repository.get_default_project()
+    default_project = await _get_default_project(project_repository, session_maker)
     assert default_project is not None
     assert default_project.external_id == test_project.external_id
 
@@ -220,14 +254,19 @@ async def test_set_default_project_not_found(client: AsyncClient, v2_projects_ur
 
 @pytest.mark.asyncio
 async def test_delete_project_by_id(
-    client: AsyncClient, test_project: Project, v2_projects_url, project_repository, project_service
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+    project_repository,
+    project_service,
+    session_maker,
 ):
     """Test deleting a project by external_id."""
     # Create a second project since we can't delete the default
     await project_service.add_project("to-delete", "/tmp/to-delete")
 
     # Get the created project from the repository to get its external_id
-    created_project = await project_repository.get_by_name("to-delete")
+    created_project = await _get_project_by_name(project_repository, session_maker, "to-delete")
     assert created_project is not None
 
     # Delete it
@@ -247,7 +286,12 @@ async def test_delete_project_by_id(
 
 @pytest.mark.asyncio
 async def test_delete_project_with_delete_notes_param(
-    client: AsyncClient, test_project: Project, v2_projects_url, project_repository, project_service
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+    project_repository,
+    project_service,
+    session_maker,
 ):
     """Test deleting a project with delete_notes parameter."""
     # Create a project in a temp directory
@@ -262,7 +306,9 @@ async def test_delete_project_with_delete_notes_param(
         await project_service.add_project("delete-with-notes", str(project_path))
 
         # Get the created project from the repository to get its external_id
-        created_project = await project_repository.get_by_name("delete-with-notes")
+        created_project = await _get_project_by_name(
+            project_repository, session_maker, "delete-with-notes"
+        )
         assert created_project is not None
 
         # Delete with delete_notes=true
@@ -335,14 +381,19 @@ async def test_project_id_stability_after_rename(
 
 @pytest.mark.asyncio
 async def test_update_project_active_status(
-    client: AsyncClient, test_project: Project, v2_projects_url, project_repository, project_service
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+    project_repository,
+    project_service,
+    session_maker,
 ):
     """Test updating a project's active status by external_id."""
     # Create a non-default project
     await project_service.add_project("test-active", "/tmp/test-active")
 
     # Get the created project from the repository to get its external_id
-    created_project = await project_repository.get_by_name("test-active")
+    created_project = await _get_project_by_name(project_repository, session_maker, "test-active")
     assert created_project is not None
 
     # Update active status
@@ -447,7 +498,7 @@ async def test_resolve_project_not_found(client: AsyncClient, v2_projects_url):
 
 @pytest.mark.asyncio
 async def test_resolve_project_not_found_fresh_install_names_setup_command(
-    client: AsyncClient, v2_projects_url, project_repository
+    client: AsyncClient, v2_projects_url, project_repository, session_maker
 ):
     """#974 follow-up: a fresh install fails its first read with a bare not-found.
 
@@ -456,8 +507,8 @@ async def test_resolve_project_not_found_fresh_install_names_setup_command(
     the configured default 404s. With an empty projects table the error must point
     at first-run setup instead of reading like a broken install.
     """
-    for project in await project_repository.find_all():
-        await project_repository.delete(project.id)
+    for project in await _find_projects(project_repository, session_maker):
+        await _delete_project(project_repository, session_maker, project.id)
 
     response = await client.post(f"{v2_projects_url}/resolve", json={"identifier": "main"})
 

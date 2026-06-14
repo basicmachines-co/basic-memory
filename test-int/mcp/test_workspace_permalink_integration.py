@@ -13,6 +13,7 @@ import pytest_asyncio
 from fastmcp import Client
 from httpx import ASGITransport, AsyncClient as HttpxAsyncClient
 
+from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry
 from basic_memory.mcp import async_client
 from basic_memory.mcp import project_context
@@ -93,16 +94,18 @@ async def alternate_project(
     alternate_path.mkdir(parents=True, exist_ok=True)
 
     _, session_maker = engine_factory
-    project_repository = ProjectRepository(session_maker)
-    project = await project_repository.create(
-        {
-            "name": "alternate-project",
-            "description": "Non-default project for prefix routing tests",
-            "path": str(alternate_path),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
+    project_repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        project = await project_repository.create(
+            session,
+            {
+                "name": "alternate-project",
+                "description": "Non-default project for prefix routing tests",
+                "path": str(alternate_path),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
 
     app_config.projects[project.name] = ProjectEntry(path=str(alternate_path))
     config_manager.save_config(app_config)

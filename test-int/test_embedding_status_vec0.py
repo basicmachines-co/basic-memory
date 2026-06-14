@@ -93,17 +93,19 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
 
     # --- Seed a real entity + search_index row so counts are non-zero ---
     # Use the repository so model-level defaults (external_id) are applied.
-    entity_repo = EntityRepository(session_maker, project_id=project_id)
-    entity = await entity_repo.create(
-        {
-            "title": "Vec Note",
-            "note_type": "note",
-            "content_type": "text/markdown",
-            "project_id": project_id,
-            "permalink": "vec-note",
-            "file_path": "vec-note.md",
-        }
-    )
+    entity_repo = EntityRepository(project_id=project_id)
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repo.create(
+            session,
+            {
+                "title": "Vec Note",
+                "note_type": "note",
+                "content_type": "text/markdown",
+                "project_id": project_id,
+                "permalink": "vec-note",
+                "file_path": "vec-note.md",
+            },
+        )
     entity_id = entity.id
 
     async with db.scoped_session(session_maker) as session:
@@ -151,8 +153,8 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
     await _engine.dispose()
 
     # --- Query status through a fresh ProjectRepository (no extension preloaded) ---
-    project_repository = ProjectRepository(session_maker)
-    project_service = ProjectService(project_repository)
+    project_repository = ProjectRepository()
+    project_service = ProjectService(project_repository, session_maker)
 
     # Test fixtures run with semantic search disabled; the status call reads the global
     # ConfigManager, so patch it to report semantic enabled for this regression path.

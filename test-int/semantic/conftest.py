@@ -242,16 +242,18 @@ async def create_search_service(
     engine, session_maker = engine_factory_result
 
     # Create test project
-    project_repo = ProjectRepository(session_maker)
-    project = await project_repo.create(
-        {
-            "name": "bench-project",
-            "description": "Semantic benchmark project",
-            "path": str(tmp_path),
-            "is_active": True,
-            "is_default": True,
-        }
-    )
+    project_repo = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        project = await project_repo.create(
+            session,
+            {
+                "name": "bench-project",
+                "description": "Semantic benchmark project",
+                "path": str(tmp_path),
+                "is_active": True,
+                "is_default": True,
+            },
+        )
 
     # Build app config
     semantic_enabled = combo.provider_name is not None
@@ -290,11 +292,16 @@ async def create_search_service(
             repo._vector_tables_initialized = False
         search_repo = repo
 
-    entity_repo = EntityRepository(session_maker, project_id=project.id)
+    entity_repo = EntityRepository(project_id=project.id)
     entity_parser = EntityParser(tmp_path)
     markdown_processor = MarkdownProcessor(entity_parser)
     file_service = FileService(tmp_path, markdown_processor)
 
-    service = SearchService(search_repo, entity_repo, file_service)
+    service = SearchService(
+        search_repo,
+        entity_repo,
+        file_service,
+        session_maker=session_maker,
+    )
     await service.init_search_index()
     return service

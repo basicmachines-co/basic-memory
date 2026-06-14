@@ -17,6 +17,7 @@ from textwrap import dedent
 
 import pytest
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig
 from basic_memory.indexing.models import IndexingBatchResult
 from basic_memory.models import Project
@@ -27,9 +28,15 @@ async def _current_project(sync_service: SyncService) -> Project:
     project_id = sync_service.entity_repository.project_id
     assert project_id is not None
 
-    project = await sync_service.project_repository.find_by_id(project_id)
+    async with db.scoped_session(sync_service.session_maker) as session:
+        project = await sync_service.project_repository.find_by_id(session, project_id)
     assert project is not None
     return project
+
+
+async def _find_unresolved_relations(sync_service: SyncService):
+    async with db.scoped_session(sync_service.session_maker) as session:
+        return await sync_service.relation_repository.find_unresolved_relations(session)
 
 
 def _last_scan_timestamp(project: Project) -> float:
@@ -751,7 +758,7 @@ async def test_relation_resolution_skipped_when_no_changes(
     assert len(report1.new) == 1
 
     # Check that there are unresolved relations (target doesn't exist)
-    unresolved = await sync_service.relation_repository.find_unresolved_relations()
+    unresolved = await _find_unresolved_relations(sync_service)
     unresolved_count_before = len(unresolved)
     assert unresolved_count_before > 0  # Should have unresolved relation to [[Target File]]
 
@@ -763,7 +770,7 @@ async def test_relation_resolution_skipped_when_no_changes(
     assert report2.total == 0  # No changes detected
 
     # Verify unresolved relations count unchanged (resolution was skipped)
-    unresolved_after = await sync_service.relation_repository.find_unresolved_relations()
+    unresolved_after = await _find_unresolved_relations(sync_service)
     assert len(unresolved_after) == unresolved_count_before
 
 
@@ -791,7 +798,7 @@ async def test_relation_resolution_runs_when_files_modified(
     await sync_service.sync(project_dir)
 
     # Verify unresolved relation exists
-    unresolved_before = await sync_service.relation_repository.find_unresolved_relations()
+    unresolved_before = await _find_unresolved_relations(sync_service)
     assert len(unresolved_before) > 0
 
     # Sleep to ensure mtime will be newer
@@ -816,5 +823,5 @@ async def test_relation_resolution_runs_when_files_modified(
     assert "target.md" in report.new
 
     # Verify relation was resolved (unresolved count decreased)
-    unresolved_after = await sync_service.relation_repository.find_unresolved_relations()
+    unresolved_after = await _find_unresolved_relations(sync_service)
     assert len(unresolved_after) < len(unresolved_before)

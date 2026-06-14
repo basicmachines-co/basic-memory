@@ -595,6 +595,7 @@ async def test_fastembed_provider_fails_fast_without_cache_dir(monkeypatch):
 
     assert _SelfHealStubTextEmbedding.construct_count == 1
 
+
 @pytest.mark.asyncio
 async def test_factory_loads_native_model_once_across_repo_constructions(monkeypatch):
     """The native ONNX model must load exactly once per process despite reuse (#872).

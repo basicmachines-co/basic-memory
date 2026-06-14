@@ -106,6 +106,7 @@ def entity_service_with_search(
     link_resolver,
     search_service: SearchService,
     app_config: BasicMemoryConfig,
+    session_maker,
 ) -> EntityService:
     """Create EntityService with a real attached search service."""
     return EntityService(
@@ -117,6 +118,7 @@ def entity_service_with_search(
         link_resolver=link_resolver,
         search_service=search_service,
         app_config=app_config,
+        session_maker=session_maker,
     )
 
 
@@ -223,7 +225,8 @@ async def test_create_entity_unique_permalink(
     # move file
     file_path = file_service.get_entity_path(entity)
     file_path.rename(project_config.home / "new_path.md")
-    await entity_repository.update(entity.id, {"file_path": "new_path.md"})
+    async with db.scoped_session(entity_service.session_maker) as session:
+        await entity_repository.update(session, entity.id, {"file_path": "new_path.md"})
 
     # create again
     entity2 = await entity_service.create_entity(entity_data)
@@ -2241,7 +2244,8 @@ async def test_move_entity_with_null_permalink_generates_permalink(
     }
 
     # Create the entity directly in database
-    created_entity = await entity_repository.create(entity_data)
+    async with db.scoped_session(entity_service.session_maker) as session:
+        created_entity = await entity_repository.create(session, entity_data)
     assert created_entity.permalink is None
 
     # Create the physical file
