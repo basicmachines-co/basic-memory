@@ -331,6 +331,7 @@ class Repository[T: Base]:
             return False
 
         await session.delete(entity)
+        await session.flush()
 
         logger.debug(f"Deleted {self.Model.__name__}: {entity_id}")
         return True

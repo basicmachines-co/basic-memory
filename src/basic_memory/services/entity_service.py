@@ -984,25 +984,7 @@ class EntityService(BaseService[EntityModel]):
             if user_id is not None:
                 db_entity.last_updated_by = user_id
 
-            entity_updates = {
-                "title": db_entity.title,
-                "note_type": db_entity.note_type,
-                "permalink": db_entity.permalink,
-                "file_path": db_entity.file_path,
-                "content_type": db_entity.content_type,
-                "created_at": db_entity.created_at,
-                "updated_at": db_entity.updated_at,
-                "entity_metadata": db_entity.entity_metadata,
-                "checksum": db_entity.checksum,
-                "last_updated_by": db_entity.last_updated_by,
-            }
-            updated = await self.repository.update_fields(
-                active_session,
-                db_entity.id,
-                entity_updates,
-            )
-            if not updated:  # pragma: no cover
-                raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
+            await active_session.flush()
             return db_entity
 
     def _apply_markdown_entity_fields(

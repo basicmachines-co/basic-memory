@@ -253,6 +253,7 @@ class ProjectRepository(Repository[Project]):
             )
 
         await session.delete(project)
+        await session.flush()
         logger.debug(f"Deleted Project and search rows for project_id: {entity_id}")
         return True
 
