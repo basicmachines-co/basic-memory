@@ -206,14 +206,13 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
         Configured async engine for SQLite
     """
     # Configure connection args with Windows-specific settings
-    connect_args: dict[str, bool | float | None] = {"check_same_thread": False}
+    connect_args: dict[str, bool | float] = {"check_same_thread": False}
 
     # Add Windows-specific parameters to improve reliability
     if os.name == "nt":  # Windows
         connect_args.update(
             {
                 "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
-                "isolation_level": None,  # Use autocommit mode
             }
         )
 

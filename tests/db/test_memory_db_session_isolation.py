@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectEntry
 from basic_memory.models import Base
 
 
@@ -91,3 +92,32 @@ async def test_concurrent_session_rollback_does_not_destroy_uncommitted_writes()
             "writer's committed INSERT was rolled back by a concurrent session — "
             "the in-memory engine is sharing one transaction scope across sessions"
         )
+
+
+@pytest.mark.asyncio
+async def test_windows_memory_engine_respects_explicit_rollback(monkeypatch):
+    """The Windows SQLite branch must not force driver-level autocommit."""
+    db_path = Path("unused.db")
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": ProjectEntry(path=".")},
+        default_project="test-project",
+        database_backend=DatabaseBackend.SQLITE,
+    )
+    monkeypatch.setattr(db.os, "name", "nt")
+
+    async with db.engine_session_factory(
+        db_path=db_path, db_type=db.DatabaseType.MEMORY, config=app_config
+    ) as (engine, session_maker):
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE rollback_probe (name TEXT NOT NULL)"))
+
+        async with session_maker() as session:
+            transaction = await session.begin()
+            await session.execute(text("INSERT INTO rollback_probe (name) VALUES ('discarded')"))
+            await transaction.rollback()
+
+        async with session_maker() as session:
+            count = (await session.execute(text("SELECT count(*) FROM rollback_probe"))).scalar()
+
+        assert count == 0
