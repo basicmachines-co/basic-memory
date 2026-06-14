@@ -16,6 +16,7 @@ from fastapi import Depends
 from loguru import logger
 
 from basic_memory.deps.config import AppConfigDep
+from basic_memory.deps.db import SessionMakerDep
 from basic_memory.deps.projects import (
     ProjectConfigDep,
     ProjectConfigV2Dep,
@@ -159,9 +160,10 @@ async def get_search_service(
     search_repository: SearchRepositoryDep,
     entity_repository: EntityRepositoryDep,
     file_service: FileServiceDep,
+    session_maker: SessionMakerDep,
 ) -> SearchService:
     """Create SearchService with dependencies."""
-    return SearchService(search_repository, entity_repository, file_service)
+    return SearchService(search_repository, entity_repository, file_service, session_maker)
 
 
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
@@ -171,9 +173,10 @@ async def get_search_service_v2(  # pragma: no cover
     search_repository: SearchRepositoryV2Dep,
     entity_repository: EntityRepositoryV2Dep,
     file_service: FileServiceV2Dep,
+    session_maker: SessionMakerDep,
 ) -> SearchService:
     """Create SearchService for v2 API."""
-    return SearchService(search_repository, entity_repository, file_service)
+    return SearchService(search_repository, entity_repository, file_service, session_maker)
 
 
 SearchServiceV2Dep = Annotated[SearchService, Depends(get_search_service_v2)]
@@ -183,9 +186,10 @@ async def get_search_service_v2_external(
     search_repository: SearchRepositoryV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
 ) -> SearchService:
     """Create SearchService for v2 API (uses external_id)."""
-    return SearchService(search_repository, entity_repository, file_service)
+    return SearchService(search_repository, entity_repository, file_service, session_maker)
 
 
 SearchServiceV2ExternalDep = Annotated[SearchService, Depends(get_search_service_v2_external)]
@@ -195,27 +199,45 @@ SearchServiceV2ExternalDep = Annotated[SearchService, Depends(get_search_service
 
 
 async def get_link_resolver(
-    entity_repository: EntityRepositoryDep, search_service: SearchServiceDep
+    entity_repository: EntityRepositoryDep,
+    search_service: SearchServiceDep,
+    session_maker: SessionMakerDep,
 ) -> LinkResolver:
-    return LinkResolver(entity_repository=entity_repository, search_service=search_service)
+    return LinkResolver(
+        entity_repository=entity_repository,
+        search_service=search_service,
+        session_maker=session_maker,
+    )
 
 
 LinkResolverDep = Annotated[LinkResolver, Depends(get_link_resolver)]
 
 
 async def get_link_resolver_v2(  # pragma: no cover
-    entity_repository: EntityRepositoryV2Dep, search_service: SearchServiceV2Dep
+    entity_repository: EntityRepositoryV2Dep,
+    search_service: SearchServiceV2Dep,
+    session_maker: SessionMakerDep,
 ) -> LinkResolver:
-    return LinkResolver(entity_repository=entity_repository, search_service=search_service)
+    return LinkResolver(
+        entity_repository=entity_repository,
+        search_service=search_service,
+        session_maker=session_maker,
+    )
 
 
 LinkResolverV2Dep = Annotated[LinkResolver, Depends(get_link_resolver_v2)]
 
 
 async def get_link_resolver_v2_external(
-    entity_repository: EntityRepositoryV2ExternalDep, search_service: SearchServiceV2ExternalDep
+    entity_repository: EntityRepositoryV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
 ) -> LinkResolver:
-    return LinkResolver(entity_repository=entity_repository, search_service=search_service)
+    return LinkResolver(
+        entity_repository=entity_repository,
+        search_service=search_service,
+        session_maker=session_maker,
+    )
 
 
 LinkResolverV2ExternalDep = Annotated[LinkResolver, Depends(get_link_resolver_v2_external)]
@@ -232,6 +254,7 @@ async def get_entity_service(
     file_service: FileServiceDep,
     link_resolver: LinkResolverDep,
     search_service: SearchServiceDep,
+    session_maker: SessionMakerDep,
     app_config: AppConfigDep,
 ) -> EntityService:
     """Create EntityService with repository."""
@@ -242,6 +265,7 @@ async def get_entity_service(
         entity_parser=entity_parser,
         file_service=file_service,
         link_resolver=link_resolver,
+        session_maker=session_maker,
         search_service=search_service,
         app_config=app_config,
     )
@@ -258,6 +282,7 @@ async def get_entity_service_v2(  # pragma: no cover
     file_service: FileServiceV2Dep,
     link_resolver: LinkResolverV2Dep,
     search_service: SearchServiceV2Dep,
+    session_maker: SessionMakerDep,
     app_config: AppConfigDep,
 ) -> EntityService:
     """Create EntityService for v2 API."""
@@ -268,6 +293,7 @@ async def get_entity_service_v2(  # pragma: no cover
         entity_parser=entity_parser,
         file_service=file_service,
         link_resolver=link_resolver,
+        session_maker=session_maker,
         search_service=search_service,
         app_config=app_config,
     )
@@ -284,6 +310,7 @@ async def get_entity_service_v2_external(
     file_service: FileServiceV2ExternalDep,
     link_resolver: LinkResolverV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
     app_config: AppConfigDep,
 ) -> EntityService:
     """Create EntityService for v2 API (uses external_id)."""
@@ -294,6 +321,7 @@ async def get_entity_service_v2_external(
         entity_parser=entity_parser,
         file_service=file_service,
         link_resolver=link_resolver,
+        session_maker=session_maker,
         search_service=search_service,
         app_config=app_config,
     )
@@ -310,12 +338,14 @@ async def get_context_service(
     entity_repository: EntityRepositoryDep,
     observation_repository: ObservationRepositoryDep,
     link_resolver: LinkResolverDep,
+    session_maker: SessionMakerDep,
 ) -> ContextService:
     return ContextService(
         search_repository=search_repository,
         entity_repository=entity_repository,
         observation_repository=observation_repository,
         link_resolver=link_resolver,
+        session_maker=session_maker,
     )
 
 
@@ -327,6 +357,7 @@ async def get_context_service_v2(  # pragma: no cover
     entity_repository: EntityRepositoryV2Dep,
     observation_repository: ObservationRepositoryV2Dep,
     link_resolver: LinkResolverV2Dep,
+    session_maker: SessionMakerDep,
 ) -> ContextService:
     """Create ContextService for v2 API."""
     return ContextService(
@@ -334,6 +365,7 @@ async def get_context_service_v2(  # pragma: no cover
         entity_repository=entity_repository,
         observation_repository=observation_repository,
         link_resolver=link_resolver,
+        session_maker=session_maker,
     )
 
 
@@ -345,6 +377,7 @@ async def get_context_service_v2_external(
     entity_repository: EntityRepositoryV2ExternalDep,
     observation_repository: ObservationRepositoryV2ExternalDep,
     link_resolver: LinkResolverV2ExternalDep,
+    session_maker: SessionMakerDep,
 ) -> ContextService:
     """Create ContextService for v2 API (uses external_id)."""
     return ContextService(
@@ -352,6 +385,7 @@ async def get_context_service_v2_external(
         entity_repository=entity_repository,
         observation_repository=observation_repository,
         link_resolver=link_resolver,
+        session_maker=session_maker,
     )
 
 
@@ -370,6 +404,7 @@ async def get_sync_service(
     project_repository: ProjectRepositoryDep,
     search_service: SearchServiceDep,
     file_service: FileServiceDep,
+    session_maker: SessionMakerDep,
 ) -> SyncService:  # pragma: no cover
     return SyncService(
         app_config=app_config,
@@ -380,6 +415,7 @@ async def get_sync_service(
         project_repository=project_repository,
         search_service=search_service,
         file_service=file_service,
+        session_maker=session_maker,
     )
 
 
@@ -395,6 +431,7 @@ async def get_sync_service_v2(
     project_repository: ProjectRepositoryDep,
     search_service: SearchServiceV2Dep,
     file_service: FileServiceV2Dep,
+    session_maker: SessionMakerDep,
 ) -> SyncService:  # pragma: no cover
     """Create SyncService for v2 API."""
     return SyncService(
@@ -406,6 +443,7 @@ async def get_sync_service_v2(
         project_repository=project_repository,
         search_service=search_service,
         file_service=file_service,
+        session_maker=session_maker,
     )
 
 
@@ -421,6 +459,7 @@ async def get_sync_service_v2_external(
     project_repository: ProjectRepositoryDep,
     search_service: SearchServiceV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
 ) -> SyncService:  # pragma: no cover
     """Create SyncService for v2 API (uses external_id)."""
     return SyncService(
@@ -432,6 +471,7 @@ async def get_sync_service_v2_external(
         project_repository=project_repository,
         search_service=search_service,
         file_service=file_service,
+        session_maker=session_maker,
     )
 
 
@@ -535,6 +575,7 @@ TaskSchedulerDep = Annotated[TaskScheduler, Depends(get_task_scheduler)]
 
 async def get_project_service(
     project_repository: ProjectRepositoryDep,
+    session_maker: SessionMakerDep,
     app_config: AppConfigDep,
 ) -> ProjectService:
     """Create ProjectService with repository and a system-level FileService for directory operations."""
@@ -543,7 +584,9 @@ async def get_project_service(
     entity_parser = EntityParser(Path.home())
     markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
     file_service = FileService(Path.home(), markdown_processor, app_config=app_config)
-    return ProjectService(repository=project_repository, file_service=file_service)
+    return ProjectService(
+        repository=project_repository, session_maker=session_maker, file_service=file_service
+    )
 
 
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
@@ -554,10 +597,12 @@ ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 
 async def get_directory_service(
     entity_repository: EntityRepositoryDep,
+    session_maker: SessionMakerDep,
 ) -> DirectoryService:
     """Create DirectoryService with dependencies."""
     return DirectoryService(
         entity_repository=entity_repository,
+        session_maker=session_maker,
     )
 
 
@@ -566,10 +611,12 @@ DirectoryServiceDep = Annotated[DirectoryService, Depends(get_directory_service)
 
 async def get_directory_service_v2(  # pragma: no cover
     entity_repository: EntityRepositoryV2Dep,
+    session_maker: SessionMakerDep,
 ) -> DirectoryService:
     """Create DirectoryService for v2 API (uses integer project_id from path)."""
     return DirectoryService(
         entity_repository=entity_repository,
+        session_maker=session_maker,
     )
 
 
@@ -578,10 +625,12 @@ DirectoryServiceV2Dep = Annotated[DirectoryService, Depends(get_directory_servic
 
 async def get_directory_service_v2_external(
     entity_repository: EntityRepositoryV2ExternalDep,
+    session_maker: SessionMakerDep,
 ) -> DirectoryService:
     """Create DirectoryService for v2 API (uses external_id from path)."""
     return DirectoryService(
         entity_repository=entity_repository,
+        session_maker=session_maker,
     )
 
 

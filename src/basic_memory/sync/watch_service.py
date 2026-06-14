@@ -2,14 +2,27 @@
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Set, Sequence, Callable, Awaitable, TYPE_CHECKING
+from typing import (
+    AsyncIterator,
+    List,
+    Optional,
+    Set,
+    Sequence,
+    Callable,
+    Awaitable,
+    TYPE_CHECKING,
+)
 
 if TYPE_CHECKING:
     from basic_memory.sync.sync_service import SyncService
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.models import Project
@@ -83,12 +96,14 @@ class WatchService:
         self,
         app_config: BasicMemoryConfig,
         project_repository: ProjectRepository,
+        session_maker: async_sessionmaker[AsyncSession],
         quiet: bool = False,
         sync_service_factory: Optional[SyncServiceFactory] = None,
         constrained_project: Optional[str] = None,
     ):
         self.app_config = app_config
         self.project_repository = project_repository
+        self.session_maker = session_maker
         self.state = WatchServiceState()
         self.status_path = app_config.data_dir_path / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,6 +118,12 @@ class WatchService:
 
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
+
+    @asynccontextmanager
+    async def _session_scope(self) -> AsyncIterator[AsyncSession]:
+        """Open a service-owned transaction."""
+        async with db.scoped_session(self.session_maker) as session:
+            yield session
 
     async def _get_sync_service(self, project: Project) -> "SyncService":
         """Get sync service for a project, using factory if provided."""
@@ -193,7 +214,8 @@ class WatchService:
              projects with a local bisync copy keep their absolute path and are
              still watched.
         """
-        projects = await self.project_repository.get_active_projects()
+        async with self._session_scope() as session:
+            projects = await self.project_repository.get_active_projects(session)
 
         if self.constrained_project:
             projects = [p for p in projects if p.name == self.constrained_project]
@@ -393,7 +415,8 @@ class WatchService:
         # Avoid mutating `adds` while iterating (can skip items).
         reclassified_as_modified: List[str] = []
         for added_path in list(adds):  # pragma: no cover TODO add test
-            entity = await sync_service.entity_repository.get_by_file_path(added_path)
+            async with sync_service._session_scope() as session:
+                entity = await sync_service.entity_repository.get_by_file_path(session, added_path)
             if entity is not None:
                 logger.debug(f"Existing file will be processed as modified, path={added_path}")
                 reclassified_as_modified.append(added_path)
@@ -424,7 +447,10 @@ class WatchService:
                     continue  # pragma: no cover
 
                 # Skip directories for deleted paths (based on entity type in db)
-                deleted_entity = await sync_service.entity_repository.get_by_file_path(deleted_path)
+                async with sync_service._session_scope() as session:
+                    deleted_entity = await sync_service.entity_repository.get_by_file_path(
+                        session, deleted_path
+                    )
                 if deleted_entity is None:
                     # If this was a directory, it wouldn't have an entity
                     logger.debug("Skipping unknown path for move detection", path=deleted_path)
@@ -483,7 +509,10 @@ class WatchService:
                     # Check if this was a directory - skip if so
                     # (we can't tell if the deleted path was a directory since it no longer exists,
                     # so we check if there's an entity in the database for it)
-                    entity = await sync_service.entity_repository.get_by_file_path(path)
+                    async with sync_service._session_scope() as session:
+                        entity = await sync_service.entity_repository.get_by_file_path(
+                            session, path
+                        )
                     if entity is None:
                         # No entity means this was likely a directory - skip it
                         logger.debug(

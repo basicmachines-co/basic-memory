@@ -16,11 +16,14 @@ from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
+from basic_memory import db
 from basic_memory.deps import (
     ProjectConfigV2ExternalDep,
     FileServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
     SearchServiceV2ExternalDep,
+    SessionDep,
+    SessionMakerDep,
 )
 from basic_memory.models.knowledge import Entity as EntityModel
 from basic_memory.schemas.v2.resource import (
@@ -38,6 +41,7 @@ async def get_resource_content(
     config: ProjectConfigV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
+    session: SessionDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
 ) -> Response:
@@ -70,7 +74,7 @@ async def get_resource_content(
             action="get_content",
             phase="load_entity",
         ):
-            entity = await entity_repository.get_by_external_id(entity_id)
+            entity = await entity_repository.get_by_external_id(session, entity_id)
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
@@ -121,6 +125,7 @@ async def create_resource(
     file_service: FileServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
 ) -> ResourceResponse:
     """Create a new resource file.
@@ -158,13 +163,14 @@ async def create_resource(
                     "Path must be relative and stay within project boundaries.",
                 )
 
-            existing_entity = await entity_repository.get_by_file_path(data.file_path)
-            if existing_entity:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Resource already exists at {data.file_path} with entity_id {existing_entity.external_id}. "
-                    f"Use PUT /resource/{existing_entity.external_id} to update it.",
-                )
+            async with db.scoped_session(session_maker) as session:
+                existing_entity = await entity_repository.get_by_file_path(session, data.file_path)
+                if existing_entity:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Resource already exists at {data.file_path} with entity_id {existing_entity.external_id}. "
+                        f"Use PUT /resource/{existing_entity.external_id} to update it.",
+                    )
 
             with logfire.span(
                 "api.resource.create.write_file",
@@ -203,7 +209,8 @@ async def create_resource(
                 action="create",
                 phase="upsert_entity",
             ):
-                entity = await entity_repository.add(entity)
+                async with db.scoped_session(session_maker) as session:
+                    entity = await entity_repository.add(session, entity)
 
             with logfire.span(
                 "api.resource.create.search_index",
@@ -236,6 +243,7 @@ async def update_resource(
     file_service: FileServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
 ) -> ResourceResponse:
@@ -265,7 +273,8 @@ async def update_resource(
         action="update",
     ):
         try:
-            entity = await entity_repository.get_by_external_id(entity_id)
+            async with db.scoped_session(session_maker) as session:
+                entity = await entity_repository.get_by_external_id(session, entity_id)
             if not entity:
                 raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
@@ -315,17 +324,19 @@ async def update_resource(
                 action="update",
                 phase="update_entity",
             ):
-                updated_entity = await entity_repository.update(
-                    entity.id,
-                    {
-                        "title": file_name,
-                        "note_type": note_type,
-                        "content_type": content_type,
-                        "file_path": target_file_path,
-                        "checksum": checksum,
-                        "updated_at": file_metadata.modified_at,
-                    },
-                )
+                async with db.scoped_session(session_maker) as session:
+                    updated_entity = await entity_repository.update(
+                        session,
+                        entity.id,
+                        {
+                            "title": file_name,
+                            "note_type": note_type,
+                            "content_type": content_type,
+                            "file_path": target_file_path,
+                            "checksum": checksum,
+                            "updated_at": file_metadata.modified_at,
+                        },
+                    )
             if updated_entity is None:
                 raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 

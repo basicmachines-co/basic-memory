@@ -177,8 +177,9 @@ async def _reindex_projects(app_config):
             db_path=app_config.database_path,
             db_type=db.DatabaseType.FILESYSTEM,
         )
-        project_repository = ProjectRepository(session_maker)
-        projects = await project_repository.get_active_projects()
+        project_repository = ProjectRepository()
+        async with db.scoped_session(session_maker) as session:
+            projects = await project_repository.get_active_projects(session)
 
         for project in projects:
             console.print(f"  Indexing [cyan]{project.name}[/cyan]...")
@@ -355,8 +356,9 @@ async def _reindex(
             db_path=app_config.database_path,
             db_type=db.DatabaseType.FILESYSTEM,
         )
-        project_repository = ProjectRepository(session_maker)
-        projects = await project_repository.get_active_projects()
+        project_repository = ProjectRepository()
+        async with db.scoped_session(session_maker) as session:
+            projects = await project_repository.get_active_projects(session)
 
         if project:
             projects = [p for p in projects if p.name == project]
@@ -418,7 +420,7 @@ async def _reindex(
                 console.print(
                     f"  Building vector embeddings ([cyan]{embedding_mode_label}[/cyan])..."
                 )
-                entity_repository = EntityRepository(session_maker, project_id=proj.id)
+                entity_repository = EntityRepository(project_id=proj.id)
                 search_repository = create_search_repository(
                     session_maker, project_id=proj.id, app_config=app_config
                 )
@@ -426,7 +428,12 @@ async def _reindex(
                 entity_parser = EntityParser(project_path)
                 markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
                 file_service = FileService(project_path, markdown_processor, app_config=app_config)
-                search_service = SearchService(search_repository, entity_repository, file_service)
+                search_service = SearchService(
+                    search_repository,
+                    entity_repository,
+                    file_service,
+                    session_maker=session_maker,
+                )
 
                 with Progress(
                     SpinnerColumn(),

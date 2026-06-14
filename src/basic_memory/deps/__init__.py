@@ -25,6 +25,8 @@ from basic_memory.deps.db import (
     EngineFactoryDep,
     get_session_maker,
     SessionMakerDep,
+    get_session,
+    SessionDep,
 )
 
 from basic_memory.deps.projects import (
@@ -169,6 +171,8 @@ __all__ = [
     "EngineFactoryDep",
     "get_session_maker",
     "SessionMakerDep",
+    "get_session",
+    "SessionDep",
     # Projects
     "get_project_repository",
     "ProjectRepositoryDep",

@@ -7,12 +7,11 @@ from typing import List, Optional, Sequence, Union, Any
 from loguru import logger
 from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.engine import Row
 
-from basic_memory import db
 from basic_memory.models.knowledge import Entity, Observation, Relation
 from basic_memory.repository.repository import Repository
 
@@ -24,16 +23,17 @@ class EntityRepository(Repository[Entity]):
     to strings before passing to repository methods.
     """
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession], project_id: int):
-        """Initialize with session maker and project_id filter.
+    def __init__(self, project_id: int):
+        """Initialize with project_id filter.
 
         Args:
-            session_maker: SQLAlchemy session maker
             project_id: Project ID to filter all operations by
         """
-        super().__init__(session_maker, Entity, project_id=project_id)
+        super().__init__(Entity, project_id=project_id)
 
-    async def get_by_id(self, entity_id: int, *, load_relations: bool = True) -> Optional[Entity]:
+    async def get_by_id(
+        self, session: AsyncSession, entity_id: int, *, load_relations: bool = True
+    ) -> Optional[Entity]:
         """Get entity by numeric ID.
 
         Args:
@@ -42,23 +42,24 @@ class EntityRepository(Repository[Entity]):
         Returns:
             Entity if found, None otherwise
         """
-        async with db.scoped_session(self.session_maker) as session:
-            if not load_relations:
-                result = await session.execute(self.select().where(Entity.id == entity_id))
-                return result.scalars().one_or_none()
+        if not load_relations:
+            result = await session.execute(self.select().where(Entity.id == entity_id))
+            return result.scalars().one_or_none()
 
-            return await self.select_by_id(session, entity_id)
+        return await self.select_by_id(session, entity_id)
 
-    async def _find_one_by_query(self, query, *, load_relations: bool) -> Optional[Entity]:
+    async def _find_one_by_query(
+        self, session: AsyncSession, query, *, load_relations: bool
+    ) -> Optional[Entity]:
         """Return one entity row with optional eager loading."""
         if load_relations:
-            return await self.find_one(query)
+            return await self.find_one(session, query)
 
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return result.scalars().one_or_none()
 
     async def get_by_external_id(
-        self, external_id: str, *, load_relations: bool = True
+        self, session: AsyncSession, external_id: str, *, load_relations: bool = True
     ) -> Optional[Entity]:
         """Get entity by external UUID.
 
@@ -69,10 +70,10 @@ class EntityRepository(Repository[Entity]):
             Entity if found, None otherwise
         """
         query = self.select().where(Entity.external_id == external_id)
-        return await self._find_one_by_query(query, load_relations=load_relations)
+        return await self._find_one_by_query(session, query, load_relations=load_relations)
 
     async def get_by_permalink(
-        self, permalink: str, *, load_relations: bool = True
+        self, session: AsyncSession, permalink: str, *, load_relations: bool = True
     ) -> Optional[Entity]:
         """Get entity by permalink.
 
@@ -80,9 +81,11 @@ class EntityRepository(Repository[Entity]):
             permalink: Unique identifier for the entity
         """
         query = self.select().where(Entity.permalink == permalink)
-        return await self._find_one_by_query(query, load_relations=load_relations)
+        return await self._find_one_by_query(session, query, load_relations=load_relations)
 
-    async def get_by_title(self, title: str, *, load_relations: bool = True) -> Sequence[Entity]:
+    async def get_by_title(
+        self, session: AsyncSession, title: str, *, load_relations: bool = True
+    ) -> Sequence[Entity]:
         """Get entities by title, ordered by shortest path first.
 
         When multiple entities share the same title (in different folders),
@@ -97,11 +100,11 @@ class EntityRepository(Repository[Entity]):
             .where(Entity.title == title)
             .order_by(func.length(Entity.file_path), Entity.file_path)
         )
-        result = await self.execute_query(query, use_query_options=load_relations)
+        result = await self.execute_query(session, query, use_query_options=load_relations)
         return list(result.scalars().all())
 
     async def get_by_file_path(
-        self, file_path: Union[Path, str], *, load_relations: bool = True
+        self, session: AsyncSession, file_path: Union[Path, str], *, load_relations: bool = True
     ) -> Optional[Entity]:
         """Get entity by file_path.
 
@@ -109,13 +112,13 @@ class EntityRepository(Repository[Entity]):
             file_path: Path to the entity file (will be converted to string internally)
         """
         query = self.select().where(Entity.file_path == Path(file_path).as_posix())
-        return await self._find_one_by_query(query, load_relations=load_relations)
+        return await self._find_one_by_query(session, query, load_relations=load_relations)
 
     # -------------------------------------------------------------------------
     # Lightweight methods for permalink resolution (no eager loading)
     # -------------------------------------------------------------------------
 
-    async def permalink_exists(self, permalink: str) -> bool:
+    async def permalink_exists(self, session: AsyncSession, permalink: str) -> bool:
         """Check if a permalink exists without loading the full entity.
 
         This is much faster than get_by_permalink() as it skips eager loading
@@ -129,10 +132,12 @@ class EntityRepository(Repository[Entity]):
         """
         query = select(Entity.id).where(Entity.permalink == permalink).limit(1)
         query = self._add_project_filter(query)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return result.scalar_one_or_none() is not None
 
-    async def get_file_path_for_permalink(self, permalink: str) -> Optional[str]:
+    async def get_file_path_for_permalink(
+        self, session: AsyncSession, permalink: str
+    ) -> Optional[str]:
         """Get the file_path for a permalink without loading the full entity.
 
         Use when you only need the file_path, not the full entity with relations.
@@ -145,10 +150,12 @@ class EntityRepository(Repository[Entity]):
         """
         query = select(Entity.file_path).where(Entity.permalink == permalink)
         query = self._add_project_filter(query)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return result.scalar_one_or_none()
 
-    async def get_permalink_for_file_path(self, file_path: Union[Path, str]) -> Optional[str]:
+    async def get_permalink_for_file_path(
+        self, session: AsyncSession, file_path: Union[Path, str]
+    ) -> Optional[str]:
         """Get the permalink for a file_path without loading the full entity.
 
         Use when you only need the permalink, not the full entity with relations.
@@ -161,10 +168,10 @@ class EntityRepository(Repository[Entity]):
         """
         query = select(Entity.permalink).where(Entity.file_path == Path(file_path).as_posix())
         query = self._add_project_filter(query)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return result.scalar_one_or_none()
 
-    async def get_all_permalinks(self) -> List[str]:
+    async def get_all_permalinks(self, session: AsyncSession) -> List[str]:
         """Get all permalinks for this project.
 
         Optimized for bulk operations - returns only permalink strings
@@ -175,11 +182,11 @@ class EntityRepository(Repository[Entity]):
         """
         query = select(Entity.permalink)
         query = self._add_project_filter(query)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
     async def find_by_ids_for_hydration(
-        self, ids: List[int], *, include_cross_project: bool = False
+        self, session: AsyncSession, ids: List[int], *, include_cross_project: bool = False
     ) -> Sequence[Entity]:
         """Fetch minimal entity fields needed for context hydration.
 
@@ -203,10 +210,10 @@ class EntityRepository(Repository[Entity]):
         if not include_cross_project:
             query = self._add_project_filter(query)
 
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def get_permalink_to_file_path_map(self) -> dict[str, str]:
+    async def get_permalink_to_file_path_map(self, session: AsyncSession) -> dict[str, str]:
         """Get a mapping of permalink -> file_path for all entities.
 
         Optimized for bulk permalink resolution - loads minimal data in one query.
@@ -216,10 +223,10 @@ class EntityRepository(Repository[Entity]):
         """
         query = select(Entity.permalink, Entity.file_path)
         query = self._add_project_filter(query)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return {row.permalink: row.file_path for row in result.all()}
 
-    async def get_file_path_to_permalink_map(self) -> dict[str, str]:
+    async def get_file_path_to_permalink_map(self, session: AsyncSession) -> dict[str, str]:
         """Get a mapping of file_path -> permalink for all entities.
 
         Optimized for bulk permalink resolution - loads minimal data in one query.
@@ -229,7 +236,7 @@ class EntityRepository(Repository[Entity]):
         """
         query = select(Entity.file_path, Entity.permalink)
         query = self._add_project_filter(query)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return {row.file_path: row.permalink for row in result.all()}
 
     async def get_by_file_paths(
@@ -262,7 +269,7 @@ class EntityRepository(Repository[Entity]):
         result = await session.execute(query)  # pragma: no cover
         return list(result.all())  # pragma: no cover
 
-    async def find_by_checksum(self, checksum: str) -> Sequence[Entity]:
+    async def find_by_checksum(self, session: AsyncSession, checksum: str) -> Sequence[Entity]:
         """Find entities with the given checksum.
 
         Used for move detection - finds entities that may have been moved to a new path.
@@ -276,10 +283,12 @@ class EntityRepository(Repository[Entity]):
         """
         query = self.select().where(Entity.checksum == checksum)
         # Don't load relationships for move detection - we only need file_path and checksum
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def find_by_checksums(self, checksums: Sequence[str]) -> Sequence[Entity]:
+    async def find_by_checksums(
+        self, session: AsyncSession, checksums: Sequence[str]
+    ) -> Sequence[Entity]:
         """Find entities with any of the given checksums (batch query for move detection).
 
         This is a batch-optimized version of find_by_checksum() that queries multiple checksums
@@ -304,16 +313,18 @@ class EntityRepository(Repository[Entity]):
         # Query: SELECT * FROM entities WHERE checksum IN (checksum1, checksum2, ...)
         query = self.select().where(Entity.checksum.in_(checksums))  # pragma: no cover
         # Don't load relationships for move detection - we only need file_path and checksum
-        result = await self.execute_query(query, use_query_options=False)  # pragma: no cover
+        result = await self.execute_query(
+            session, query, use_query_options=False
+        )  # pragma: no cover
         return list(result.scalars().all())  # pragma: no cover
 
-    async def delete_by_file_path(self, file_path: Union[Path, str]) -> bool:
+    async def delete_by_file_path(self, session: AsyncSession, file_path: Union[Path, str]) -> bool:
         """Delete entity with the provided file_path.
 
         Args:
             file_path: Path to the entity file (will be converted to string internally)
         """
-        return await self.delete_by_fields(file_path=Path(file_path).as_posix())
+        return await self.delete_by_fields(session, file_path=Path(file_path).as_posix())
 
     def get_load_options(self) -> List[LoaderOption]:
         """Get SQLAlchemy loader options for eager loading relationships."""
@@ -327,7 +338,9 @@ class EntityRepository(Repository[Entity]):
             selectinload(Entity.incoming_relations).selectinload(Relation.to_entity),
         ]
 
-    async def find_by_permalinks(self, permalinks: List[str]) -> Sequence[Entity]:
+    async def find_by_permalinks(
+        self, session: AsyncSession, permalinks: List[str]
+    ) -> Sequence[Entity]:
         """Find multiple entities by their permalink.
 
         Args:
@@ -342,10 +355,10 @@ class EntityRepository(Repository[Entity]):
             self.select().options(*self.get_load_options()).where(Entity.permalink.in_(permalinks))
         )
 
-        result = await self.execute_query(query)
+        result = await self.execute_query(session, query)
         return list(result.scalars().all())
 
-    async def upsert_entity(self, entity: Entity) -> Entity:
+    async def upsert_entity(self, session: AsyncSession, entity: Entity) -> Entity:
         """Insert or update entity using simple try/catch with database-level conflict resolution.
 
         Handles file_path race conditions by checking for existing entity on IntegrityError.
@@ -357,99 +370,84 @@ class EntityRepository(Repository[Entity]):
         Returns:
             The inserted or updated entity
         """
-        async with db.scoped_session(self.session_maker) as session:
-            # Set project_id if applicable and not already set
-            self._set_project_id_if_needed(entity)
+        # Set project_id if applicable and not already set
+        self._set_project_id_if_needed(entity)
 
-            # Try simple insert first
-            try:
+        # Try simple insert first.
+        try:
+            async with session.begin_nested():
                 session.add(entity)
                 await session.flush()
+        except IntegrityError as e:
+            # Check if this is a FOREIGN KEY constraint failure
+            # SQLite: "FOREIGN KEY constraint failed"
+            # Postgres: "violates foreign key constraint"
+            error_str = str(e)
+            if (
+                "FOREIGN KEY constraint failed" in error_str
+                or "violates foreign key constraint" in error_str
+            ):
+                # Import locally to avoid circular dependency (repository -> services -> repository)
+                from basic_memory.services.exceptions import SyncFatalError
 
-                # Return with relationships loaded
-                query = (
-                    self.select()
-                    .where(Entity.file_path == entity.file_path)
-                    .options(*self.get_load_options())
+                # Project doesn't exist in database - this is a fatal sync error
+                raise SyncFatalError(
+                    f"Cannot sync file '{entity.file_path}': "
+                    f"project_id={entity.project_id} does not exist in database. "
+                    f"The project may have been deleted. This sync will be terminated."
+                ) from e
+
+            # Re-query after the nested rollback to get a fresh, attached entity.
+            existing_result = await session.execute(
+                select(Entity)
+                .where(Entity.file_path == entity.file_path, Entity.project_id == entity.project_id)
+                .options(*self.get_load_options())
+            )
+            existing_entity = existing_result.scalar_one_or_none()
+
+            if existing_entity:
+                # File path conflict - update the existing entity
+                logger.debug(
+                    f"Resolving file_path conflict for {entity.file_path}, "
+                    f"entity_id={existing_entity.id}, observations={len(entity.observations)}"
                 )
-                result = await session.execute(query)
-                found = result.scalar_one_or_none()
-                if not found:  # pragma: no cover
-                    raise RuntimeError(
-                        f"Failed to retrieve entity after insert: {entity.file_path}"
-                    )
-                return found
+                # Use merge to avoid session state conflicts. Preserve stable
+                # external_id so external references survive re-indexing.
+                entity.id = existing_entity.id
+                entity.external_id = existing_entity.external_id
 
-            except IntegrityError as e:
-                # Check if this is a FOREIGN KEY constraint failure
-                # SQLite: "FOREIGN KEY constraint failed"
-                # Postgres: "violates foreign key constraint"
-                error_str = str(e)
-                if (
-                    "FOREIGN KEY constraint failed" in error_str
-                    or "violates foreign key constraint" in error_str
-                ):
-                    # Import locally to avoid circular dependency (repository -> services -> repository)
-                    from basic_memory.services.exceptions import SyncFatalError
+                # Ensure observations reference the correct entity_id.
+                for obs in entity.observations:
+                    obs.entity_id = existing_entity.id
+                    obs.id = None
 
-                    # Project doesn't exist in database - this is a fatal sync error
-                    raise SyncFatalError(
-                        f"Cannot sync file '{entity.file_path}': "
-                        f"project_id={entity.project_id} does not exist in database. "
-                        f"The project may have been deleted. This sync will be terminated."
-                    ) from e
+                merged_entity = await session.merge(entity)
+                await session.flush()
 
-                await session.rollback()
-
-                # Re-query after rollback to get a fresh, attached entity
-                existing_result = await session.execute(
+                # Re-query to get proper relationships loaded.
+                final_result = await session.execute(
                     select(Entity)
-                    .where(
-                        Entity.file_path == entity.file_path, Entity.project_id == entity.project_id
-                    )
+                    .where(Entity.id == merged_entity.id)
                     .options(*self.get_load_options())
                 )
-                existing_entity = existing_result.scalar_one_or_none()
+                return final_result.scalar_one()
 
-                if existing_entity:
-                    # File path conflict - update the existing entity
-                    logger.debug(
-                        f"Resolving file_path conflict for {entity.file_path}, "
-                        f"entity_id={existing_entity.id}, observations={len(entity.observations)}"
-                    )
-                    # Use merge to avoid session state conflicts
-                    # Set the ID to update existing entity
-                    entity.id = existing_entity.id
-                    # Preserve the stable external_id so that external references
-                    # (e.g. public share links) survive re-indexing
-                    entity.external_id = existing_entity.external_id
+            # No file_path conflict - must be permalink conflict.
+            return await self._handle_permalink_conflict(entity, session)
 
-                    # Ensure observations reference the correct entity_id
-                    for obs in entity.observations:
-                        obs.entity_id = existing_entity.id
-                        # Clear any existing ID to force INSERT as new observation
-                        obs.id = None
+        # Return with relationships loaded.
+        query = (
+            self.select()
+            .where(Entity.file_path == entity.file_path)
+            .options(*self.get_load_options())
+        )
+        result = await session.execute(query)
+        found = result.scalar_one_or_none()
+        if not found:  # pragma: no cover
+            raise RuntimeError(f"Failed to retrieve entity after insert: {entity.file_path}")
+        return found
 
-                    # Merge the entity which will update the existing one
-                    merged_entity = await session.merge(entity)
-
-                    await session.commit()
-
-                    # Re-query to get proper relationships loaded
-                    final_result = await session.execute(
-                        select(Entity)
-                        .where(Entity.id == merged_entity.id)
-                        .options(*self.get_load_options())
-                    )
-                    return final_result.scalar_one()
-
-                else:
-                    # No file_path conflict - must be permalink conflict
-                    # Generate unique permalink and retry
-                    entity = await self._handle_permalink_conflict(entity, session)
-                    return entity
-
-    async def get_all_file_paths(self) -> List[str]:
+    async def get_all_file_paths(self, session: AsyncSession) -> List[str]:
         """Get all file paths for this project - optimized for deletion detection.
 
         Returns only file_path strings without loading entities or relationships.
@@ -461,10 +459,10 @@ class EntityRepository(Repository[Entity]):
         query = select(Entity.file_path)
         query = self._add_project_filter(query)
 
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def find_without_relations(self) -> Sequence[Entity]:
+    async def find_without_relations(self, session: AsyncSession) -> Sequence[Entity]:
         """Find entities that have no incoming or outgoing relations."""
         # Trigger: entity appears as a source in any relation.
         # Why: even unresolved outgoing links mean the entity references another node.
@@ -477,10 +475,10 @@ class EntityRepository(Repository[Entity]):
         has_incoming = exists().where(Relation.to_id == Entity.id)
 
         query = self.select().where(~has_outgoing).where(~has_incoming).order_by(Entity.file_path)
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def get_distinct_directories(self) -> List[str]:
+    async def get_distinct_directories(self, session: AsyncSession) -> List[str]:
         """Extract unique directory paths from file_path column.
 
         Optimized method for getting directory structure without loading full entities
@@ -494,7 +492,7 @@ class EntityRepository(Repository[Entity]):
         query = self._add_project_filter(query)
 
         # Execute with use_query_options=False to skip eager loading
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         file_paths = [row for row in result.scalars().all()]
 
         # Parse file paths to extract unique directories
@@ -508,7 +506,9 @@ class EntityRepository(Repository[Entity]):
 
         return sorted(directories)
 
-    async def find_by_directory_prefix(self, directory_prefix: str) -> Sequence[Entity]:
+    async def find_by_directory_prefix(
+        self, session: AsyncSession, directory_prefix: str
+    ) -> Sequence[Entity]:
         """Find entities whose file_path starts with the given directory prefix.
 
         Optimized method for listing directory contents without loading all entities.
@@ -524,7 +524,7 @@ class EntityRepository(Repository[Entity]):
         # Build SQL LIKE pattern
         if directory_prefix == "" or directory_prefix == "/":
             # Root directory - return all entities
-            return await self.find_all()
+            return await self.find_all(session)
 
         # Remove leading/trailing slashes for consistency
         directory_prefix = directory_prefix.strip("/")
@@ -537,7 +537,7 @@ class EntityRepository(Repository[Entity]):
         query = self.select().where(Entity.file_path.like(pattern))
 
         # Skip eager loading - we only need basic entity fields for directory trees
-        result = await self.execute_query(query, use_query_options=False)
+        result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
     async def _handle_permalink_conflict(self, entity: Entity, session: AsyncSession) -> Entity:

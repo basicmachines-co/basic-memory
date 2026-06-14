@@ -54,13 +54,13 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
         db_path=app_config.database_path,
         db_type=db.DatabaseType.FILESYSTEM,
     )
-    project_repository = ProjectRepository(session_maker)
+    project_repository = ProjectRepository()
 
     # Import ProjectService here to avoid circular imports
     from basic_memory.services.project_service import ProjectService
 
     # Create project service and synchronize projects
-    project_service = ProjectService(repository=project_repository)
+    project_service = ProjectService(repository=project_repository, session_maker=session_maker)
     try:
         await project_service.synchronize_projects()
         logger.info("Projects successfully reconciled between config and database")
@@ -97,7 +97,7 @@ async def initialize_file_sync(
         db_path=app_config.database_path,
         db_type=db.DatabaseType.FILESYSTEM,
     )
-    project_repository = ProjectRepository(session_maker)
+    project_repository = ProjectRepository()
 
     # Filter to constrained project if MCP server was started with --project.
     # Applied to both the initial background sync and the watch service so that
@@ -109,12 +109,14 @@ async def initialize_file_sync(
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
+        session_maker=session_maker,
         quiet=quiet,
         constrained_project=constrained_project,
     )
 
     # Get active projects
-    active_projects = await project_repository.get_active_projects()
+    async with db.scoped_session(session_maker) as session:
+        active_projects = await project_repository.get_active_projects(session)
 
     if constrained_project:
         active_projects = [p for p in active_projects if p.name == constrained_project]

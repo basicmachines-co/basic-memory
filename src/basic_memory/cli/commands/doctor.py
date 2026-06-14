@@ -23,6 +23,64 @@ from basic_memory.schemas import SyncReportResponse
 console = Console()
 
 
+def _is_default_project_delete_error(error: Exception) -> bool:
+    """Return True only for the API guard that blocks deleting the default project."""
+    error_text = str(error)
+    return "Cannot delete default project" in error_text
+
+
+async def _delete_doctor_project_locally(project_name: str, project_id: str) -> None:
+    """Remove the generated doctor project when the public API guard blocks cleanup."""
+    from basic_memory import db
+    from basic_memory.config import ConfigManager
+    from basic_memory.repository import ProjectRepository
+
+    config_manager = ConfigManager()
+    repository = ProjectRepository()
+    _, session_maker = await db.get_or_create_db(
+        db_path=config_manager.config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        project = await repository.get_by_external_id(session, project_id)
+        if project is None:
+            raise ValueError(f"Doctor cleanup project '{project_id}' not found")
+        if project.name != project_name:
+            raise ValueError(
+                f"Doctor cleanup expected project '{project_name}', found '{project.name}'"
+            )
+        await repository.delete(session, project.id)
+
+    config = config_manager.load_config()
+    if project_name in config.projects:
+        del config.projects[project_name]
+        if config.default_project == project_name:
+            config.default_project = next(iter(config.projects), None)
+        config_manager.save_config(config)
+
+
+async def _delete_doctor_project(
+    project_client: ProjectClient, project_name: str, project_id: str
+) -> None:
+    """Delete the generated doctor project without weakening the public API guard."""
+    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    try:
+        await project_client.delete_project(project_id)
+    except ToolError as exc:
+        if not _is_default_project_delete_error(exc):
+            raise
+
+        # Trigger: fresh local configs can promote the generated doctor project
+        # to default because the placeholder default has no DB row.
+        # Why: the project is disposable doctor-owned state, while the public API
+        # must keep rejecting default-project deletion for normal callers.
+        # Outcome: cleanup removes only the exact doctor project it created.
+        await _delete_doctor_project_locally(project_name, project_id)
+
+
 async def run_doctor() -> None:
     """Run local consistency checks for file <-> database flows."""
     # Deferred: the markdown parsing stack is only needed while the checks run,
@@ -129,7 +187,7 @@ async def run_doctor() -> None:
 
             finally:
                 if project_id:
-                    await project_client.delete_project(project_id)
+                    await _delete_doctor_project(project_client, project_name, project_id)
 
     console.print("[green]Doctor checks passed.[/green]")
 

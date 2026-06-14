@@ -30,33 +30,30 @@ from basic_memory.repository.search_repository import SearchRepository, create_s
 
 
 async def get_entity_repository(
-    session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
 ) -> EntityRepository:
     """Create an EntityRepository instance for the current project."""
-    return EntityRepository(session_maker, project_id=project_id)
+    return EntityRepository(project_id=project_id)
 
 
 EntityRepositoryDep = Annotated[EntityRepository, Depends(get_entity_repository)]
 
 
 async def get_entity_repository_v2(  # pragma: no cover
-    session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> EntityRepository:
     """Create an EntityRepository instance for v2 API (uses integer project_id from path)."""
-    return EntityRepository(session_maker, project_id=project_id)
+    return EntityRepository(project_id=project_id)
 
 
 EntityRepositoryV2Dep = Annotated[EntityRepository, Depends(get_entity_repository_v2)]
 
 
 async def get_entity_repository_v2_external(
-    session_maker: SessionMakerDep,
     project_id: ProjectExternalIdPathDep,
 ) -> EntityRepository:
     """Create an EntityRepository instance for v2 API (uses external_id from path)."""
-    return EntityRepository(session_maker, project_id=project_id)
+    return EntityRepository(project_id=project_id)
 
 
 EntityRepositoryV2ExternalDep = Annotated[
@@ -68,22 +65,20 @@ EntityRepositoryV2ExternalDep = Annotated[
 
 
 async def get_observation_repository(
-    session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
 ) -> ObservationRepository:
     """Create an ObservationRepository instance for the current project."""
-    return ObservationRepository(session_maker, project_id=project_id)
+    return ObservationRepository(project_id=project_id)
 
 
 ObservationRepositoryDep = Annotated[ObservationRepository, Depends(get_observation_repository)]
 
 
 async def get_observation_repository_v2(  # pragma: no cover
-    session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> ObservationRepository:
     """Create an ObservationRepository instance for v2 API."""
-    return ObservationRepository(session_maker, project_id=project_id)
+    return ObservationRepository(project_id=project_id)
 
 
 ObservationRepositoryV2Dep = Annotated[
@@ -92,11 +87,10 @@ ObservationRepositoryV2Dep = Annotated[
 
 
 async def get_observation_repository_v2_external(
-    session_maker: SessionMakerDep,
     project_id: ProjectExternalIdPathDep,
 ) -> ObservationRepository:
     """Create an ObservationRepository instance for v2 API (uses external_id)."""
-    return ObservationRepository(session_maker, project_id=project_id)
+    return ObservationRepository(project_id=project_id)
 
 
 ObservationRepositoryV2ExternalDep = Annotated[
@@ -108,33 +102,30 @@ ObservationRepositoryV2ExternalDep = Annotated[
 
 
 async def get_relation_repository(
-    session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
 ) -> RelationRepository:
     """Create a RelationRepository instance for the current project."""
-    return RelationRepository(session_maker, project_id=project_id)
+    return RelationRepository(project_id=project_id)
 
 
 RelationRepositoryDep = Annotated[RelationRepository, Depends(get_relation_repository)]
 
 
 async def get_relation_repository_v2(  # pragma: no cover
-    session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> RelationRepository:
     """Create a RelationRepository instance for v2 API."""
-    return RelationRepository(session_maker, project_id=project_id)
+    return RelationRepository(project_id=project_id)
 
 
 RelationRepositoryV2Dep = Annotated[RelationRepository, Depends(get_relation_repository_v2)]
 
 
 async def get_relation_repository_v2_external(
-    session_maker: SessionMakerDep,
     project_id: ProjectExternalIdPathDep,
 ) -> RelationRepository:
     """Create a RelationRepository instance for v2 API (uses external_id)."""
-    return RelationRepository(session_maker, project_id=project_id)
+    return RelationRepository(project_id=project_id)
 
 
 RelationRepositoryV2ExternalDep = Annotated[

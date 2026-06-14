@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
+from basic_memory import db
 from basic_memory.ignore_utils import (
     IGNORED_PATH_REJECTION_DETAIL,
     load_gitignore_patterns,
@@ -34,6 +35,8 @@ from basic_memory.deps import (
     ProjectExternalIdPathDep,
     SyncServiceV2ExternalDep,
     TaskSchedulerDep,
+    SessionDep,
+    SessionMakerDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
@@ -81,6 +84,7 @@ async def get_graph(
     project_id: ProjectExternalIdPathDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     relation_repository: RelationRepositoryV2ExternalDep,
+    session: SessionDep,
 ) -> GraphResponse:
     """Return all entities and resolved relations for knowledge graph visualization.
 
@@ -96,7 +100,7 @@ async def get_graph(
         logger.info("API v2 request: get_graph")
 
         # Fetch all entities for this project
-        entities = await entity_repository.find_all(use_load_options=False)
+        entities = await entity_repository.find_all(session, use_load_options=False)
         nodes = [
             GraphNode(
                 external_id=entity.external_id,
@@ -108,7 +112,7 @@ async def get_graph(
         ]
 
         # Fetch all resolved relations (to_id is not null) with eager-loaded entities
-        relations = await relation_repository.find_all()
+        relations = await relation_repository.find_all(session)
         edges = [
             GraphEdge(
                 from_id=relation.from_entity.external_id,
@@ -130,6 +134,7 @@ async def get_graph(
 async def get_orphan_entities(
     project_id: ProjectExternalIdPathDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    session: SessionDep,
 ) -> OrphanEntitiesResponse:
     """Return entities that have no incoming or outgoing relations."""
     with logfire.span(
@@ -140,7 +145,7 @@ async def get_orphan_entities(
     ):
         logger.info("API v2 request: get_orphan_entities")
 
-        entities = await entity_repository.find_without_relations()
+        entities = await entity_repository.find_without_relations(session)
         nodes = [
             GraphNode(
                 external_id=entity.external_id,
@@ -165,6 +170,7 @@ async def resolve_identifier(
     link_resolver: LinkResolverV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     project_repository: ProjectRepositoryDep,
+    session: SessionDep,
 ) -> EntityResolveResponse:
     """Resolve a string identifier (external_id, permalink, title, or path) to entity info.
 
@@ -203,12 +209,15 @@ async def resolve_identifier(
     ):
         logger.info(f"API v2 request: resolve_identifier for '{data.identifier}'")
 
-        entity = await entity_repository.get_by_external_id(data.identifier)
+        entity = await entity_repository.get_by_external_id(session, data.identifier)
         resolution_method = "external_id" if entity else "search"
 
         if not entity:
             entity = await link_resolver.resolve_link(
-                data.identifier, source_path=data.source_path, strict=data.strict
+                data.identifier,
+                source_path=data.source_path,
+                strict=data.strict,
+                session=session,
             )
             if entity:
                 if entity.permalink == data.identifier:
@@ -223,7 +232,7 @@ async def resolve_identifier(
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity not found: '{data.identifier}'")
 
-        owner_project = await project_repository.get_by_id(entity.project_id)
+        owner_project = await project_repository.get_by_id(session, entity.project_id)
         if not owner_project:  # pragma: no cover
             raise HTTPException(
                 status_code=500,
@@ -304,6 +313,7 @@ async def sync_file(
     project_config: ProjectConfigV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
+    session_maker: SessionMakerDep,
 ) -> EntityResponseV2:
     """Index a single markdown file that exists on disk but is not indexed yet.
 
@@ -406,7 +416,8 @@ async def sync_file(
         # Trigger: the file may already have a DB row (e.g. modified on disk after indexing)
         # Why: the indexer needs to know whether to insert or update the entity
         # Outcome: new is computed from the database instead of assumed by the caller
-        existing = await sync_service.entity_repository.get_by_file_path(file_path)
+        async with db.scoped_session(session_maker) as session:
+            existing = await sync_service.entity_repository.get_by_file_path(session, file_path)
         synced = await sync_service.sync_one_markdown_file(
             file_path, new=existing is None, index_search=True
         )
@@ -435,6 +446,7 @@ async def sync_file(
 async def get_entity_by_id(
     project_id: ProjectExternalIdPathDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    session: SessionDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Get an entity by its external ID (UUID).
@@ -459,7 +471,7 @@ async def get_entity_by_id(
     ):
         logger.info(f"API v2 request: get_entity_by_id entity_id={entity_id}")
 
-        entity = await entity_repository.get_by_external_id(entity_id)
+        entity = await entity_repository.get_by_external_id(session, entity_id)
         if not entity:
             raise HTTPException(
                 status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
@@ -536,6 +548,7 @@ async def update_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
     app_config: AppConfigDep,
+    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Update an entity by external ID.
@@ -557,7 +570,8 @@ async def update_entity_by_id(
     ):
         logger.info(f"API v2 request: update_entity_by_id entity_id={entity_id}")
 
-        existing = await entity_repository.get_by_external_id(entity_id)
+        async with db.scoped_session(session_maker) as session:
+            existing = await entity_repository.get_by_external_id(session, entity_id)
         created = existing is None
 
         if existing:
@@ -568,10 +582,12 @@ async def update_entity_by_id(
             write_result = await entity_service.create_entity_with_content(data)
             entity = write_result.entity
             if entity.external_id != entity_id:
-                entity = await entity_repository.update(
-                    entity.id,
-                    {"external_id": entity_id},
-                )
+                async with db.scoped_session(session_maker) as session:
+                    entity = await entity_repository.update(
+                        session,
+                        entity.id,
+                        {"external_id": entity_id},
+                    )
                 # external_id fixup only changes the DB row. The file content is unchanged,
                 # so the markdown captured during the write remains valid downstream.
                 if not entity:
@@ -607,6 +623,7 @@ async def edit_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
     app_config: AppConfigDep,
+    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Edit an existing entity by external ID using operations like append, prepend, etc.
@@ -631,7 +648,8 @@ async def edit_entity_by_id(
             f"API v2 request: edit_entity_by_id entity_id={entity_id}, operation='{data.operation}'"
         )
 
-        entity = await entity_repository.get_by_external_id(entity_id)
+        async with db.scoped_session(session_maker) as session:
+            entity = await entity_repository.get_by_external_id(session, entity_id)
         if not entity:  # pragma: no cover
             raise HTTPException(
                 status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
@@ -678,6 +696,7 @@ async def delete_entity_by_id(
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> DeleteEntitiesResponse:
     """Delete an entity by external ID.
@@ -698,7 +717,8 @@ async def delete_entity_by_id(
     ):
         logger.info(f"API v2 request: delete_entity_by_id entity_id={entity_id}")
 
-        entity = await entity_repository.get_by_external_id(entity_id)
+        async with db.scoped_session(session_maker) as session:
+            entity = await entity_repository.get_by_external_id(session, entity_id)
         if entity is None:
             logger.info(f"API v2 response: external_id={entity_id} not found, deleted=False")
             return DeleteEntitiesResponse(deleted=False)
@@ -724,6 +744,7 @@ async def move_entity(
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
+    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Move an entity to a new file location.
@@ -751,7 +772,8 @@ async def move_entity(
 
         try:
             # First, get the entity by external_id to verify it exists
-            entity = await entity_repository.get_by_external_id(entity_id)
+            async with db.scoped_session(session_maker) as session:
+                entity = await entity_repository.get_by_external_id(session, entity_id)
             if not entity:  # pragma: no cover
                 raise HTTPException(
                     status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
@@ -766,9 +788,11 @@ async def move_entity(
             )
 
             # Reindex at new location
-            reindexed_entity = await entity_service.link_resolver.resolve_link(
-                data.destination_path
-            )
+            async with db.scoped_session(session_maker) as session:
+                reindexed_entity = await entity_service.link_resolver.resolve_link(
+                    data.destination_path,
+                    session=session,
+                )
             if reindexed_entity:
                 await search_service.index_entity(reindexed_entity)
                 _schedule_vector_sync_if_enabled(
@@ -805,6 +829,7 @@ async def move_directory(
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
+    session_maker: SessionMakerDep,
 ) -> DirectoryMoveResult:
     """Move all entities in a directory to a new location.
 
@@ -840,7 +865,10 @@ async def move_directory(
 
             # Reindex moved entities
             for file_path in result.moved_files:
-                entity = await entity_service.link_resolver.resolve_link(file_path)
+                async with db.scoped_session(session_maker) as session:
+                    entity = await entity_service.link_resolver.resolve_link(
+                        file_path, session=session
+                    )
                 if entity:
                     await search_service.index_entity(entity)
                     _schedule_vector_sync_if_enabled(

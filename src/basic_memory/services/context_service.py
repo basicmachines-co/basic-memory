@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, AsyncIterator, List, Optional, Tuple, TYPE_CHECKING
 
 
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
+from basic_memory import db
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
@@ -91,11 +94,21 @@ class ContextService:
         entity_repository: EntityRepository,
         observation_repository: ObservationRepository,
         link_resolver: Optional[LinkResolver] = None,
+        session_maker: async_sessionmaker[AsyncSession] | None = None,
     ):
         self.search_repository = search_repository
         self.entity_repository = entity_repository
         self.observation_repository = observation_repository
         self.link_resolver = link_resolver
+        self.session_maker = session_maker
+
+    @asynccontextmanager
+    async def _session_scope(self) -> AsyncIterator[AsyncSession]:
+        """Open a service-owned transaction for core repository reads."""
+        if self.session_maker is None:  # pragma: no cover
+            raise ValueError("session_maker is required for ContextService")
+        async with db.scoped_session(self.session_maker) as session:
+            yield session
 
     async def build_context(
         self,
@@ -176,9 +189,13 @@ class ContextService:
                         )
 
                         if not primary and self.link_resolver:
-                            entity = await self.link_resolver.resolve_link(
-                                path, use_search=True, strict=False
-                            )
+                            async with self._session_scope() as session:
+                                entity = await self.link_resolver.resolve_link(
+                                    path,
+                                    use_search=True,
+                                    strict=False,
+                                    session=session,
+                                )
                             if entity:
                                 logger.debug(
                                     f"LinkResolver resolved '{path}' to permalink '{entity.permalink}'"
@@ -234,9 +251,10 @@ class ContextService:
                     phase="load_observations",
                     result_count=len(entity_ids),
                 ):
-                    observations_by_entity = await self.observation_repository.find_by_entities(
-                        entity_ids
-                    )
+                    async with self._session_scope() as session:
+                        observations_by_entity = await self.observation_repository.find_by_entities(
+                            session, entity_ids
+                        )
                 logger.debug(f"Found observations for {len(observations_by_entity)} entities")
 
             metadata = ContextMetadata(

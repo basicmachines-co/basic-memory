@@ -12,6 +12,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Path, status
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig
 from basic_memory.deps.db import SessionMakerDep
 from basic_memory.repository.project_repository import ProjectRepository
@@ -21,11 +22,9 @@ from basic_memory.utils import generate_permalink
 # --- Project Repository ---
 
 
-async def get_project_repository(
-    session_maker: SessionMakerDep,
-) -> ProjectRepository:
+async def get_project_repository() -> ProjectRepository:
     """Get the project repository."""
-    return ProjectRepository(session_maker)
+    return ProjectRepository()
 
 
 ProjectRepositoryDep = Annotated[ProjectRepository, Depends(get_project_repository)]
@@ -41,6 +40,7 @@ ProjectPathDep = Annotated[str, Path()]
 
 
 async def get_project_id(
+    session_maker: SessionMakerDep,
     project_repository: ProjectRepositoryDep,
     project: ProjectPathDep,
 ) -> int:
@@ -61,14 +61,17 @@ async def get_project_id(
     """
     # Convert project name to permalink for lookup
     project_permalink = generate_permalink(str(project))
-    project_obj = await project_repository.get_by_permalink(project_permalink)
-    if project_obj:
-        return project_obj.id
+    async with db.scoped_session(session_maker) as session:
+        project_obj = await project_repository.get_by_permalink(session, project_permalink)
+        if project_obj:
+            return project_obj.id
 
-    # Try by name if permalink lookup fails
-    project_obj = await project_repository.get_by_name(str(project))  # pragma: no cover
-    if project_obj:  # pragma: no cover
-        return project_obj.id
+        # Try by name if permalink lookup fails
+        project_obj = await project_repository.get_by_name(
+            session, str(project)
+        )  # pragma: no cover
+        if project_obj:  # pragma: no cover
+            return project_obj.id
 
     # Not found
     raise HTTPException(  # pragma: no cover
@@ -83,7 +86,9 @@ ProjectIdDep = Annotated[int, Depends(get_project_id)]
 
 
 async def get_project_config(
-    project: ProjectPathDep, project_repository: ProjectRepositoryDep
+    session_maker: SessionMakerDep,
+    project: ProjectPathDep,
+    project_repository: ProjectRepositoryDep,
 ) -> ProjectConfig:  # pragma: no cover
     """Get the current project referenced from request state.
 
@@ -99,9 +104,10 @@ async def get_project_config(
     """
     # Convert project name to permalink for lookup
     project_permalink = generate_permalink(str(project))
-    project_obj = await project_repository.get_by_permalink(project_permalink)
-    if project_obj:
-        return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
+    async with db.scoped_session(session_maker) as session:
+        project_obj = await project_repository.get_by_permalink(session, project_permalink)
+        if project_obj:
+            return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
 
     # Not found
     raise HTTPException(  # pragma: no cover
@@ -116,6 +122,7 @@ ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]
 
 
 async def validate_project_id(
+    session_maker: SessionMakerDep,
     project_id: int,
     project_repository: ProjectRepositoryDep,
 ) -> int:
@@ -134,12 +141,13 @@ async def validate_project_id(
     Raises:
         HTTPException: If project with that ID is not found
     """
-    project_obj = await project_repository.get_by_id(project_id)
-    if not project_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project with ID {project_id} not found.",
-        )
+    async with db.scoped_session(session_maker) as session:
+        project_obj = await project_repository.get_by_id(session, project_id)
+        if not project_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found.",
+            )
     return project_id
 
 
@@ -147,7 +155,9 @@ ProjectIdPathDep = Annotated[int, Depends(validate_project_id)]
 
 
 async def get_project_config_v2(
-    project_id: ProjectIdPathDep, project_repository: ProjectRepositoryDep
+    session_maker: SessionMakerDep,
+    project_id: ProjectIdPathDep,
+    project_repository: ProjectRepositoryDep,
 ) -> ProjectConfig:  # pragma: no cover
     """Get the project config for v2 API (uses integer project_id from path).
 
@@ -161,9 +171,10 @@ async def get_project_config_v2(
     Raises:
         HTTPException: If project is not found
     """
-    project_obj = await project_repository.get_by_id(project_id)
-    if project_obj:
-        return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
+    async with db.scoped_session(session_maker) as session:
+        project_obj = await project_repository.get_by_id(session, project_id)
+        if project_obj:
+            return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
 
     # Not found (this should not happen since ProjectIdPathDep already validates existence)
     raise HTTPException(  # pragma: no cover
@@ -178,6 +189,7 @@ ProjectConfigV2Dep = Annotated[ProjectConfig, Depends(get_project_config_v2)]
 
 
 async def validate_project_external_id(
+    session_maker: SessionMakerDep,
     project_id: str,
     project_repository: ProjectRepositoryDep,
 ) -> int:
@@ -196,12 +208,13 @@ async def validate_project_external_id(
     Raises:
         HTTPException: If project with that external_id is not found
     """
-    project_obj = await project_repository.get_by_external_id(project_id)
-    if not project_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project with external_id '{project_id}' not found.",
-        )
+    async with db.scoped_session(session_maker) as session:
+        project_obj = await project_repository.get_by_external_id(session, project_id)
+        if not project_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with external_id '{project_id}' not found.",
+            )
     return project_obj.id
 
 
@@ -209,7 +222,9 @@ ProjectExternalIdPathDep = Annotated[int, Depends(validate_project_external_id)]
 
 
 async def get_project_config_v2_external(
-    project_id: ProjectExternalIdPathDep, project_repository: ProjectRepositoryDep
+    session_maker: SessionMakerDep,
+    project_id: ProjectExternalIdPathDep,
+    project_repository: ProjectRepositoryDep,
 ) -> ProjectConfig:  # pragma: no cover
     """Get the project config for v2 API (uses external_id UUID from path).
 
@@ -223,9 +238,10 @@ async def get_project_config_v2_external(
     Raises:
         HTTPException: If project is not found
     """
-    project_obj = await project_repository.get_by_id(project_id)
-    if project_obj:
-        return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
+    async with db.scoped_session(session_maker) as session:
+        project_obj = await project_repository.get_by_id(session, project_id)
+        if project_obj:
+            return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
 
     # Not found (this should not happen since ProjectExternalIdPathDep already validates)
     raise HTTPException(  # pragma: no cover
