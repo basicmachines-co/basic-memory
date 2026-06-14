@@ -6,6 +6,7 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 ![](https://badge.mcpx.dev?type=server 'MCP Server')
 ![](https://badge.mcpx.dev?type=dev 'MCP Dev')
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/basicmachines-co/basic-memory)
 
 ## Skip the install — try Basic Memory in the cloud
 
