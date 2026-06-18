@@ -2,6 +2,12 @@
 
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.batching import build_index_batches
+from basic_memory.indexing.change_planning import (
+    ChangeReport,
+    FileMoveCandidate,
+    plan_file_changes,
+    plan_moved_files,
+)
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -38,10 +44,12 @@ from basic_memory.indexing.note_content_reconciliation import (
 
 __all__ = [
     "BatchIndexer",
+    "ChangeReport",
     "FileIndexDecision",
     "FileIndexDecisionStatus",
     "FileIndexPlan",
     "FileIndexTarget",
+    "FileMoveCandidate",
     "IndexedEntity",
     "IndexBatch",
     "IndexFileMetadata",
@@ -65,5 +73,7 @@ __all__ = [
     "plan_file_index_target_from_current",
     "plan_file_index_target_from_observed",
     "plan_legacy_file_index_targets",
+    "plan_file_changes",
+    "plan_moved_files",
     "plan_note_content_reconciliation",
 ]
