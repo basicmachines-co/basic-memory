@@ -29,6 +29,11 @@ from basic_memory.indexing.file_index_planning import (
     plan_file_index_target_from_observed,
     plan_legacy_file_index_targets,
 )
+from basic_memory.indexing.input_file_adaptation import (
+    IndexContentTypeProvider,
+    LoadedIndexFile,
+    build_index_input_files,
+)
 from basic_memory.indexing.models import (
     IndexedEntity,
     IndexBatch,
@@ -91,10 +96,12 @@ __all__ = [
     "IndexFileWriter",
     "IndexFrontmatterUpdate",
     "IndexFrontmatterWriteResult",
+    "IndexContentTypeProvider",
     "IndexingBatchResult",
     "IndexedFileChecksumSource",
     "IndexInputFile",
     "IndexProgress",
+    "LoadedIndexFile",
     "NoteContentBootstrap",
     "NoteContentFileObserved",
     "NoteContentFileSynced",
@@ -109,6 +116,7 @@ __all__ = [
     "VectorSyncProgress",
     "VectorSyncProgressState",
     "build_file_index_plan",
+    "build_index_input_files",
     "build_index_batches",
     "current_file_index_decision",
     "plan_file_index_target_from_current",
