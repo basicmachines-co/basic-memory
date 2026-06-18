@@ -13,6 +13,11 @@ from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexPlanner,
     EmbeddingIndexTarget,
 )
+from basic_memory.indexing.file_index_checking import (
+    CurrentFileChecksumSource,
+    FileIndexChecker,
+    IndexedFileChecksumSource,
+)
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -67,12 +72,14 @@ __all__ = [
     "BatchIndexer",
     "ChangeReport",
     "CheckpointModel",
+    "CurrentFileChecksumSource",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
     "EmbeddingIndexTarget",
     "EntityId",
     "FileIndexDecision",
     "FileIndexDecisionStatus",
+    "FileIndexChecker",
     "FileIndexPlan",
     "FileIndexTarget",
     "FileMoveCandidate",
@@ -85,6 +92,7 @@ __all__ = [
     "IndexFrontmatterUpdate",
     "IndexFrontmatterWriteResult",
     "IndexingBatchResult",
+    "IndexedFileChecksumSource",
     "IndexInputFile",
     "IndexProgress",
     "NoteContentBootstrap",
