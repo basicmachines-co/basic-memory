@@ -46,10 +46,18 @@ from basic_memory.indexing.note_content_reconciliation import (
     ObservedNoteContent,
     plan_note_content_reconciliation,
 )
+from basic_memory.indexing.progress import (
+    CheckpointModel,
+    IndexingResult,
+    IndexingResultState,
+    VectorSyncProgress,
+    VectorSyncProgressState,
+)
 
 __all__ = [
     "BatchIndexer",
     "ChangeReport",
+    "CheckpointModel",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
     "EmbeddingIndexTarget",
@@ -59,6 +67,8 @@ __all__ = [
     "FileIndexTarget",
     "FileMoveCandidate",
     "IndexedEntity",
+    "IndexingResult",
+    "IndexingResultState",
     "IndexBatch",
     "IndexFileMetadata",
     "IndexFileWriter",
@@ -75,6 +85,8 @@ __all__ = [
     "NoteContentState",
     "ObservedNoteContent",
     "SyncedMarkdownFile",
+    "VectorSyncProgress",
+    "VectorSyncProgressState",
     "build_file_index_plan",
     "build_index_batches",
     "current_file_index_decision",
