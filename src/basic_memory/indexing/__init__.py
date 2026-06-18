@@ -34,6 +34,12 @@ from basic_memory.indexing.input_file_adaptation import (
     LoadedIndexFile,
     build_index_input_files,
 )
+from basic_memory.indexing.link_resolution import (
+    LinkResolutionTarget,
+    LinkText,
+    normalize_link_text,
+    resolve_link_texts,
+)
 from basic_memory.indexing.models import (
     IndexedEntity,
     IndexBatch,
@@ -102,6 +108,8 @@ __all__ = [
     "IndexInputFile",
     "IndexProgress",
     "LoadedIndexFile",
+    "LinkResolutionTarget",
+    "LinkText",
     "NoteContentBootstrap",
     "NoteContentFileObserved",
     "NoteContentFileSynced",
@@ -119,6 +127,7 @@ __all__ = [
     "build_index_input_files",
     "build_index_batches",
     "current_file_index_decision",
+    "normalize_link_text",
     "plan_file_index_target_from_current",
     "plan_file_index_target_from_observed",
     "plan_legacy_file_index_targets",
@@ -126,4 +135,5 @@ __all__ = [
     "plan_moved_files",
     "plan_note_content_reconciliation",
     "resolve_relations_until_stable",
+    "resolve_link_texts",
 ]
