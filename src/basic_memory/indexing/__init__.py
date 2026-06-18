@@ -53,14 +53,24 @@ from basic_memory.indexing.progress import (
     VectorSyncProgress,
     VectorSyncProgressState,
 )
+from basic_memory.indexing.relation_resolution import (
+    AffectedEntityIds,
+    EntityId,
+    RelationResolutionPass,
+    ResolveRelationsResult,
+    UnresolvedRelationCounter,
+    resolve_relations_until_stable,
+)
 
 __all__ = [
+    "AffectedEntityIds",
     "BatchIndexer",
     "ChangeReport",
     "CheckpointModel",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
     "EmbeddingIndexTarget",
+    "EntityId",
     "FileIndexDecision",
     "FileIndexDecisionStatus",
     "FileIndexPlan",
@@ -84,7 +94,10 @@ __all__ = [
     "NoteContentReconciliationPlan",
     "NoteContentState",
     "ObservedNoteContent",
+    "RelationResolutionPass",
+    "ResolveRelationsResult",
     "SyncedMarkdownFile",
+    "UnresolvedRelationCounter",
     "VectorSyncProgress",
     "VectorSyncProgressState",
     "build_file_index_plan",
@@ -96,4 +109,5 @@ __all__ = [
     "plan_file_changes",
     "plan_moved_files",
     "plan_note_content_reconciliation",
+    "resolve_relations_until_stable",
 ]
