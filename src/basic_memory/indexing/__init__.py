@@ -8,6 +8,11 @@ from basic_memory.indexing.change_planning import (
     plan_file_changes,
     plan_moved_files,
 )
+from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexPlan,
+    EmbeddingIndexPlanner,
+    EmbeddingIndexTarget,
+)
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -45,6 +50,9 @@ from basic_memory.indexing.note_content_reconciliation import (
 __all__ = [
     "BatchIndexer",
     "ChangeReport",
+    "EmbeddingIndexPlan",
+    "EmbeddingIndexPlanner",
+    "EmbeddingIndexTarget",
     "FileIndexDecision",
     "FileIndexDecisionStatus",
     "FileIndexPlan",
