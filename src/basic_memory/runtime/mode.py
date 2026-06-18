@@ -3,8 +3,8 @@
 This module centralizes runtime mode detection, ensuring cloud/local/test
 determination happens in one place rather than scattered across modules.
 
-Composition roots (containers) read ConfigManager and use this module
-to resolve the runtime mode, then pass the result downstream.
+Composition roots read ConfigManager and use this module to resolve the runtime
+mode, then pass the result downstream.
 """
 
 import os
@@ -49,10 +49,10 @@ def resolve_runtime_mode(
         return RuntimeMode.TEST
 
     # Trigger: BASIC_MEMORY_CLOUD_MODE env var is set
-    # Why: cloud deployments must not start local file sync — cloud handles
-    #      file storage via S3/Tigris, and the local sync tries to open a
-    #      SQLite/Postgres DB that doesn't exist in the cloud container
-    # Outcome: returns CLOUD mode, skipping file sync initialization
+    # Why: cloud deployments must not start local file sync; cloud handles
+    #      file storage via object storage, and local sync tries to open a
+    #      SQLite/Postgres DB that does not exist in the cloud container.
+    # Outcome: returns CLOUD mode, skipping file sync initialization.
     cloud_mode = os.getenv("BASIC_MEMORY_CLOUD_MODE", "").lower() in ("1", "true")
     if cloud_mode:
         return RuntimeMode.CLOUD
