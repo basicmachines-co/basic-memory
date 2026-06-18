@@ -14,6 +14,16 @@ from basic_memory.indexing.models import (
     IndexProgress,
     SyncedMarkdownFile,
 )
+from basic_memory.indexing.note_content_reconciliation import (
+    NoteContentBootstrap,
+    NoteContentFileObserved,
+    NoteContentFileSynced,
+    NoteContentPromoted,
+    NoteContentReconciliationPlan,
+    NoteContentState,
+    ObservedNoteContent,
+    plan_note_content_reconciliation,
+)
 
 __all__ = [
     "BatchIndexer",
@@ -26,6 +36,14 @@ __all__ = [
     "IndexingBatchResult",
     "IndexInputFile",
     "IndexProgress",
+    "NoteContentBootstrap",
+    "NoteContentFileObserved",
+    "NoteContentFileSynced",
+    "NoteContentPromoted",
+    "NoteContentReconciliationPlan",
+    "NoteContentState",
+    "ObservedNoteContent",
     "SyncedMarkdownFile",
     "build_index_batches",
+    "plan_note_content_reconciliation",
 ]
