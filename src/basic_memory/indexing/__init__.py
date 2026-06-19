@@ -53,6 +53,14 @@ from basic_memory.indexing.file_indexer import (
     IndexMarkdownNoteContentReconciler,
     IndexMarkdownSyncService,
 )
+from basic_memory.indexing.file_batch_runner import (
+    IndexFileBatchChecker,
+    IndexFileBatchContentClassifier,
+    IndexFileBatchIndexer,
+    IndexFileBatchReader,
+    IndexFileBatchReadResult,
+    run_index_file_batch,
+)
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -282,6 +290,11 @@ __all__ = [
     "IndexedFileLiveUpdatePlan",
     "IndexedEntity",
     "IndexFileBatchJobResult",
+    "IndexFileBatchChecker",
+    "IndexFileBatchContentClassifier",
+    "IndexFileBatchIndexer",
+    "IndexFileBatchReader",
+    "IndexFileBatchReadResult",
     "IndexFileEmbeddingJobContext",
     "IndexFileJobResult",
     "IndexFileJobStatus",
@@ -447,6 +460,7 @@ __all__ = [
     "resolve_project_relations",
     "resolve_relations_until_stable",
     "resolve_link_texts",
+    "run_index_file_batch",
     "search_text_variants",
     "should_emit_project_index_progress_event",
     "strip_search_text",
