@@ -2,10 +2,33 @@
 
 from dataclasses import FrozenInstanceError
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
 
-from basic_memory.runtime import RuntimeAcceptedNoteChange, RuntimeMode, resolve_runtime_mode
+from basic_memory.runtime import (
+    NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+    NOTE_OBJECT_ACTOR_KIND_METADATA,
+    NOTE_OBJECT_ACTOR_NAME_METADATA,
+    NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA,
+    NOTE_OBJECT_DB_CHECKSUM_METADATA,
+    NOTE_OBJECT_DB_VERSION_METADATA,
+    NOTE_OBJECT_ENTITY_ID_METADATA,
+    NOTE_OBJECT_FILE_CHECKSUM_METADATA,
+    NOTE_OBJECT_FILE_VERSION_METADATA,
+    NOTE_OBJECT_SOURCE_METADATA,
+    RuntimeAcceptedNoteChange,
+    RuntimeMode,
+    RuntimeNoteObjectMetadata,
+    actor_kind_from_object_metadata,
+    actor_name_from_object_metadata,
+    actor_user_profile_id_from_object_metadata,
+    db_version_from_object_metadata,
+    file_checksum_from_object_metadata,
+    normalize_actor_name,
+    resolve_runtime_mode,
+    source_from_object_metadata,
+)
 from basic_memory.runtime.contracts import (
     RuntimeDeleteStatus,
     RuntimeCapabilities,
@@ -150,6 +173,60 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(result, "reason", "changed")
+
+    def test_note_object_metadata_serializes_storage_metadata(self):
+        metadata = RuntimeNoteObjectMetadata(
+            entity_id=42,
+            db_version=4,
+            db_checksum="db-sum",
+            actor_user_profile_id=UUID("33333333-3333-3333-3333-333333333333"),
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            actor_name="Claude Code",
+            source="mcp",
+        )
+
+        assert metadata.to_storage_metadata() == {
+            NOTE_OBJECT_ENTITY_ID_METADATA: "42",
+            NOTE_OBJECT_DB_VERSION_METADATA: "4",
+            NOTE_OBJECT_DB_CHECKSUM_METADATA: "db-sum",
+            NOTE_OBJECT_FILE_VERSION_METADATA: "4",
+            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "db-sum",
+            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: ("33333333-3333-3333-3333-333333333333"),
+            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
+            NOTE_OBJECT_SOURCE_METADATA: "mcp",
+        }
+
+    def test_note_object_metadata_parses_safe_values_only(self):
+        metadata = {
+            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: " user-1 ",
+            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            NOTE_OBJECT_ACTOR_NAME_METADATA: " Pat\t\n<script>! ",
+            NOTE_OBJECT_FILE_CHECKSUM_METADATA: " checksum-1 ",
+            NOTE_OBJECT_DB_VERSION_METADATA: " 7 ",
+            NOTE_OBJECT_SOURCE_METADATA: "mcp",
+        }
+
+        assert actor_user_profile_id_from_object_metadata(metadata) == "user-1"
+        assert actor_kind_from_object_metadata(metadata) == NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT
+        assert actor_name_from_object_metadata(metadata) == "Pat script"
+        assert file_checksum_from_object_metadata(metadata) == "checksum-1"
+        assert db_version_from_object_metadata(metadata) == 7
+        assert source_from_object_metadata(metadata) == "mcp"
+
+        unsafe_metadata = {
+            NOTE_OBJECT_ACTOR_KIND_METADATA: "spoofed",
+            NOTE_OBJECT_DB_VERSION_METADATA: "-1",
+            NOTE_OBJECT_SOURCE_METADATA: "spoofed",
+        }
+        assert actor_kind_from_object_metadata(unsafe_metadata) is None
+        assert db_version_from_object_metadata(unsafe_metadata) is None
+        assert source_from_object_metadata(unsafe_metadata) is None
+
+    def test_normalize_actor_name_strips_unsafe_characters_and_limits_length(self):
+        assert normalize_actor_name(" Pat\t\n<script>! ") == "Pat script"
+        assert normalize_actor_name("x" * 121) == "x" * 120
+        assert normalize_actor_name("!@#$") is None
 
     def test_pending_note_materialization_carries_cleanup_work(self):
         cleanup = RuntimePendingNoteFileDelete(
