@@ -171,6 +171,10 @@ from basic_memory.indexing.index_file_runner import (
     run_index_file,
 )
 from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
+from basic_memory.indexing.job_payloads import (
+    IndexFileJobPayload,
+    IndexFileObjectMetadataPayload,
+)
 from basic_memory.indexing.link_resolution import (
     LinkResolutionTarget,
     LinkText,
@@ -550,6 +554,8 @@ __all__ = [
     "IndexFileNoteLiveUpdateContext",
     "IndexFileNoteLiveUpdatePlan",
     "IndexFileNoteLiveUpdateType",
+    "IndexFileJobPayload",
+    "IndexFileObjectMetadataPayload",
     "IndexFileRelationResolutionContext",
     "IndexFileRuntimeRequest",
     "IndexingResult",
