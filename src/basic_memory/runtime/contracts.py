@@ -220,6 +220,11 @@ class StorageEventPayload:
         return self.event_name == STORAGE_OBJECT_DELETED_EVENT
 
 
+def normalize_storage_etag(etag: StorageEtag) -> StorageEtag:
+    """Compare quoted and unquoted S3-compatible ETags the same way."""
+    return etag.strip('"')
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeStorageEventProjectBatch:
     """Storage events grouped for one project-prefixed runtime namespace."""

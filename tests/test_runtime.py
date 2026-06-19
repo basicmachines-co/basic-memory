@@ -63,6 +63,7 @@ from basic_memory.runtime.contracts import (
     StorageObjectIdentity,
     StorageObjectVersion,
     assert_runtime_file_matches_expected,
+    normalize_storage_etag,
     plan_runtime_storage_event_operation,
     plan_runtime_storage_event_operations,
     plan_runtime_storage_events_by_project,
@@ -148,6 +149,11 @@ class TestRuntimeContracts:
 
         assert identity.project_path == "project"
         assert identity.relative_path == "notes/a.md"
+
+    def test_normalize_storage_etag_matches_s3_quote_behavior(self):
+        assert normalize_storage_etag('"etag-1"') == "etag-1"
+        assert normalize_storage_etag("etag-1") == "etag-1"
+        assert normalize_storage_etag('""etag-1""') == "etag-1"
 
     def test_runtime_storage_event_routing_plan_groups_projects_and_skips_root_objects(self):
         alpha_put = StorageEventPayload(
