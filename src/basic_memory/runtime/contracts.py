@@ -138,6 +138,37 @@ class RuntimeAcceptedNoteEntitySource(Protocol):
     def last_updated_by(self) -> str | None: ...
 
 
+class RuntimeNoteContentStateSource(Protocol):
+    """Minimal note_content row shape needed for accepted-note responses."""
+
+    @property
+    def markdown_content(self) -> str: ...
+
+    @property
+    def db_version(self) -> RuntimeNoteContentVersion: ...
+
+    @property
+    def db_checksum(self) -> RuntimeNoteContentChecksum: ...
+
+    @property
+    def file_version(self) -> int | None: ...
+
+    @property
+    def file_checksum(self) -> RuntimeFileChecksum | None: ...
+
+    @property
+    def file_write_status(self) -> str: ...
+
+    @property
+    def last_source(self) -> RuntimeNoteChangeSource | None: ...
+
+    @property
+    def file_updated_at(self) -> datetime | None: ...
+
+    @property
+    def last_materialization_error(self) -> str | None: ...
+
+
 class RuntimeFileChecksumReader(Protocol):
     """Capability for reading a runtime file checksum if an object exists."""
 
@@ -1205,6 +1236,36 @@ class RuntimeAcceptedNoteChange[PayloadT]:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeNoteContentState:
+    """Accepted note_content row state before response serialization."""
+
+    markdown_content: str
+    db_version: RuntimeNoteContentVersion
+    db_checksum: RuntimeNoteContentChecksum
+    file_version: int | None
+    file_checksum: RuntimeFileChecksum | None
+    file_write_status: str
+    last_source: RuntimeNoteChangeSource | None
+    file_updated_at: datetime | None
+    last_materialization_error: str | None
+
+    @classmethod
+    def from_source(cls, source: RuntimeNoteContentStateSource) -> Self:
+        """Build typed runtime state from a loaded note_content source row."""
+        return cls(
+            markdown_content=source.markdown_content,
+            db_version=source.db_version,
+            db_checksum=source.db_checksum,
+            file_version=source.file_version,
+            file_checksum=source.file_checksum,
+            file_write_status=source.file_write_status,
+            last_source=source.last_source,
+            file_updated_at=source.file_updated_at,
+            last_materialization_error=source.last_materialization_error,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeAcceptedNoteResponse:
     """Accepted note response state before HTTP serialization."""
 
@@ -1268,6 +1329,26 @@ class RuntimeAcceptedNoteResponse:
             last_source=last_source,
             file_updated_at=file_updated_at,
             last_materialization_error=last_materialization_error,
+        )
+
+    @classmethod
+    def from_entity_and_content_state(
+        cls,
+        entity: RuntimeAcceptedNoteEntitySource,
+        note_content: RuntimeNoteContentState,
+    ) -> Self:
+        """Build accepted-note response state from an entity and typed note_content state."""
+        return cls.from_entity(
+            entity,
+            markdown_content=note_content.markdown_content,
+            db_version=note_content.db_version,
+            db_checksum=note_content.db_checksum,
+            file_version=note_content.file_version,
+            file_checksum=note_content.file_checksum,
+            file_write_status=note_content.file_write_status,
+            last_source=note_content.last_source,
+            file_updated_at=note_content.file_updated_at,
+            last_materialization_error=note_content.last_materialization_error,
         )
 
     def to_response_payload(self) -> dict[str, object]:

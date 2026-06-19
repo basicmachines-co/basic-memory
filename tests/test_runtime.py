@@ -54,6 +54,7 @@ from basic_memory.runtime.contracts import (
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
+    RuntimeNoteContentState,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteJobRequest,
@@ -1417,6 +1418,51 @@ class TestRuntimeContracts:
 
         nullable_source_response = replace(response, last_source=None)
         assert nullable_source_response.to_response_payload()["last_source"] is None
+
+    def test_runtime_note_content_state_builds_accepted_note_response(self):
+        created_at = datetime(2026, 4, 13, 12, 0, tzinfo=UTC)
+        updated_at = datetime(2026, 4, 13, 12, 30, tzinfo=UTC)
+        file_updated_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
+        entity = SimpleNamespace(
+            external_id="entity-1",
+            id=42,
+            title="Accepted",
+            note_type="note",
+            content_type="text/markdown",
+            permalink="main/accepted",
+            file_path="notes/accepted.md",
+            entity_metadata={"topic": "tests"},
+            created_at=created_at,
+            updated_at=updated_at,
+            created_by="creator",
+            last_updated_by="editor",
+        )
+        note_content = SimpleNamespace(
+            markdown_content="# Accepted\n",
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=3,
+            file_checksum="file-checksum",
+            file_write_status="synced",
+            last_source=None,
+            file_updated_at=file_updated_at,
+            last_materialization_error=None,
+        )
+
+        state = RuntimeNoteContentState.from_source(note_content)
+        response = RuntimeAcceptedNoteResponse.from_entity_and_content_state(
+            entity,
+            state,
+        )
+
+        assert state.markdown_content == "# Accepted\n"
+        assert state.last_source is None
+        assert response.to_response_payload()["content"] == "# Accepted\n"
+        assert response.to_response_payload()["last_source"] is None
+        assert response.to_response_payload()["file_updated_at"] == file_updated_at.isoformat()
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(state, "file_write_status", "pending")
 
     def test_plan_previous_note_file_delete_returns_cleanup_for_materialized_moves(self):
         cleanup = plan_previous_note_file_delete(
