@@ -24,6 +24,7 @@ from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
+    RuntimeProjectDeleteJobRequest,
     RuntimeProjectIndexJobRequest,
     RuntimeStorageFileIndexContext,
     RuntimeStorageFileIndexJobIdentity,
@@ -264,6 +265,40 @@ class ProjectIndexJobPayload(BaseModel):
             force_full=self.force_full,
             search=self.search,
             embeddings=self.embeddings,
+        )
+
+
+class ProjectDeleteJobPayload(BaseModel):
+    """Serialized worker payload for hard-deleting a soft-deleted project."""
+
+    tenant_id: UUID
+    project_id: int
+    project_external_id: str
+    project_name: str
+    project_path: str
+    delete_notes: bool = True
+
+    @classmethod
+    def from_runtime_request(cls, request: RuntimeProjectDeleteJobRequest) -> Self:
+        """Validate the runtime project-delete request at a worker boundary."""
+        return cls(
+            tenant_id=request.tenant_id,
+            project_id=request.project_id,
+            project_external_id=request.project_external_id,
+            project_name=request.project_name,
+            project_path=request.project_path,
+            delete_notes=request.delete_notes,
+        )
+
+    def to_runtime_request(self) -> RuntimeProjectDeleteJobRequest:
+        """Map the validated worker payload back to the runtime request."""
+        return RuntimeProjectDeleteJobRequest(
+            tenant_id=self.tenant_id,
+            project_id=self.project_id,
+            project_external_id=self.project_external_id,
+            project_name=self.project_name,
+            project_path=self.project_path,
+            delete_notes=self.delete_notes,
         )
 
 

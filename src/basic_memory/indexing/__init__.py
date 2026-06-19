@@ -179,6 +179,7 @@ from basic_memory.indexing.job_payloads import (
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
     ObservedIndexFilePayload,
+    ProjectDeleteJobPayload,
     ProjectIndexJobPayload,
     ResolveRelationsJobPayload,
 )
@@ -666,6 +667,7 @@ __all__ = [
     "OrphanSearchIndex",
     "PROJECT_INDEX_PROGRESS_EVENT_INTERVAL",
     "MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE",
+    "ProjectDeleteJobPayload",
     "ProjectIndexJobPayload",
     "ProjectIndexBatchJobActivity",
     "ProjectIndexBatchJobActivityUpdate",

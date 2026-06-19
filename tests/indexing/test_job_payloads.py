@@ -14,6 +14,7 @@ from basic_memory.indexing import (
     IndexFileObjectMetadataPayload,
     IndexFileRuntimeRequest,
     ObservedIndexFilePayload,
+    ProjectDeleteJobPayload,
     ProjectIndexJobPayload,
     ResolveRelationsJobPayload,
     ResolveRelationsJobRequest,
@@ -22,6 +23,7 @@ from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
+    RuntimeProjectDeleteJobRequest,
     RuntimeProjectIndexJobRequest,
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
@@ -193,6 +195,31 @@ def test_project_index_job_payload_round_trips_runtime_request() -> None:
         embeddings=False,
     )
     assert payload.project_reference() == runtime_request.project
+    assert payload.to_runtime_request() == runtime_request
+
+
+def test_project_delete_job_payload_round_trips_runtime_request() -> None:
+    """Project-delete jobs validate cleanup runtime requests at the worker boundary."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    runtime_request = RuntimeProjectDeleteJobRequest(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_name="Main",
+        project_path="main",
+        delete_notes=False,
+    )
+
+    payload = ProjectDeleteJobPayload.from_runtime_request(runtime_request)
+
+    assert payload == ProjectDeleteJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_name="Main",
+        project_path="main",
+        delete_notes=False,
+    )
     assert payload.to_runtime_request() == runtime_request
 
 
