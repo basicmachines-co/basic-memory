@@ -20,6 +20,7 @@ from basic_memory.indexing import (
     ProjectIndexFileOutcome,
     apply_project_index_batch_job_results,
     build_index_file_batch_job_result,
+    index_file_job_result_from_indexed_file,
     index_file_job_result_from_decision,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
@@ -145,6 +146,58 @@ def test_index_file_job_result_from_read_decision_fails_fast():
 
     with pytest.raises(RuntimeError, match="Unexpected file index decision"):
         index_file_job_result_from_decision(decision)
+
+
+def test_index_file_job_result_from_indexed_file_uses_trusted_live_update_plan():
+    indexed_file = FileIndexResult(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        operation=FileIndexOperation.updated,
+    )
+    live_update_plan = IndexedFileLiveUpdatePlan(
+        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
+        object_checksum="checksum-1",
+        indexed_checksum="checksum-1",
+        checksum_matches_indexed_file=True,
+        actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+        live_update_source="mcp",
+        operation=FileIndexOperation.created,
+    )
+
+    assert index_file_job_result_from_indexed_file(
+        indexed_file,
+        live_update_plan=live_update_plan,
+    ) == IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        entity_id=42,
+        note_external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        entity_checksum="checksum-1",
+        operation=FileIndexOperation.created,
+        actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+        live_update_source="mcp",
+    )
+
+    assert index_file_job_result_from_indexed_file(indexed_file) == IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        entity_id=42,
+        note_external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        entity_checksum="checksum-1",
+        operation=FileIndexOperation.updated,
+    )
 
 
 def test_index_file_batch_job_result_carries_ordered_file_and_vector_targets():

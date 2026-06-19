@@ -222,6 +222,36 @@ def index_file_job_result_from_decision(
     raise RuntimeError(f"Unexpected file index decision: {decision.status}")
 
 
+def index_file_job_result_from_indexed_file(
+    indexed_file: FileIndexResult,
+    *,
+    live_update_plan: IndexedFileLiveUpdatePlan | None = None,
+) -> IndexFileJobResult:
+    """Convert a successful file-index result into the queue job result."""
+    return IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason=f"file indexed: {indexed_file.file_path}",
+        entity_id=indexed_file.entity_id,
+        note_external_id=indexed_file.external_id,
+        title=indexed_file.title,
+        permalink=indexed_file.permalink,
+        entity_checksum=indexed_file.checksum,
+        operation=(
+            live_update_plan.operation or indexed_file.operation
+            if live_update_plan is not None
+            else indexed_file.operation
+        ),
+        actor_user_profile_id=(
+            live_update_plan.actor_user_profile_id if live_update_plan is not None else None
+        ),
+        actor_kind=live_update_plan.actor_kind if live_update_plan is not None else None,
+        actor_name=live_update_plan.actor_name if live_update_plan is not None else None,
+        live_update_source=(
+            live_update_plan.live_update_source if live_update_plan is not None else None
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentMaterializedNoteEntity:
     """Indexed entity state needed to build a current materialized note result."""
