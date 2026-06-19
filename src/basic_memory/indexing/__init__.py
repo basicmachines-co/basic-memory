@@ -46,6 +46,8 @@ from basic_memory.indexing.link_resolution import (
     resolve_link_texts,
 )
 from basic_memory.indexing.models import (
+    FileIndexOperation,
+    FileIndexResult,
     IndexedEntity,
     IndexBatch,
     IndexFileMetadata,
@@ -143,6 +145,8 @@ __all__ = [
     "FileIndexChecker",
     "FileIndexPlan",
     "FileIndexPlanSummary",
+    "FileIndexOperation",
+    "FileIndexResult",
     "FileIndexTarget",
     "FileMoveCandidate",
     "IndexedEntity",

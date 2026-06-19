@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -76,6 +77,26 @@ class IndexedEntity:
     checksum: str
     content_type: str | None = None
     markdown_content: str | None = None
+
+
+class FileIndexOperation(StrEnum):
+    """Database operation used for one indexed markdown file."""
+
+    created = "created"
+    updated = "updated"
+
+
+@dataclass(frozen=True, slots=True)
+class FileIndexResult:
+    """Result for one successfully indexed markdown file."""
+
+    file_path: str
+    entity_id: int
+    external_id: str
+    title: str
+    permalink: str
+    checksum: str
+    operation: FileIndexOperation
 
 
 @dataclass(slots=True)
