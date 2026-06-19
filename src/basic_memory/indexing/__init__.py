@@ -61,6 +61,12 @@ from basic_memory.indexing.embedding_index_planning import (
     run_embedding_index_batch,
     summarize_embedding_index_batch_result,
 )
+from basic_memory.indexing.external_file_delete_runner import (
+    ExternalFileDeleteEntities,
+    ExternalFileDeleteObjects,
+    ExternalFileDeleteResult,
+    run_external_file_delete,
+)
 from basic_memory.indexing.file_index_checking import (
     CurrentFileChecksumSource,
     FileIndexChecker,
@@ -367,6 +373,9 @@ __all__ = [
     "EmbeddingIndexTarget",
     "EmbeddingVectorSync",
     "EntityId",
+    "ExternalFileDeleteEntities",
+    "ExternalFileDeleteObjects",
+    "ExternalFileDeleteResult",
     "FileIndexDecision",
     "FileIndexDecisionStatus",
     "FileIndexChecker",
@@ -605,6 +614,7 @@ __all__ = [
     "run_note_materialization",
     "run_embedding_index",
     "run_embedding_index_batch",
+    "run_external_file_delete",
     "run_project_delete",
     "run_project_index_coordinator",
     "search_text_variants",
