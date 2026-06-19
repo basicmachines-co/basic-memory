@@ -10,7 +10,9 @@ from basic_memory.indexing.note_content_reconciliation import NoteContentWriteSt
 from basic_memory.runtime import (
     RuntimeFileChecksum,
     RuntimeFileConflictError,
+    RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
+    RuntimeNoteContentVersionSource,
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
@@ -18,7 +20,10 @@ from basic_memory.runtime import (
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
     TenantId,
+    note_content_matches_materialization_request,
     plan_note_file_delete_job_request,
+    plan_note_materialization_cleanup_file_delete,
+    plan_prepared_note_write,
 )
 from basic_memory.services.exceptions import FileOperationError
 
@@ -84,6 +89,23 @@ class NoteMaterializationPreflightProvider(Protocol):
     ) -> NoteMaterializationPreflightResult: ...
 
 
+class NoteMaterializationEntitySource(Protocol):
+    """Entity fields needed to plan one note materialization preflight."""
+
+    @property
+    def file_path(self) -> RuntimeFilePath: ...
+
+
+class NoteMaterializationContentSource(RuntimeNoteContentVersionSource, Protocol):
+    """note_content fields needed to plan one note materialization preflight."""
+
+    @property
+    def markdown_content(self) -> str: ...
+
+    @property
+    def file_checksum(self) -> object | None: ...
+
+
 class NoteMaterializationFileWriter(Protocol):
     """Capability that writes one prepared note to storage."""
 
@@ -118,6 +140,47 @@ class NoteFileDeleteEnqueuer(Protocol):
     """Capability that enqueues cleanup for old materialized note files."""
 
     async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None: ...
+
+
+def plan_note_materialization_preflight(
+    request: RuntimeNoteMaterializationJobRequest,
+    *,
+    entity: NoteMaterializationEntitySource | None,
+    note_content: NoteMaterializationContentSource | None,
+    attempted_at: datetime,
+) -> NoteMaterializationPreflightResult:
+    """Plan the DB preflight outcome for one queued note materialization request."""
+    if entity is None or note_content is None:
+        return NoteMaterializationPreflightResult.terminal(
+            RuntimeNoteMaterializationResult(
+                entity_id=request.entity_id,
+                status=RuntimeNoteMaterializationStatus.missing,
+                reason=f"note state no longer exists: {request.entity_id}",
+            ),
+            cleanup_file=plan_note_materialization_cleanup_file_delete(request),
+        )
+
+    if not note_content_matches_materialization_request(note_content, request):
+        return NoteMaterializationPreflightResult.terminal(
+            RuntimeNoteMaterializationResult(
+                entity_id=request.entity_id,
+                status=RuntimeNoteMaterializationStatus.stale,
+                reason=f"accepted note changed before file write: {request.entity_id}",
+                file_path=entity.file_path,
+            )
+        )
+
+    return NoteMaterializationPreflightResult.prepared(
+        plan_prepared_note_write(
+            request=request,
+            file_path=entity.file_path,
+            markdown_content=str(note_content.markdown_content),
+            previous_file_checksum=(
+                str(note_content.file_checksum) if note_content.file_checksum is not None else None
+            ),
+            attempted_at=attempted_at,
+        )
+    )
 
 
 async def run_note_materialization(

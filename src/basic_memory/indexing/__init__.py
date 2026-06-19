@@ -187,6 +187,8 @@ from basic_memory.indexing.note_content_reconciliation import (
 )
 from basic_memory.indexing.note_materialization_runner import (
     NoteFileDeleteEnqueuer,
+    NoteMaterializationContentSource,
+    NoteMaterializationEntitySource,
     NoteMaterializationFileWriter,
     NoteMaterializationPreflightOutcome,
     NoteMaterializationPreflightProvider,
@@ -196,6 +198,7 @@ from basic_memory.indexing.note_materialization_runner import (
     NoteMaterializationStatusPublisher,
     cleanup_file_from_prepared_write,
     enqueue_cleanup_file,
+    plan_note_materialization_preflight,
     run_note_materialization,
 )
 from basic_memory.indexing.note_content_reconciler import (
@@ -453,6 +456,8 @@ __all__ = [
     "ObservedNoteContent",
     "NoteFileDeleteEnqueuer",
     "NoteFileDeleteStorage",
+    "NoteMaterializationContentSource",
+    "NoteMaterializationEntitySource",
     "NoteMaterializationFileWriter",
     "NoteMaterializationPreflightOutcome",
     "NoteMaterializationPreflightProvider",
@@ -593,6 +598,7 @@ __all__ = [
     "plan_note_content_materialization_publish",
     "plan_note_content_materialization_status",
     "plan_note_content_reconciliation",
+    "plan_note_materialization_preflight",
     "plan_observed_object_index_completed_live_update",
     "plan_project_index_completed_live_update",
     "plan_project_index_batch_result_record",

@@ -1,6 +1,7 @@
 """Tests for portable note materialization orchestration."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from basic_memory.indexing.note_materialization_runner import (
     NoteMaterializationPreflightResult,
     NoteMaterializationStatusPublication,
+    plan_note_materialization_preflight,
     run_note_materialization,
 )
 from basic_memory.runtime import (
@@ -137,6 +139,83 @@ def written_file() -> RuntimeWrittenFileState:
         file_path="notes/a.md",
         file_checksum="new-file-sum",
         file_updated_at=datetime(2026, 6, 18, 14, 18, tzinfo=UTC),
+    )
+
+
+def test_plan_note_materialization_preflight_returns_missing_terminal_result() -> None:
+    request = materialization_request()
+
+    result = plan_note_materialization_preflight(
+        request,
+        entity=None,
+        note_content=None,
+        attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
+    )
+
+    assert result == NoteMaterializationPreflightResult.terminal(
+        RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.missing,
+            reason="note state no longer exists: 42",
+        ),
+        cleanup_file=RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-cleanup-sum",
+        ),
+    )
+
+
+def test_plan_note_materialization_preflight_returns_stale_terminal_result() -> None:
+    request = materialization_request()
+
+    result = plan_note_materialization_preflight(
+        request,
+        entity=SimpleNamespace(file_path="notes/a.md"),
+        note_content=SimpleNamespace(
+            db_version=5,
+            db_checksum="newer-db-checksum",
+            markdown_content="# Newer\n",
+            file_checksum="old-file-sum",
+        ),
+        attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
+    )
+
+    assert result == NoteMaterializationPreflightResult.terminal(
+        RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.stale,
+            reason="accepted note changed before file write: 42",
+            file_path="notes/a.md",
+        )
+    )
+
+
+def test_plan_note_materialization_preflight_returns_prepared_write() -> None:
+    request = materialization_request()
+    attempted_at = datetime(2026, 6, 18, 14, 17, tzinfo=UTC)
+
+    result = plan_note_materialization_preflight(
+        request,
+        entity=SimpleNamespace(file_path="notes/a.md"),
+        note_content=SimpleNamespace(
+            db_version=4,
+            db_checksum="db-checksum",
+            markdown_content="# A note\n",
+            file_checksum="old-file-sum",
+        ),
+        attempted_at=attempted_at,
+    )
+
+    assert result == NoteMaterializationPreflightResult.prepared(
+        plan_prepared_note_write(
+            request=request,
+            file_path="notes/a.md",
+            markdown_content="# A note\n",
+            previous_file_checksum="old-file-sum",
+            attempted_at=attempted_at,
+        )
     )
 
 
