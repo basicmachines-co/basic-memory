@@ -106,6 +106,16 @@ class PreparedEditTitleReconciliation:
     metadata: dict[str, Any] | None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedEntityMove:
+    """Accepted markdown state for a DB-first note move."""
+
+    file_path: Path
+    markdown_content: str
+    search_content: str
+    permalink: str | None
+
+
 def _frontmatter_permalink(value: object) -> str | None:
     """Return an explicit frontmatter permalink only when YAML parsed a real string."""
     return value if isinstance(value, str) and value else None
@@ -748,6 +758,51 @@ class EntityService(BaseService[EntityModel]):
             file_path=file_path,
             markdown_content=markdown_content,
             entity_fields=entity_fields,
+        )
+
+    async def prepare_move_entity_content(
+        self,
+        entity: EntityModel,
+        current_content: str,
+        destination_path: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> PreparedEntityMove:
+        """Derive accepted markdown and permalink state for a note move.
+
+        This method does not read files, write files, or mutate database rows.
+        The caller supplies the current accepted markdown because cloud DB-first
+        moves may need to use note_content rather than a materialized file.
+        """
+        # Keep the search helper import lazy for the same package-cycle reason as
+        # reconcile_prepared_edit_title_from_h1.
+        from basic_memory.indexing.accepted_note_search import (
+            accepted_search_content_from_markdown,
+        )
+
+        accepted_path = destination_path.strip()
+        if not accepted_path or accepted_path.startswith("/"):
+            raise ValueError(f"Invalid destination path: {destination_path}")
+
+        file_path = Path(accepted_path)
+        markdown_content = current_content
+        permalink = entity.permalink
+        disable_permalinks = bool(self.app_config and self.app_config.disable_permalinks)
+        update_permalinks_on_move = bool(
+            self.app_config and self.app_config.update_permalinks_on_move
+        )
+
+        if not disable_permalinks and (update_permalinks_on_move or entity.permalink is None):
+            permalink = await self.resolve_permalink(file_path, session=session)
+            post = frontmatter.loads(markdown_content)
+            post.metadata["permalink"] = permalink
+            markdown_content = dump_frontmatter(post)
+
+        return PreparedEntityMove(
+            file_path=file_path,
+            markdown_content=markdown_content,
+            search_content=accepted_search_content_from_markdown(markdown_content),
+            permalink=permalink,
         )
 
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:

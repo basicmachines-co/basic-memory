@@ -206,6 +206,35 @@ async def test_prepare_update_entity_content_preserves_permalink_when_move_updat
 
 
 @pytest.mark.asyncio
+async def test_prepare_move_entity_content_updates_permalink_when_move_policy_enabled(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Prepared Move",
+            directory="notes",
+            note_type="note",
+            content="Move body",
+        )
+    )
+    entity_service.app_config.update_permalinks_on_move = True
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_move_entity_content(
+        created,
+        current_content,
+        "archive/Prepared Move.md",
+    )
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+
+    assert prepared.file_path.as_posix() == "archive/Prepared Move.md"
+    assert prepared.permalink == "test-project/archive/prepared-move"
+    assert prepared_frontmatter["permalink"] == "test-project/archive/prepared-move"
+    assert prepared.search_content == remove_frontmatter(prepared.markdown_content)
+
+
+@pytest.mark.asyncio
 async def test_update_entity_with_content_rejects_rename_conflicts_before_writing(
     entity_service,
     file_service,
