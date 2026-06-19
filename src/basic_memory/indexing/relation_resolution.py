@@ -12,6 +12,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.indexing.models import IndexFileJobStatus
 from basic_memory.repository import RelationRepository
 
 type EntityId = int
@@ -88,6 +89,54 @@ class ResolveRelationsJobRequest:
             }
         )
         return routing_headers
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexRelationResolutionContext:
+    """Project-index completion facts needed to queue relation resolution."""
+
+    tenant_id: UUID
+    project_id: int | str | None
+    project_path: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexFileRelationResolutionContext:
+    """Index-file facts needed to decide whether relation resolution should run."""
+
+    tenant_id: UUID
+    project_id: int
+    project_path: str
+    workflow_id: UUID | None
+    status: IndexFileJobStatus
+
+
+def plan_project_index_completion_relation_resolution(
+    context: ProjectIndexRelationResolutionContext,
+) -> ResolveRelationsJobRequest | None:
+    """Plan the final relation-resolution job for a completed project index."""
+    if context.project_id is None or context.project_path is None:
+        return None
+    return ResolveRelationsJobRequest(
+        tenant_id=context.tenant_id,
+        project_id=int(context.project_id),
+        project_path=context.project_path,
+    )
+
+
+def plan_index_file_relation_resolution(
+    context: IndexFileRelationResolutionContext,
+) -> ResolveRelationsJobRequest | None:
+    """Plan relation-resolution work after one incremental file index."""
+    if context.workflow_id is not None:
+        return None
+    if context.status != IndexFileJobStatus.processed:
+        return None
+    return ResolveRelationsJobRequest(
+        tenant_id=context.tenant_id,
+        project_id=context.project_id,
+        project_path=context.project_path,
+    )
 
 
 @dataclass(frozen=True, slots=True)

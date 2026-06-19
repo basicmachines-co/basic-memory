@@ -8,13 +8,18 @@ from uuid import UUID
 import pytest
 
 from basic_memory.indexing.relation_resolution import (
+    IndexFileRelationResolutionContext,
+    ProjectIndexRelationResolutionContext,
     RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
     ResolveRelationsJobRequest,
     ResolveRelationsResult,
     SyncServiceRelationResolver,
+    plan_index_file_relation_resolution,
+    plan_project_index_completion_relation_resolution,
     resolve_project_relations,
     resolve_relations_until_stable,
 )
+from basic_memory.indexing.models import IndexFileJobStatus
 
 
 class StubUnresolvedRelationCounter:
@@ -109,6 +114,92 @@ def test_resolve_relations_job_request_matches_cloud_queue_identity() -> None:
 
     with pytest.raises(FrozenInstanceError):
         setattr(request, "project_path", "other")
+
+
+def test_project_index_completion_relation_resolution_plan_requires_project_identity() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    assert plan_project_index_completion_relation_resolution(
+        ProjectIndexRelationResolutionContext(
+            tenant_id=tenant_id,
+            project_id="7",
+            project_path="main",
+        )
+    ) == ResolveRelationsJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_path="main",
+    )
+    assert (
+        plan_project_index_completion_relation_resolution(
+            ProjectIndexRelationResolutionContext(
+                tenant_id=tenant_id,
+                project_id=None,
+                project_path="main",
+            )
+        )
+        is None
+    )
+    assert (
+        plan_project_index_completion_relation_resolution(
+            ProjectIndexRelationResolutionContext(
+                tenant_id=tenant_id,
+                project_id="7",
+                project_path=None,
+            )
+        )
+        is None
+    )
+    with pytest.raises(ValueError):
+        plan_project_index_completion_relation_resolution(
+            ProjectIndexRelationResolutionContext(
+                tenant_id=tenant_id,
+                project_id="not-an-int",
+                project_path="main",
+            )
+        )
+
+
+def test_index_file_relation_resolution_plan_requires_incremental_processed_file() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    assert plan_index_file_relation_resolution(
+        IndexFileRelationResolutionContext(
+            tenant_id=tenant_id,
+            project_id=7,
+            project_path="main",
+            workflow_id=None,
+            status=IndexFileJobStatus.processed,
+        )
+    ) == ResolveRelationsJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_path="main",
+    )
+    assert (
+        plan_index_file_relation_resolution(
+            IndexFileRelationResolutionContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                project_path="main",
+                workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
+                status=IndexFileJobStatus.processed,
+            )
+        )
+        is None
+    )
+    assert (
+        plan_index_file_relation_resolution(
+            IndexFileRelationResolutionContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                project_path="main",
+                workflow_id=None,
+                status=IndexFileJobStatus.current,
+            )
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
