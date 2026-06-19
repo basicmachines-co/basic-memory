@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 
@@ -14,6 +15,22 @@ class EmbeddingIndexTarget:
 
     entity_id: int
     entity_checksum: str
+
+
+class EmbeddingIndexStatus(StrEnum):
+    """Normal outcomes for one semantic-embedding indexing job."""
+
+    processed = "processed"
+    noop = "noop"
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingIndexResult:
+    """Summary of one embedding indexing job."""
+
+    entity_id: int
+    status: EmbeddingIndexStatus
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)

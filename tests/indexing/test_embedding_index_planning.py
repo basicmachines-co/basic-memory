@@ -2,6 +2,8 @@
 
 from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexBatchResult,
+    EmbeddingIndexResult,
+    EmbeddingIndexStatus,
     EmbeddingIndexPlanner,
     EmbeddingIndexTarget,
     summarize_embedding_index_batch_result,
@@ -65,4 +67,16 @@ def test_embedding_index_batch_result_handles_empty_batches() -> None:
         failed_entities=0,
         deferred_entities=0,
         reason="no entities",
+    )
+
+
+def test_embedding_index_result_describes_one_entity_outcome() -> None:
+    assert EmbeddingIndexResult(
+        entity_id=42,
+        status=EmbeddingIndexStatus.processed,
+        reason="entity embeddings indexed: 42",
+    ) == EmbeddingIndexResult(
+        entity_id=42,
+        status=EmbeddingIndexStatus.processed,
+        reason="entity embeddings indexed: 42",
     )

@@ -13,6 +13,8 @@ from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexBatchSummary,
     EmbeddingIndexPlan,
     EmbeddingIndexPlanner,
+    EmbeddingIndexResult,
+    EmbeddingIndexStatus,
     EmbeddingIndexTarget,
     summarize_embedding_index_batch_result,
 )
@@ -141,6 +143,8 @@ __all__ = [
     "EmbeddingIndexBatchSummary",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
+    "EmbeddingIndexResult",
+    "EmbeddingIndexStatus",
     "EmbeddingIndexTarget",
     "EntityId",
     "FileIndexDecision",
