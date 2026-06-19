@@ -45,8 +45,11 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     RuntimeQueuedWorkflowMetadata,
+    RuntimeStorageEventOperation,
+    RuntimeStorageEventOperationKind,
     RuntimeStorageEventProjectBatch,
     RuntimeStorageEventRoutingPlan,
+    RuntimeStorageEventSkipReason,
     RuntimeWorkflowAttemptMetadata,
     RuntimeWorkflowCompletionMetadata,
     RuntimeWorkflowFailureMetadata,
@@ -57,6 +60,8 @@ from basic_memory.runtime.contracts import (
     StorageObjectIdentity,
     StorageObjectVersion,
     assert_runtime_file_matches_expected,
+    plan_runtime_storage_event_operation,
+    plan_runtime_storage_event_operations,
     plan_runtime_storage_events_by_project,
     plan_previous_note_file_delete,
     read_runtime_file_checksum,
@@ -209,6 +214,74 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(plan, "skipped_events", ())
+
+    def test_runtime_storage_event_operation_plans_index_delete_and_skip_work(self):
+        def event(key: str, event_name: str) -> StorageEventPayload:
+            return StorageEventPayload(
+                event_name=event_name,
+                event_time="2026-06-19T12:00:00Z",
+                object_version=StorageObjectVersion(
+                    identity=StorageObjectIdentity(
+                        bucket_name="memory-bucket",
+                        key=key,
+                    ),
+                    etag=f"{event_name}-{key}",
+                ),
+            )
+
+        created_event = event("project/notes/a.md", "OBJECT_CREATED_PUT")
+        deleted_event = event("project/notes/b.md", "OBJECT_DELETED")
+        root_event = event("project/", "OBJECT_CREATED_PUT")
+        non_markdown_event = event("project/image.png", "OBJECT_CREATED_POST")
+        unknown_event = event("project/notes/c.md", "OBJECT_RESTORED")
+
+        operations = plan_runtime_storage_event_operations(
+            [
+                created_event,
+                deleted_event,
+                root_event,
+                non_markdown_event,
+                unknown_event,
+            ]
+        )
+
+        assert operations == (
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.index_file,
+                storage_event=created_event,
+                relative_path="notes/a.md",
+            ),
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.delete_file,
+                storage_event=deleted_event,
+                relative_path="notes/b.md",
+            ),
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.skip,
+                storage_event=root_event,
+                skip_reason=RuntimeStorageEventSkipReason.project_root,
+            ),
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.skip,
+                storage_event=non_markdown_event,
+                relative_path="image.png",
+                skip_reason=RuntimeStorageEventSkipReason.non_markdown,
+            ),
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.skip,
+                storage_event=unknown_event,
+                relative_path="notes/c.md",
+                skip_reason=RuntimeStorageEventSkipReason.unknown_event,
+            ),
+        )
+        assert plan_runtime_storage_event_operation(created_event).require_relative_path() == (
+            "notes/a.md"
+        )
+
+        with pytest.raises(RuntimeError, match="Storage event operation has no relative path"):
+            operations[2].require_relative_path()
+        with pytest.raises(FrozenInstanceError):
+            setattr(operations[0], "kind", RuntimeStorageEventOperationKind.skip)
 
     def test_runtime_job_request_is_immutable(self):
         request = RuntimeJobRequest(

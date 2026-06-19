@@ -270,6 +270,97 @@ def plan_runtime_storage_events_by_project(
     )
 
 
+class RuntimeStorageEventOperationKind(StrEnum):
+    """Executable outcomes for a project-scoped storage event."""
+
+    index_file = "index_file"
+    delete_file = "delete_file"
+    skip = "skip"
+
+
+class RuntimeStorageEventSkipReason(StrEnum):
+    """Reasons a project-scoped storage event should not produce work."""
+
+    project_root = "project_root"
+    non_markdown = "non_markdown"
+    unknown_event = "unknown_event"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStorageEventOperation:
+    """Typed operation selected from a project-scoped storage event."""
+
+    kind: RuntimeStorageEventOperationKind
+    storage_event: StorageEventPayload
+    relative_path: RuntimeFilePath | None = None
+    skip_reason: RuntimeStorageEventSkipReason | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == RuntimeStorageEventOperationKind.skip:
+            if self.skip_reason is None:
+                raise ValueError("Skipped storage event operations require a skip reason")
+            return
+
+        if self.skip_reason is not None:
+            raise ValueError("Executable storage event operations cannot include a skip reason")
+        if not self.relative_path:
+            raise ValueError("Executable storage event operations require a relative path")
+
+    def require_relative_path(self) -> RuntimeFilePath:
+        if not self.relative_path:
+            raise RuntimeError("Storage event operation has no relative path")
+        return self.relative_path
+
+
+def plan_runtime_storage_event_operation(
+    storage_event: StorageEventPayload,
+) -> RuntimeStorageEventOperation:
+    """Select the project-scoped runtime operation for one storage event."""
+    relative_path = storage_event.relative_path
+    if not relative_path:
+        return RuntimeStorageEventOperation(
+            kind=RuntimeStorageEventOperationKind.skip,
+            storage_event=storage_event,
+            skip_reason=RuntimeStorageEventSkipReason.project_root,
+        )
+
+    if not relative_path.endswith(".md"):
+        return RuntimeStorageEventOperation(
+            kind=RuntimeStorageEventOperationKind.skip,
+            storage_event=storage_event,
+            relative_path=relative_path,
+            skip_reason=RuntimeStorageEventSkipReason.non_markdown,
+        )
+
+    if storage_event.is_object_created:
+        return RuntimeStorageEventOperation(
+            kind=RuntimeStorageEventOperationKind.index_file,
+            storage_event=storage_event,
+            relative_path=relative_path,
+        )
+
+    if storage_event.is_object_deleted:
+        return RuntimeStorageEventOperation(
+            kind=RuntimeStorageEventOperationKind.delete_file,
+            storage_event=storage_event,
+            relative_path=relative_path,
+        )
+
+    return RuntimeStorageEventOperation(
+        kind=RuntimeStorageEventOperationKind.skip,
+        storage_event=storage_event,
+        relative_path=relative_path,
+        skip_reason=RuntimeStorageEventSkipReason.unknown_event,
+    )
+
+
+def plan_runtime_storage_event_operations(
+    events: Iterable[StorageEventPayload],
+) -> tuple[RuntimeStorageEventOperation, ...]:
+    """Select project-scoped runtime operations for storage events in arrival order."""
+    return tuple(plan_runtime_storage_event_operation(event) for event in events)
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeJobReference:
     """Queue job identity that can be shared without depending on one queue."""
