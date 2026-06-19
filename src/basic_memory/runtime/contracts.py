@@ -226,6 +226,62 @@ class RuntimeFileDeleteResult:
     status: RuntimeDeleteStatus
     reason: str
 
+    @classmethod
+    def no_accepted_checksum(
+        cls,
+        *,
+        entity_id: RuntimeEntityId,
+        file_path: RuntimeFilePath,
+    ) -> Self:
+        return cls(
+            entity_id=entity_id,
+            file_path=file_path,
+            status=RuntimeDeleteStatus.skipped,
+            reason=f"no accepted file checksum for {file_path}",
+        )
+
+    @classmethod
+    def already_absent(
+        cls,
+        *,
+        entity_id: RuntimeEntityId,
+        file_path: RuntimeFilePath,
+    ) -> Self:
+        return cls(
+            entity_id=entity_id,
+            file_path=file_path,
+            status=RuntimeDeleteStatus.missing,
+            reason=f"file already absent: {file_path}",
+        )
+
+    @classmethod
+    def changed_before_delete(
+        cls,
+        *,
+        entity_id: RuntimeEntityId,
+        file_path: RuntimeFilePath,
+    ) -> Self:
+        return cls(
+            entity_id=entity_id,
+            file_path=file_path,
+            status=RuntimeDeleteStatus.skipped,
+            reason=f"file changed before delete: {file_path}",
+        )
+
+    @classmethod
+    def deleted(
+        cls,
+        *,
+        entity_id: RuntimeEntityId,
+        file_path: RuntimeFilePath,
+    ) -> Self:
+        return cls(
+            entity_id=entity_id,
+            file_path=file_path,
+            status=RuntimeDeleteStatus.deleted,
+            reason=f"file deleted: {file_path}",
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeProjectDeleteResult:

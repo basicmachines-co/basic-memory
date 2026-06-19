@@ -92,6 +92,44 @@ class TestRuntimeContracts:
         with pytest.raises(RuntimeError, match="Note history provider factory"):
             capabilities.require_note_history_provider_factory()
 
+    def test_runtime_file_delete_result_factories_preserve_cleanup_reasons(self):
+        assert RuntimeFileDeleteResult.no_accepted_checksum(
+            entity_id=1,
+            file_path="notes/a.md",
+        ) == RuntimeFileDeleteResult(
+            entity_id=1,
+            file_path="notes/a.md",
+            status=RuntimeDeleteStatus.skipped,
+            reason="no accepted file checksum for notes/a.md",
+        )
+        assert RuntimeFileDeleteResult.already_absent(
+            entity_id=1,
+            file_path="notes/a.md",
+        ) == RuntimeFileDeleteResult(
+            entity_id=1,
+            file_path="notes/a.md",
+            status=RuntimeDeleteStatus.missing,
+            reason="file already absent: notes/a.md",
+        )
+        assert RuntimeFileDeleteResult.changed_before_delete(
+            entity_id=1,
+            file_path="notes/a.md",
+        ) == RuntimeFileDeleteResult(
+            entity_id=1,
+            file_path="notes/a.md",
+            status=RuntimeDeleteStatus.skipped,
+            reason="file changed before delete: notes/a.md",
+        )
+        assert RuntimeFileDeleteResult.deleted(
+            entity_id=1,
+            file_path="notes/a.md",
+        ) == RuntimeFileDeleteResult(
+            entity_id=1,
+            file_path="notes/a.md",
+            status=RuntimeDeleteStatus.deleted,
+            reason="file deleted: notes/a.md",
+        )
+
     def test_runtime_project_delete_result_counts_file_outcomes(self):
         result = RuntimeProjectDeleteResult.from_file_results(
             project_id=42,
