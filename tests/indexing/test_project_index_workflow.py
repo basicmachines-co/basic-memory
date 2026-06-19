@@ -5,8 +5,10 @@ from uuid import UUID
 
 from basic_memory.indexing import (
     ProjectIndexCounters,
+    ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStart,
+    build_project_index_workflow_progress_update,
     build_project_index_workflow_start,
 )
 
@@ -138,5 +140,86 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
             "project_name": "Project Name",
             "project_permalink": "project-name",
             "project_path": "project",
+        },
+    )
+
+
+def test_project_index_workflow_progress_update_builds_metadata_and_event_data() -> None:
+    counters = ProjectIndexCounters(
+        total=100,
+        processed=50,
+        succeeded=49,
+        missing=1,
+        failed=0,
+    )
+
+    update = build_project_index_workflow_progress_update(
+        metadata={
+            "phase": "indexing",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "discovery": {
+                "total_files": 100,
+                "batch_count": 2,
+                "batch_size": 50,
+                "discovered_at": "2026-06-19T10:20:30+00:00",
+            },
+            "counters": {
+                "total": 100,
+                "processed": 0,
+                "succeeded": 0,
+                "missing": 0,
+                "failed": 0,
+            },
+        },
+        counters=counters,
+        recorded_batch_indexes=(0,),
+    )
+
+    assert update == ProjectIndexWorkflowProgressUpdate(
+        counters=counters,
+        progress="Indexed 50/100 files, 49 succeeded, 1 missing",
+        should_emit_event=True,
+        metadata={
+            "phase": "indexing",
+            "progress": "Indexed 50/100 files, 49 succeeded, 1 missing",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "discovery": {
+                "total_files": 100,
+                "batch_count": 2,
+                "batch_size": 50,
+                "discovered_at": "2026-06-19T10:20:30+00:00",
+            },
+            "counters": {
+                "total": 100,
+                "processed": 50,
+                "succeeded": 49,
+                "missing": 1,
+                "failed": 0,
+            },
+            "recorded_batches": [0],
+        },
+        progress_event_data={
+            "phase": "indexing",
+            "progress": "Indexed 50/100 files, 49 succeeded, 1 missing",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "counters": {
+                "total": 100,
+                "processed": 50,
+                "succeeded": 49,
+                "missing": 1,
+                "failed": 0,
+            },
         },
     )

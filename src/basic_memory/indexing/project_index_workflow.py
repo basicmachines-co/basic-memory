@@ -1,5 +1,6 @@
 """Portable project-index workflow request values."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, Self
 
@@ -7,6 +8,7 @@ from basic_memory.indexing.project_index_progress import (
     ProjectIndexCounters,
     initial_project_index_counters,
     project_index_progress_text,
+    should_emit_project_index_progress_event,
 )
 from basic_memory.runtime import (
     ProjectExternalId,
@@ -99,6 +101,17 @@ class ProjectIndexWorkflowStart:
     attempt_event_data: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowProgressUpdate:
+    """Portable progress metadata for a running project-index workflow."""
+
+    counters: ProjectIndexCounters
+    progress: str
+    should_emit_event: bool
+    metadata: dict[str, object]
+    progress_event_data: dict[str, object]
+
+
 def build_project_index_workflow_start(
     *,
     request: ProjectIndexWorkflowRequest,
@@ -147,5 +160,35 @@ def build_project_index_workflow_start(
             "project_name": request.project.project_name,
             "project_permalink": request.project.project_permalink,
             "project_path": request.project.project_path,
+        },
+    )
+
+
+def build_project_index_workflow_progress_update(
+    *,
+    metadata: Mapping[str, object],
+    counters: ProjectIndexCounters,
+    recorded_batch_indexes: Sequence[int] | None = None,
+) -> ProjectIndexWorkflowProgressUpdate:
+    """Build updated persisted metadata for a running project-index workflow."""
+    progress = project_index_progress_text(counters)
+    counters_metadata = counters.to_metadata()
+    updated_metadata = dict(metadata)
+    updated_metadata["phase"] = "indexing"
+    updated_metadata["progress"] = progress
+    updated_metadata["counters"] = counters_metadata
+    if recorded_batch_indexes is not None:
+        updated_metadata["recorded_batches"] = list(recorded_batch_indexes)
+
+    return ProjectIndexWorkflowProgressUpdate(
+        counters=counters,
+        progress=progress,
+        should_emit_event=should_emit_project_index_progress_event(counters),
+        metadata=updated_metadata,
+        progress_event_data={
+            "phase": "indexing",
+            "progress": progress,
+            "payload": updated_metadata.get("payload") or {},
+            "counters": counters_metadata,
         },
     )
