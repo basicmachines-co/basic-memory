@@ -64,6 +64,7 @@ from basic_memory.runtime.contracts import (
     RuntimeProjectDeleteResult,
     RuntimeStorageFileIndexJobIdentity,
     RuntimeObservedIndexFile,
+    RuntimeStorageObjectObservation,
     RuntimeQueuedWorkflowMetadata,
     RuntimeStorageFileIndexMode,
     RuntimeStorageFileIndexRequest,
@@ -270,6 +271,30 @@ class TestRuntimeContracts:
                 "workflow_id": "22222222-2222-2222-2222-222222222222",
             },
         )
+
+    def test_runtime_storage_object_observation_builds_observed_file_identity(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        observation = RuntimeStorageObjectObservation(etag='"etag-a"', size=123)
+
+        identity = observation.to_file_index_job_identity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+        )
+
+        assert identity == RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            object_etag='"etag-a"',
+            object_size=123,
+        )
+        assert identity.dedupe_key() == (
+            "index-file:11111111-1111-1111-1111-111111111111:42:notes/a.md:observed:etag-a:123"
+        )
+        with pytest.raises(FrozenInstanceError):
+            setattr(observation, "etag", "other")
 
     def test_runtime_project_index_job_request_matches_cloud_queue_identity(self):
         tenant_id = UUID("11111111-1111-1111-1111-111111111111")

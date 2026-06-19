@@ -458,6 +458,33 @@ class RuntimeStorageFileIndexJobIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeStorageObjectObservation:
+    """Storage object metadata observed before enqueueing one file-index job."""
+
+    etag: StorageEtag
+    size: int | None = None
+
+    def to_file_index_job_identity(
+        self,
+        *,
+        tenant_id: TenantId,
+        project_id: ProjectId,
+        file_path: RuntimeFilePath,
+        workflow_id: WorkflowId | None = None,
+    ) -> RuntimeStorageFileIndexJobIdentity:
+        """Build the queue identity for this observed storage object."""
+        return RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            file_path=file_path,
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            workflow_id=workflow_id,
+            object_etag=self.etag,
+            object_size=self.size,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeObservedIndexFile:
     """Storage metadata observed before a project-index batch is queued."""
 
