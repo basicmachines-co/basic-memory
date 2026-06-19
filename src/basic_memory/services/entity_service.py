@@ -62,6 +62,18 @@ class EntityWriteResult:
     search_content: str
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedEntityFields:
+    """Entity row values that mirror one accepted markdown snapshot."""
+
+    title: str
+    note_type: str
+    entity_metadata: dict[str, Any] | None
+    content_type: str
+    permalink: str | None
+    file_path: str
+
+
 @dataclass(frozen=True)
 class PreparedEntityWrite:
     """Accepted note state before any persistence side effects happen.
@@ -73,9 +85,7 @@ class PreparedEntityWrite:
         file_path: Canonical note path implied by the request.
         markdown_content: Full markdown to persist, including frontmatter.
         search_content: Frontmatter-stripped content for inline FTS indexing.
-        entity_fields: Entity row values that mirror the accepted markdown state.
-            Keys are ``title``, ``note_type``, ``file_path``, ``content_type``,
-            ``entity_metadata``, and ``permalink``.
+        entity_fields: Typed entity row values that mirror the accepted markdown state.
         entity_markdown: Parsed markdown reused by the local write path to update
             entities, observations, and relations without reparsing a second time.
     """
@@ -83,7 +93,7 @@ class PreparedEntityWrite:
     file_path: Path
     markdown_content: str
     search_content: str
-    entity_fields: dict[str, Any]
+    entity_fields: PreparedEntityFields
     entity_markdown: EntityMarkdown
 
 
@@ -323,15 +333,15 @@ class EntityService(BaseService[EntityModel]):
         # Older service flows mutated the request schema with the resolved permalink and any
         # frontmatter-derived note type. Several callers and tests still rely on that behavior
         # after create/update returns.
-        source_schema.title = prepared.entity_fields["title"]
-        source_schema.note_type = prepared.entity_fields["note_type"]
-        source_schema.content_type = prepared.entity_fields["content_type"]
-        source_schema.entity_metadata = prepared.entity_fields["entity_metadata"]
+        source_schema.title = prepared.entity_fields.title
+        source_schema.note_type = prepared.entity_fields.note_type
+        source_schema.content_type = prepared.entity_fields.content_type
+        source_schema.entity_metadata = prepared.entity_fields.entity_metadata
 
         if self.app_config and self.app_config.disable_permalinks:
             source_schema._permalink = ""
         else:
-            source_schema._permalink = prepared.entity_fields["permalink"]
+            source_schema._permalink = prepared.entity_fields.permalink
 
     def _apply_schema_frontmatter_overrides(self, schema: EntitySchema) -> EntityMarkdown | None:
         """Apply schema content frontmatter overrides and return permalink resolution metadata."""
@@ -399,25 +409,25 @@ class EntityService(BaseService[EntityModel]):
         content_type: str,
         metadata: dict[str, Any] | None,
         permalink: str | None,
-    ) -> dict[str, Any]:
+    ) -> PreparedEntityFields:
         """Build the entity row data that mirrors accepted markdown state."""
         normalized_metadata = normalize_frontmatter_metadata(metadata or {})
         entity_metadata = {k: v for k, v in normalized_metadata.items() if v is not None}
-        return {
-            "title": title,
-            "note_type": note_type,
-            "file_path": file_path.as_posix(),
-            "content_type": content_type,
-            "entity_metadata": entity_metadata or None,
-            "permalink": permalink,
-        }
+        return PreparedEntityFields(
+            title=title,
+            note_type=note_type,
+            file_path=file_path.as_posix(),
+            content_type=content_type,
+            entity_metadata=entity_metadata or None,
+            permalink=permalink,
+        )
 
     async def _build_prepared_write(
         self,
         *,
         file_path: Path,
         markdown_content: str,
-        entity_fields: dict[str, Any],
+        entity_fields: PreparedEntityFields,
     ) -> PreparedEntityWrite:
         """Parse accepted markdown once so all persistence paths share the same state."""
         # Trigger: both local and cloud-style callers need the exact same accepted markdown.
