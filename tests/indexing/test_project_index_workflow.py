@@ -6,12 +6,14 @@ from uuid import UUID
 from basic_memory.indexing import (
     ProjectIndexCounters,
     ProjectIndexWorkflowCompletionUpdate,
+    ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStart,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
     build_project_index_workflow_start,
+    build_project_index_workflow_stale_failure_update,
 )
 
 
@@ -312,5 +314,83 @@ def test_project_index_workflow_completion_update_builds_metadata_and_event_data
                 "missing": 1,
                 "failed": 0,
             },
+        },
+    )
+
+
+def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_data() -> None:
+    counters = ProjectIndexCounters(
+        total=100,
+        processed=50,
+        succeeded=49,
+        missing=1,
+        failed=0,
+    )
+
+    update = build_project_index_workflow_stale_failure_update(
+        metadata={
+            "phase": "indexing",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "counters": {
+                "total": 100,
+                "processed": 50,
+                "succeeded": 49,
+                "missing": 1,
+                "failed": 0,
+            },
+            "recorded_batches": [0],
+        },
+        counters=counters,
+        missing_batch_indexes=(1,),
+        recorded_batch_indexes=(0,),
+        legacy_missing_batch_count=0,
+        last_heartbeat_at="2026-06-19T10:20:30+00:00",
+        stale_before="2026-06-19T10:25:30+00:00",
+    )
+
+    diagnostics = {
+        "reason": "stale_project_index_batches",
+        "missing_batches": [1],
+        "recorded_batches": [0],
+        "legacy_missing_batch_count": 0,
+        "last_heartbeat_at": "2026-06-19T10:20:30+00:00",
+        "stale_before": "2026-06-19T10:25:30+00:00",
+    }
+    assert update == ProjectIndexWorkflowFailureUpdate(
+        counters=counters,
+        progress="Project index stalled after 50/100 files",
+        error_message="Project index stalled with 1 unreported batch(es)",
+        metadata={
+            "phase": "failed",
+            "progress": "Project index stalled after 50/100 files",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "counters": {
+                "total": 100,
+                "processed": 50,
+                "succeeded": 49,
+                "missing": 1,
+                "failed": 0,
+            },
+            "recorded_batches": [0],
+            "diagnostics": diagnostics,
+        },
+        failed_event_data={
+            "phase": "failed",
+            "progress": "Project index stalled after 50/100 files",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "error": "Project index stalled with 1 unreported batch(es)",
+            "diagnostics": diagnostics,
         },
     )

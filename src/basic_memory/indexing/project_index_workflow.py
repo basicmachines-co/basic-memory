@@ -122,6 +122,17 @@ class ProjectIndexWorkflowCompletionUpdate:
     completed_event_data: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowFailureUpdate:
+    """Portable failure metadata for a project-index workflow."""
+
+    counters: ProjectIndexCounters
+    progress: str
+    error_message: str
+    metadata: dict[str, object]
+    failed_event_data: dict[str, object]
+
+
 def build_project_index_workflow_start(
     *,
     request: ProjectIndexWorkflowRequest,
@@ -227,5 +238,53 @@ def build_project_index_workflow_completion_update(
             "progress": progress,
             "payload": completed_metadata.get("payload") or {},
             "result": counters_metadata,
+        },
+    )
+
+
+def build_project_index_workflow_stale_failure_update(
+    *,
+    metadata: Mapping[str, object],
+    counters: ProjectIndexCounters,
+    missing_batch_indexes: Sequence[int],
+    recorded_batch_indexes: Sequence[int],
+    legacy_missing_batch_count: int,
+    last_heartbeat_at: str,
+    stale_before: str,
+) -> ProjectIndexWorkflowFailureUpdate:
+    """Build terminal failure metadata for stale project-index batch fan-out."""
+    missing_batches = list(missing_batch_indexes)
+    recorded_batches = list(recorded_batch_indexes)
+    if legacy_missing_batch_count:
+        error_message = "Project index stalled with legacy batch metadata"
+    else:
+        error_message = f"Project index stalled with {len(missing_batches)} unreported batch(es)"
+    progress = f"Project index stalled after {counters.processed}/{counters.total} files"
+    diagnostics: dict[str, object] = {
+        "reason": "stale_project_index_batches",
+        "missing_batches": missing_batches,
+        "recorded_batches": recorded_batches,
+        "legacy_missing_batch_count": legacy_missing_batch_count,
+        "last_heartbeat_at": last_heartbeat_at,
+        "stale_before": stale_before,
+    }
+    counters_metadata = counters.to_metadata()
+    failed_metadata = dict(metadata)
+    failed_metadata["phase"] = "failed"
+    failed_metadata["progress"] = progress
+    failed_metadata["counters"] = counters_metadata
+    failed_metadata["diagnostics"] = diagnostics
+
+    return ProjectIndexWorkflowFailureUpdate(
+        counters=counters,
+        progress=progress,
+        error_message=error_message,
+        metadata=failed_metadata,
+        failed_event_data={
+            "phase": "failed",
+            "progress": progress,
+            "payload": failed_metadata.get("payload") or {},
+            "error": error_message,
+            "diagnostics": diagnostics,
         },
     )

@@ -166,6 +166,7 @@ from basic_memory.indexing.project_index_progress import (
 )
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexWorkflowCompletionUpdate,
+    ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowSource,
@@ -173,6 +174,7 @@ from basic_memory.indexing.project_index_workflow import (
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
     build_project_index_workflow_start,
+    build_project_index_workflow_stale_failure_update,
 )
 from basic_memory.indexing.relation_resolution import (
     AffectedEntityIds,
@@ -277,6 +279,7 @@ __all__ = [
     "ProjectIndexMissingBatches",
     "ProjectIndexWorkflowPayloadState",
     "ProjectIndexWorkflowCompletionUpdate",
+    "ProjectIndexWorkflowFailureUpdate",
     "ProjectIndexWorkflowProgressUpdate",
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowProgressState",
@@ -310,6 +313,7 @@ __all__ = [
     "build_project_index_workflow_completion_update",
     "build_project_index_workflow_progress_update",
     "build_project_index_workflow_start",
+    "build_project_index_workflow_stale_failure_update",
     "cleanup_orphan_entities",
     "current_file_index_decision",
     "first_markdown_h1",
