@@ -4,7 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from basic_memory.runtime import RuntimeDeletedNoteResponse
+from basic_memory.runtime import (
+    RuntimeDeletedNoteResponse,
+    RuntimePendingNoteFileDelete,
+    plan_accepted_note_delete_change,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +16,21 @@ class _DeletedEntity:
     external_id: object | None
     title: object | None
     permalink: object | None
+
+
+@dataclass(frozen=True, slots=True)
+class _DeletedFileEntity:
+    id: int
+    external_id: object | None
+    title: object | None
+    permalink: object | None
+    file_path: str
+    checksum: object | None
+
+
+@dataclass(frozen=True, slots=True)
+class _DeletedNoteContent:
+    file_checksum: object | None
 
 
 def test_runtime_deleted_note_response_builds_pending_file_delete_payload() -> None:
@@ -48,3 +67,47 @@ def test_runtime_deleted_note_response_rejects_missing_identity_fields() -> None
             ),
             file_path="notes/deleted.md",
         )
+
+
+def test_plan_accepted_note_delete_change_builds_missing_payload() -> None:
+    accepted = plan_accepted_note_delete_change(
+        project_id=7,
+        entity=None,
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.payload == {"deleted": False}
+    assert accepted.materialization is None
+    assert accepted.file_delete is None
+
+
+def test_plan_accepted_note_delete_change_builds_payload_and_file_cleanup() -> None:
+    accepted = plan_accepted_note_delete_change(
+        project_id=7,
+        entity=_DeletedFileEntity(
+            id=42,
+            external_id=" note-1 ",
+            title=" Deleted Note ",
+            permalink=" notes/deleted-note ",
+            file_path="notes/deleted.md",
+            checksum="entity-checksum",
+        ),
+        note_content=_DeletedNoteContent(file_checksum="note-file-checksum"),
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.payload == {
+        "deleted": True,
+        "external_id": "note-1",
+        "title": "Deleted Note",
+        "permalink": "notes/deleted-note",
+        "file_path": "notes/deleted.md",
+        "file_delete_status": "pending",
+    }
+    assert accepted.materialization is None
+    assert accepted.file_delete == RuntimePendingNoteFileDelete(
+        project_id=7,
+        entity_id=42,
+        file_path="notes/deleted.md",
+        file_checksum="note-file-checksum",
+    )

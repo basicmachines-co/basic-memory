@@ -179,6 +179,17 @@ class RuntimeDeletedNoteEntityChecksumSource(Protocol):
     def checksum(self) -> object | None: ...
 
 
+class RuntimeDeletedNoteFileDeleteEntitySource(
+    RuntimeDeletedNoteEntityDeleteSource,
+    RuntimeDeletedNoteEntityChecksumSource,
+    Protocol,
+):
+    """Deleted-note entity shape needed to plan file cleanup after row delete."""
+
+    @property
+    def file_path(self) -> RuntimeFilePath: ...
+
+
 class RuntimeDeletedNoteFileChecksumSource(Protocol):
     """Minimal note_content shape needed to guard file cleanup."""
 
@@ -1659,6 +1670,39 @@ class RuntimeAcceptedNoteChange[PayloadT]:
     payload: PayloadT
     materialization: RuntimePendingNoteMaterialization | None = None
     file_delete: RuntimePendingNoteFileDelete | None = None
+
+
+def plan_accepted_note_delete_change(
+    *,
+    project_id: ProjectId,
+    entity: RuntimeDeletedNoteFileDeleteEntitySource | None,
+    note_content: RuntimeDeletedNoteFileChecksumSource | None = None,
+) -> RuntimeAcceptedNoteChange[dict[str, object]]:
+    """Build the accepted delete response plus any materialized-file cleanup marker."""
+    if entity is None:
+        return RuntimeAcceptedNoteChange(
+            status_code=200,
+            payload=RuntimeDeletedNoteResponse.missing().as_payload(),
+        )
+
+    file_path = entity.file_path
+    response = RuntimeDeletedNoteResponse.pending_file_delete(
+        entity=entity,
+        file_path=file_path,
+    )
+    return RuntimeAcceptedNoteChange(
+        status_code=200,
+        payload=response.as_payload(),
+        file_delete=RuntimePendingNoteFileDelete(
+            project_id=project_id,
+            entity_id=entity.id,
+            file_path=file_path,
+            file_checksum=select_deleted_note_file_checksum(
+                note_content=note_content,
+                entity=entity,
+            ),
+        ),
+    )
 
 
 def plan_accepted_note_materialization_change[PayloadT](
