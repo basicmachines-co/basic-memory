@@ -1206,6 +1206,24 @@ class RuntimePendingNoteFileDelete:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeProjectFileSnapshot:
+    """Accepted materialized-file state captured before a project row disappears."""
+
+    entity_id: RuntimeEntityId
+    file_path: RuntimeFilePath
+    file_checksum: RuntimeFileChecksum | None = None
+
+    def to_pending_note_file_delete(self, *, project_id: ProjectId) -> RuntimePendingNoteFileDelete:
+        """Return the note-file cleanup work represented by this project snapshot."""
+        return RuntimePendingNoteFileDelete(
+            project_id=project_id,
+            entity_id=self.entity_id,
+            file_path=self.file_path,
+            file_checksum=self.file_checksum,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeDirectoryFileSnapshot:
     """Accepted materialized-file state captured before directory rows disappear."""
 

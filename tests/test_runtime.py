@@ -64,6 +64,7 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteJobRequest,
+    RuntimeProjectFileSnapshot,
     RuntimeProjectIndexJobRequest,
     RuntimeProjectDeleteResult,
     RuntimeStorageFileIndexJobIdentity,
@@ -1314,6 +1315,23 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "file_path", "notes/new.md")
+
+    def test_runtime_project_file_snapshot_builds_pending_cleanup(self):
+        snapshot = RuntimeProjectFileSnapshot(
+            entity_id=42,
+            file_path="notes/project.md",
+            file_checksum="accepted-checksum",
+        )
+
+        assert snapshot.to_pending_note_file_delete(project_id=7) == RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/project.md",
+            file_checksum="accepted-checksum",
+        )
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(snapshot, "file_path", "notes/other.md")
 
     def test_plan_directory_file_snapshot_prefers_fresh_note_content_guard(self):
         snapshot = plan_directory_file_snapshot(
