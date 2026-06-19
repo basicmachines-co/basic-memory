@@ -146,6 +146,11 @@ from basic_memory.runtime.note_object_metadata import (
     source_from_object_metadata,
     storage_object_checksum_for_index_match,
 )
+from basic_memory.runtime.observed_index_files import (
+    RuntimeObservedIndexFileMetadataSource,
+    runtime_observed_index_file_from_metadata,
+    runtime_observed_index_files_from_metadata_map,
+)
 from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixMatch,
     StorageProjectPrefixResolution,
@@ -202,6 +207,7 @@ __all__ = [
     "RuntimeJobRequest",
     "RuntimeQueuedWorkflowMetadata",
     "RuntimeObservedIndexFile",
+    "RuntimeObservedIndexFileMetadataSource",
     "RuntimeMode",
     "RuntimeNoteActorKind",
     "RuntimeNoteActorName",
@@ -296,6 +302,8 @@ __all__ = [
     "read_runtime_file_checksum",
     "resolve_runtime_mode",
     "resolve_storage_project_prefix",
+    "runtime_observed_index_file_from_metadata",
+    "runtime_observed_index_files_from_metadata_map",
     "source_from_object_metadata",
     "storage_object_checksum_for_index_match",
     "truncate_runtime_workflow_text",
