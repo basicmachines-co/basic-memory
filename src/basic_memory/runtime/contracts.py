@@ -433,6 +433,33 @@ def plan_project_index_job_request(
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeProjectDeleteJobRequest:
+    """Queue-neutral request shape for hard-deleting one inactive project."""
+
+    tenant_id: TenantId
+    project_id: ProjectId
+    project_external_id: ProjectExternalId
+    project_name: ProjectName
+    project_path: ProjectPath
+    delete_notes: bool = True
+
+    def dedupe_key(self) -> str:
+        """Return the logical project-delete queue identity."""
+        return f"delete-project:{self.tenant_id}:{self.project_id}"
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the project-delete job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project_id),
+            }
+        )
+        return routing_headers
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeIndexFileBatchJobRequest:
     """Queue-neutral request shape for indexing one project file batch."""
 

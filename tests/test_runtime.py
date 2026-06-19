@@ -52,6 +52,7 @@ from basic_memory.runtime.contracts import (
     RuntimeNoteMaterializationStatus,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
+    RuntimeProjectDeleteJobRequest,
     RuntimeProjectIndexJobRequest,
     RuntimeProjectDeleteResult,
     RuntimeStorageFileIndexJobIdentity,
@@ -301,6 +302,28 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "force_full", False)
+
+    def test_runtime_project_delete_job_request_matches_cloud_queue_identity(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+
+        request = RuntimeProjectDeleteJobRequest(
+            tenant_id=tenant_id,
+            project_id=42,
+            project_external_id="project-main",
+            project_name="Main",
+            project_path="main",
+            delete_notes=False,
+        )
+
+        assert request.dedupe_key() == "delete-project:11111111-1111-1111-1111-111111111111:42"
+        assert request.routing_headers({"source": "test"}) == {
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "42",
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(request, "delete_notes", True)
 
     def test_runtime_index_file_batch_job_request_carries_observed_targets(self):
         tenant_id = UUID("11111111-1111-1111-1111-111111111111")
