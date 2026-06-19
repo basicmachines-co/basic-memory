@@ -36,6 +36,7 @@ from basic_memory.runtime import (
     resolve_runtime_mode,
     source_from_object_metadata,
     storage_object_checksum_for_index_match,
+    plan_prepared_note_write,
 )
 from basic_memory.runtime.contracts import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
@@ -1496,6 +1497,49 @@ class TestRuntimeContracts:
         assert prepared_write.cleanup_file_path == "notes/old.md"
         with pytest.raises(FrozenInstanceError):
             setattr(prepared_write, "file_path", "notes/b.md")
+
+    def test_plan_prepared_note_write_builds_storage_snapshot(self):
+        attempted_at = datetime(2026, 6, 18, 14, 17, tzinfo=UTC)
+        actor_user_profile_id = UUID("33333333-3333-3333-3333-333333333333")
+        request = RuntimeNoteMaterializationJobRequest(
+            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+            project_id=7,
+            entity_id=42,
+            db_version=4,
+            db_checksum="db-checksum",
+            actor_user_profile_id=actor_user_profile_id,
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            actor_name="Claude Code",
+            source="mcp",
+            cleanup_file_path="notes/old.md",
+            cleanup_file_checksum="old-cleanup-sum",
+        )
+
+        prepared_write = plan_prepared_note_write(
+            request=request,
+            file_path="notes/a.md",
+            markdown_content="# A note\n",
+            previous_file_checksum="old-file-sum",
+            attempted_at=attempted_at,
+        )
+
+        assert prepared_write == RuntimePreparedNoteWrite(
+            file_path="notes/a.md",
+            markdown_content="# A note\n",
+            previous_file_checksum="old-file-sum",
+            cleanup_file_path="notes/old.md",
+            cleanup_file_checksum="old-cleanup-sum",
+            attempted_at=attempted_at,
+            object_metadata=RuntimeNoteObjectMetadata(
+                entity_id=42,
+                db_version=4,
+                db_checksum="db-checksum",
+                actor_user_profile_id=actor_user_profile_id,
+                actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+                actor_name="Claude Code",
+                source="mcp",
+            ),
+        )
 
     def test_runtime_written_file_state_carries_materialized_storage_result(self):
         file_updated_at = datetime(2026, 6, 18, 14, 16)

@@ -127,6 +127,7 @@ from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 from basic_memory.runtime.note_materialization import (
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
+    plan_prepared_note_write,
 )
 from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
@@ -318,6 +319,7 @@ __all__ = [
     "plan_runtime_storage_event_operations",
     "plan_runtime_storage_events_by_project",
     "plan_previous_note_file_delete",
+    "plan_prepared_note_write",
     "read_runtime_file_checksum",
     "required_runtime_deleted_note_text",
     "resolve_runtime_mode",
