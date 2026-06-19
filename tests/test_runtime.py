@@ -1,7 +1,7 @@
 """Tests for runtime mode resolution."""
 
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -38,8 +38,10 @@ from basic_memory.runtime import (
 )
 from basic_memory.runtime.contracts import (
     ProjectRuntimeReference,
+    RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS,
     RuntimeDeleteStatus,
     RuntimeCapabilities,
+    RuntimeDirectoryFileSnapshot,
     RuntimeExpectedFileState,
     RuntimeFileDeleteResult,
     RuntimeFileConflictError,
@@ -79,6 +81,7 @@ from basic_memory.runtime.contracts import (
     assert_runtime_file_matches_expected,
     normalize_storage_etag,
     plan_project_index_job_request,
+    plan_directory_file_snapshot,
     plan_note_file_delete_job_request,
     plan_runtime_storage_event_operation,
     plan_runtime_storage_event_operations,
@@ -1198,6 +1201,89 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "file_path", "notes/new.md")
+
+    def test_plan_directory_file_snapshot_prefers_fresh_note_content_guard(self):
+        snapshot = plan_directory_file_snapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            entity_checksum="entity-sha",
+            entity_mtime=100.0,
+            entity_size=42,
+            note_file_checksum="note-sha",
+            note_file_updated_at=datetime.fromtimestamp(160.0, tz=UTC),
+        )
+
+        assert snapshot == RuntimeDirectoryFileSnapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            file_checksum="note-sha",
+            last_modified_at=160.0,
+            size=None,
+        )
+        assert snapshot.to_pending_note_file_delete(project_id=3) == RuntimePendingNoteFileDelete(
+            project_id=3,
+            entity_id=7,
+            file_path="notes/example.md",
+            file_checksum="note-sha",
+        )
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(snapshot, "size", 99)
+
+    def test_plan_directory_file_snapshot_keeps_size_for_matching_generation(self):
+        aligned_timestamp = 200.0 + (RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS / 2)
+
+        snapshot = plan_directory_file_snapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            entity_checksum="entity-sha",
+            entity_mtime=200.0,
+            entity_size=42,
+            note_file_checksum="note-sha",
+            note_file_updated_at=datetime.fromtimestamp(aligned_timestamp, tz=UTC),
+        )
+
+        assert snapshot.file_checksum == "note-sha"
+        assert snapshot.last_modified_at == aligned_timestamp
+        assert snapshot.size == 42
+
+    def test_plan_directory_file_snapshot_falls_back_to_entity_metadata(self):
+        snapshot = plan_directory_file_snapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            entity_checksum="entity-sha",
+            entity_mtime=123.0,
+            entity_size=99,
+            note_file_checksum=None,
+            note_file_updated_at=None,
+        )
+
+        assert snapshot == RuntimeDirectoryFileSnapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            file_checksum="entity-sha",
+            last_modified_at=123.0,
+            size=99,
+        )
+
+    def test_plan_directory_file_snapshot_uses_checksum_without_storage_timestamp(self):
+        snapshot = plan_directory_file_snapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            entity_checksum="entity-sha",
+            entity_mtime=None,
+            entity_size=99,
+            note_file_checksum=None,
+            note_file_updated_at=None,
+        )
+
+        assert snapshot == RuntimeDirectoryFileSnapshot(
+            entity_id=7,
+            file_path="notes/example.md",
+            file_checksum="entity-sha",
+            last_modified_at=None,
+            size=None,
+        )
 
     def test_runtime_prepared_note_write_carries_materialization_inputs(self):
         attempted_at = datetime(2026, 6, 18, 14, 15)

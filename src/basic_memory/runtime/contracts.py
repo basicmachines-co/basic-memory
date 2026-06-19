@@ -53,6 +53,7 @@ STORAGE_OBJECT_CREATED_EVENTS: frozenset[StorageEventName] = frozenset(
 )
 STORAGE_OBJECT_DELETED_EVENT: StorageEventName = "OBJECT_DELETED"
 WORKFLOW_EVENT_TEXT_MAX_CHARS = 4096
+RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS = 0.001
 
 
 class ProjectRuntimeSource(Protocol):
@@ -952,6 +953,65 @@ class RuntimePendingNoteFileDelete:
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
     file_checksum: RuntimeFileChecksum | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDirectoryFileSnapshot:
+    """Accepted materialized-file state captured before directory rows disappear."""
+
+    entity_id: RuntimeEntityId
+    file_path: RuntimeFilePath
+    file_checksum: RuntimeFileChecksum | None
+    last_modified_at: float | None = None
+    size: int | None = None
+
+    def to_pending_note_file_delete(self, *, project_id: ProjectId) -> RuntimePendingNoteFileDelete:
+        """Return the note-file cleanup work represented by this accepted snapshot."""
+        return RuntimePendingNoteFileDelete(
+            project_id=project_id,
+            entity_id=self.entity_id,
+            file_path=self.file_path,
+            file_checksum=self.file_checksum,
+        )
+
+
+def plan_directory_file_snapshot(
+    *,
+    entity_id: RuntimeEntityId,
+    file_path: RuntimeFilePath,
+    entity_checksum: RuntimeFileChecksum | None,
+    entity_mtime: float | None,
+    entity_size: int | None,
+    note_file_checksum: RuntimeFileChecksum | None,
+    note_file_updated_at: datetime | None,
+) -> RuntimeDirectoryFileSnapshot:
+    """Choose the freshest delete guard for one accepted directory-delete row."""
+    note_file_updated_timestamp = (
+        note_file_updated_at.timestamp() if note_file_updated_at is not None else None
+    )
+    accepted_last_modified_at = (
+        note_file_updated_timestamp if note_file_updated_timestamp is not None else entity_mtime
+    )
+    accepted_checksum = (
+        note_file_checksum
+        if note_file_updated_timestamp is not None and note_file_checksum is not None
+        else entity_checksum
+    )
+    timestamps_match = (
+        entity_mtime is not None
+        and accepted_last_modified_at is not None
+        and abs(entity_mtime - accepted_last_modified_at)
+        <= RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS
+    )
+    accepted_size = entity_size if entity_size is not None and timestamps_match else None
+
+    return RuntimeDirectoryFileSnapshot(
+        entity_id=entity_id,
+        file_path=file_path,
+        file_checksum=accepted_checksum,
+        last_modified_at=accepted_last_modified_at,
+        size=accepted_size,
+    )
 
 
 @dataclass(frozen=True, slots=True)
