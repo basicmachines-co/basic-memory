@@ -14,6 +14,8 @@ from basic_memory.indexing import (
     IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
+    IndexedEntity,
+    build_index_file_batch_job_result,
     index_file_job_result_from_decision,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
@@ -161,6 +163,71 @@ def test_index_file_batch_job_result_carries_ordered_file_and_vector_targets():
     assert result.vector_targets == (vector_target,)
     with pytest.raises(FrozenInstanceError):
         setattr(result, "processed_files", 2)
+
+
+def test_build_index_file_batch_job_result_preserves_order_and_embedding_targets():
+    current_result = IndexFileJobResult(
+        status=IndexFileJobStatus.current,
+        reason="file already indexed: notes/current.md",
+    )
+    missing_result = IndexFileJobResult(
+        status=IndexFileJobStatus.missing,
+        reason="file not found: notes/missing.md",
+    )
+
+    result = build_index_file_batch_job_result(
+        target_paths=(
+            "notes/current.md",
+            "notes/processed.md",
+            "notes/missing.md",
+            "notes/failed.md",
+        ),
+        terminal_results={
+            "notes/current.md": current_result,
+            "notes/missing.md": missing_result,
+        },
+        indexed_files=(
+            IndexedEntity(
+                path="notes/processed.md",
+                entity_id=42,
+                permalink="notes/processed",
+                checksum="checksum-processed",
+            ),
+            IndexedEntity(
+                path="notes/failed.md",
+                entity_id=43,
+                permalink="notes/failed",
+                checksum="checksum-failed",
+            ),
+        ),
+        errors={"notes/failed.md": "parse failed"},
+        index_embeddings=True,
+        embedding_eligible_paths=("notes/processed.md",),
+    )
+
+    assert result == IndexFileBatchJobResult(
+        total_files=4,
+        processed_files=2,
+        missing_files=1,
+        failed_files=1,
+        file_results=(
+            current_result,
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/processed.md",
+                entity_id=42,
+                entity_checksum="checksum-processed",
+            ),
+            missing_result,
+            IndexFileJobResult(
+                status=IndexFileJobStatus.failed,
+                reason="file indexing failed: notes/failed.md: parse failed",
+                entity_id=43,
+                entity_checksum="checksum-failed",
+            ),
+        ),
+        vector_targets=(EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-processed"),),
+    )
 
 
 def test_plan_current_materialized_note_result_preserves_trusted_live_update_metadata():

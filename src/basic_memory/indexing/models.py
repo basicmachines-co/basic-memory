@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -11,6 +12,10 @@ from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
+)
+from basic_memory.indexing.project_index_progress import (
+    ProjectIndexFileOutcome,
+    summarize_project_index_file_outcomes,
 )
 from basic_memory.runtime import (
     RuntimeFileChecksum,
@@ -421,6 +426,67 @@ class IndexFileBatchJobResult:
     failed_files: int
     file_results: tuple[IndexFileJobResult, ...]
     vector_targets: tuple[EmbeddingIndexTarget, ...]
+
+
+def build_index_file_batch_job_result(
+    *,
+    target_paths: Sequence[str],
+    terminal_results: Mapping[str, IndexFileJobResult],
+    indexed_files: Sequence[IndexedEntity],
+    errors: Mapping[str, str],
+    index_embeddings: bool,
+    embedding_eligible_paths: Collection[str],
+) -> IndexFileBatchJobResult:
+    """Build an ordered batch result after content reads and indexing complete."""
+    indexed_by_path = {indexed.path: indexed for indexed in indexed_files}
+    ordered_file_results: list[IndexFileJobResult] = []
+    vector_targets: list[EmbeddingIndexTarget] = []
+
+    for file_path in target_paths:
+        indexed = indexed_by_path.get(file_path)
+        if indexed is not None and index_embeddings and file_path in embedding_eligible_paths:
+            vector_targets.append(
+                EmbeddingIndexTarget(
+                    entity_id=indexed.entity_id,
+                    entity_checksum=indexed.checksum,
+                )
+            )
+
+        if file_path in errors:
+            ordered_file_results.append(
+                IndexFileJobResult(
+                    status=IndexFileJobStatus.failed,
+                    reason=f"file indexing failed: {file_path}: {errors[file_path]}",
+                    entity_id=indexed.entity_id if indexed is not None else None,
+                    entity_checksum=indexed.checksum if indexed is not None else None,
+                )
+            )
+        elif indexed is not None:
+            ordered_file_results.append(
+                IndexFileJobResult(
+                    status=IndexFileJobStatus.processed,
+                    reason=f"file indexed: {file_path}",
+                    entity_id=indexed.entity_id,
+                    entity_checksum=indexed.checksum,
+                )
+            )
+        else:
+            terminal_result = terminal_results.get(file_path)
+            if terminal_result is None:
+                raise RuntimeError(f"Missing file index result for {file_path}")
+            ordered_file_results.append(terminal_result)
+
+    outcome_summary = summarize_project_index_file_outcomes(
+        [ProjectIndexFileOutcome(result.status.value) for result in ordered_file_results]
+    )
+    return IndexFileBatchJobResult(
+        total_files=outcome_summary.total_files,
+        processed_files=outcome_summary.processed_files,
+        missing_files=outcome_summary.missing_files,
+        failed_files=outcome_summary.failed_files,
+        file_results=tuple(ordered_file_results),
+        vector_targets=tuple(vector_targets),
+    )
 
 
 @dataclass(slots=True)
