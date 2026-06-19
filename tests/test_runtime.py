@@ -7,9 +7,12 @@ import pytest
 
 from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
 from basic_memory.runtime.contracts import (
+    RuntimeDeleteStatus,
     RuntimeCapabilities,
+    RuntimeFileDeleteResult,
     RuntimeJobCounts,
     RuntimeJobRequest,
+    RuntimeProjectDeleteResult,
     StorageObjectIdentity,
 )
 
@@ -88,3 +91,43 @@ class TestRuntimeContracts:
 
         with pytest.raises(RuntimeError, match="Note history provider factory"):
             capabilities.require_note_history_provider_factory()
+
+    def test_runtime_project_delete_result_counts_file_outcomes(self):
+        result = RuntimeProjectDeleteResult.from_file_results(
+            project_id=42,
+            project_external_id="project-main",
+            status=RuntimeDeleteStatus.deleted,
+            deleted_project=True,
+            file_results=[
+                RuntimeFileDeleteResult(
+                    entity_id=1,
+                    file_path="notes/a.md",
+                    status=RuntimeDeleteStatus.deleted,
+                    reason="file deleted",
+                ),
+                RuntimeFileDeleteResult(
+                    entity_id=2,
+                    file_path="notes/missing.md",
+                    status=RuntimeDeleteStatus.missing,
+                    reason="file missing",
+                ),
+                RuntimeFileDeleteResult(
+                    entity_id=3,
+                    file_path="notes/skipped.md",
+                    status=RuntimeDeleteStatus.skipped,
+                    reason="file skipped",
+                ),
+            ],
+            reason="project deleted",
+        )
+
+        assert result == RuntimeProjectDeleteResult(
+            project_id=42,
+            project_external_id="project-main",
+            status=RuntimeDeleteStatus.deleted,
+            deleted_project=True,
+            deleted_files=1,
+            skipped_files=1,
+            missing_files=1,
+            reason="project deleted",
+        )

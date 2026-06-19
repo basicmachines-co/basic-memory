@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Protocol, Self
 from uuid import UUID
 
@@ -20,6 +21,8 @@ type ProjectExternalId = str
 type ProjectName = str
 type ProjectPath = str
 type ProjectPermalink = str
+type RuntimeEntityId = int
+type RuntimeFilePath = str
 type StorageBucketName = str
 type StorageKey = str
 type StorageEtag = str
@@ -61,6 +64,14 @@ class StorageEventSource(Protocol):
     """Capability for reading normalized storage events from an ingress payload."""
 
     def events_by_bucket(self) -> Mapping[StorageBucketName, tuple[StorageEventPayload, ...]]: ...
+
+
+class RuntimeDeleteStatus(StrEnum):
+    """Normal outcomes for runtime cleanup jobs."""
+
+    deleted = "deleted"
+    missing = "missing"
+    skipped = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +215,59 @@ class JobRuntime(Protocol):
     """Capability for enqueueing runtime jobs without depending on one queue."""
 
     async def enqueue(self, request: RuntimeJobRequest) -> RuntimeJobId: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeFileDeleteResult:
+    """Summary of one guarded materialized-file cleanup."""
+
+    entity_id: RuntimeEntityId
+    file_path: RuntimeFilePath
+    status: RuntimeDeleteStatus
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProjectDeleteResult:
+    """Summary of one project cleanup run."""
+
+    project_id: ProjectId
+    project_external_id: ProjectExternalId
+    status: RuntimeDeleteStatus
+    deleted_project: bool
+    deleted_files: int
+    skipped_files: int
+    missing_files: int
+    reason: str
+
+    @classmethod
+    def from_file_results(
+        cls,
+        *,
+        project_id: ProjectId,
+        project_external_id: ProjectExternalId,
+        status: RuntimeDeleteStatus,
+        deleted_project: bool,
+        file_results: list[RuntimeFileDeleteResult],
+        reason: str,
+    ) -> "RuntimeProjectDeleteResult":
+        """Build aggregate project cleanup counters from guarded file deletes."""
+        return cls(
+            project_id=project_id,
+            project_external_id=project_external_id,
+            status=status,
+            deleted_project=deleted_project,
+            deleted_files=sum(
+                1 for result in file_results if result.status == RuntimeDeleteStatus.deleted
+            ),
+            skipped_files=sum(
+                1 for result in file_results if result.status == RuntimeDeleteStatus.skipped
+            ),
+            missing_files=sum(
+                1 for result in file_results if result.status == RuntimeDeleteStatus.missing
+            ),
+            reason=reason,
+        )
 
 
 class NoteHistoryProvider(Protocol):
