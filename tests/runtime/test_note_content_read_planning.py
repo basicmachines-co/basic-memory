@@ -6,8 +6,15 @@ import pytest
 
 from basic_memory.runtime import (
     RuntimeNoteContentReadAction,
+    RuntimeNoteContentReadRepairStatus,
     plan_runtime_note_content_read,
+    plan_runtime_note_content_read_repair,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _Project:
+    id: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,3 +74,62 @@ def test_runtime_note_content_read_plan_rejects_wrong_accessor() -> None:
 
     with pytest.raises(RuntimeError, match="accepted note content"):
         plan.require_accepted_note()
+
+
+def test_plan_runtime_note_content_read_repair_stops_when_project_is_missing() -> None:
+    plan = plan_runtime_note_content_read_repair(None, None, None)
+
+    assert plan.status is RuntimeNoteContentReadRepairStatus.project_missing
+    assert not plan.should_read_file
+    assert not plan.repaired
+
+
+def test_plan_runtime_note_content_read_repair_stops_when_entity_is_missing() -> None:
+    project = _Project(id=7)
+
+    plan = plan_runtime_note_content_read_repair(project, None, None)
+
+    assert plan.status is RuntimeNoteContentReadRepairStatus.entity_missing
+    assert plan.project is project
+    assert not plan.should_read_file
+
+
+def test_plan_runtime_note_content_read_repair_stops_for_non_markdown_entity() -> None:
+    project = _Project(id=7)
+    entity = _Entity(content_type="image/png")
+
+    plan = plan_runtime_note_content_read_repair(project, entity, None)
+
+    assert plan.status is RuntimeNoteContentReadRepairStatus.entity_missing
+    assert plan.project is project
+    assert plan.entity is None
+
+
+def test_plan_runtime_note_content_read_repair_succeeds_when_row_already_exists() -> None:
+    project = _Project(id=7)
+    entity = _Entity(content_type="text/markdown")
+    note_content = _NoteContent(markdown_content="# Present\n")
+
+    plan = plan_runtime_note_content_read_repair(project, entity, note_content)
+
+    assert plan.status is RuntimeNoteContentReadRepairStatus.already_present
+    assert plan.repaired
+    assert not plan.should_read_file
+
+
+def test_plan_runtime_note_content_read_repair_requests_file_for_missing_markdown_row() -> None:
+    project = _Project(id=7)
+    entity = _Entity(content_type="text/markdown")
+
+    plan = plan_runtime_note_content_read_repair(project, entity, None)
+
+    assert plan.status is RuntimeNoteContentReadRepairStatus.read_file
+    assert plan.should_read_file
+    assert plan.require_repair_target() == (project, entity)
+
+
+def test_runtime_note_content_read_repair_plan_rejects_missing_target() -> None:
+    plan = plan_runtime_note_content_read_repair(_Project(id=7), None, None)
+
+    with pytest.raises(RuntimeError, match="repair target"):
+        plan.require_repair_target()
