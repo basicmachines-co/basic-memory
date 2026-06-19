@@ -1,8 +1,15 @@
 """Tests for portable embedding index planning."""
 
+from dataclasses import FrozenInstanceError
+from uuid import UUID
+
+import pytest
+
 from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexBatchJobRequest,
     EmbeddingIndexBatchResult,
     EmbeddingIndexResult,
+    EmbeddingIndexJobRequest,
     EmbeddingIndexStatus,
     EmbeddingIndexPlanner,
     EmbeddingIndexTarget,
@@ -15,6 +22,69 @@ class BatchResult:
     entities_skipped = 1
     entities_failed = 0
     entities_deferred = 1
+
+
+def test_embedding_index_job_request_matches_cloud_queue_identity() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    request = EmbeddingIndexJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        entity_id=42,
+        entity_checksum="checksum-42",
+    )
+
+    assert request.dedupe_key() == (
+        "index-embeddings:11111111-1111-1111-1111-111111111111:7:42:checksum-42"
+    )
+    assert request.routing_headers({"source": "test"}) == {
+        "source": "test",
+        "tenant_id": str(tenant_id),
+        "project_id": "7",
+    }
+    assert EmbeddingIndexJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        entity_id=42,
+    ).dedupe_key() == ("index-embeddings:11111111-1111-1111-1111-111111111111:7:42:latest")
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(request, "entity_id", 43)
+
+
+def test_embedding_index_batch_job_request_uses_core_fingerprint() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    request = EmbeddingIndexBatchJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_path="main",
+        entities=(
+            EmbeddingIndexTarget(entity_id=43, entity_checksum="checksum-43"),
+            EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-42"),
+            EmbeddingIndexTarget(entity_id=42, entity_checksum="newer-checksum-42"),
+        ),
+        workflow_id=workflow_id,
+    )
+
+    assert request.dedupe_key() == (
+        "index-embeddings-batch:11111111-1111-1111-1111-111111111111:7:ac0bc9102835b829086fa453"
+    )
+    assert request.routing_headers({"source": "test"}) == {
+        "source": "test",
+        "tenant_id": str(tenant_id),
+        "project_id": "7",
+        "project_path": "main",
+        "workflow_id": str(workflow_id),
+    }
+    assert EmbeddingIndexBatchJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_path="main",
+    ).routing_headers() == {
+        "tenant_id": str(tenant_id),
+        "project_id": "7",
+        "project_path": "main",
+    }
 
 
 def test_embedding_index_planner_dedupes_entities_and_fingerprints_versions() -> None:

@@ -20,8 +20,10 @@ from basic_memory.indexing.change_planning import (
     plan_moved_files,
 )
 from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexBatchJobRequest,
     EmbeddingIndexBatchResult,
     EmbeddingIndexBatchSummary,
+    EmbeddingIndexJobRequest,
     EmbeddingIndexPlan,
     EmbeddingIndexPlanner,
     EmbeddingIndexResult,
@@ -172,7 +174,9 @@ __all__ = [
     "CurrentMaterializedNoteEntity",
     "CurrentMaterializedNotePlan",
     "EmbeddingIndexBatchResult",
+    "EmbeddingIndexBatchJobRequest",
     "EmbeddingIndexBatchSummary",
+    "EmbeddingIndexJobRequest",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
     "EmbeddingIndexResult",

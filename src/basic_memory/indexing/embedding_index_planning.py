@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
+from uuid import UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +16,64 @@ class EmbeddingIndexTarget:
 
     entity_id: int
     entity_checksum: str
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingIndexJobRequest:
+    """Queue-neutral request shape for indexing embeddings for one entity."""
+
+    tenant_id: UUID
+    project_id: int
+    entity_id: int
+    entity_checksum: str | None = None
+
+    def dedupe_key(self) -> str:
+        """Return the logical single-entity embedding queue identity."""
+        checksum_key = self.entity_checksum or "latest"
+        return (
+            f"index-embeddings:{self.tenant_id}:{self.project_id}:{self.entity_id}:{checksum_key}"
+        )
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the single-entity embedding job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project_id),
+            }
+        )
+        return routing_headers
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingIndexBatchJobRequest:
+    """Queue-neutral request shape for indexing embeddings for entity versions."""
+
+    tenant_id: UUID
+    project_id: int
+    project_path: str
+    entities: tuple[EmbeddingIndexTarget, ...] = ()
+    workflow_id: UUID | None = None
+
+    def dedupe_key(self) -> str:
+        """Return the logical batch embedding queue identity."""
+        fingerprint = EmbeddingIndexPlanner().fingerprint(self.entities)
+        return f"index-embeddings-batch:{self.tenant_id}:{self.project_id}:{fingerprint}"
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the batch embedding job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project_id),
+                "project_path": self.project_path,
+            }
+        )
+        if self.workflow_id is not None:
+            routing_headers["workflow_id"] = str(self.workflow_id)
+        return routing_headers
 
 
 class EmbeddingIndexStatus(StrEnum):
