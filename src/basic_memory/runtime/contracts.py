@@ -2070,6 +2070,41 @@ class NoteHistoryProvider(Protocol):
     ) -> bytes: ...
 
 
+class NoteHistoryVersionSource(Protocol):
+    """Storage-version shape needed to build portable note history."""
+
+    @property
+    def version_id(self) -> StorageVersionId: ...
+
+    @property
+    def key(self) -> StorageKey: ...
+
+    @property
+    def is_latest(self) -> bool: ...
+
+    @property
+    def last_modified(self) -> datetime: ...
+
+    @property
+    def size(self) -> int: ...
+
+    @property
+    def etag(self) -> StorageEtag: ...
+
+
+class NoteHistoryPageSource(Protocol):
+    """Storage-version page shape needed to build portable note history."""
+
+    @property
+    def versions(self) -> Iterable[NoteHistoryVersionSource]: ...
+
+    @property
+    def next_key_marker(self) -> StorageKey | None: ...
+
+    @property
+    def next_version_id_marker(self) -> StorageVersionId | None: ...
+
+
 class SnapshotProvider(Protocol):
     """Capability for creating and reading bucket snapshot state."""
 
@@ -2217,6 +2252,18 @@ class NoteHistoryVersion:
     size: int
     etag: StorageEtag
 
+    @classmethod
+    def from_source(cls, source: NoteHistoryVersionSource) -> Self:
+        """Build a portable note-history version from storage-provider metadata."""
+        return cls(
+            version_id=source.version_id,
+            key=source.key,
+            is_latest=source.is_latest,
+            last_modified=source.last_modified,
+            size=source.size,
+            etag=source.etag,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class NoteHistoryPage:
@@ -2225,6 +2272,15 @@ class NoteHistoryPage:
     versions: tuple[NoteHistoryVersion, ...]
     next_key_marker: StorageKey | None = None
     next_version_id_marker: StorageVersionId | None = None
+
+    @classmethod
+    def from_source(cls, source: NoteHistoryPageSource) -> Self:
+        """Build a portable note-history page from storage-provider pagination."""
+        return cls(
+            versions=tuple(NoteHistoryVersion.from_source(version) for version in source.versions),
+            next_key_marker=source.next_key_marker,
+            next_version_id_marker=source.next_version_id_marker,
+        )
 
 
 @dataclass(frozen=True, slots=True)
