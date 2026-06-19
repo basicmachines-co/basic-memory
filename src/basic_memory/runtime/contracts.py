@@ -162,6 +162,20 @@ class RuntimeDeletedNoteEntityDeleteSource(RuntimeDeletedNoteEntitySource, Proto
     def id(self) -> RuntimeEntityId: ...
 
 
+class RuntimeDeletedNoteEntityChecksumSource(Protocol):
+    """Minimal deleted-note entity shape needed to guard file cleanup."""
+
+    @property
+    def checksum(self) -> object | None: ...
+
+
+class RuntimeDeletedNoteFileChecksumSource(Protocol):
+    """Minimal note_content shape needed to guard file cleanup."""
+
+    @property
+    def file_checksum(self) -> object | None: ...
+
+
 class RuntimeNoteContentStateSource(Protocol):
     """Minimal note_content row shape needed for accepted-note responses."""
 
@@ -840,6 +854,19 @@ class RuntimeDeletedNoteResponse:
             "file_path": self.file_path,
             "file_delete_status": self.file_delete_status,
         }
+
+
+def select_deleted_note_file_checksum(
+    *,
+    note_content: RuntimeDeletedNoteFileChecksumSource | None,
+    entity: RuntimeDeletedNoteEntityChecksumSource,
+) -> RuntimeFileChecksum | None:
+    """Choose the best accepted file checksum to guard deleted-note cleanup."""
+    if note_content is not None and note_content.file_checksum is not None:
+        return str(note_content.file_checksum)
+    if entity.checksum is not None:
+        return str(entity.checksum)
+    return None
 
 
 def required_runtime_deleted_note_text(
