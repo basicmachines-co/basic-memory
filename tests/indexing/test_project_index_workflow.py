@@ -25,6 +25,7 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowQueued,
     ProjectIndexWorkflowRecordPlan,
     ProjectIndexWorkflowRequest,
+    ProjectIndexStaleWorkflowPlan,
     ProjectIndexWorkflowStart,
     build_project_index_batch_activity_update,
     build_project_index_batch_job_plan,
@@ -37,6 +38,7 @@ from basic_memory.indexing import (
     build_project_index_workflow_stale_failure_update,
     plan_project_index_batch_result_record,
     plan_project_index_file_result_record,
+    plan_project_index_stale_workflow,
 )
 from basic_memory.runtime import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
 
@@ -780,6 +782,149 @@ def test_project_index_batch_result_record_plan_builds_completion_update() -> No
         "missing": 1,
         "failed": 0,
     }
+
+
+def test_project_index_stale_workflow_plan_keeps_active_batches_running() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    active_batch_jobs = ProjectIndexBatchJobActivity(
+        batch_indexes=(1,),
+        queued_count=1,
+        picked_fresh_count=0,
+        picked_stale_count=0,
+    )
+
+    plan = plan_project_index_stale_workflow(
+        metadata=project_index_record_metadata(
+            total=100,
+            processed=50,
+            succeeded=49,
+            missing=1,
+            recorded_batches=[0],
+        ),
+        workflow_id=workflow_id,
+        active_batch_jobs=active_batch_jobs,
+        observed_at="2026-06-19T10:24:00+00:00",
+        last_heartbeat_at="2026-06-19T10:20:30+00:00",
+        stale_before="2026-06-19T10:25:30+00:00",
+    )
+
+    assert plan.status == "keep_running"
+    assert plan.should_fail is False
+    assert plan.failure_update is None
+    assert plan.require_activity_update() == ProjectIndexBatchJobActivityUpdate(
+        activity=active_batch_jobs,
+        metadata={
+            "phase": "indexing",
+            "progress": "Indexed 50/100 files, 49 succeeded",
+            "payload": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": 42,
+                "project_external_id": "external-project",
+            },
+            "discovery": {
+                "total_files": 100,
+                "batch_count": 2,
+                "batch_size": 50,
+                "discovered_at": "2026-06-19T10:20:30+00:00",
+            },
+            "counters": {
+                "total": 100,
+                "processed": 50,
+                "succeeded": 49,
+                "missing": 1,
+                "failed": 0,
+            },
+            "recorded_batches": [0],
+            "last_batch_job_activity": {
+                "active_batches": [1],
+                "queued_count": 1,
+                "picked_fresh_count": 0,
+                "picked_stale_count": 0,
+                "observed_at": "2026-06-19T10:24:00+00:00",
+            },
+        },
+    )
+    with pytest.raises(RuntimeError, match="does not include a failure update"):
+        plan.require_failure_update()
+
+
+def test_project_index_stale_workflow_plan_builds_failure_update() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    plan = plan_project_index_stale_workflow(
+        metadata=project_index_record_metadata(
+            total=100,
+            processed=50,
+            succeeded=49,
+            missing=1,
+            recorded_batches=[0],
+        ),
+        workflow_id=workflow_id,
+        active_batch_jobs=ProjectIndexBatchJobActivity.empty(),
+        observed_at="2026-06-19T10:24:00+00:00",
+        last_heartbeat_at="2026-06-19T10:20:30+00:00",
+        stale_before="2026-06-19T10:25:30+00:00",
+    )
+
+    diagnostics = {
+        "reason": "stale_project_index_batches",
+        "missing_batches": [1],
+        "recorded_batches": [0],
+        "legacy_missing_batch_count": 0,
+        "last_heartbeat_at": "2026-06-19T10:20:30+00:00",
+        "stale_before": "2026-06-19T10:25:30+00:00",
+    }
+    assert plan == ProjectIndexStaleWorkflowPlan.fail(
+        ProjectIndexWorkflowFailureUpdate(
+            counters=ProjectIndexCounters(
+                total=100,
+                processed=50,
+                succeeded=49,
+                missing=1,
+                failed=0,
+            ),
+            progress="Project index stalled after 50/100 files",
+            error_message="Project index stalled with 1 unreported batch(es)",
+            metadata={
+                "phase": "failed",
+                "progress": "Project index stalled after 50/100 files",
+                "payload": {
+                    "tenant_id": "11111111-1111-1111-1111-111111111111",
+                    "project_id": 42,
+                    "project_external_id": "external-project",
+                },
+                "discovery": {
+                    "total_files": 100,
+                    "batch_count": 2,
+                    "batch_size": 50,
+                    "discovered_at": "2026-06-19T10:20:30+00:00",
+                },
+                "counters": {
+                    "total": 100,
+                    "processed": 50,
+                    "succeeded": 49,
+                    "missing": 1,
+                    "failed": 0,
+                },
+                "recorded_batches": [0],
+                "diagnostics": diagnostics,
+            },
+            failed_event_data={
+                "phase": "failed",
+                "progress": "Project index stalled after 50/100 files",
+                "payload": {
+                    "tenant_id": "11111111-1111-1111-1111-111111111111",
+                    "project_id": 42,
+                    "project_external_id": "external-project",
+                },
+                "error": "Project index stalled with 1 unreported batch(es)",
+                "diagnostics": diagnostics,
+            },
+        )
+    )
+    assert plan.should_fail is True
+    with pytest.raises(RuntimeError, match="does not include an activity update"):
+        plan.require_activity_update()
 
 
 def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_data() -> None:

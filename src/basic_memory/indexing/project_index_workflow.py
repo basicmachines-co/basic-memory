@@ -17,6 +17,7 @@ from basic_memory.indexing.project_index_progress import (
     apply_project_index_file_outcome,
     initial_project_index_counters,
     project_index_counters_from_metadata,
+    project_index_missing_batches_from_metadata,
     project_index_progress_text,
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
@@ -277,6 +278,64 @@ class ProjectIndexWorkflowRecordPlan:
         if self.completion_update is None:
             raise RuntimeError(f"{self.status} plan does not include a completion update")
         return self.completion_update
+
+
+type ProjectIndexStaleWorkflowStatus = Literal["keep_running", "fail"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexStaleWorkflowPlan:
+    """Portable decision for one stale project-index workflow check."""
+
+    status: ProjectIndexStaleWorkflowStatus
+    activity_update: ProjectIndexBatchJobActivityUpdate | None = None
+    failure_update: ProjectIndexWorkflowFailureUpdate | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "keep_running":
+            if self.activity_update is None:
+                raise ValueError("keep_running plans require an activity update")
+            if self.failure_update is not None:
+                raise ValueError("keep_running plans cannot include a failure update")
+            return
+
+        if self.failure_update is None:
+            raise ValueError("fail plans require a failure update")
+        if self.activity_update is not None:
+            raise ValueError("fail plans cannot include an activity update")
+
+    @classmethod
+    def keep_running(
+        cls,
+        activity_update: ProjectIndexBatchJobActivityUpdate,
+    ) -> Self:
+        """Return a non-terminal activity update plan."""
+        return cls(status="keep_running", activity_update=activity_update)
+
+    @classmethod
+    def fail(
+        cls,
+        failure_update: ProjectIndexWorkflowFailureUpdate,
+    ) -> Self:
+        """Return a terminal stale-failure plan."""
+        return cls(status="fail", failure_update=failure_update)
+
+    @property
+    def should_fail(self) -> bool:
+        """Return whether this stale check should fail the workflow."""
+        return self.status == "fail"
+
+    def require_activity_update(self) -> ProjectIndexBatchJobActivityUpdate:
+        """Return the activity update or fail when this is a terminal plan."""
+        if self.activity_update is None:
+            raise RuntimeError(f"{self.status} plan does not include an activity update")
+        return self.activity_update
+
+    def require_failure_update(self) -> ProjectIndexWorkflowFailureUpdate:
+        """Return the failure update or fail when this is a keep-running plan."""
+        if self.failure_update is None:
+            raise RuntimeError(f"{self.status} plan does not include a failure update")
+        return self.failure_update
 
 
 @dataclass(frozen=True, slots=True)
@@ -848,6 +907,43 @@ def plan_project_index_batch_result_record(
             ),
         )
     return ProjectIndexWorkflowRecordPlan.progress(progress_update)
+
+
+def plan_project_index_stale_workflow(
+    *,
+    metadata: Mapping[str, object],
+    workflow_id: WorkflowId,
+    active_batch_jobs: ProjectIndexBatchJobActivity,
+    observed_at: str,
+    last_heartbeat_at: str,
+    stale_before: str,
+) -> ProjectIndexStaleWorkflowPlan:
+    """Plan how a runtime should update one stale project-index workflow."""
+    if active_batch_jobs.has_unfinished_jobs:
+        return ProjectIndexStaleWorkflowPlan.keep_running(
+            build_project_index_batch_activity_update(
+                metadata=metadata,
+                activity=active_batch_jobs,
+                observed_at=observed_at,
+            )
+        )
+
+    counters = require_project_index_workflow_counters(
+        metadata,
+        workflow_id=workflow_id,
+    )
+    missing_batch_plan = project_index_missing_batches_from_metadata(metadata)
+    return ProjectIndexStaleWorkflowPlan.fail(
+        build_project_index_workflow_stale_failure_update(
+            metadata=metadata,
+            counters=counters,
+            missing_batch_indexes=missing_batch_plan.missing_batch_indexes,
+            recorded_batch_indexes=missing_batch_plan.recorded_batch_indexes,
+            legacy_missing_batch_count=missing_batch_plan.legacy_missing_batch_count,
+            last_heartbeat_at=last_heartbeat_at,
+            stale_before=stale_before,
+        )
+    )
 
 
 def build_project_index_workflow_stale_failure_update(
