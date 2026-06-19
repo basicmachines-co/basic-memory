@@ -1580,6 +1580,20 @@ def note_content_matches_materialization_request(
     )
 
 
+def plan_note_materialization_cleanup_file_delete(
+    request: RuntimeNoteMaterializationJobRequest,
+) -> RuntimePendingNoteFileDelete | None:
+    """Return old-file cleanup work carried by one materialization request."""
+    if request.cleanup_file_path is None:
+        return None
+    return RuntimePendingNoteFileDelete(
+        project_id=request.project_id,
+        entity_id=request.entity_id,
+        file_path=request.cleanup_file_path,
+        file_checksum=request.cleanup_file_checksum,
+    )
+
+
 def plan_note_materialization_job_request(
     *,
     tenant_id: TenantId,
