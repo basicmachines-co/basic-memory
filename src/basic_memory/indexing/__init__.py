@@ -102,6 +102,10 @@ from basic_memory.indexing.link_resolution import (
     normalize_link_text,
     resolve_link_texts,
 )
+from basic_memory.indexing.note_file_delete_runner import (
+    NoteFileDeleteStorage,
+    run_note_file_delete,
+)
 from basic_memory.indexing.models import (
     CurrentMaterializedNoteEntity,
     CurrentMaterializedNotePlan,
@@ -382,6 +386,7 @@ __all__ = [
     "NoteContentUpdatePlan",
     "ObservedNoteContent",
     "NoteFileDeleteEnqueuer",
+    "NoteFileDeleteStorage",
     "NoteMaterializationFileWriter",
     "NoteMaterializationPreflightOutcome",
     "NoteMaterializationPreflightProvider",
@@ -523,6 +528,7 @@ __all__ = [
     "enqueue_cleanup_file",
     "run_index_file",
     "run_index_file_batch",
+    "run_note_file_delete",
     "run_note_materialization",
     "run_embedding_index",
     "run_embedding_index_batch",
