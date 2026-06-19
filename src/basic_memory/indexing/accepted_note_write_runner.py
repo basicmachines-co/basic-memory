@@ -200,6 +200,16 @@ class AcceptedNoteSearchEntitySource(AcceptedNoteContentEntitySource, Protocol):
     def updated_at(self) -> datetime: ...
 
 
+class AcceptedNoteDeleteEntitySource(AcceptedNoteContentEntitySource, Protocol):
+    """Entity identity required to delete one accepted note row."""
+
+
+class AcceptedNoteDeleteSession(Protocol):
+    """Session capability for deleting one accepted note entity."""
+
+    async def delete(self, instance: object, /) -> None: ...
+
+
 class AcceptedPendingEntityRepository(Protocol):
     """Repository capability for inserting one pending accepted entity."""
 
@@ -561,3 +571,12 @@ async def refresh_accepted_note_search_index(
         session,
         accepted_note_search_row_from_entity(entity, search_content=search_content),
     )
+
+
+async def delete_accepted_note_entity(
+    session: AcceptedNoteDeleteSession,
+    *,
+    entity: AcceptedNoteDeleteEntitySource,
+) -> None:
+    """Delete the accepted entity row inside the caller-owned transaction."""
+    await session.delete(entity)

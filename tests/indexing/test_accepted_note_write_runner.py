@@ -19,6 +19,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     accepted_pending_entity_write_from_prepared,
     apply_accepted_prepared_entity_fields,
     create_accepted_pending_entity,
+    delete_accepted_note_entity,
     prepare_accepted_note_create,
     prepare_accepted_note_edit,
     prepare_accepted_note_move,
@@ -102,6 +103,14 @@ class _SearchRepository:
         row: AcceptedNoteSearchRow,
     ) -> None:
         self.calls.append(row)
+
+
+class _DeleteSession:
+    def __init__(self) -> None:
+        self.deleted: list[object] = []
+
+    async def delete(self, entity: object) -> None:
+        self.deleted.append(entity)
 
 
 class _CreatePreparer:
@@ -594,3 +603,13 @@ async def test_refresh_accepted_note_search_index_uses_repository_protocol() -> 
     row = repository.calls[0]
     assert row.entity_id == 42
     assert row.project_id == 7
+
+
+@pytest.mark.asyncio
+async def test_delete_accepted_note_entity_uses_session_protocol() -> None:
+    session = _DeleteSession()
+    entity = _entity()
+
+    await delete_accepted_note_entity(session, entity=entity)
+
+    assert session.deleted == [entity]
