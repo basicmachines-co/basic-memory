@@ -4,10 +4,31 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 from basic_memory.file_utils import ParseError, remove_frontmatter
 
 MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE = 6000
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedNoteSearchRow:
+    """Entity-level search row for an accepted DB-first note snapshot."""
+
+    id: int
+    title: str
+    content_stems: str
+    content_snippet: str
+    permalink: str | None
+    file_path: str
+    item_type: str
+    note_type: str | None
+    entity_id: int
+    created_at: datetime
+    updated_at: datetime
+    project_id: int
 
 
 def strip_search_text(value: str | None) -> str:
@@ -91,3 +112,40 @@ def accepted_note_content_stems(
     if len(stems) > MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE:
         return stems[:MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE]
     return stems
+
+
+def build_accepted_note_search_row(
+    *,
+    entity_id: int,
+    title: str | None,
+    note_type: str | None,
+    entity_metadata: Mapping[str, object] | None,
+    permalink: str | None,
+    file_path: str,
+    search_content: str,
+    created_at: datetime,
+    updated_at: datetime,
+    project_id: int,
+    item_type: str = "entity",
+) -> AcceptedNoteSearchRow:
+    """Build the hot entity search row for one accepted note snapshot."""
+    return AcceptedNoteSearchRow(
+        id=entity_id,
+        title=strip_search_text(title),
+        content_stems=accepted_note_content_stems(
+            title=title,
+            search_content=search_content,
+            permalink=permalink,
+            file_path=file_path,
+            tags=accepted_note_tags(entity_metadata),
+        ),
+        content_snippet=strip_search_text(search_content),
+        permalink=permalink,
+        file_path=Path(file_path).as_posix(),
+        item_type=item_type,
+        note_type=note_type,
+        entity_id=entity_id,
+        created_at=created_at,
+        updated_at=updated_at,
+        project_id=project_id,
+    )

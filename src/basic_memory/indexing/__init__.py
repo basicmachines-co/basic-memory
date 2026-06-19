@@ -1,10 +1,12 @@
 """Reusable indexing primitives shared by local sync and future remote callers."""
 
 from basic_memory.indexing.accepted_note_search import (
+    AcceptedNoteSearchRow,
     MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE,
     accepted_note_content_stems,
     accepted_note_tags,
     accepted_search_content_from_markdown,
+    build_accepted_note_search_row,
     first_markdown_h1,
     search_text_variants,
     strip_search_text,
@@ -143,6 +145,7 @@ from basic_memory.indexing.vector_sync_planning import (
 
 __all__ = [
     "AffectedEntityIds",
+    "AcceptedNoteSearchRow",
     "BatchIndexer",
     "ChangeReport",
     "CheckpointPhase",
@@ -222,6 +225,7 @@ __all__ = [
     "apply_project_index_file_outcomes",
     "apply_vector_sync_batch_result",
     "build_file_index_plan",
+    "build_accepted_note_search_row",
     "build_index_input_files",
     "build_index_batches",
     "current_file_index_decision",
