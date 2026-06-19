@@ -22,12 +22,14 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
     FileIndexPlan,
+    FileIndexPlanSummary,
     FileIndexTarget,
     build_file_index_plan,
     current_file_index_decision,
     plan_file_index_target_from_current,
     plan_file_index_target_from_observed,
     plan_legacy_file_index_targets,
+    summarize_file_index_plan,
 )
 from basic_memory.indexing.input_file_adaptation import (
     IndexContentTypeProvider,
@@ -135,6 +137,7 @@ __all__ = [
     "FileIndexDecisionStatus",
     "FileIndexChecker",
     "FileIndexPlan",
+    "FileIndexPlanSummary",
     "FileIndexTarget",
     "FileMoveCandidate",
     "IndexedEntity",
@@ -212,4 +215,5 @@ __all__ = [
     "resolve_link_texts",
     "should_emit_project_index_progress_event",
     "summarize_project_index_file_outcomes",
+    "summarize_file_index_plan",
 ]

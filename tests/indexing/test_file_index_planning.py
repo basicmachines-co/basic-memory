@@ -4,11 +4,13 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
     FileIndexPlan,
+    FileIndexPlanSummary,
     FileIndexTarget,
     build_file_index_plan,
     plan_file_index_target_from_current,
     plan_file_index_target_from_observed,
     plan_legacy_file_index_targets,
+    summarize_file_index_plan,
 )
 
 
@@ -96,6 +98,31 @@ def test_build_file_index_plan_keeps_reads_in_paths_and_terminal_decisions() -> 
                 reason="file not found: notes/missing.md",
             ),
         ),
+    )
+
+
+def test_summarize_file_index_plan_counts_read_current_and_missing_targets() -> None:
+    plan = FileIndexPlan(
+        paths_to_read=("notes/read.md",),
+        decisions=(
+            FileIndexDecision(
+                path="notes/current.md",
+                status=FileIndexDecisionStatus.current,
+                reason="file already indexed: notes/current.md",
+            ),
+            FileIndexDecision(
+                path="notes/missing.md",
+                status=FileIndexDecisionStatus.missing,
+                reason="file not found: notes/missing.md",
+            ),
+        ),
+    )
+
+    assert summarize_file_index_plan(plan) == FileIndexPlanSummary(
+        total_files=3,
+        files_to_read=1,
+        current_files=1,
+        missing_files=1,
     )
 
 

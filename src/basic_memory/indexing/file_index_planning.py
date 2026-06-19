@@ -44,6 +44,16 @@ class FileIndexPlan:
     decisions: tuple[FileIndexDecision, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FileIndexPlanSummary:
+    """Decision counts for a file-index content read plan."""
+
+    total_files: int
+    files_to_read: int
+    current_files: int
+    missing_files: int
+
+
 def current_file_index_decision(file_path: FileIndexPath) -> FileIndexDecision:
     """Return a no-op decision for an already-current file."""
     return FileIndexDecision(
@@ -98,6 +108,23 @@ def build_file_index_plan(decisions: Iterable[FileIndexDecision]) -> FileIndexPl
     return FileIndexPlan(
         paths_to_read=tuple(paths_to_read),
         decisions=tuple(terminal_decisions),
+    )
+
+
+def summarize_file_index_plan(plan: FileIndexPlan) -> FileIndexPlanSummary:
+    """Count read, current, and missing targets in a file-index plan."""
+    current_files = sum(
+        decision.status == FileIndexDecisionStatus.current for decision in plan.decisions
+    )
+    missing_files = sum(
+        decision.status == FileIndexDecisionStatus.missing for decision in plan.decisions
+    )
+    files_to_read = len(plan.paths_to_read)
+    return FileIndexPlanSummary(
+        total_files=files_to_read + len(plan.decisions),
+        files_to_read=files_to_read,
+        current_files=current_files,
+        missing_files=missing_files,
     )
 
 
