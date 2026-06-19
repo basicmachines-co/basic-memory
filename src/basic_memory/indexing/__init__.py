@@ -218,6 +218,14 @@ from basic_memory.indexing.progress import (
     apply_vector_sync_batch_result,
     initialize_vector_sync_progress,
 )
+from basic_memory.indexing.project_delete_acceptance import (
+    ProjectDeleteAcceptedDeletionStatus,
+    ProjectDeleteAcceptedFileStatus,
+    ProjectDeleteAcceptedProject,
+    ProjectDeleteAcceptedProjectSource,
+    ProjectDeleteAcceptedResult,
+    ProjectDeleteAcceptedStatus,
+)
 from basic_memory.indexing.project_delete_runner import (
     ProjectDeleteFileDeleter,
     ProjectDeletePreflightProvider,
@@ -439,6 +447,12 @@ __all__ = [
     "ProjectIndexBatchJobPlan",
     "ProjectIndexBatchEnqueuer",
     "ProjectIndexBatchCounterUpdate",
+    "ProjectDeleteAcceptedDeletionStatus",
+    "ProjectDeleteAcceptedFileStatus",
+    "ProjectDeleteAcceptedProject",
+    "ProjectDeleteAcceptedProjectSource",
+    "ProjectDeleteAcceptedResult",
+    "ProjectDeleteAcceptedStatus",
     "ProjectDeleteFileDeleter",
     "ProjectDeletePreflightProvider",
     "ProjectDeletePreflightResult",
