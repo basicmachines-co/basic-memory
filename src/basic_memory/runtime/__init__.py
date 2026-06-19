@@ -241,6 +241,7 @@ from basic_memory.runtime.observed_index_files import (
     runtime_observed_index_file_from_metadata,
     runtime_observed_index_files_from_metadata_map,
 )
+from basic_memory.runtime.process import runtime_process_rss_bytes
 from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixMatch,
     StorageProjectPrefixResolution,
@@ -479,6 +480,7 @@ __all__ = [
     "runtime_note_content_payload_as_dict",
     "runtime_note_content_payload_as_json_bytes",
     "runtime_scheduled_task_from_payload",
+    "runtime_process_rss_bytes",
     "runtime_observed_index_file_from_metadata",
     "runtime_observed_index_files_from_metadata_map",
     "run_runtime_storage_event_operations",
