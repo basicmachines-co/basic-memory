@@ -12,7 +12,10 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import file_utils
-from basic_memory.indexing.note_content_reconciliation import NoteContentMaterializedCurrent
+from basic_memory.indexing.note_content_reconciliation import (
+    NoteContentMaterializationStatusUpdate,
+    NoteContentMaterializedCurrent,
+)
 from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
     apply_note_content_update_plan,
@@ -125,5 +128,33 @@ async def test_apply_note_content_update_plan_publishes_materialized_current_fil
         file_write_status="synced",
         file_updated_at=file_updated_at,
         last_materialization_error=None,
+        last_materialization_attempt_at=attempted_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_note_content_update_plan_marks_materialization_status() -> None:
+    """Materialization status plans should apply without overwriting file checksum."""
+    attempted_at = datetime(2026, 4, 13, 14, 59, tzinfo=UTC)
+    repository = SimpleNamespace(update_state_fields=AsyncMock())
+    session = FakeSession()
+
+    await apply_note_content_update_plan(
+        cast(Any, repository),
+        cast(Any, session),
+        42,
+        NoteContentMaterializationStatusUpdate(
+            file_write_status="failed",
+            file_checksum=None,
+            last_materialization_error="write failed",
+            last_materialization_attempt_at=attempted_at,
+        ),
+    )
+
+    repository.update_state_fields.assert_awaited_once_with(
+        session,
+        42,
+        file_write_status="failed",
+        last_materialization_error="write failed",
         last_materialization_attempt_at=attempted_at,
     )

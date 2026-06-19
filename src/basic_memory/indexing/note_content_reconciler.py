@@ -13,6 +13,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentBootstrap,
     NoteContentFileObserved,
     NoteContentFileSynced,
+    NoteContentMaterializationStatusUpdate,
     NoteContentMaterializedCurrent,
     NoteContentMaterializedStale,
     NoteContentPromoted,
@@ -27,6 +28,7 @@ type NoteContentUpdatePlan = (
     | NoteContentFileObserved
     | NoteContentMaterializedCurrent
     | NoteContentMaterializedStale
+    | NoteContentMaterializationStatusUpdate
     | NoteContentPromoted
 )
 
@@ -128,6 +130,15 @@ async def apply_note_content_update_plan(
                 last_materialization_error=plan.last_materialization_error,
                 last_materialization_attempt_at=plan.last_materialization_attempt_at,
             )
+        case NoteContentMaterializationStatusUpdate():
+            updates: dict[str, object] = {
+                "file_write_status": plan.file_write_status,
+                "last_materialization_error": plan.last_materialization_error,
+                "last_materialization_attempt_at": plan.last_materialization_attempt_at,
+            }
+            if plan.file_checksum is not None:
+                updates["file_checksum"] = plan.file_checksum
+            await repository.update_state_fields(session, entity_id, **updates)
         case NoteContentPromoted():
             await repository.update_state_fields(
                 session,

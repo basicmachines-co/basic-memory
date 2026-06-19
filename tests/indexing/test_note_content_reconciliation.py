@@ -3,16 +3,19 @@
 from datetime import UTC, datetime
 
 from basic_memory.indexing.note_content_reconciliation import (
+    AcceptedNoteContentVersion,
     MaterializedNoteContentFile,
     NoteContentBootstrap,
     NoteContentFileObserved,
     NoteContentFileSynced,
     NoteContentMaterializedCurrent,
     NoteContentMaterializedStale,
+    NoteContentMaterializationStatusUpdate,
     NoteContentPromoted,
     NoteContentState,
     ObservedNoteContent,
     plan_note_content_materialization_publish,
+    plan_note_content_materialization_status,
     plan_note_content_reconciliation,
 )
 
@@ -168,3 +171,80 @@ def test_plan_materialization_publish_leaves_newer_db_version_pending() -> None:
         last_materialization_error=None,
         last_materialization_attempt_at=attempted_at,
     )
+
+
+def test_plan_materialization_status_marks_current_payload_failed() -> None:
+    attempted_at = datetime(2026, 6, 18, 12, 29, tzinfo=UTC)
+
+    plan = plan_note_content_materialization_status(
+        current=NoteContentState(
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=3,
+            file_checksum="old-file-checksum",
+        ),
+        accepted=AcceptedNoteContentVersion(
+            db_version=4,
+            db_checksum="db-checksum",
+        ),
+        file_write_status="failed",
+        attempted_at=attempted_at,
+        error_message="write failed",
+    )
+
+    assert plan == NoteContentMaterializationStatusUpdate(
+        file_write_status="failed",
+        file_checksum=None,
+        last_materialization_error="write failed",
+        last_materialization_attempt_at=attempted_at,
+    )
+
+
+def test_plan_materialization_status_records_current_conflict_checksum() -> None:
+    attempted_at = datetime(2026, 6, 18, 12, 29, tzinfo=UTC)
+
+    plan = plan_note_content_materialization_status(
+        current=NoteContentState(
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=3,
+            file_checksum="old-file-checksum",
+        ),
+        accepted=AcceptedNoteContentVersion(
+            db_version=4,
+            db_checksum="db-checksum",
+        ),
+        file_write_status="external_change_detected",
+        attempted_at=attempted_at,
+        actual_file_checksum="external-file-checksum",
+        error_message="Refusing to overwrite unexpected file",
+    )
+
+    assert plan == NoteContentMaterializationStatusUpdate(
+        file_write_status="external_change_detected",
+        file_checksum="external-file-checksum",
+        last_materialization_error="Refusing to overwrite unexpected file",
+        last_materialization_attempt_at=attempted_at,
+    )
+
+
+def test_plan_materialization_status_skips_stale_payload() -> None:
+    attempted_at = datetime(2026, 6, 18, 12, 29, tzinfo=UTC)
+
+    plan = plan_note_content_materialization_status(
+        current=NoteContentState(
+            db_version=5,
+            db_checksum="newer-db-checksum",
+            file_version=4,
+            file_checksum="newer-file-checksum",
+        ),
+        accepted=AcceptedNoteContentVersion(
+            db_version=4,
+            db_checksum="db-checksum",
+        ),
+        file_write_status="failed",
+        attempted_at=attempted_at,
+        error_message="write failed",
+    )
+
+    assert plan is None

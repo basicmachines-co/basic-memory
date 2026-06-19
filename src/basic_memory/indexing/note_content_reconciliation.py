@@ -38,6 +38,14 @@ class NoteContentState:
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptedNoteContentVersion:
+    """Accepted DB note-content marker carried by materialization work."""
+
+    db_version: int
+    db_checksum: NoteContentChecksum
+
+
+@dataclass(frozen=True, slots=True)
 class MaterializedNoteContentFile:
     """One file object written from a DB-accepted note_content version."""
 
@@ -112,6 +120,16 @@ class NoteContentMaterializedStale:
 
 
 @dataclass(frozen=True, slots=True)
+class NoteContentMaterializationStatusUpdate:
+    """Update when current materialization work fails or detects a conflict."""
+
+    file_write_status: NoteContentWriteStatus
+    file_checksum: NoteContentChecksum | None
+    last_materialization_error: str | None
+    last_materialization_attempt_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class NoteContentPromoted:
     """Update when an external file change becomes the newest accepted content."""
 
@@ -134,6 +152,15 @@ type NoteContentReconciliationPlan = (
 type NoteContentMaterializationPublishPlan = (
     NoteContentMaterializedCurrent | NoteContentMaterializedStale
 )
+type NoteContentMaterializationStatusPlan = NoteContentMaterializationStatusUpdate | None
+
+
+def note_content_matches_accepted_version(
+    current: NoteContentState,
+    accepted: AcceptedNoteContentVersion,
+) -> bool:
+    """Return whether note_content still describes the accepted DB marker."""
+    return current.db_version == accepted.db_version and current.db_checksum == accepted.db_checksum
 
 
 def plan_note_content_reconciliation(
@@ -207,8 +234,12 @@ def plan_note_content_materialization_publish(
     written: MaterializedNoteContentFile,
 ) -> NoteContentMaterializationPublishPlan:
     """Choose how note_content should record one completed materialization write."""
-    payload_is_current = (
-        current.db_version == written.db_version and current.db_checksum == written.db_checksum
+    payload_is_current = note_content_matches_accepted_version(
+        current,
+        AcceptedNoteContentVersion(
+            db_version=written.db_version,
+            db_checksum=written.db_checksum,
+        ),
     )
     if payload_is_current:
         return NoteContentMaterializedCurrent(
@@ -227,4 +258,25 @@ def plan_note_content_materialization_publish(
         file_updated_at=written.file_updated_at,
         last_materialization_error=None,
         last_materialization_attempt_at=written.attempted_at,
+    )
+
+
+def plan_note_content_materialization_status(
+    *,
+    current: NoteContentState,
+    accepted: AcceptedNoteContentVersion,
+    file_write_status: NoteContentWriteStatus,
+    attempted_at: datetime,
+    actual_file_checksum: NoteContentChecksum | None = None,
+    error_message: str | None = None,
+) -> NoteContentMaterializationStatusPlan:
+    """Choose whether current materialization status should update note_content."""
+    if not note_content_matches_accepted_version(current, accepted):
+        return None
+
+    return NoteContentMaterializationStatusUpdate(
+        file_write_status=file_write_status,
+        file_checksum=actual_file_checksum,
+        last_materialization_error=error_message,
+        last_materialization_attempt_at=attempted_at,
     )
