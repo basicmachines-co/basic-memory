@@ -9,7 +9,7 @@ and snapshots while sharing the same typed handoff values.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Protocol, Self
@@ -1589,6 +1589,22 @@ class RuntimeNoteContentState:
             file_updated_at=source.file_updated_at,
             last_materialization_error=source.last_materialization_error,
         )
+
+
+def plan_accepted_note_response(
+    *,
+    entity: RuntimeAcceptedNoteEntitySource,
+    note_content: RuntimeNoteContentStateSource,
+    fallback_source: RuntimeNoteChangeSource,
+) -> RuntimeAcceptedNoteResponse:
+    """Build an accepted-note response from accepted note_content state."""
+    note_content_state = RuntimeNoteContentState.from_source(note_content)
+    if note_content_state.last_source is None:
+        note_content_state = replace(note_content_state, last_source=fallback_source)
+    return RuntimeAcceptedNoteResponse.from_entity_and_content_state(
+        entity,
+        note_content_state,
+    )
 
 
 @dataclass(frozen=True, slots=True)
