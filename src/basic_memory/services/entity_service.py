@@ -97,9 +97,66 @@ class PreparedEntityWrite:
     entity_markdown: EntityMarkdown
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedEditTitleReconciliation:
+    """Markdown title state after reconciling an edit with the note's body heading."""
+
+    markdown_content: str
+    title: str
+    metadata: dict[str, Any] | None
+
+
 def _frontmatter_permalink(value: object) -> str | None:
     """Return an explicit frontmatter permalink only when YAML parsed a real string."""
     return value if isinstance(value, str) and value else None
+
+
+def reconcile_prepared_edit_title_from_h1(
+    *,
+    original_markdown: str,
+    markdown_content: str,
+    current_title: str | None,
+    prepared_title: str,
+    metadata: dict[str, Any] | None,
+) -> PreparedEditTitleReconciliation:
+    """Keep PATCH title metadata in step when a direct H1 edit changes the note title."""
+    # The indexing package imports services at module load time, so keep this shared helper import
+    # inside the function to avoid a startup cycle while still preserving one H1 parser.
+    from basic_memory.indexing.accepted_note_search import (
+        accepted_search_content_from_markdown,
+        first_markdown_h1,
+    )
+
+    original_h1 = first_markdown_h1(accepted_search_content_from_markdown(original_markdown))
+    prepared_h1 = first_markdown_h1(accepted_search_content_from_markdown(markdown_content))
+
+    if not prepared_h1 or prepared_h1 == prepared_title:
+        return PreparedEditTitleReconciliation(
+            markdown_content=markdown_content,
+            title=prepared_title,
+            metadata=metadata,
+        )
+
+    # Only infer a title edit when the note previously used the H1 as its title.
+    # If frontmatter and H1 intentionally differed, preserve that explicit metadata.
+    if original_h1 != current_title or prepared_title != current_title:
+        return PreparedEditTitleReconciliation(
+            markdown_content=markdown_content,
+            title=prepared_title,
+            metadata=metadata,
+        )
+
+    post = frontmatter.loads(markdown_content)
+    post.metadata["title"] = prepared_h1
+    reconciled_metadata = metadata
+    if reconciled_metadata is not None:
+        reconciled_metadata = {**reconciled_metadata, "title": prepared_h1}
+
+    return PreparedEditTitleReconciliation(
+        markdown_content=dump_frontmatter(post),
+        title=prepared_h1,
+        metadata=reconciled_metadata,
+    )
 
 
 class EntityService(BaseService[EntityModel]):
@@ -667,6 +724,17 @@ class EntityService(BaseService[EntityModel]):
 
             normalized_metadata = normalize_frontmatter_metadata(content_frontmatter or {})
             metadata = {k: v for k, v in normalized_metadata.items() if v is not None} or None
+
+        title_reconciliation = reconcile_prepared_edit_title_from_h1(
+            original_markdown=current_content,
+            markdown_content=markdown_content,
+            current_title=entity.title,
+            prepared_title=title,
+            metadata=metadata,
+        )
+        markdown_content = title_reconciliation.markdown_content
+        title = title_reconciliation.title
+        metadata = title_reconciliation.metadata
 
         entity_fields = self._build_entity_fields(
             file_path=file_path,

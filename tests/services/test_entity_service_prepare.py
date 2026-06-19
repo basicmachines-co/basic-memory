@@ -287,6 +287,37 @@ async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
 
 
 @pytest.mark.asyncio
+async def test_prepare_edit_entity_content_updates_title_when_h1_changes(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Original Title",
+            directory="notes",
+            note_type="note",
+            content="# Original Title\n\nExisting body",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="find_replace",
+        content="# Updated Title",
+        find_text="# Original Title",
+    )
+    metadata = prepared.entity_fields.entity_metadata
+
+    assert prepared.entity_fields.title == "Updated Title"
+    assert parse_frontmatter(prepared.markdown_content)["title"] == "Updated Title"
+    assert metadata is not None
+    assert metadata["title"] == "Updated Title"
+    assert "# Updated Title" in remove_frontmatter(prepared.markdown_content)
+
+
+@pytest.mark.asyncio
 async def test_prepare_edit_entity_content_prepend_preserves_valid_frontmatter(
     entity_service,
     file_service,
