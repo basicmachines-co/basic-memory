@@ -1,6 +1,25 @@
 """Tests for portable indexing progress checkpoint models."""
 
-from basic_memory.indexing.progress import IndexingResult, VectorSyncProgress
+from dataclasses import dataclass, field
+
+from basic_memory.indexing.progress import (
+    IndexingResult,
+    VectorSyncProgress,
+    apply_vector_sync_batch_result,
+    initialize_vector_sync_progress,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BatchSummary:
+    """Small fake proving progress updates only need a narrow batch protocol."""
+
+    entities_synced: int
+    entities_failed: int
+    failed_entity_ids: list[int] = field(default_factory=list)
+    embedding_jobs_total: int = 0
+    embed_seconds_total: float = 0.0
+    write_seconds_total: float = 0.0
 
 
 def test_vector_sync_progress_checkpoint_round_trip() -> None:
@@ -58,6 +77,81 @@ def test_vector_sync_progress_recovers_empty_progress_from_missing_or_invalid_st
 
     assert missing == VectorSyncProgress()
     assert invalid == VectorSyncProgress()
+
+
+def test_initialize_vector_sync_progress_prefers_resume_entity_plan() -> None:
+    resume = VectorSyncProgress(
+        entity_ids=[11, 22],
+        next_index=5,
+        entities_synced=2,
+        entities_failed=1,
+        failed_entity_ids=[22],
+        embedding_jobs_total=40,
+        embed_seconds_total=12.0,
+        write_seconds_total=1.0,
+        elapsed_seconds=15.0,
+    )
+
+    progress = initialize_vector_sync_progress(
+        entity_ids=[33],
+        resume_progress=resume,
+    )
+
+    assert progress.entity_ids == [11, 22]
+    assert progress.next_index == 2
+    assert progress.entities_synced == 2
+    assert progress.entities_failed == 1
+    assert progress.failed_entity_ids == [22]
+    assert progress.embedding_jobs_total == 40
+    assert progress.elapsed_seconds == 15.0
+
+
+def test_initialize_vector_sync_progress_uses_entity_ids_without_resume_plan() -> None:
+    progress = initialize_vector_sync_progress(
+        entity_ids=[33, 44],
+        resume_progress=None,
+    )
+
+    assert progress.entity_ids == [33, 44]
+    assert progress.next_index == 0
+    assert progress.entities_synced == 0
+
+
+def test_apply_vector_sync_batch_result_updates_progress_and_reports_new_failures() -> None:
+    progress = VectorSyncProgress(
+        entity_ids=[11, 22, 33],
+        next_index=1,
+        entities_synced=1,
+        entities_failed=1,
+        failed_entity_ids=[22],
+        embedding_jobs_total=4,
+        embed_seconds_total=1.5,
+        write_seconds_total=0.5,
+    )
+
+    new_failed_entity_ids = apply_vector_sync_batch_result(
+        progress,
+        BatchSummary(
+            entities_synced=2,
+            entities_failed=2,
+            failed_entity_ids=[22, 33],
+            embedding_jobs_total=6,
+            embed_seconds_total=2.0,
+            write_seconds_total=0.75,
+        ),
+        next_index=3,
+        elapsed_seconds=8.5,
+    )
+
+    assert progress.next_index == 3
+    assert progress.entities_synced == 3
+    assert progress.entities_failed == 3
+    assert progress.embedding_jobs_total == 10
+    assert progress.embed_seconds_total == 3.5
+    assert progress.write_seconds_total == 1.25
+    assert progress.elapsed_seconds == 8.5
+    assert progress.failed_entity_ids == [22, 33]
+    assert new_failed_entity_ids == [33]
 
 
 def test_indexing_result_checkpoint_round_trip() -> None:
