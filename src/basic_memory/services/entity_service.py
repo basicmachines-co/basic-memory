@@ -4,6 +4,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, List, Optional, Sequence, Tuple, Union
 
@@ -72,6 +73,24 @@ class PreparedEntityFields:
     content_type: str
     permalink: str | None
     file_path: str
+
+
+def apply_prepared_entity_fields(
+    entity: EntityModel,
+    entity_fields: PreparedEntityFields,
+    *,
+    updated_at: datetime,
+    user_profile_value: str | None,
+) -> None:
+    """Copy prepared accepted markdown fields onto an entity row."""
+    entity.title = entity_fields.title
+    entity.note_type = entity_fields.note_type
+    entity.entity_metadata = entity_fields.entity_metadata
+    entity.content_type = entity_fields.content_type
+    entity.permalink = entity_fields.permalink
+    entity.file_path = entity_fields.file_path
+    entity.updated_at = updated_at
+    entity.last_updated_by = user_profile_value
 
 
 @dataclass(frozen=True)
