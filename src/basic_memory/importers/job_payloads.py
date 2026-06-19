@@ -1,6 +1,7 @@
 """Pydantic worker payloads for portable import runtime boundaries."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal, Self
 from uuid import UUID
 
@@ -21,6 +22,19 @@ from basic_memory.runtime import (
 
 IMPORT_DATA_ENTRYPOINT = "import_data"
 type ImportKind = Literal["claude", "chatgpt", "memory-json", "project-zip"]
+type ImportDataResultPayload = Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportDataResult:
+    """Summary of import work and downstream indexing."""
+
+    result: ImportDataResultPayload
+    index_job_id: str
+
+    def result_payload(self) -> dict[str, object]:
+        """Return a mutable workflow/admin payload copy."""
+        return dict(self.result)
 
 
 class ImportDataPayload(BaseModel):

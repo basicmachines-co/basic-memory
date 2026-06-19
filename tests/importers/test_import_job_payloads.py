@@ -1,10 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
-from basic_memory.importers import ImportDataPayload, ImportKind
+from basic_memory.importers import ImportDataPayload, ImportDataResult, ImportKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,3 +97,17 @@ def test_import_kind_type_exports_current_values() -> None:
     import_kind: ImportKind = "memory-json"
 
     assert import_kind == "memory-json"
+
+
+def test_import_data_result_carries_import_and_index_summary() -> None:
+    result = ImportDataResult(
+        result={"success": True, "files_imported": 3},
+        index_job_id="index-workflow-id",
+    )
+
+    assert result.result["success"] is True
+    assert result.index_job_id == "index-workflow-id"
+    assert result.result_payload() == {"success": True, "files_imported": 3}
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(result, "index_job_id", "other")

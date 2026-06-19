@@ -10,6 +10,8 @@ from basic_memory.importers.memory_json_importer import MemoryJsonImporter
 from basic_memory.importers.job_payloads import (
     IMPORT_DATA_ENTRYPOINT,
     ImportDataPayload,
+    ImportDataResult,
+    ImportDataResultPayload,
     ImportKind,
 )
 from basic_memory.importers.project_zip_import import (
@@ -33,6 +35,8 @@ __all__ = [
     "MemoryJsonImporter",
     "IMPORT_DATA_ENTRYPOINT",
     "ImportDataPayload",
+    "ImportDataResult",
+    "ImportDataResultPayload",
     "ImportKind",
     "ProjectZipEntry",
     "ProjectZipImportError",
