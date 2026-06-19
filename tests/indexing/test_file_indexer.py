@@ -1,0 +1,233 @@
+"""Tests for the portable per-file index service."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from unittest.mock import ANY, AsyncMock, Mock
+
+import pytest
+
+from basic_memory.indexing import FileIndexer, FileIndexOperation, SyncedMarkdownFile
+
+CHECKSUM = "abc123"
+CANONICAL_MARKDOWN = "---\ntitle: Note\npermalink: notes/note\n---\n\n# Note\n"
+OBSERVED_AT = datetime(2026, 4, 12, 12, 0, tzinfo=UTC)
+
+
+class _FakeSession:
+    def get_bind(self) -> Mock:
+        return Mock()
+
+    async def commit(self) -> None:
+        pass
+
+    async def rollback(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+def _entity(*, entity_id: int = 42, checksum: str = "old-checksum") -> Mock:
+    """Create the tiny entity shape FileIndexer needs."""
+    entity = Mock()
+    entity.id = entity_id
+    entity.checksum = checksum
+    entity.external_id = "note-42"
+    entity.title = "Note"
+    entity.permalink = "notes/note"
+    entity.observations = []
+    entity.outgoing_relations = []
+    entity.incoming_relations = []
+    entity.relations = []
+    return entity
+
+
+def _synced_file(*, entity: Mock | None = None) -> SyncedMarkdownFile:
+    """Create the Basic Memory sync result consumed by FileIndexer."""
+    return SyncedMarkdownFile(
+        entity=entity or _entity(),
+        checksum=CHECKSUM,
+        markdown_content=CANONICAL_MARKDOWN,
+        file_path="notes/note.md",
+        content_type="text/markdown",
+        updated_at=OBSERVED_AT,
+        size=len(CANONICAL_MARKDOWN.encode("utf-8")),
+    )
+
+
+def _file_indexer(
+    *,
+    existing_entity: Mock | None = None,
+    synced_file: SyncedMarkdownFile | None = None,
+):
+    """Create FileIndexer with explicit async collaborators."""
+    sync_result = synced_file or _synced_file()
+    entity_repository = Mock()
+    entity_repository.get_by_file_path = AsyncMock(return_value=existing_entity)
+
+    sync_service = Mock()
+    sync_service.session_maker = _FakeSession
+    sync_service.entity_repository = entity_repository
+    sync_service.sync_one_markdown_file = AsyncMock(return_value=sync_result)
+
+    note_content_reconciler = Mock()
+    note_content_reconciler.reconcile = AsyncMock()
+
+    return (
+        FileIndexer(
+            sync_service=sync_service,
+            note_content_reconciler=note_content_reconciler,
+        ),
+        sync_service,
+        note_content_reconciler,
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_indexes_new_markdown_file() -> None:
+    """
+    Given a markdown file with no existing entity
+    When the per-file indexer processes that file
+    Then it asks Basic Memory to sync it as new and caches the canonical markdown result.
+    """
+    synced_file = _synced_file()
+    file_indexer, sync_service, note_content_reconciler = _file_indexer(
+        synced_file=synced_file,
+    )
+
+    result = await file_indexer.index_markdown_file("notes/note.md", source="s3_webhook")
+
+    sync_service.entity_repository.get_by_file_path.assert_awaited_once_with(
+        ANY,
+        "notes/note.md",
+        load_relations=False,
+    )
+    sync_service.sync_one_markdown_file.assert_awaited_once_with(
+        "notes/note.md",
+        new=True,
+        index_search=True,
+        resolve_relations=False,
+        refresh_unchanged_derived_state=False,
+    )
+    note_content_reconciler.reconcile.assert_awaited_once_with(
+        entity=synced_file.entity,
+        markdown_content=CANONICAL_MARKDOWN,
+        observed_at=OBSERVED_AT,
+        source="s3_webhook",
+    )
+    assert result.file_path == "notes/note.md"
+    assert result.entity_id == 42
+    assert result.checksum == CHECKSUM
+    assert result.operation == FileIndexOperation.created
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_indexes_existing_markdown_file() -> None:
+    """
+    Given a markdown file already has an entity
+    When the per-file indexer processes that file
+    Then it asks Basic Memory to sync it as an update.
+    """
+    file_indexer, sync_service, _note_content_reconciler = _file_indexer(
+        existing_entity=_entity(entity_id=7),
+    )
+
+    result = await file_indexer.index_markdown_file("notes/note.md")
+
+    sync_service.sync_one_markdown_file.assert_awaited_once_with(
+        "notes/note.md",
+        new=False,
+        index_search=True,
+        resolve_relations=False,
+        refresh_unchanged_derived_state=True,
+    )
+    assert result.operation == FileIndexOperation.updated
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_repairs_derived_rows_for_unchanged_markdown_sync_result() -> None:
+    """
+    Given a cloud-written note already has the same checksum as its materialized file
+    When the per-file indexer delegates to Basic Memory
+    Then it asks core sync to refresh derived observations, relations, and search.
+    """
+    existing_entity = _entity(checksum=CHECKSUM)
+    synced_file = _synced_file(entity=existing_entity)
+    file_indexer, sync_service, _note_content_reconciler = _file_indexer(
+        existing_entity=existing_entity,
+        synced_file=synced_file,
+    )
+    sync_service.batch_indexer = Mock()
+    sync_service.batch_indexer.index_markdown_file = AsyncMock(
+        side_effect=AssertionError("indexer should delegate unchanged repair to core sync")
+    )
+
+    result = await file_indexer.index_markdown_file("notes/note.md")
+
+    sync_service.sync_one_markdown_file.assert_awaited_once_with(
+        "notes/note.md",
+        new=False,
+        index_search=True,
+        resolve_relations=False,
+        refresh_unchanged_derived_state=True,
+    )
+    sync_service.batch_indexer.index_markdown_file.assert_not_awaited()
+    assert result.checksum == CHECKSUM
+    assert result.operation == FileIndexOperation.updated
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_reports_refreshed_derived_counts_after_unchanged_repair() -> None:
+    """The final indexing log context should come from the repaired entity graph."""
+    existing_entity = _entity(checksum=CHECKSUM)
+    refreshed_entity = _entity(checksum=CHECKSUM)
+    refreshed_entity.observations = [Mock(), Mock()]
+    refreshed_entity.relations = [Mock()]
+    synced_file = _synced_file(entity=refreshed_entity)
+    file_indexer, sync_service, _note_content_reconciler = _file_indexer(
+        existing_entity=existing_entity,
+        synced_file=synced_file,
+    )
+    bound_logger = Mock()
+
+    result = await file_indexer.index_markdown_file(
+        "notes/note.md",
+        bound_logger=bound_logger,
+    )
+
+    assert result.entity_id == refreshed_entity.id
+    final_log = bound_logger.info.call_args_list[-1]
+    assert final_log.args == ("Indexed markdown file: notes/note.md",)
+    assert final_log.kwargs["observation_count"] == 2
+    assert final_log.kwargs["relation_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_propagates_sync_errors() -> None:
+    """
+    Given Basic Memory cannot sync the file
+    When the per-file indexer processes that file
+    Then the error propagates and note_content is not reconciled.
+    """
+    file_indexer, sync_service, note_content_reconciler = _file_indexer()
+    sync_service.sync_one_markdown_file.side_effect = RuntimeError("sync failed")
+
+    with pytest.raises(RuntimeError, match="sync failed"):
+        await file_indexer.index_markdown_file("notes/note.md")
+
+    note_content_reconciler.reconcile.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_propagates_note_content_reconcile_errors() -> None:
+    """
+    Given Basic Memory successfully syncs the file but note_content reconciliation fails
+    When the per-file indexer processes that file
+    Then the error propagates so callers can retry the job.
+    """
+    file_indexer, _sync_service, note_content_reconciler = _file_indexer()
+    note_content_reconciler.reconcile.side_effect = RuntimeError("cache failed")
+
+    with pytest.raises(RuntimeError, match="cache failed"):
+        await file_indexer.index_markdown_file("notes/note.md")

@@ -42,6 +42,13 @@ from basic_memory.indexing.file_index_checking import (
     FileIndexChecker,
     IndexedFileChecksumSource,
 )
+from basic_memory.indexing.file_indexer import (
+    FileIndexer,
+    IndexMarkdownEntity,
+    IndexMarkdownEntityRepository,
+    IndexMarkdownNoteContentReconciler,
+    IndexMarkdownSyncService,
+)
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -260,6 +267,7 @@ __all__ = [
     "FileIndexDecision",
     "FileIndexDecisionStatus",
     "FileIndexChecker",
+    "FileIndexer",
     "FileIndexPlan",
     "FileIndexPlanSummary",
     "FileIndexOperation",
@@ -289,6 +297,10 @@ __all__ = [
     "IndexedFileChecksumSource",
     "IndexInputFile",
     "IndexProgress",
+    "IndexMarkdownEntity",
+    "IndexMarkdownEntityRepository",
+    "IndexMarkdownNoteContentReconciler",
+    "IndexMarkdownSyncService",
     "LoadedIndexFile",
     "LinkResolutionTarget",
     "LinkText",
