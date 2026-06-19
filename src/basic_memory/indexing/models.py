@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Protocol, TYPE_CHECKING
 
+from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
+
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.models import Entity
 
@@ -124,6 +126,18 @@ class IndexFileJobResult:
     actor_kind: str | None = None
     actor_name: str | None = None
     live_update_source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexFileBatchJobResult:
+    """Summary of what happened while processing one file-index batch job."""
+
+    total_files: int
+    processed_files: int
+    missing_files: int
+    failed_files: int
+    file_results: tuple[IndexFileJobResult, ...]
+    vector_targets: tuple[EmbeddingIndexTarget, ...]
 
 
 @dataclass(slots=True)
