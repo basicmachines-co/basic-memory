@@ -6,6 +6,8 @@ from basic_memory.indexing import (
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
     IndexFileRuntimeRequest,
+    ResolveRelationsJobPayload,
+    ResolveRelationsJobRequest,
 )
 from basic_memory.runtime import (
     RuntimeStorageFileIndexMode,
@@ -77,3 +79,22 @@ def test_index_file_job_payload_from_runtime_request_restores_payload() -> None:
         index_embeddings=False,
         workflow_id=workflow_id,
     )
+
+
+def test_resolve_relations_job_payload_round_trips_runtime_request() -> None:
+    """Relation-resolution jobs validate the core runtime request at the worker boundary."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    runtime_request = ResolveRelationsJobRequest(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_path="main",
+    )
+
+    payload = ResolveRelationsJobPayload.from_runtime_request(runtime_request)
+
+    assert payload == ResolveRelationsJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_path="main",
+    )
+    assert payload.to_runtime_request() == runtime_request

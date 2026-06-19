@@ -14,6 +14,7 @@ from basic_memory.indexing.models import (
 )
 from basic_memory.indexing.project_index_progress import ObservedObjectIndexCompletionContext
 from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
+from basic_memory.indexing.relation_resolution import ResolveRelationsJobRequest
 from basic_memory.runtime import (
     RuntimeStorageFileIndexContext,
     RuntimeStorageFileIndexJobIdentity,
@@ -115,3 +116,28 @@ class IndexFileJobPayload(BaseModel):
         result: IndexFileJobResult,
     ) -> IndexFileEmbeddingJobContext:
         return self.to_runtime_request().embedding_job_context(result)
+
+
+class ResolveRelationsJobPayload(BaseModel):
+    """Serialized worker payload for resolving one project's relations."""
+
+    tenant_id: UUID
+    project_id: int
+    project_path: str
+
+    @classmethod
+    def from_runtime_request(cls, request: ResolveRelationsJobRequest) -> Self:
+        """Validate the runtime relation-resolution request at a worker boundary."""
+        return cls(
+            tenant_id=request.tenant_id,
+            project_id=request.project_id,
+            project_path=request.project_path,
+        )
+
+    def to_runtime_request(self) -> ResolveRelationsJobRequest:
+        """Map the validated worker payload back to the runtime request."""
+        return ResolveRelationsJobRequest(
+            tenant_id=self.tenant_id,
+            project_id=self.project_id,
+            project_path=self.project_path,
+        )
