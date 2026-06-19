@@ -396,6 +396,18 @@ class StorageEventPayload:
         return self.event_name == STORAGE_OBJECT_DELETED_EVENT
 
 
+def group_storage_events_by_bucket(
+    events: Iterable[StorageEventPayload],
+) -> dict[StorageBucketName, tuple[StorageEventPayload, ...]]:
+    """Group normalized storage events by bucket while preserving arrival order."""
+    grouped_events: dict[StorageBucketName, list[StorageEventPayload]] = {}
+    for storage_event in events:
+        grouped_events.setdefault(storage_event.bucket_name, []).append(storage_event)
+    return {
+        bucket_name: tuple(bucket_events) for bucket_name, bucket_events in grouped_events.items()
+    }
+
+
 def normalize_storage_etag(etag: StorageEtag) -> StorageEtag:
     """Compare quoted and unquoted S3-compatible ETags the same way."""
     return etag.strip('"')
