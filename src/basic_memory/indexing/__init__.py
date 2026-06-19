@@ -9,9 +9,12 @@ from basic_memory.indexing.change_planning import (
     plan_moved_files,
 )
 from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexBatchResult,
+    EmbeddingIndexBatchSummary,
     EmbeddingIndexPlan,
     EmbeddingIndexPlanner,
     EmbeddingIndexTarget,
+    summarize_embedding_index_batch_result,
 )
 from basic_memory.indexing.file_index_checking import (
     CurrentFileChecksumSource,
@@ -129,6 +132,8 @@ __all__ = [
     "CheckpointPhase",
     "CheckpointModel",
     "CurrentFileChecksumSource",
+    "EmbeddingIndexBatchResult",
+    "EmbeddingIndexBatchSummary",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
     "EmbeddingIndexTarget",
@@ -214,6 +219,7 @@ __all__ = [
     "resolve_relations_until_stable",
     "resolve_link_texts",
     "should_emit_project_index_progress_event",
+    "summarize_embedding_index_batch_result",
     "summarize_project_index_file_outcomes",
     "summarize_file_index_plan",
 ]

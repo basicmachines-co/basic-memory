@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,41 @@ class EmbeddingIndexPlan:
         return len(self.entity_ids)
 
 
+class EmbeddingIndexBatchSummary(Protocol):
+    """Vector sync counts produced by the concrete search backend."""
+
+    entities_synced: int
+    entities_skipped: int
+    entities_failed: int
+    entities_deferred: int
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingIndexBatchResult:
+    """Summary of a batch embedding index operation."""
+
+    total_entities: int
+    unique_entities: int
+    synced_entities: int
+    skipped_entities: int
+    failed_entities: int
+    deferred_entities: int
+    reason: str
+
+    @classmethod
+    def no_entities(cls) -> "EmbeddingIndexBatchResult":
+        """Return the result for an empty batch that does no backend work."""
+        return cls(
+            total_entities=0,
+            unique_entities=0,
+            synced_entities=0,
+            skipped_entities=0,
+            failed_entities=0,
+            deferred_entities=0,
+            reason="no entities",
+        )
+
+
 class EmbeddingIndexPlanner:
     """Prepare embedding job inputs without duplicating source-hash logic."""
 
@@ -48,3 +84,19 @@ class EmbeddingIndexPlanner:
             for target in sorted(targets, key=lambda item: (item.entity_id, item.entity_checksum))
         )
         return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def summarize_embedding_index_batch_result(
+    plan: EmbeddingIndexPlan,
+    batch_result: EmbeddingIndexBatchSummary,
+) -> EmbeddingIndexBatchResult:
+    """Combine a deduped embedding plan with backend vector sync counts."""
+    return EmbeddingIndexBatchResult(
+        total_entities=plan.total_targets,
+        unique_entities=plan.unique_entities,
+        synced_entities=batch_result.entities_synced,
+        skipped_entities=batch_result.entities_skipped,
+        failed_entities=batch_result.entities_failed,
+        deferred_entities=batch_result.entities_deferred,
+        reason=f"entity embedding batch indexed: {plan.unique_entities} entities",
+    )
