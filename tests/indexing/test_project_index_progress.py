@@ -3,7 +3,12 @@
 import pytest
 
 from basic_memory.indexing.project_index_progress import (
+    ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
+    ProjectIndexFileOutcome,
+    apply_project_index_batch_outcomes,
+    apply_project_index_file_outcome,
+    apply_project_index_file_outcomes,
     initial_project_index_counters,
     project_index_batch_count_from_metadata,
     project_index_counters_from_metadata,
@@ -46,6 +51,76 @@ def test_project_index_progress_event_throttle_keeps_start_finish_and_intervals(
     assert not should_emit_project_index_progress_event(
         ProjectIndexCounters(total=200, processed=51, succeeded=51, missing=0, failed=0)
     )
+
+
+def test_project_index_file_outcomes_update_counters() -> None:
+    counters = ProjectIndexCounters(total=4, processed=0, succeeded=0, missing=0, failed=0)
+
+    updated = apply_project_index_file_outcomes(
+        counters,
+        [
+            ProjectIndexFileOutcome.processed,
+            ProjectIndexFileOutcome.current,
+            ProjectIndexFileOutcome.missing,
+            ProjectIndexFileOutcome.failed,
+        ],
+    )
+
+    assert updated == ProjectIndexCounters(
+        total=4,
+        processed=4,
+        succeeded=2,
+        missing=1,
+        failed=1,
+    )
+    assert apply_project_index_file_outcome(
+        counters,
+        ProjectIndexFileOutcome.current,
+    ) == ProjectIndexCounters(total=4, processed=1, succeeded=1, missing=0, failed=0)
+
+
+def test_project_index_batch_outcomes_record_once_and_report_completion_gate() -> None:
+    counters = ProjectIndexCounters(total=3, processed=1, succeeded=1, missing=0, failed=0)
+
+    update = apply_project_index_batch_outcomes(
+        counters=counters,
+        recorded_batch_indexes=[0],
+        batch_index=1,
+        batch_count=2,
+        outcomes=[ProjectIndexFileOutcome.missing, ProjectIndexFileOutcome.failed],
+    )
+
+    assert update == ProjectIndexBatchCounterUpdate(
+        counters=ProjectIndexCounters(
+            total=3,
+            processed=3,
+            succeeded=1,
+            missing=1,
+            failed=1,
+        ),
+        recorded_batch_indexes=[0, 1],
+        already_recorded=False,
+        all_batches_recorded=True,
+    )
+    assert update.is_complete
+
+
+def test_project_index_batch_outcomes_skip_already_recorded_batch() -> None:
+    counters = ProjectIndexCounters(total=2, processed=1, succeeded=1, missing=0, failed=0)
+
+    update = apply_project_index_batch_outcomes(
+        counters=counters,
+        recorded_batch_indexes=[0],
+        batch_index=0,
+        batch_count=1,
+        outcomes=[ProjectIndexFileOutcome.failed],
+    )
+
+    assert update.counters == counters
+    assert update.recorded_batch_indexes == [0]
+    assert update.already_recorded is True
+    assert update.all_batches_recorded is True
+    assert update.is_complete is False
 
 
 def test_project_index_metadata_extracts_counters_recorded_batches_and_missing_batches() -> None:

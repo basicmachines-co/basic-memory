@@ -1,13 +1,23 @@
 """Portable project-index workflow progress state."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 from pydantic import Field, StrictInt, ValidationError, model_validator
 
 from basic_memory.indexing.progress import CheckpointModel
 
 PROJECT_INDEX_PROGRESS_EVENT_INTERVAL = 50
+
+
+class ProjectIndexFileOutcome(StrEnum):
+    """Portable child file outcomes that update aggregate indexing counters."""
+
+    processed = "processed"
+    current = "current"
+    missing = "missing"
+    failed = "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +48,25 @@ class ProjectIndexMissingBatches:
     missing_batch_indexes: list[int]
     recorded_batch_indexes: list[int]
     legacy_missing_batch_count: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexBatchCounterUpdate:
+    """Counter update result for one idempotent project-index batch."""
+
+    counters: ProjectIndexCounters
+    recorded_batch_indexes: list[int]
+    already_recorded: bool
+    all_batches_recorded: bool
+
+    @property
+    def is_complete(self) -> bool:
+        """Return whether aggregate counters and batch structure are both complete."""
+        return (
+            not self.already_recorded
+            and self.all_batches_recorded
+            and self.counters.processed >= self.counters.total
+        )
 
 
 class ProjectIndexCountersState(CheckpointModel):
@@ -121,6 +150,70 @@ def should_emit_project_index_progress_event(
         counters.processed == 1
         or counters.processed == counters.total
         or counters.processed % event_interval == 0
+    )
+
+
+def apply_project_index_file_outcome(
+    counters: ProjectIndexCounters,
+    outcome: ProjectIndexFileOutcome,
+) -> ProjectIndexCounters:
+    """Apply one child file outcome to immutable aggregate counters."""
+    return apply_project_index_file_outcomes(counters, [outcome])
+
+
+def apply_project_index_file_outcomes(
+    counters: ProjectIndexCounters,
+    outcomes: Sequence[ProjectIndexFileOutcome],
+) -> ProjectIndexCounters:
+    """Apply child file outcomes to immutable aggregate counters."""
+    processed = counters.processed
+    succeeded = counters.succeeded
+    missing = counters.missing
+    failed = counters.failed
+
+    for outcome in outcomes:
+        processed += 1
+        if outcome in {ProjectIndexFileOutcome.processed, ProjectIndexFileOutcome.current}:
+            succeeded += 1
+        elif outcome == ProjectIndexFileOutcome.missing:
+            missing += 1
+        else:
+            failed += 1
+
+    return ProjectIndexCounters(
+        total=counters.total,
+        processed=processed,
+        succeeded=succeeded,
+        missing=missing,
+        failed=failed,
+    )
+
+
+def apply_project_index_batch_outcomes(
+    *,
+    counters: ProjectIndexCounters,
+    recorded_batch_indexes: Sequence[int],
+    batch_index: int,
+    batch_count: int,
+    outcomes: Sequence[ProjectIndexFileOutcome],
+) -> ProjectIndexBatchCounterUpdate:
+    """Apply one batch's child file outcomes exactly once."""
+    recorded = list(recorded_batch_indexes)
+    if batch_index in recorded:
+        return ProjectIndexBatchCounterUpdate(
+            counters=counters,
+            recorded_batch_indexes=recorded,
+            already_recorded=True,
+            all_batches_recorded=len(recorded) >= batch_count,
+        )
+
+    recorded.append(batch_index)
+    updated_counters = apply_project_index_file_outcomes(counters, outcomes)
+    return ProjectIndexBatchCounterUpdate(
+        counters=updated_counters,
+        recorded_batch_indexes=recorded,
+        already_recorded=False,
+        all_batches_recorded=len(recorded) >= batch_count,
     )
 
 
