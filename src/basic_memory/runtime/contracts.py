@@ -407,6 +407,45 @@ class RuntimeStorageEventProcessingResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeStorageFileIndexRequest:
+    """Typed request for indexing one observed runtime storage object."""
+
+    project_id: ProjectId
+    project_external_id: ProjectExternalId
+    project_name: ProjectName
+    project_path: ProjectPath
+    file_path: RuntimeFilePath
+    object_etag: StorageEtag
+    object_size: int | None = None
+
+    @classmethod
+    def from_project_event(
+        cls,
+        *,
+        project: ProjectRuntimeReference,
+        storage_event: StorageEventPayload,
+    ) -> Self:
+        if not storage_event.is_object_created:
+            raise ValueError(
+                f"Storage event {storage_event.event_name} cannot produce an index request"
+            )
+
+        file_path = storage_event.relative_path
+        if not file_path:
+            raise ValueError("Storage index requests require a relative file path")
+
+        return cls(
+            project_id=project.project_id,
+            project_external_id=project.project_external_id,
+            project_name=project.require_project_name(),
+            project_path=project.project_path,
+            file_path=file_path,
+            object_etag=storage_event.etag,
+            object_size=storage_event.size,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeJobReference:
     """Queue job identity that can be shared without depending on one queue."""
 

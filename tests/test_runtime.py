@@ -32,6 +32,7 @@ from basic_memory.runtime import (
     source_from_object_metadata,
 )
 from basic_memory.runtime.contracts import (
+    ProjectRuntimeReference,
     RuntimeDeleteStatus,
     RuntimeCapabilities,
     RuntimeExpectedFileState,
@@ -45,6 +46,7 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     RuntimeQueuedWorkflowMetadata,
+    RuntimeStorageFileIndexRequest,
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
     RuntimeStorageEventProcessingResult,
@@ -283,6 +285,61 @@ class TestRuntimeContracts:
             operations[2].require_relative_path()
         with pytest.raises(FrozenInstanceError):
             setattr(operations[0], "kind", RuntimeStorageEventOperationKind.skip)
+
+    def test_runtime_storage_file_index_request_preserves_project_and_object_identity(self):
+        project = ProjectRuntimeReference(
+            project_id=42,
+            project_external_id="project-42",
+            project_name="Project 42",
+            project_path="project",
+        )
+        storage_event = StorageEventPayload(
+            event_name="OBJECT_CREATED_PUT",
+            event_time="2026-06-19T12:00:00Z",
+            object_version=StorageObjectVersion(
+                identity=StorageObjectIdentity(
+                    bucket_name="memory-bucket",
+                    key="project/notes/a.md",
+                ),
+                etag="etag-a",
+                size=123,
+            ),
+        )
+
+        request = RuntimeStorageFileIndexRequest.from_project_event(
+            project=project,
+            storage_event=storage_event,
+        )
+
+        assert request == RuntimeStorageFileIndexRequest(
+            project_id=42,
+            project_external_id="project-42",
+            project_name="Project 42",
+            project_path="project",
+            file_path="notes/a.md",
+            object_etag="etag-a",
+            object_size=123,
+        )
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(request, "file_path", "notes/b.md")
+
+        deleted_event = StorageEventPayload(
+            event_name="OBJECT_DELETED",
+            event_time="2026-06-19T12:01:00Z",
+            object_version=StorageObjectVersion(
+                identity=StorageObjectIdentity(
+                    bucket_name="memory-bucket",
+                    key="project/notes/a.md",
+                ),
+                etag="etag-a",
+            ),
+        )
+        with pytest.raises(ValueError, match="cannot produce an index request"):
+            RuntimeStorageFileIndexRequest.from_project_event(
+                project=project,
+                storage_event=deleted_event,
+            )
 
     def test_runtime_job_request_is_immutable(self):
         request = RuntimeJobRequest(
