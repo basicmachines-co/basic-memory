@@ -3,6 +3,7 @@
 from basic_memory.runtime.contracts import (
     JobEntrypoint,
     JobRuntime,
+    NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     NoteExternalId,
     NoteHistoryPage,
     NoteHistoryProvider,
@@ -148,6 +149,7 @@ from basic_memory.runtime.note_object_metadata import (
 __all__ = [
     "JobEntrypoint",
     "JobRuntime",
+    "NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR",
     "NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT",
     "NOTE_OBJECT_ACTOR_KIND_METADATA",
     "NOTE_OBJECT_ACTOR_NAME_METADATA",

@@ -38,6 +38,7 @@ from basic_memory.runtime import (
     storage_object_checksum_for_index_match,
 )
 from basic_memory.runtime.contracts import (
+    NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     ProjectRuntimeReference,
     RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS,
     RuntimeDeleteStatus,
@@ -1419,6 +1420,43 @@ class TestRuntimeContracts:
 
         nullable_source_response = replace(response, last_source=None)
         assert nullable_source_response.to_response_payload()["last_source"] is None
+
+    def test_runtime_note_content_state_adds_external_change_sync_error(self):
+        now = datetime(2026, 4, 13, 12, 0, tzinfo=UTC)
+        entity = SimpleNamespace(
+            external_id="entity-1",
+            id=42,
+            title="Accepted",
+            note_type="note",
+            content_type="text/markdown",
+            permalink="main/accepted",
+            file_path="notes/accepted.md",
+            entity_metadata={"topic": "tests"},
+            created_at=now,
+            updated_at=now,
+            created_by="creator",
+            last_updated_by="editor",
+        )
+        state = RuntimeNoteContentState(
+            markdown_content="# Accepted\n",
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=3,
+            file_checksum="file-checksum",
+            file_write_status="external_change_detected",
+            last_source="s3_webhook",
+            file_updated_at=now,
+            last_materialization_error="Refusing to overwrite unexpected file",
+        )
+
+        response = RuntimeAcceptedNoteResponse.from_entity_and_content_state(
+            entity,
+            state,
+        )
+
+        assert response.to_response_payload()["sync_error"] == (
+            NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR
+        )
 
     def test_runtime_note_content_state_builds_accepted_note_response(self):
         created_at = datetime(2026, 4, 13, 12, 0, tzinfo=UTC)

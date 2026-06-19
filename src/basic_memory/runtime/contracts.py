@@ -54,6 +54,10 @@ STORAGE_OBJECT_CREATED_EVENTS: frozenset[StorageEventName] = frozenset(
 STORAGE_OBJECT_DELETED_EVENT: StorageEventName = "OBJECT_DELETED"
 WORKFLOW_EVENT_TEXT_MAX_CHARS = 4096
 RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS = 0.001
+NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR = (
+    "An external file change was detected before this note could be written. "
+    "Refresh to review the latest content, then retry your write if you want it to win."
+)
 
 
 class ProjectRuntimeSource(Protocol):
@@ -1380,7 +1384,7 @@ class RuntimeAcceptedNoteResponse:
 
     def to_response_payload(self) -> dict[str, object]:
         """Serialize to the existing v2 entity-plus-note-content response shape."""
-        return {
+        payload: dict[str, object] = {
             "external_id": self.external_id,
             "id": self.entity_id,
             "title": self.title,
@@ -1410,6 +1414,9 @@ class RuntimeAcceptedNoteResponse:
             ),
             "last_materialization_error": self.last_materialization_error,
         }
+        if self.file_write_status == "external_change_detected":
+            payload["sync_error"] = NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
