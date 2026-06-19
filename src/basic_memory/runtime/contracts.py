@@ -24,6 +24,7 @@ type ProjectName = str
 type ProjectPath = str
 type ProjectPermalink = str
 type RuntimeEntityId = int
+type RuntimeContentType = str
 type RuntimeFilePath = str
 type StorageBucketName = str
 type StorageKey = str
@@ -61,6 +62,7 @@ NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR = (
     "An external file change was detected before this note could be written. "
     "Refresh to review the latest content, then retry your write if you want it to win."
 )
+RUNTIME_MARKDOWN_CONTENT_TYPE: RuntimeContentType = "text/markdown"
 
 
 class ProjectRuntimeSource(Protocol):
@@ -143,6 +145,20 @@ class RuntimeAcceptedNoteEntitySource(Protocol):
 
     @property
     def last_updated_by(self) -> str | None: ...
+
+
+class RuntimeContentTypeSource(Protocol):
+    """Minimal source shape for runtime content-type decisions."""
+
+    @property
+    def content_type(self) -> RuntimeContentType: ...
+
+
+class RuntimeExternalIdSource(Protocol):
+    """Minimal source shape for runtime entity identity comparisons."""
+
+    @property
+    def external_id(self) -> NoteExternalId: ...
 
 
 class RuntimeAcceptedNoteWriteEntitySource(RuntimeAcceptedNoteEntitySource, Protocol):
@@ -1570,6 +1586,23 @@ def next_runtime_note_content_version(
     if current_note_content is None:
         return 1
     return int(current_note_content.db_version) + 1
+
+
+def runtime_content_type_is_markdown(source: RuntimeContentTypeSource) -> bool:
+    """Return whether a runtime source represents a markdown note."""
+    return source.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+
+
+def accepted_note_file_path_conflicts(
+    conflicting_entity: RuntimeExternalIdSource | None,
+    *,
+    allowed_entity_external_id: NoteExternalId,
+) -> bool:
+    """Return whether a loaded entity at the target path belongs to another note."""
+    return (
+        conflicting_entity is not None
+        and conflicting_entity.external_id != allowed_entity_external_id
+    )
 
 
 @dataclass(frozen=True, slots=True)
