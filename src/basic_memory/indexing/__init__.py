@@ -366,7 +366,14 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.indexing.vector_sync_planning import (
     CheckpointPhase,
+    VECTOR_SYNC_CHUNK_SIZE,
+    VectorSyncBatchProgressCallback,
+    VectorSyncClock,
+    VectorSyncExecutor,
+    VectorSyncLogger,
+    VectorSyncProgressReporter,
     plan_vector_sync_progress,
+    run_vector_sync,
 )
 
 __all__ = [
@@ -569,8 +576,14 @@ __all__ = [
     "SyncServiceRelationResolver",
     "UnresolvedRelationCounter",
     "UnresolvedForwardReference",
+    "VECTOR_SYNC_CHUNK_SIZE",
+    "VectorSyncBatchProgressCallback",
     "VectorSyncBatchSummary",
+    "VectorSyncClock",
+    "VectorSyncExecutor",
+    "VectorSyncLogger",
     "VectorSyncProgress",
+    "VectorSyncProgressReporter",
     "VectorSyncProgressState",
     "accepted_note_content_stems",
     "accepted_note_tags",
@@ -673,6 +686,7 @@ __all__ = [
     "run_external_file_delete",
     "run_project_delete",
     "run_project_index_coordinator",
+    "run_vector_sync",
     "search_text_variants",
     "should_emit_project_index_progress_event",
     "strip_search_text",

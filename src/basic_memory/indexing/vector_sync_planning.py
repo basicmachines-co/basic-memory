@@ -1,13 +1,45 @@
 """Portable vector-sync planning helpers."""
 
-from collections.abc import Sequence
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Protocol
 
-from basic_memory.indexing.progress import VectorSyncProgress
+from basic_memory.indexing.progress import (
+    VectorSyncBatchSummary,
+    VectorSyncProgress,
+    apply_vector_sync_batch_result,
+    initialize_vector_sync_progress,
+)
 
 type CheckpointPhase = str | None
 type EntityId = int
+type VectorSyncBatchProgressCallback = Callable[[EntityId, int, int], None]
+type VectorSyncClock = Callable[[], float]
+type VectorSyncProgressReporter = Callable[[str, VectorSyncProgress], Awaitable[None]]
 
 VECTOR_RESUME_PHASES = frozenset({"forward_refs_complete", "syncing_vectors"})
+VECTOR_SYNC_CHUNK_SIZE = 100
+
+
+class VectorSyncExecutor(Protocol):
+    """Capability for refreshing semantic vector chunks for entity batches."""
+
+    async def sync_entity_vectors_batch(
+        self,
+        entity_ids: list[EntityId],
+        progress_callback: VectorSyncBatchProgressCallback | None = None,
+    ) -> VectorSyncBatchSummary:
+        """Refresh vector chunks for one batch of entities."""
+
+
+class VectorSyncLogger(Protocol):
+    """Logging surface needed by the portable vector-sync runner."""
+
+    def info(self, message: str, **kwargs: object) -> None:
+        """Record vector-sync progress."""
+
+    def error(self, message: str, **kwargs: object) -> None:
+        """Record vector-sync failures."""
 
 
 def plan_vector_sync_progress(
@@ -32,3 +64,100 @@ def plan_vector_sync_progress(
     )
     planned_vector_progress.entity_ids = list(vector_sync_entity_ids)
     return planned_vector_progress
+
+
+async def run_vector_sync(
+    entity_ids: Sequence[EntityId],
+    *,
+    vector_sync: VectorSyncExecutor,
+    logger: VectorSyncLogger,
+    report_progress: VectorSyncProgressReporter | None = None,
+    resume_progress: VectorSyncProgress | None = None,
+    chunk_size: int = VECTOR_SYNC_CHUNK_SIZE,
+    project_id: int | None = None,
+    clock: VectorSyncClock = time.perf_counter,
+) -> VectorSyncProgress:
+    """Sync semantic vectors for entity ids with durable chunk boundaries."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+
+    progress_state = initialize_vector_sync_progress(
+        entity_ids=entity_ids,
+        resume_progress=resume_progress,
+    )
+    effective_entity_ids = progress_state.entity_ids
+    total = len(effective_entity_ids)
+    if total == 0:
+        return progress_state
+
+    sync_start = clock() - progress_state.elapsed_seconds
+    last_callback_at = clock()
+
+    if progress_state.next_index > 0:
+        logger.info(f"♻️ [VECTOR] Resuming at entity {progress_state.next_index}/{total}")
+
+    for chunk_start in range(progress_state.next_index, total, chunk_size):
+        chunk_entity_ids = effective_entity_ids[chunk_start : chunk_start + chunk_size]
+
+        def on_progress(
+            entity_id: EntityId,
+            index: int,
+            total_count: int,
+            *,
+            chunk_start_index: int = chunk_start,
+        ) -> None:
+            nonlocal last_callback_at
+
+            del entity_id, total_count
+            now = clock()
+            previous_entity_seconds = now - last_callback_at
+            completed = chunk_start_index + index
+
+            if completed > 0 and (completed % 10 == 0 or previous_entity_seconds > 5.0):
+                total_elapsed = now - sync_start
+                rate = completed / total_elapsed if total_elapsed > 0 else 0.0
+                logger.info(
+                    f"🧠 [VECTOR] Progress: {completed}/{total} entities "
+                    f"({previous_entity_seconds:.1f}s previous entity, "
+                    f"{total_elapsed:.1f}s total, {rate:.1f} entities/s)"
+                )
+            last_callback_at = now
+
+        batch_result = await vector_sync.sync_entity_vectors_batch(
+            chunk_entity_ids,
+            progress_callback=on_progress,
+        )
+
+        new_failed_entity_ids = apply_vector_sync_batch_result(
+            progress_state,
+            batch_result,
+            next_index=chunk_start + len(chunk_entity_ids),
+            elapsed_seconds=clock() - sync_start,
+        )
+        for failed_entity_id in new_failed_entity_ids:
+            logger.error(f"❌ [VECTOR] Failed to sync entity {failed_entity_id}")
+
+        if report_progress is not None:
+            percent_complete = 100.0 * progress_state.next_index / total if total > 0 else 100.0
+            await report_progress(
+                (
+                    f"Syncing vectors: {progress_state.next_index}/{total} entities "
+                    f"({percent_complete:.1f}%)..."
+                ),
+                progress_state,
+            )
+
+    completion_message = (
+        f"✅ [VECTOR] Completed: {progress_state.entities_synced}/{total} synced, "
+        f"{progress_state.entities_failed} errors, "
+        f"{progress_state.elapsed_seconds:.1f}s total, "
+        f"{progress_state.embedding_jobs_total} embedding jobs, "
+        f"{progress_state.embed_seconds_total:.1f}s embed, "
+        f"{progress_state.write_seconds_total:.1f}s write"
+    )
+    if project_id is None:
+        logger.info(completion_message)
+    else:
+        logger.info(completion_message, project_id=project_id)
+
+    return progress_state
