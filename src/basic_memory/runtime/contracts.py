@@ -155,6 +155,13 @@ class RuntimeDeletedNoteEntitySource(Protocol):
     def permalink(self) -> object | None: ...
 
 
+class RuntimeDeletedNoteEntityDeleteSource(RuntimeDeletedNoteEntitySource, Protocol):
+    """Deleted-note entity shape needed for conditional row cleanup."""
+
+    @property
+    def id(self) -> RuntimeEntityId: ...
+
+
 class RuntimeNoteContentStateSource(Protocol):
     """Minimal note_content row shape needed for accepted-note responses."""
 
@@ -787,6 +794,81 @@ def required_runtime_deleted_note_text(
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"Deleted entity for {file_path} is missing {field_name}")
     return value.strip()
+
+
+class RuntimeExternalFileDeleteAction(StrEnum):
+    """Adapter work selected for an externally observed file delete."""
+
+    missing_entity = "missing_entity"
+    stale_object = "stale_object"
+    delete_entity = "delete_entity"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeExternalFileDeleteRequest:
+    """Concrete adapter request for deleting one entity row by current file path."""
+
+    entity_id: RuntimeEntityId
+    file_path: RuntimeFilePath
+    deleted_note: RuntimeDeletedNoteReference
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeExternalFileDeletePlan:
+    """Pure decision for reconciling an externally observed file delete."""
+
+    action: RuntimeExternalFileDeleteAction
+    file_path: RuntimeFilePath
+    reason: str
+    entity_id: RuntimeEntityId | None = None
+    deleted_note: RuntimeDeletedNoteReference | None = None
+
+    @classmethod
+    def missing_entity(cls, *, file_path: RuntimeFilePath) -> Self:
+        return cls(
+            action=RuntimeExternalFileDeleteAction.missing_entity,
+            file_path=file_path,
+            reason=f"entity already absent for {file_path}",
+        )
+
+    @classmethod
+    def from_existing_entity(
+        cls,
+        entity: RuntimeDeletedNoteEntityDeleteSource,
+        *,
+        file_path: RuntimeFilePath,
+        object_exists: bool,
+    ) -> Self:
+        if object_exists:
+            return cls(
+                action=RuntimeExternalFileDeleteAction.stale_object,
+                file_path=file_path,
+                entity_id=entity.id,
+                reason=f"object exists after delete event: {file_path}",
+            )
+
+        return cls(
+            action=RuntimeExternalFileDeleteAction.delete_entity,
+            file_path=file_path,
+            entity_id=entity.id,
+            deleted_note=RuntimeDeletedNoteReference.from_entity(entity, file_path=file_path),
+            reason=f"delete entity for externally deleted file: {file_path}",
+        )
+
+    @property
+    def should_delete_entity(self) -> bool:
+        return self.action == RuntimeExternalFileDeleteAction.delete_entity
+
+    def require_delete_request(self) -> RuntimeExternalFileDeleteRequest:
+        if not self.should_delete_entity or self.entity_id is None or self.deleted_note is None:
+            raise RuntimeError(
+                f"External file delete plan does not delete an entity: {self.reason}"
+            )
+        return RuntimeExternalFileDeleteRequest(
+            entity_id=self.entity_id,
+            file_path=self.file_path,
+            deleted_note=self.deleted_note,
+        )
 
 
 @dataclass(frozen=True, slots=True)

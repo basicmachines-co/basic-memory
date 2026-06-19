@@ -45,6 +45,9 @@ from basic_memory.runtime.contracts import (
     RuntimeCapabilities,
     RuntimeDirectoryFileSnapshot,
     RuntimeExpectedFileState,
+    RuntimeExternalFileDeleteAction,
+    RuntimeExternalFileDeletePlan,
+    RuntimeExternalFileDeleteRequest,
     RuntimeAcceptedNoteResponse,
     RuntimeDeletedNoteReference,
     RuntimeFileDeleteResult,
@@ -129,6 +132,7 @@ class FakeStorageEventSource:
 
 @dataclass(frozen=True, slots=True)
 class FakeDeletedNoteEntity:
+    id: int
     external_id: object | None
     title: object | None
     permalink: object | None
@@ -834,6 +838,7 @@ class TestRuntimeContracts:
     def test_runtime_deleted_note_reference_validates_live_update_identity(self):
         reference = RuntimeDeletedNoteReference.from_entity(
             FakeDeletedNoteEntity(
+                id=1,
                 external_id=" note-1 ",
                 title=" Deleted note ",
                 permalink=" deleted-note ",
@@ -850,12 +855,56 @@ class TestRuntimeContracts:
         with pytest.raises(RuntimeError, match="missing title"):
             RuntimeDeletedNoteReference.from_entity(
                 FakeDeletedNoteEntity(
+                    id=1,
                     external_id="note-1",
                     title="",
                     permalink="deleted-note",
                 ),
                 file_path="notes/deleted.md",
             )
+
+    def test_runtime_external_file_delete_plan_distinguishes_adapter_work(self):
+        entity = FakeDeletedNoteEntity(
+            id=7,
+            external_id=" note-7 ",
+            title=" Deleted note ",
+            permalink=" deleted-note ",
+        )
+
+        missing_plan = RuntimeExternalFileDeletePlan.missing_entity(file_path="notes/deleted.md")
+        assert missing_plan.action == RuntimeExternalFileDeleteAction.missing_entity
+        assert missing_plan.entity_id is None
+        assert missing_plan.deleted_note is None
+        assert missing_plan.should_delete_entity is False
+        with pytest.raises(RuntimeError, match="does not delete an entity"):
+            missing_plan.require_delete_request()
+
+        stale_plan = RuntimeExternalFileDeletePlan.from_existing_entity(
+            entity,
+            file_path="notes/deleted.md",
+            object_exists=True,
+        )
+        assert stale_plan.action == RuntimeExternalFileDeleteAction.stale_object
+        assert stale_plan.entity_id == 7
+        assert stale_plan.deleted_note is None
+        assert stale_plan.should_delete_entity is False
+
+        delete_plan = RuntimeExternalFileDeletePlan.from_existing_entity(
+            entity,
+            file_path="notes/deleted.md",
+            object_exists=False,
+        )
+        assert delete_plan.action == RuntimeExternalFileDeleteAction.delete_entity
+        assert delete_plan.should_delete_entity is True
+        assert delete_plan.require_delete_request() == RuntimeExternalFileDeleteRequest(
+            entity_id=7,
+            file_path="notes/deleted.md",
+            deleted_note=RuntimeDeletedNoteReference(
+                external_id="note-7",
+                title="Deleted note",
+                permalink="deleted-note",
+            ),
+        )
 
     def test_runtime_capabilities_fail_fast_when_factories_are_missing(self):
         capabilities: RuntimeCapabilities[object, object] = RuntimeCapabilities()
