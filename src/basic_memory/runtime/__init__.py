@@ -23,6 +23,8 @@ from basic_memory.runtime.contracts import (
     RuntimeAcceptedNoteResponse,
     RuntimeCapabilities,
     RuntimeDeleteStatus,
+    RuntimeDeletedNoteEntitySource,
+    RuntimeDeletedNoteReference,
     RuntimeDirectoryFileSnapshot,
     RuntimeEntityId,
     RuntimeFileChecksum,
@@ -111,6 +113,7 @@ from basic_memory.runtime.contracts import (
     plan_runtime_storage_events_by_project,
     plan_previous_note_file_delete,
     read_runtime_file_checksum,
+    required_runtime_deleted_note_text,
     truncate_runtime_workflow_text,
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
@@ -191,6 +194,8 @@ __all__ = [
     "RuntimeAcceptedNoteResponse",
     "RuntimeCapabilities",
     "RuntimeDeleteStatus",
+    "RuntimeDeletedNoteEntitySource",
+    "RuntimeDeletedNoteReference",
     "RuntimeDirectoryFileSnapshot",
     "RuntimeEntityId",
     "RuntimeExpectedFileState",
@@ -300,6 +305,7 @@ __all__ = [
     "plan_runtime_storage_events_by_project",
     "plan_previous_note_file_delete",
     "read_runtime_file_checksum",
+    "required_runtime_deleted_note_text",
     "resolve_runtime_mode",
     "resolve_storage_project_prefix",
     "runtime_observed_index_file_from_metadata",

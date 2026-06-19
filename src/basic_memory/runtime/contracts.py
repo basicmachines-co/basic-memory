@@ -142,6 +142,19 @@ class RuntimeAcceptedNoteEntitySource(Protocol):
     def last_updated_by(self) -> str | None: ...
 
 
+class RuntimeDeletedNoteEntitySource(Protocol):
+    """Minimal deleted-note entity shape needed before row cleanup."""
+
+    @property
+    def external_id(self) -> object | None: ...
+
+    @property
+    def title(self) -> object | None: ...
+
+    @property
+    def permalink(self) -> object | None: ...
+
+
 class RuntimeNoteContentStateSource(Protocol):
     """Minimal note_content row shape needed for accepted-note responses."""
 
@@ -728,6 +741,52 @@ class RuntimeStorageEventProcessingResult:
 
     def as_dict(self) -> dict[str, int]:
         return self.counts.as_dict()
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDeletedNoteReference:
+    """Deleted note identity captured before removing its entity row."""
+
+    external_id: NoteExternalId
+    title: str
+    permalink: str
+
+    @classmethod
+    def from_entity(
+        cls,
+        entity: RuntimeDeletedNoteEntitySource,
+        *,
+        file_path: RuntimeFilePath,
+    ) -> Self:
+        return cls(
+            external_id=required_runtime_deleted_note_text(
+                entity.external_id,
+                field_name="external_id",
+                file_path=file_path,
+            ),
+            title=required_runtime_deleted_note_text(
+                entity.title,
+                field_name="title",
+                file_path=file_path,
+            ),
+            permalink=required_runtime_deleted_note_text(
+                entity.permalink,
+                field_name="permalink",
+                file_path=file_path,
+            ),
+        )
+
+
+def required_runtime_deleted_note_text(
+    value: object,
+    *,
+    field_name: str,
+    file_path: RuntimeFilePath,
+) -> str:
+    """Return required deleted-note text for downstream live-update contracts."""
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"Deleted entity for {file_path} is missing {field_name}")
+    return value.strip()
 
 
 @dataclass(frozen=True, slots=True)

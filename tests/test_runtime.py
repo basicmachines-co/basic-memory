@@ -1,6 +1,6 @@
 """Tests for runtime mode resolution."""
 
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID
@@ -46,6 +46,7 @@ from basic_memory.runtime.contracts import (
     RuntimeDirectoryFileSnapshot,
     RuntimeExpectedFileState,
     RuntimeAcceptedNoteResponse,
+    RuntimeDeletedNoteReference,
     RuntimeFileDeleteResult,
     RuntimeFileConflictError,
     RuntimeJobCounts,
@@ -124,6 +125,13 @@ class FakeJobRuntime:
 class FakeStorageEventSource:
     def events_by_bucket(self) -> dict[str, tuple[StorageEventPayload, ...]]:
         return {}
+
+
+@dataclass(frozen=True, slots=True)
+class FakeDeletedNoteEntity:
+    external_id: object | None
+    title: object | None
+    permalink: object | None
 
 
 class TestRuntimeMode:
@@ -822,6 +830,32 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(result, "counts", RuntimeJobCounts())
+
+    def test_runtime_deleted_note_reference_validates_live_update_identity(self):
+        reference = RuntimeDeletedNoteReference.from_entity(
+            FakeDeletedNoteEntity(
+                external_id=" note-1 ",
+                title=" Deleted note ",
+                permalink=" deleted-note ",
+            ),
+            file_path="notes/deleted.md",
+        )
+
+        assert reference == RuntimeDeletedNoteReference(
+            external_id="note-1",
+            title="Deleted note",
+            permalink="deleted-note",
+        )
+
+        with pytest.raises(RuntimeError, match="missing title"):
+            RuntimeDeletedNoteReference.from_entity(
+                FakeDeletedNoteEntity(
+                    external_id="note-1",
+                    title="",
+                    permalink="deleted-note",
+                ),
+                file_path="notes/deleted.md",
+            )
 
     def test_runtime_capabilities_fail_fast_when_factories_are_missing(self):
         capabilities: RuntimeCapabilities[object, object] = RuntimeCapabilities()
