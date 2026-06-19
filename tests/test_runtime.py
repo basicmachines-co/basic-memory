@@ -12,6 +12,8 @@ from basic_memory.runtime.contracts import (
     RuntimeFileDeleteResult,
     RuntimeJobCounts,
     RuntimeJobRequest,
+    RuntimeNoteMaterializationResult,
+    RuntimeNoteMaterializationStatus,
     RuntimeProjectDeleteResult,
     StorageObjectIdentity,
 )
@@ -129,6 +131,22 @@ class TestRuntimeContracts:
             status=RuntimeDeleteStatus.deleted,
             reason="file deleted: notes/a.md",
         )
+
+    def test_runtime_note_materialization_result_is_a_frozen_outcome(self):
+        result = RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.written,
+            reason="note file written: notes/a.md",
+            file_path="notes/a.md",
+            file_checksum="checksum-1",
+        )
+
+        assert result.status.value == "written"
+        assert result.file_path == "notes/a.md"
+        assert result.file_checksum == "checksum-1"
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(result, "reason", "changed")
 
     def test_runtime_project_delete_result_counts_file_outcomes(self):
         result = RuntimeProjectDeleteResult.from_file_results(

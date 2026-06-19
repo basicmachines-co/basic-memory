@@ -32,6 +32,7 @@ type JobEntrypoint = str
 type RuntimeJobId = str | int
 type WorkflowId = UUID
 type NoteExternalId = str
+type RuntimeFileChecksum = str
 type SnapshotName = str
 type SnapshotVersion = str
 
@@ -72,6 +73,15 @@ class RuntimeDeleteStatus(StrEnum):
     deleted = "deleted"
     missing = "missing"
     skipped = "skipped"
+
+
+class RuntimeNoteMaterializationStatus(StrEnum):
+    """Normal outcomes for materialized note file writes."""
+
+    written = "written"
+    stale = "stale"
+    missing = "missing"
+    conflict = "conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +225,17 @@ class JobRuntime(Protocol):
     """Capability for enqueueing runtime jobs without depending on one queue."""
 
     async def enqueue(self, request: RuntimeJobRequest) -> RuntimeJobId: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeNoteMaterializationResult:
+    """Summary of one guarded note file materialization."""
+
+    entity_id: RuntimeEntityId
+    status: RuntimeNoteMaterializationStatus
+    reason: str
+    file_path: RuntimeFilePath | None = None
+    file_checksum: RuntimeFileChecksum | None = None
 
 
 @dataclass(frozen=True, slots=True)
