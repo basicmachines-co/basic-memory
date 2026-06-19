@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Self
 
-from basic_memory.runtime import StorageEtag, normalize_storage_etag
+from basic_memory.runtime import (
+    RuntimeIndexFileBatchJobRequest,
+    RuntimeObservedIndexFile,
+    StorageEtag,
+    normalize_storage_etag,
+)
 
 type FileIndexPath = str
 type FileIndexChecksum = str
@@ -34,6 +39,27 @@ class FileIndexTarget:
             observed_checksum=normalize_storage_etag(etag),
             observed_size=size,
         )
+
+    @classmethod
+    def from_runtime_observed_file(cls, observed_file: RuntimeObservedIndexFile) -> Self:
+        """Convert runtime project-index metadata into checker input."""
+        return cls(
+            path=observed_file.path,
+            observed_checksum=observed_file.checksum,
+            observed_size=observed_file.size,
+        )
+
+
+def file_index_targets_from_runtime_batch_request(
+    request: RuntimeIndexFileBatchJobRequest,
+) -> tuple[FileIndexTarget, ...]:
+    """Return checker targets for a runtime batch request."""
+    if request.observed_files:
+        return tuple(
+            FileIndexTarget.from_runtime_observed_file(observed_file)
+            for observed_file in request.observed_files
+        )
+    return tuple(FileIndexTarget(path=file_path) for file_path in request.file_paths)
 
 
 class FileIndexDecisionStatus(StrEnum):
