@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Self
 
 from basic_memory.indexing.models import (
     IndexFileEmbeddingJobContext,
@@ -13,6 +14,7 @@ from basic_memory.indexing.models import (
 from basic_memory.indexing.project_index_progress import ObservedObjectIndexCompletionContext
 from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
 from basic_memory.runtime import (
+    ProjectRuntimeReference,
     ProjectExternalId,
     ProjectName,
     ProjectPath,
@@ -20,7 +22,9 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexContext,
     RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageFileIndexMode,
+    RuntimeStorageFileIndexRequest,
     RuntimeStorageObjectObservation,
+    StorageEventPayload,
     TenantId,
     WorkflowId,
 )
@@ -40,6 +44,36 @@ class IndexFileRuntimeRequest:
     object_observation: RuntimeStorageObjectObservation | None = None
     index_embeddings: bool = True
     workflow_id: WorkflowId | None = None
+
+    @classmethod
+    def from_storage_event(
+        cls,
+        *,
+        tenant_id: TenantId,
+        project: ProjectRuntimeReference,
+        storage_event: StorageEventPayload,
+        index_embeddings: bool = True,
+        workflow_id: WorkflowId | None = None,
+    ) -> Self:
+        index_request = RuntimeStorageFileIndexRequest.from_project_event(
+            project=project,
+            storage_event=storage_event,
+        )
+        return cls(
+            tenant_id=tenant_id,
+            project_id=index_request.project_id,
+            project_external_id=index_request.project_external_id,
+            project_name=index_request.project_name,
+            project_path=index_request.project_path,
+            file_path=index_request.file_path,
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            object_observation=RuntimeStorageObjectObservation(
+                etag=index_request.object_etag,
+                size=index_request.object_size,
+            ),
+            index_embeddings=index_embeddings,
+            workflow_id=workflow_id,
+        )
 
     def storage_job_identity(self) -> RuntimeStorageFileIndexJobIdentity:
         if (

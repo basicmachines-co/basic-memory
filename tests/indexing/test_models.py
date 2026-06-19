@@ -46,11 +46,15 @@ from basic_memory.runtime import (
     NOTE_OBJECT_DB_VERSION_METADATA,
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
+    ProjectRuntimeReference,
     RuntimeStorageFileIndexMode,
     RuntimeStorageFileIndexContext,
     RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageObjectChecksumSource,
     RuntimeStorageObjectObservation,
+    StorageEventPayload,
+    StorageObjectIdentity,
+    StorageObjectVersion,
 )
 
 
@@ -364,6 +368,43 @@ def test_index_file_runtime_request_derives_worker_handoff_contexts():
 
     with pytest.raises(FrozenInstanceError):
         setattr(request, "file_path", "notes/b.md")
+
+
+def test_index_file_runtime_request_from_storage_event_uses_observed_object_identity():
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    project = ProjectRuntimeReference(
+        project_id=7,
+        project_external_id="project-7",
+        project_path="project",
+        project_name="Project Seven",
+    )
+    storage_event = StorageEventPayload(
+        event_name="OBJECT_CREATED_PUT",
+        event_time="2026-06-19T12:00:00Z",
+        object_version=StorageObjectVersion(
+            identity=StorageObjectIdentity(
+                bucket_name="tenant-bucket",
+                key="project/notes/a.md",
+            ),
+            etag='"etag-1"',
+            size=12,
+        ),
+    )
+
+    assert IndexFileRuntimeRequest.from_storage_event(
+        tenant_id=tenant_id,
+        project=project,
+        storage_event=storage_event,
+    ) == IndexFileRuntimeRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_external_id="project-7",
+        project_name="Project Seven",
+        project_path="project",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_observation=RuntimeStorageObjectObservation(etag='"etag-1"', size=12),
+    )
 
 
 def test_plan_index_file_note_live_update_builds_typed_note_change_plan():
