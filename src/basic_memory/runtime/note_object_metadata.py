@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from uuid import UUID
 
 from basic_memory.runtime.contracts import (
@@ -38,6 +39,21 @@ VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
 _SAFE_ACTOR_NAME_CHARS = re.compile(r"[^A-Za-z0-9 ._()+/:-]+")
 _WHITESPACE = re.compile(r"\s+")
 _MAX_ACTOR_NAME_LENGTH = 120
+
+
+class RuntimeStorageObjectChecksumSource(StrEnum):
+    """Storage checksum source used when matching an indexed file to object metadata."""
+
+    note_file_checksum = "bm-file-checksum"
+    storage_etag = "etag"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStorageObjectChecksum:
+    """Checksum selected for comparing an indexed file to a storage object."""
+
+    checksum: RuntimeFileChecksum
+    source: RuntimeStorageObjectChecksumSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +157,24 @@ def file_checksum_from_object_metadata(
 
     stripped = value.strip()
     return stripped or None
+
+
+def storage_object_checksum_for_index_match(
+    *,
+    object_checksum: RuntimeFileChecksum,
+    object_metadata: RuntimeNoteObjectMetadataMap | None,
+) -> RuntimeStorageObjectChecksum:
+    """Return the checksum that should match an indexed markdown file."""
+    file_checksum = file_checksum_from_object_metadata(object_metadata)
+    if file_checksum is not None:
+        return RuntimeStorageObjectChecksum(
+            checksum=file_checksum,
+            source=RuntimeStorageObjectChecksumSource.note_file_checksum,
+        )
+    return RuntimeStorageObjectChecksum(
+        checksum=object_checksum,
+        source=RuntimeStorageObjectChecksumSource.storage_etag,
+    )
 
 
 def db_version_from_object_metadata(

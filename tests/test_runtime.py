@@ -21,6 +21,8 @@ from basic_memory.runtime import (
     RuntimeMode,
     RuntimeNoteObjectMetadata,
     RuntimePreparedNoteWrite,
+    RuntimeStorageObjectChecksum,
+    RuntimeStorageObjectChecksumSource,
     RuntimeWrittenFileState,
     actor_kind_from_object_metadata,
     actor_name_from_object_metadata,
@@ -30,6 +32,7 @@ from basic_memory.runtime import (
     normalize_actor_name,
     resolve_runtime_mode,
     source_from_object_metadata,
+    storage_object_checksum_for_index_match,
 )
 from basic_memory.runtime.contracts import (
     ProjectRuntimeReference,
@@ -806,6 +809,22 @@ class TestRuntimeContracts:
         assert actor_kind_from_object_metadata(unsafe_metadata) is None
         assert db_version_from_object_metadata(unsafe_metadata) is None
         assert source_from_object_metadata(unsafe_metadata) is None
+
+    def test_storage_object_checksum_for_index_match_prefers_note_file_checksum(self):
+        assert storage_object_checksum_for_index_match(
+            object_checksum="etag-sum",
+            object_metadata={NOTE_OBJECT_FILE_CHECKSUM_METADATA: " file-sum "},
+        ) == RuntimeStorageObjectChecksum(
+            checksum="file-sum",
+            source=RuntimeStorageObjectChecksumSource.note_file_checksum,
+        )
+        assert storage_object_checksum_for_index_match(
+            object_checksum="etag-sum",
+            object_metadata={},
+        ) == RuntimeStorageObjectChecksum(
+            checksum="etag-sum",
+            source=RuntimeStorageObjectChecksumSource.storage_etag,
+        )
 
     def test_normalize_actor_name_strips_unsafe_characters_and_limits_length(self):
         assert normalize_actor_name(" Pat\t\n<script>! ") == "Pat script"

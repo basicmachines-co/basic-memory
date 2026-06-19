@@ -112,6 +112,8 @@ from basic_memory.runtime.note_object_metadata import (
     VALID_NOTE_OBJECT_SOURCES,
     RuntimeNoteObjectMetadata,
     RuntimeNoteObjectMetadataMap,
+    RuntimeStorageObjectChecksum,
+    RuntimeStorageObjectChecksumSource,
     actor_kind_from_object_metadata,
     actor_name_from_object_metadata,
     actor_user_profile_id_from_object_metadata,
@@ -119,6 +121,7 @@ from basic_memory.runtime.note_object_metadata import (
     file_checksum_from_object_metadata,
     normalize_actor_name,
     source_from_object_metadata,
+    storage_object_checksum_for_index_match,
 )
 
 __all__ = [
@@ -180,6 +183,8 @@ __all__ = [
     "RuntimeStorageFileIndexMode",
     "RuntimeStorageFileIndexJobIdentity",
     "RuntimeStorageFileIndexRequest",
+    "RuntimeStorageObjectChecksum",
+    "RuntimeStorageObjectChecksumSource",
     "RuntimeStorageEventOperation",
     "RuntimeStorageEventOperationKind",
     "RuntimeStorageEventProcessingResult",
@@ -236,5 +241,6 @@ __all__ = [
     "read_runtime_file_checksum",
     "resolve_runtime_mode",
     "source_from_object_metadata",
+    "storage_object_checksum_for_index_match",
     "truncate_runtime_workflow_text",
 ]
