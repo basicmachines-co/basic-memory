@@ -32,8 +32,10 @@ type JobEntrypoint = str
 type RuntimeJobId = str | int
 type WorkflowId = UUID
 type RuntimeWorkflowBroker = str
+type RuntimeWorkflowMetadataPatch = Mapping[str, object]
 type RuntimeWorkflowPhase = str
 type RuntimeWorkflowProgress = str
+type RuntimeWorkflowResult = Mapping[str, object]
 type NoteExternalId = str
 type RuntimeFileChecksum = str
 type RuntimeNoteContentVersion = int
@@ -48,6 +50,7 @@ STORAGE_OBJECT_CREATED_EVENTS: frozenset[StorageEventName] = frozenset(
     {"OBJECT_CREATED_PUT", "OBJECT_CREATED_POST"}
 )
 STORAGE_OBJECT_DELETED_EVENT: StorageEventName = "OBJECT_DELETED"
+WORKFLOW_EVENT_TEXT_MAX_CHARS = 4096
 
 
 class ProjectRuntimeSource(Protocol):
@@ -280,6 +283,151 @@ class RuntimeQueuedWorkflowMetadata:
             "phase": self.phase,
             "progress": self.progress,
             **dict(self.payload),
+        }
+
+
+def truncate_runtime_workflow_text(
+    value: str,
+    *,
+    max_chars: int = WORKFLOW_EVENT_TEXT_MAX_CHARS,
+) -> str:
+    """Return a stable workflow text preview for durable metadata and event streams."""
+    if max_chars < 0:
+        raise ValueError("max_chars must be non-negative")
+
+    if len(value) <= max_chars:
+        return value
+
+    omitted_chars = len(value) - max_chars
+    suffix = f"... [truncated {omitted_chars} chars]"
+    available_chars = max(max_chars - len(suffix), 0)
+    return f"{value[:available_chars]}{suffix}"
+
+
+def merge_runtime_workflow_metadata_patch(
+    base: Mapping[str, object],
+    metadata_patch: RuntimeWorkflowMetadataPatch | None,
+) -> dict[str, object]:
+    """Merge adapter-specific workflow metadata without changing existing precedence."""
+    patch = dict(base)
+    if metadata_patch is not None:
+        patch.update(metadata_patch)
+    return patch
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowAttemptMetadata:
+    """Workflow metadata and event data for a started runtime attempt."""
+
+    progress: RuntimeWorkflowProgress
+    metadata_patch: RuntimeWorkflowMetadataPatch | None = None
+    phase: RuntimeWorkflowPhase = "running"
+
+    def workflow_metadata_patch(self) -> dict[str, object]:
+        """Serialize to the existing durable attempt metadata patch shape."""
+        return merge_runtime_workflow_metadata_patch(
+            {
+                "phase": self.phase,
+                "progress": self.progress,
+            },
+            self.metadata_patch,
+        )
+
+    def attempt_started_event_data(
+        self,
+        *,
+        attempt_number: int,
+        pgq_job_id: RuntimeJobId | None,
+    ) -> dict[str, object]:
+        """Serialize to the existing attempt-started event payload shape."""
+        return {
+            "attempt_number": attempt_number,
+            "pgq_job_id": pgq_job_id,
+            "phase": self.phase,
+            "progress": self.progress,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowProgressMetadata:
+    """Workflow metadata and event data for an in-flight progress update."""
+
+    progress: RuntimeWorkflowProgress
+    phase: RuntimeWorkflowPhase | None = None
+    metadata_patch: RuntimeWorkflowMetadataPatch | None = None
+
+    def workflow_metadata_patch(self) -> dict[str, object]:
+        """Serialize to the existing durable progress metadata patch shape."""
+        base: dict[str, object] = {"progress": self.progress}
+        if self.phase is not None:
+            base["phase"] = self.phase
+        return merge_runtime_workflow_metadata_patch(base, self.metadata_patch)
+
+    def progress_event_data(self) -> dict[str, object]:
+        """Serialize to the existing progress event payload shape."""
+        return {
+            "phase": self.phase,
+            "progress": self.progress,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowCompletionMetadata:
+    """Workflow metadata and event data for a completed runtime workflow."""
+
+    result: RuntimeWorkflowResult | None = None
+    metadata_patch: RuntimeWorkflowMetadataPatch | None = None
+    progress: RuntimeWorkflowProgress = "completed"
+
+    def workflow_metadata_patch(self) -> dict[str, object]:
+        """Serialize to the existing durable completion metadata patch shape."""
+        base: dict[str, object] = {
+            "phase": "completed",
+            "progress": self.progress,
+        }
+        if self.result is not None:
+            base["result"] = dict(self.result)
+        return merge_runtime_workflow_metadata_patch(base, self.metadata_patch)
+
+    def completed_event_data(self) -> dict[str, object]:
+        """Serialize to the existing completed event payload shape."""
+        return {
+            "phase": "completed",
+            "progress": self.progress,
+            "result": dict(self.result) if self.result is not None else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowFailureMetadata:
+    """Workflow metadata and event data for a failed runtime workflow."""
+
+    error_message: str
+    progress: RuntimeWorkflowProgress = "failed"
+    metadata_patch: RuntimeWorkflowMetadataPatch | None = None
+
+    @property
+    def error_preview(self) -> str:
+        """Return the stored/evented error preview without exposing provider details."""
+        return truncate_runtime_workflow_text(self.error_message)
+
+    def workflow_metadata_patch(self) -> dict[str, object]:
+        """Serialize to the existing durable failure metadata patch shape."""
+        return merge_runtime_workflow_metadata_patch(
+            {
+                "phase": "failed",
+                "progress": self.progress,
+                "error_message": self.error_preview,
+            },
+            self.metadata_patch,
+        )
+
+    def failed_event_data(self) -> dict[str, object]:
+        """Serialize to the existing failed event payload shape."""
+        return {
+            "phase": "failed",
+            "progress": self.progress,
+            "error_message": self.error_preview,
         }
 
 

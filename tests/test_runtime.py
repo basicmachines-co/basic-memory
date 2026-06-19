@@ -45,11 +45,17 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     RuntimeQueuedWorkflowMetadata,
+    RuntimeWorkflowAttemptMetadata,
+    RuntimeWorkflowCompletionMetadata,
+    RuntimeWorkflowFailureMetadata,
+    RuntimeWorkflowProgressMetadata,
     RuntimeWorkflowTransport,
+    StorageEventPayload,
     StorageObjectIdentity,
     assert_runtime_file_matches_expected,
     plan_previous_note_file_delete,
     read_runtime_file_checksum,
+    truncate_runtime_workflow_text,
 )
 
 
@@ -76,7 +82,7 @@ class FakeJobRuntime:
 
 
 class FakeStorageEventSource:
-    def events_by_bucket(self) -> dict[str, tuple[object, ...]]:
+    def events_by_bucket(self) -> dict[str, tuple[StorageEventPayload, ...]]:
         return {}
 
 
@@ -175,6 +181,95 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(metadata, "progress", "changed")
+
+    def test_runtime_workflow_update_metadata_serializes_existing_shapes(self):
+        attempt = RuntimeWorkflowAttemptMetadata(
+            progress="loading files",
+            metadata_patch={"worker_id": "worker-1"},
+        )
+        assert attempt.workflow_metadata_patch() == {
+            "phase": "running",
+            "progress": "loading files",
+            "worker_id": "worker-1",
+        }
+        assert attempt.attempt_started_event_data(
+            attempt_number=2,
+            pgq_job_id="pgq-7",
+        ) == {
+            "attempt_number": 2,
+            "pgq_job_id": "pgq-7",
+            "phase": "running",
+            "progress": "loading files",
+        }
+
+        progress = RuntimeWorkflowProgressMetadata(
+            progress="indexing notes",
+            phase="running",
+            metadata_patch={"indexed": 3},
+        )
+        assert progress.workflow_metadata_patch() == {
+            "progress": "indexing notes",
+            "phase": "running",
+            "indexed": 3,
+        }
+        assert progress.progress_event_data() == {
+            "phase": "running",
+            "progress": "indexing notes",
+        }
+
+        no_phase_progress = RuntimeWorkflowProgressMetadata(progress="still queued")
+        assert no_phase_progress.workflow_metadata_patch() == {
+            "progress": "still queued",
+        }
+        assert no_phase_progress.progress_event_data() == {
+            "phase": None,
+            "progress": "still queued",
+        }
+
+        completion = RuntimeWorkflowCompletionMetadata(
+            result={"processed": 4},
+            metadata_patch={"finished_by": "worker-1"},
+        )
+        assert completion.workflow_metadata_patch() == {
+            "phase": "completed",
+            "progress": "completed",
+            "result": {"processed": 4},
+            "finished_by": "worker-1",
+        }
+        assert completion.completed_event_data() == {
+            "phase": "completed",
+            "progress": "completed",
+            "result": {"processed": 4},
+        }
+
+        failure = RuntimeWorkflowFailureMetadata(
+            error_message="worker crashed",
+            progress="failed while indexing",
+            metadata_patch={"retryable": False},
+        )
+        assert failure.workflow_metadata_patch() == {
+            "phase": "failed",
+            "progress": "failed while indexing",
+            "error_message": "worker crashed",
+            "retryable": False,
+        }
+        assert failure.failed_event_data() == {
+            "phase": "failed",
+            "progress": "failed while indexing",
+            "error_message": "worker crashed",
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(failure, "progress", "changed")
+
+    def test_truncate_runtime_workflow_text_matches_existing_preview_shape(self):
+        assert truncate_runtime_workflow_text("short text", max_chars=32) == "short text"
+
+        long_text = "x" * 50
+        assert (
+            truncate_runtime_workflow_text(long_text, max_chars=32)
+            == "xxxxxxxx... [truncated 18 chars]"
+        )
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))
