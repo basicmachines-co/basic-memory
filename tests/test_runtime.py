@@ -57,6 +57,7 @@ from basic_memory.runtime.contracts import (
     RuntimeFileConflictError,
     RuntimeJobCounts,
     RuntimeJobRequest,
+    RuntimeJobStatus,
     RuntimeIndexFileBatchJobRequest,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
@@ -834,6 +835,34 @@ class TestRuntimeContracts:
         assert runtime_job_status_from_workflow_status("paused") == "unknown"
         assert parse_runtime_workflow_id(str(workflow_id)) == workflow_id
         assert parse_runtime_workflow_id("not-a-workflow-id") is None
+
+    def test_runtime_job_status_carries_public_status_snapshot(self):
+        created_at = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+        started_at = datetime(2026, 6, 19, 12, 1, tzinfo=UTC)
+        status = RuntimeJobStatus(
+            job_id="job-1",
+            status="in_progress",
+            job_type="index_project",
+            tenant_id="tenant-1",
+            workflow_id="workflow-1",
+            progress="Indexing files",
+            phase="indexing",
+            checkpoint={"batch": 2},
+            created_at=created_at,
+            started_at=started_at,
+            result={"indexed": 4},
+            index_job_id="index-job-1",
+        )
+
+        assert status.job_id == "job-1"
+        assert status.status == "in_progress"
+        assert status.checkpoint == {"batch": 2}
+        assert status.result == {"indexed": 4}
+        assert status.created_at == created_at
+        assert status.started_at == started_at
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(status, "status", "complete")
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))

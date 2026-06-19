@@ -1610,6 +1610,27 @@ class JobRuntime(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeJobStatus:
+    """Unified runtime job status and result information."""
+
+    job_id: str
+    status: RuntimeJobStatusType
+    job_type: str | None = None
+    tenant_id: str | None = None
+    workflow_id: str | None = None
+    image_tag: str | None = None
+    error: str | None = None
+    progress: str | None = None
+    phase: RuntimeWorkflowPhase | None = None
+    checkpoint: RuntimeWorkflowCheckpoint | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: RuntimeWorkflowResult | None = None
+    index_job_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeNoteMaterializationResult:
     """Summary of one guarded note file materialization."""
 
