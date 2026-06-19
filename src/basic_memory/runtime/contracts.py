@@ -2355,6 +2355,38 @@ class SnapshotObjectReference:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SnapshotBrowseFile:
+    """One file returned by an internal snapshot browse operation."""
+
+    key: StorageKey
+    size: int
+    last_modified: datetime
+    etag: StorageEtag | None = None
+
+    @classmethod
+    def from_source(cls, source: SnapshotObjectSource) -> Self:
+        """Build browse-file data from storage-provider metadata."""
+        return cls(
+            key=source.key,
+            size=source.size,
+            last_modified=source.last_modified,
+            etag=source.etag,
+        )
+
+
+def snapshot_browse_project_names(
+    files: Iterable[SnapshotBrowseFile],
+) -> tuple[ProjectName, ...]:
+    """Return sorted top-level project folders present in snapshot browse results."""
+    projects: set[ProjectName] = set()
+    for file in files:
+        project_name, separator, _ = file.key.partition("/")
+        if separator and project_name:
+            projects.add(project_name)
+    return tuple(sorted(projects))
+
+
 def plan_snapshot_name(
     *,
     description: str,

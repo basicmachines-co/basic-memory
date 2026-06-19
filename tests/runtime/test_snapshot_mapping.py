@@ -2,7 +2,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from basic_memory.runtime import SnapshotObjectReference, SnapshotReference, plan_snapshot_name
+from basic_memory.runtime import (
+    SnapshotBrowseFile,
+    SnapshotObjectReference,
+    SnapshotReference,
+    plan_snapshot_name,
+    snapshot_browse_project_names,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +65,58 @@ def test_snapshot_object_reference_maps_from_storage_source() -> None:
         last_modified=modified_at,
         etag="abc123",
     )
+
+
+def test_snapshot_browse_file_maps_from_storage_source() -> None:
+    modified_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+
+    file = SnapshotBrowseFile.from_source(
+        _SnapshotObjectSource(
+            key="project/note.md",
+            size=42,
+            last_modified=modified_at,
+            etag="abc123",
+        )
+    )
+
+    assert file == SnapshotBrowseFile(
+        key="project/note.md",
+        size=42,
+        last_modified=modified_at,
+        etag="abc123",
+    )
+
+
+def test_snapshot_browse_project_names_returns_sorted_unique_top_level_folders() -> None:
+    modified_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+    files = (
+        SnapshotBrowseFile(
+            key="z-project/notes/a.md",
+            size=1,
+            last_modified=modified_at,
+            etag=None,
+        ),
+        SnapshotBrowseFile(
+            key="a-project/notes/b.md",
+            size=2,
+            last_modified=modified_at,
+            etag='"b"',
+        ),
+        SnapshotBrowseFile(
+            key="a-project/notes/c.md",
+            size=3,
+            last_modified=modified_at,
+            etag='"c"',
+        ),
+        SnapshotBrowseFile(
+            key="root.md",
+            size=4,
+            last_modified=modified_at,
+            etag='"root"',
+        ),
+    )
+
+    assert snapshot_browse_project_names(files) == ("a-project", "z-project")
 
 
 def test_plan_snapshot_name_formats_manual_snapshot_name() -> None:
