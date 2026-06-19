@@ -1,5 +1,7 @@
 """Repository for managing entities in the knowledge graph."""
 
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence, Union, Any
 
@@ -14,6 +16,25 @@ from sqlalchemy.engine import Row
 
 from basic_memory.models.knowledge import Entity, Observation, Relation
 from basic_memory.repository.repository import Repository
+
+type EntityMetadata = dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedPendingEntityWrite:
+    """Entity fields accepted by the database before the source file is materialized."""
+
+    title: str
+    note_type: str
+    entity_metadata: EntityMetadata
+    content_type: str
+    permalink: str | None
+    file_path: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+    last_updated_by: str | None
+    external_id: str | None = None
 
 
 class EntityRepository(Repository[Entity]):
@@ -30,6 +51,36 @@ class EntityRepository(Repository[Entity]):
             project_id: Project ID to filter all operations by
         """
         super().__init__(Entity, project_id=project_id)
+
+    async def create_pending_accepted_entity(
+        self,
+        session: AsyncSession,
+        write: AcceptedPendingEntityWrite,
+    ) -> Entity:
+        """Insert a DB-accepted entity whose source file has not been written yet."""
+        if self.project_id is None:  # pragma: no cover
+            raise RuntimeError("EntityRepository requires project_id to create pending entity")
+
+        entity = Entity(
+            title=write.title,
+            note_type=write.note_type,
+            entity_metadata=write.entity_metadata,
+            content_type=write.content_type,
+            project_id=self.project_id,
+            permalink=write.permalink,
+            file_path=Path(write.file_path).as_posix(),
+            checksum=None,
+            created_at=write.created_at,
+            updated_at=write.updated_at,
+            created_by=write.created_by,
+            last_updated_by=write.last_updated_by,
+        )
+        if write.external_id is not None:
+            entity.external_id = write.external_id
+
+        session.add(entity)
+        await session.flush()
+        return entity
 
     async def get_by_id(
         self, session: AsyncSession, entity_id: int, *, load_relations: bool = True
