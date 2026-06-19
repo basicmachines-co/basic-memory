@@ -33,6 +33,7 @@ type StorageEtag = str
 type StorageEventName = str
 type StorageVersionId = str
 type JobEntrypoint = str
+type RuntimeJobDedupeKey = str
 type RuntimeJobId = str | int
 type WorkflowId = UUID
 type RuntimeWorkflowBroker = str
@@ -674,13 +675,13 @@ class RuntimeStorageFileIndexJobIdentity:
         execute_after: timedelta | None = None,
     ) -> RuntimeJobRequest:
         """Build the runtime queue request for this file-index identity."""
-        return RuntimeJobRequest(
+        return runtime_job_request_from_source(
+            self,
             entrypoint=entrypoint,
             payload=payload,
             priority=priority,
             execute_after=execute_after,
-            dedupe_key=self.dedupe_key(),
-            headers=self.routing_headers(headers),
+            headers=headers,
         )
 
 
@@ -1206,8 +1207,36 @@ class RuntimeJobRequest:
     payload: bytes | None = None
     priority: int = 0
     execute_after: timedelta | None = None
-    dedupe_key: str | None = None
+    dedupe_key: RuntimeJobDedupeKey | None = None
     headers: Mapping[str, str] | None = None
+
+
+class RuntimeJobRequestSource(Protocol):
+    """Minimal typed source that can become a concrete runtime queue request."""
+
+    def dedupe_key(self) -> RuntimeJobDedupeKey: ...
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]: ...
+
+
+def runtime_job_request_from_source(
+    source: RuntimeJobRequestSource,
+    *,
+    entrypoint: JobEntrypoint,
+    payload: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+    priority: int = 0,
+    execute_after: timedelta | None = None,
+) -> RuntimeJobRequest:
+    """Build a concrete queue request from a typed runtime request source."""
+    return RuntimeJobRequest(
+        entrypoint=entrypoint,
+        payload=payload,
+        priority=priority,
+        execute_after=execute_after,
+        dedupe_key=source.dedupe_key(),
+        headers=source.routing_headers(headers),
+    )
 
 
 @dataclass(frozen=True, slots=True)
