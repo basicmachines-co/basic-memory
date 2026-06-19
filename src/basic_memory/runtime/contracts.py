@@ -207,6 +207,19 @@ class RuntimeNoteContentStateSource(Protocol):
     def last_materialization_error(self) -> str | None: ...
 
 
+class RuntimePendingNoteMaterializationSource(Protocol):
+    """Minimal note_content row shape needed to queue materialization work."""
+
+    @property
+    def db_version(self) -> object: ...
+
+    @property
+    def db_checksum(self) -> object: ...
+
+    @property
+    def last_source(self) -> object | None: ...
+
+
 class RuntimeNoteContentResourceEntitySource(Protocol):
     """Minimal entity shape needed for note-content resource reads."""
 
@@ -1453,6 +1466,32 @@ class RuntimePendingNoteMaterialization:
     actor_name: RuntimeNoteActorName | None = None
     source: RuntimeNoteChangeSource | None = None
     cleanup_after_write: RuntimePendingNoteFileDelete | None = None
+
+
+def plan_pending_note_materialization(
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    note_content: RuntimePendingNoteMaterializationSource,
+    fallback_source: RuntimeNoteChangeSource,
+    actor_user_profile_id: UUID | None = None,
+    actor_kind: RuntimeNoteActorKind | None = None,
+    actor_name: RuntimeNoteActorName | None = None,
+    cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
+) -> RuntimePendingNoteMaterialization:
+    """Build the queued materialization marker from accepted note_content state."""
+    source = note_content.last_source or fallback_source
+    return RuntimePendingNoteMaterialization(
+        project_id=project_id,
+        entity_id=entity_id,
+        db_version=int(note_content.db_version),
+        db_checksum=str(note_content.db_checksum),
+        actor_user_profile_id=actor_user_profile_id,
+        actor_kind=actor_kind,
+        actor_name=actor_name,
+        source=str(source) if source else None,
+        cleanup_after_write=cleanup_after_write,
+    )
 
 
 @dataclass(frozen=True, slots=True)
