@@ -21,12 +21,23 @@ from basic_memory.indexing.project_index_progress import (
     summarize_project_index_file_outcomes,
 )
 from basic_memory.runtime import (
+    NoteExternalId,
+    ProjectExternalId,
+    ProjectName,
     RuntimeFileChecksum,
+    RuntimeFilePath,
+    RuntimeNoteActorKind,
+    RuntimeNoteActorName,
     RuntimeNoteChangeSource,
     RuntimeNoteObjectMetadataMap,
     RuntimeNoteObjectProvenance,
+    RuntimeStorageFileIndexMode,
     RuntimeStorageObjectChecksumSource,
+    StorageEtag,
+    TenantId,
+    WorkflowId,
     db_version_from_object_metadata,
+    normalize_storage_etag,
     storage_object_checksum_for_index_match,
 )
 
@@ -205,6 +216,52 @@ class IndexFileJobResult:
     live_update_source: str | None = None
 
 
+class IndexFileNoteLiveUpdateType(StrEnum):
+    """Note-level live-update events produced by file indexing."""
+
+    note_created = "note.created"
+    note_updated = "note.updated"
+
+
+@dataclass(frozen=True, slots=True)
+class IndexFileNoteLiveUpdateContext:
+    """Queue-neutral context needed to plan one note-level file-index update."""
+
+    tenant_id: TenantId
+    project_external_id: ProjectExternalId | None
+    project_name: ProjectName | None
+    file_path: RuntimeFilePath
+    mode: RuntimeStorageFileIndexMode
+    workflow_id: WorkflowId | None = None
+    object_etag: StorageEtag | None = None
+    object_size: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexFileNoteLiveUpdatePlan:
+    """Typed note-level update that an adapter can publish through its transport."""
+
+    event_type: IndexFileNoteLiveUpdateType
+    tenant_id: TenantId
+    source: RuntimeNoteChangeSource
+    project_external_id: ProjectExternalId
+    project_name: ProjectName
+    note_external_id: NoteExternalId
+    note_path: RuntimeFilePath
+    note_version_etag: StorageEtag | None
+    content_checksum: RuntimeFileChecksum | None
+    file_checksum: StorageEtag | None
+    file_size_bytes: int | None
+    title: str
+    permalink: str
+    actor_user_profile_id: str | None = None
+    actor_kind: RuntimeNoteActorKind | None = None
+    actor_name: RuntimeNoteActorName | None = None
+
+
+DEFAULT_INDEX_FILE_NOTE_LIVE_UPDATE_SOURCE: RuntimeNoteChangeSource = "s3_webhook"
+
+
 def index_file_job_result_from_decision(
     decision: FileIndexDecision,
 ) -> IndexFileJobResult:
@@ -228,6 +285,10 @@ def index_file_job_result_from_indexed_file(
     live_update_plan: IndexedFileLiveUpdatePlan | None = None,
 ) -> IndexFileJobResult:
     """Convert a successful file-index result into the queue job result."""
+    operation = indexed_file.operation
+    if live_update_plan is not None and live_update_plan.operation is not None:
+        operation = live_update_plan.operation
+
     return IndexFileJobResult(
         status=IndexFileJobStatus.processed,
         reason=f"file indexed: {indexed_file.file_path}",
@@ -236,11 +297,7 @@ def index_file_job_result_from_indexed_file(
         title=indexed_file.title,
         permalink=indexed_file.permalink,
         entity_checksum=indexed_file.checksum,
-        operation=(
-            live_update_plan.operation or indexed_file.operation
-            if live_update_plan is not None
-            else indexed_file.operation
-        ),
+        operation=operation,
         actor_user_profile_id=(
             live_update_plan.actor_user_profile_id if live_update_plan is not None else None
         ),
@@ -250,6 +307,81 @@ def index_file_job_result_from_indexed_file(
             live_update_plan.live_update_source if live_update_plan is not None else None
         ),
     )
+
+
+def plan_index_file_note_live_update(
+    context: IndexFileNoteLiveUpdateContext,
+    result: IndexFileJobResult,
+) -> IndexFileNoteLiveUpdatePlan | None:
+    """Plan a note-level live update for one externally observed file index."""
+    if context.workflow_id is not None:
+        return None
+    if context.mode != RuntimeStorageFileIndexMode.observed_object:
+        return None
+    if result.status == IndexFileJobStatus.current and result.live_update_source is None:
+        return None
+    if result.status not in (IndexFileJobStatus.processed, IndexFileJobStatus.current):
+        return None
+
+    project_external_id = _required_index_file_note_live_update_text(
+        context.project_external_id,
+        field_name="project_external_id",
+    )
+    project_name = _required_index_file_note_live_update_text(
+        context.project_name,
+        field_name="project_name",
+    )
+    note_external_id = _required_index_file_note_live_update_text(
+        result.note_external_id,
+        field_name="note_external_id",
+    )
+    title = _required_index_file_note_live_update_text(
+        result.title,
+        field_name="title",
+    )
+    permalink = _required_index_file_note_live_update_text(
+        result.permalink,
+        field_name="permalink",
+    )
+    if result.operation is None:
+        raise RuntimeError("Observed_object index_file result is missing operation")
+
+    event_type = (
+        IndexFileNoteLiveUpdateType.note_created
+        if result.operation == FileIndexOperation.created
+        else IndexFileNoteLiveUpdateType.note_updated
+    )
+    normalized_etag = (
+        normalize_storage_etag(context.object_etag) if context.object_etag is not None else None
+    )
+    return IndexFileNoteLiveUpdatePlan(
+        event_type=event_type,
+        tenant_id=context.tenant_id,
+        source=result.live_update_source or DEFAULT_INDEX_FILE_NOTE_LIVE_UPDATE_SOURCE,
+        project_external_id=project_external_id,
+        project_name=project_name,
+        note_external_id=note_external_id,
+        note_path=context.file_path,
+        note_version_etag=normalized_etag,
+        content_checksum=result.entity_checksum,
+        file_checksum=normalized_etag,
+        file_size_bytes=context.object_size,
+        title=title,
+        permalink=permalink,
+        actor_user_profile_id=result.actor_user_profile_id,
+        actor_kind=result.actor_kind,
+        actor_name=result.actor_name,
+    )
+
+
+def _required_index_file_note_live_update_text(
+    value: object,
+    *,
+    field_name: str,
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"Observed_object index_file result is missing {field_name}")
+    return value.strip()
 
 
 @dataclass(frozen=True, slots=True)

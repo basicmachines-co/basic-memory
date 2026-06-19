@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from uuid import UUID
 
 import pytest
 
@@ -15,6 +16,9 @@ from basic_memory.indexing import (
     IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
+    IndexFileNoteLiveUpdateContext,
+    IndexFileNoteLiveUpdatePlan,
+    IndexFileNoteLiveUpdateType,
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
     ProjectIndexFileOutcome,
@@ -22,6 +26,7 @@ from basic_memory.indexing import (
     build_index_file_batch_job_result,
     index_file_job_result_from_indexed_file,
     index_file_job_result_from_decision,
+    plan_index_file_note_live_update,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
     project_index_file_outcome_from_job_result,
@@ -35,6 +40,7 @@ from basic_memory.runtime import (
     NOTE_OBJECT_DB_VERSION_METADATA,
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
+    RuntimeStorageFileIndexMode,
     RuntimeStorageObjectChecksumSource,
 )
 
@@ -198,6 +204,142 @@ def test_index_file_job_result_from_indexed_file_uses_trusted_live_update_plan()
         entity_checksum="checksum-1",
         operation=FileIndexOperation.updated,
     )
+
+
+def test_plan_index_file_note_live_update_builds_typed_note_change_plan():
+    context = IndexFileNoteLiveUpdateContext(
+        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        project_external_id="project-1",
+        project_name="Project One",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_etag='"etag-1"',
+        object_size=12,
+    )
+    result = IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        entity_id=42,
+        note_external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        entity_checksum="checksum-1",
+        operation=FileIndexOperation.created,
+        actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+        live_update_source="mcp",
+    )
+
+    assert plan_index_file_note_live_update(context, result) == IndexFileNoteLiveUpdatePlan(
+        event_type=IndexFileNoteLiveUpdateType.note_created,
+        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        source="mcp",
+        project_external_id="project-1",
+        project_name="Project One",
+        note_external_id="note-42",
+        note_path="notes/a.md",
+        note_version_etag="etag-1",
+        content_checksum="checksum-1",
+        file_checksum="etag-1",
+        file_size_bytes=12,
+        title="A Note",
+        permalink="notes/a-note",
+        actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+    )
+
+
+def test_plan_index_file_note_live_update_skips_non_note_change_results():
+    context = IndexFileNoteLiveUpdateContext(
+        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        project_external_id="project-1",
+        project_name="Project One",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_etag='"etag-1"',
+        object_size=12,
+    )
+
+    assert (
+        plan_index_file_note_live_update(
+            IndexFileNoteLiveUpdateContext(
+                tenant_id=context.tenant_id,
+                project_external_id=context.project_external_id,
+                project_name=context.project_name,
+                file_path=context.file_path,
+                mode=RuntimeStorageFileIndexMode.current_file,
+            ),
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/a.md",
+            ),
+        )
+        is None
+    )
+    assert (
+        plan_index_file_note_live_update(
+            IndexFileNoteLiveUpdateContext(
+                tenant_id=context.tenant_id,
+                project_external_id=context.project_external_id,
+                project_name=context.project_name,
+                file_path=context.file_path,
+                mode=context.mode,
+                workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
+                object_etag=context.object_etag,
+                object_size=context.object_size,
+            ),
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/a.md",
+            ),
+        )
+        is None
+    )
+    assert (
+        plan_index_file_note_live_update(
+            context,
+            IndexFileJobResult(
+                status=IndexFileJobStatus.current,
+                reason="file already indexed: notes/a.md",
+            ),
+        )
+        is None
+    )
+    assert (
+        plan_index_file_note_live_update(
+            context,
+            IndexFileJobResult(
+                status=IndexFileJobStatus.missing,
+                reason="file not found: notes/a.md",
+            ),
+        )
+        is None
+    )
+
+
+def test_plan_index_file_note_live_update_validates_required_observed_object_fields():
+    context = IndexFileNoteLiveUpdateContext(
+        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        project_external_id=None,
+        project_name="Project One",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_etag='"etag-1"',
+        object_size=12,
+    )
+    result = IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        note_external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        operation=FileIndexOperation.updated,
+    )
+
+    with pytest.raises(RuntimeError, match="missing project_external_id"):
+        plan_index_file_note_live_update(context, result)
 
 
 def test_index_file_batch_job_result_carries_ordered_file_and_vector_targets():
