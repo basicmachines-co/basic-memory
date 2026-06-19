@@ -152,7 +152,9 @@ from basic_memory.indexing.project_index_workflow import (
 from basic_memory.indexing.relation_resolution import (
     AffectedEntityIds,
     EntityId,
+    RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
     RelationResolutionPass,
+    ResolveRelationsJobRequest,
     ResolveRelationsResult,
     UnresolvedRelationCounter,
     resolve_relations_until_stable,
@@ -242,6 +244,8 @@ __all__ = [
     "ProjectIndexWorkflowProgressState",
     "ProjectIndexWorkflowSource",
     "RelationResolutionPass",
+    "RESOLVE_RELATIONS_DEBOUNCE_SECONDS",
+    "ResolveRelationsJobRequest",
     "ResolveRelationsResult",
     "SyncedMarkdownFile",
     "UnresolvedRelationCounter",

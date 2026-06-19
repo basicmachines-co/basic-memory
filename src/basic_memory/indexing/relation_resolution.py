@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Protocol
+from uuid import UUID
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
+RESOLVE_RELATIONS_DEBOUNCE_SECONDS = 10
 
 
 class RelationResolutionPass(Protocol):
@@ -21,6 +25,36 @@ class UnresolvedRelationCounter(Protocol):
 
     async def count_unresolved_relations(self) -> int:
         """Return the current unresolved relation count."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResolveRelationsJobRequest:
+    """Queue-neutral request shape for resolving one project's forward references."""
+
+    tenant_id: UUID
+    project_id: int
+    project_path: str
+    debounce_seconds: int = RESOLVE_RELATIONS_DEBOUNCE_SECONDS
+
+    @property
+    def execute_after(self) -> timedelta:
+        """Return the coalescing delay for relation-resolution work."""
+        return timedelta(seconds=self.debounce_seconds)
+
+    def dedupe_key(self) -> str:
+        """Return the per-(tenant, project) relation-resolution queue identity."""
+        return f"resolve-relations:{self.tenant_id}:{self.project_id}"
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the relation-resolution job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project_id),
+            }
+        )
+        return routing_headers
 
 
 @dataclass(frozen=True, slots=True)

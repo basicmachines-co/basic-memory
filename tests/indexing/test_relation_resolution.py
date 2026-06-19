@@ -1,8 +1,14 @@
 """Tests for portable relation resolution orchestration."""
 
+from dataclasses import FrozenInstanceError
+from datetime import timedelta
+from uuid import UUID
+
 import pytest
 
 from basic_memory.indexing.relation_resolution import (
+    RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
+    ResolveRelationsJobRequest,
     ResolveRelationsResult,
     resolve_relations_until_stable,
 )
@@ -32,6 +38,27 @@ class StubRelationResolutionPass:
         index = min(self.calls, len(self._affected_per_pass) - 1)
         self.calls += 1
         return self._affected_per_pass[index]
+
+
+def test_resolve_relations_job_request_matches_cloud_queue_identity() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    request = ResolveRelationsJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_path="main",
+    )
+
+    assert RESOLVE_RELATIONS_DEBOUNCE_SECONDS == 10
+    assert request.dedupe_key() == ("resolve-relations:11111111-1111-1111-1111-111111111111:7")
+    assert request.routing_headers({"source": "test"}) == {
+        "source": "test",
+        "tenant_id": str(tenant_id),
+        "project_id": "7",
+    }
+    assert request.execute_after == timedelta(seconds=10)
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(request, "project_path", "other")
 
 
 @pytest.mark.asyncio
