@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import cast
 
 import pytest
@@ -15,12 +16,17 @@ from basic_memory.indexing.accepted_note_write_runner import (
     accepted_note_content_write_from_markdown,
     accepted_note_search_row_from_entity,
     accepted_pending_entity_write_from_prepared,
+    apply_accepted_prepared_entity_fields,
     create_accepted_pending_entity,
+    prepare_accepted_note_create,
+    prepare_accepted_note_edit,
+    prepare_accepted_note_replace,
     refresh_accepted_note_search_index,
 )
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import AcceptedNoteContentWrite
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
+from basic_memory.schemas.base import Entity as EntitySchema
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +41,17 @@ class _PreparedFields:
 
 @dataclass(frozen=True, slots=True)
 class _PreparedWrite:
+    markdown_content: str
+    search_content: str
     entity_fields: _PreparedFields
+
+
+class _FlushSession:
+    def __init__(self) -> None:
+        self.flush_count = 0
+
+    async def flush(self) -> None:
+        self.flush_count += 1
 
 
 class _PendingEntityRepository:
@@ -78,16 +94,101 @@ class _SearchRepository:
         self.calls.append(row)
 
 
-def _prepared() -> _PreparedWrite:
+class _CreatePreparer:
+    def __init__(self, prepared: _PreparedWrite) -> None:
+        self.prepared = prepared
+        self.calls: list[tuple[EntitySchema, bool, AsyncSession | None]] = []
+
+    async def prepare_create_entity_content(
+        self,
+        schema: EntitySchema,
+        *,
+        check_storage_exists: bool = True,
+        session: AsyncSession | None = None,
+    ) -> _PreparedWrite:
+        self.calls.append((schema, check_storage_exists, session))
+        return self.prepared
+
+
+class _ReplacePreparer:
+    def __init__(self, prepared: _PreparedWrite) -> None:
+        self.prepared = prepared
+        self.calls: list[tuple[Entity, EntitySchema, str, AsyncSession | None]] = []
+
+    async def prepare_update_entity_content(
+        self,
+        entity: Entity,
+        schema: EntitySchema,
+        existing_content: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> _PreparedWrite:
+        self.calls.append((entity, schema, existing_content, session))
+        return self.prepared
+
+
+class _EditPreparer:
+    def __init__(self, prepared: _PreparedWrite) -> None:
+        self.prepared = prepared
+        self.calls: list[
+            tuple[Entity, str, str, str, str | None, str | None, int, AsyncSession | None]
+        ] = []
+
+    async def prepare_edit_entity_content(
+        self,
+        entity: Entity,
+        current_content: str,
+        *,
+        operation: str,
+        content: str,
+        section: str | None = None,
+        find_text: str | None = None,
+        expected_replacements: int = 1,
+        session: AsyncSession | None = None,
+    ) -> _PreparedWrite:
+        self.calls.append(
+            (
+                entity,
+                current_content,
+                operation,
+                content,
+                section,
+                find_text,
+                expected_replacements,
+                session,
+            )
+        )
+        return self.prepared
+
+
+def _prepared(
+    *,
+    markdown_content: str = "# Accepted\n",
+    search_content: str = "Accepted",
+    fields: _PreparedFields | None = None,
+) -> _PreparedWrite:
     return _PreparedWrite(
-        entity_fields=_PreparedFields(
+        markdown_content=markdown_content,
+        search_content=search_content,
+        entity_fields=fields
+        or _PreparedFields(
             title="Accepted",
             note_type="note",
             entity_metadata={"status": "draft"},
             content_type="text/markdown",
             permalink="accepted",
             file_path="notes/accepted.md",
-        )
+        ),
+    )
+
+
+def _schema() -> EntitySchema:
+    return EntitySchema(
+        title="Accepted",
+        directory="notes",
+        note_type="note",
+        content_type="text/markdown",
+        content="# Accepted\n",
     )
 
 
@@ -119,6 +220,145 @@ def _note_content() -> NoteContent:
         file_write_status="pending",
         last_source="api",
     )
+
+
+@pytest.mark.asyncio
+async def test_prepare_accepted_note_create_hashes_prepared_markdown() -> None:
+    session = cast(AsyncSession, object())
+    schema = _schema()
+    prepared = _prepared(markdown_content="# Created\n")
+    preparer = _CreatePreparer(prepared)
+
+    result = await prepare_accepted_note_create(
+        preparer,
+        schema,
+        check_storage_exists=False,
+        session=session,
+    )
+
+    assert result.prepared is prepared
+    assert result.db_checksum == sha256(b"# Created\n").hexdigest()
+    assert preparer.calls == [(schema, False, session)]
+
+
+@pytest.mark.asyncio
+async def test_prepare_accepted_note_replace_applies_entity_fields() -> None:
+    session = _FlushSession()
+    entity = _entity()
+    schema = _schema()
+    now = datetime(2026, 6, 19, 12, 30, tzinfo=UTC)
+    fields = _PreparedFields(
+        title="Replacement",
+        note_type="decision",
+        entity_metadata={"status": "accepted"},
+        content_type="text/markdown",
+        permalink="replacement",
+        file_path="notes/replacement.md",
+    )
+    prepared = _prepared(markdown_content="# Replacement\n", fields=fields)
+    preparer = _ReplacePreparer(prepared)
+
+    result = await prepare_accepted_note_replace(
+        preparer,
+        cast(AsyncSession, session),
+        entity=entity,
+        data=schema,
+        current_note_content=_note_content(),
+        now=now,
+        user_profile_value="user-2",
+    )
+
+    assert result.prepared is prepared
+    assert result.db_checksum == sha256(b"# Replacement\n").hexdigest()
+    assert preparer.calls == [
+        (entity, schema, "# Accepted\n", cast(AsyncSession, session)),
+    ]
+    assert entity.title == "Replacement"
+    assert entity.note_type == "decision"
+    assert entity.entity_metadata == {"status": "accepted"}
+    assert entity.file_path == "notes/replacement.md"
+    assert entity.updated_at == now
+    assert entity.last_updated_by == "user-2"
+    assert session.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
+    session = _FlushSession()
+    entity = _entity()
+    now = datetime(2026, 6, 19, 12, 45, tzinfo=UTC)
+    fields = _PreparedFields(
+        title="Edited",
+        note_type="note",
+        entity_metadata={"status": "edited"},
+        content_type="text/markdown",
+        permalink="edited",
+        file_path="notes/edited.md",
+    )
+    prepared = _prepared(markdown_content="# Edited\n", fields=fields)
+    preparer = _EditPreparer(prepared)
+
+    result = await prepare_accepted_note_edit(
+        preparer,
+        cast(AsyncSession, session),
+        entity=entity,
+        current_note_content=_note_content(),
+        operation="find_replace",
+        content="# Edited",
+        section=None,
+        find_text="# Accepted",
+        expected_replacements=1,
+        now=now,
+        user_profile_value=None,
+    )
+
+    assert result.prepared is prepared
+    assert result.db_checksum == sha256(b"# Edited\n").hexdigest()
+    assert preparer.calls == [
+        (
+            entity,
+            "# Accepted\n",
+            "find_replace",
+            "# Edited",
+            None,
+            "# Accepted",
+            1,
+            cast(AsyncSession, session),
+        )
+    ]
+    assert entity.title == "Edited"
+    assert entity.permalink == "edited"
+    assert entity.file_path == "notes/edited.md"
+    assert entity.last_updated_by is None
+    assert session.flush_count == 1
+
+
+def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
+    entity = _entity()
+    now = datetime(2026, 6, 19, 13, 0, tzinfo=UTC)
+
+    apply_accepted_prepared_entity_fields(
+        entity,
+        _PreparedFields(
+            title="Applied",
+            note_type="schema",
+            entity_metadata={"type": "schema"},
+            content_type="text/markdown",
+            permalink="applied",
+            file_path="schemas/applied.md",
+        ),
+        updated_at=now,
+        user_profile_value="user-3",
+    )
+
+    assert entity.title == "Applied"
+    assert entity.note_type == "schema"
+    assert entity.entity_metadata == {"type": "schema"}
+    assert entity.content_type == "text/markdown"
+    assert entity.permalink == "applied"
+    assert entity.file_path == "schemas/applied.md"
+    assert entity.updated_at == now
+    assert entity.last_updated_by == "user-3"
 
 
 def test_accepted_pending_entity_write_from_prepared_maps_core_fields() -> None:

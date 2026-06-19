@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basic_memory import file_utils
 from basic_memory.indexing.accepted_note_search import (
     AcceptedNoteSearchRow,
     build_accepted_note_search_row,
@@ -28,6 +30,7 @@ from basic_memory.runtime import (
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
 )
+from basic_memory.schemas.base import Entity as EntitySchema
 
 
 class AcceptedPreparedEntityFields(Protocol):
@@ -57,6 +60,78 @@ class AcceptedPreparedEntityWriteSource(Protocol):
 
     @property
     def entity_fields(self) -> AcceptedPreparedEntityFields: ...
+
+
+class AcceptedPreparedMarkdownWriteSource(AcceptedPreparedEntityWriteSource, Protocol):
+    """Prepared accepted markdown produced before DB or storage persistence."""
+
+    @property
+    def markdown_content(self) -> str: ...
+
+    @property
+    def search_content(self) -> str: ...
+
+
+class AcceptedPreparedEntityTarget(Protocol):
+    """Mutable entity fields mirrored from one prepared accepted note."""
+
+    title: str
+    note_type: str
+    entity_metadata: EntityMetadata
+    content_type: str
+    permalink: str | None
+    file_path: RuntimeFilePath
+    updated_at: datetime
+    last_updated_by: str | None
+
+
+class AcceptedNoteContentSource(Protocol):
+    """Current accepted markdown source used as a replacement or edit base."""
+
+    @property
+    def markdown_content(self) -> str: ...
+
+
+class AcceptedNoteCreatePreparer(Protocol):
+    """Capability that derives accepted markdown for a new note."""
+
+    async def prepare_create_entity_content(
+        self,
+        schema: EntitySchema,
+        *,
+        check_storage_exists: bool = ...,
+        session: AsyncSession | None = ...,
+    ) -> AcceptedPreparedMarkdownWriteSource: ...
+
+
+class AcceptedNoteReplacePreparer(Protocol):
+    """Capability that derives accepted markdown for a full note replacement."""
+
+    async def prepare_update_entity_content(
+        self,
+        entity: Entity,
+        schema: EntitySchema,
+        existing_content: str,
+        *,
+        session: AsyncSession | None = ...,
+    ) -> AcceptedPreparedMarkdownWriteSource: ...
+
+
+class AcceptedNoteEditPreparer(Protocol):
+    """Capability that derives accepted markdown for a partial note edit."""
+
+    async def prepare_edit_entity_content(
+        self,
+        entity: Entity,
+        current_content: str,
+        *,
+        operation: str,
+        content: str,
+        section: str | None = ...,
+        find_text: str | None = ...,
+        expected_replacements: int = ...,
+        session: AsyncSession | None = ...,
+    ) -> AcceptedPreparedMarkdownWriteSource: ...
 
 
 class AcceptedNoteContentEntitySource(Protocol):
@@ -129,6 +204,14 @@ type AcceptedNoteContentRepositoryFactory = Callable[[ProjectId], AcceptedNoteCo
 type AcceptedNoteSearchRepositoryFactory = Callable[[ProjectId], AcceptedNoteSearchRowRepository]
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptedPreparedNoteWrite:
+    """Prepared accepted markdown plus the checksum of that exact markdown."""
+
+    prepared: AcceptedPreparedMarkdownWriteSource
+    db_checksum: RuntimeNoteContentChecksum
+
+
 def accepted_entity_repository_for_project(
     project_id: ProjectId,
 ) -> AcceptedPendingEntityRepository:
@@ -148,6 +231,113 @@ def accepted_note_search_repository_for_project(
 ) -> AcceptedNoteSearchRowRepository:
     """Create the core repository adapter for accepted-note search rows."""
     return AcceptedNoteSearchRepository(project_id=project_id)
+
+
+async def prepare_accepted_note_create(
+    preparer: AcceptedNoteCreatePreparer,
+    data: EntitySchema,
+    *,
+    check_storage_exists: bool,
+    session: AsyncSession | None = None,
+) -> AcceptedPreparedNoteWrite:
+    """Prepare one DB-first note create and checksum the accepted markdown."""
+    prepared = await preparer.prepare_create_entity_content(
+        data,
+        check_storage_exists=check_storage_exists,
+        session=session,
+    )
+    return AcceptedPreparedNoteWrite(
+        prepared=prepared,
+        db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
+    )
+
+
+async def prepare_accepted_note_replace(
+    preparer: AcceptedNoteReplacePreparer,
+    session: AsyncSession,
+    *,
+    entity: Entity,
+    data: EntitySchema,
+    current_note_content: AcceptedNoteContentSource,
+    now: datetime,
+    user_profile_value: str | None,
+) -> AcceptedPreparedNoteWrite:
+    """Prepare a full accepted replacement and apply its entity fields."""
+    prepared = await preparer.prepare_update_entity_content(
+        entity,
+        data,
+        str(current_note_content.markdown_content),
+        session=session,
+    )
+    result = AcceptedPreparedNoteWrite(
+        prepared=prepared,
+        db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
+    )
+    apply_accepted_prepared_entity_fields(
+        entity,
+        prepared.entity_fields,
+        updated_at=now,
+        user_profile_value=user_profile_value,
+    )
+    await session.flush()
+    return result
+
+
+async def prepare_accepted_note_edit(
+    preparer: AcceptedNoteEditPreparer,
+    session: AsyncSession,
+    *,
+    entity: Entity,
+    current_note_content: AcceptedNoteContentSource,
+    operation: str,
+    content: str,
+    section: str | None,
+    find_text: str | None,
+    expected_replacements: int,
+    now: datetime,
+    user_profile_value: str | None,
+) -> AcceptedPreparedNoteWrite:
+    """Prepare a partial accepted edit and apply its entity fields."""
+    prepared = await preparer.prepare_edit_entity_content(
+        entity,
+        str(current_note_content.markdown_content),
+        operation=operation,
+        content=content,
+        section=section,
+        find_text=find_text,
+        expected_replacements=expected_replacements,
+        session=session,
+    )
+    result = AcceptedPreparedNoteWrite(
+        prepared=prepared,
+        db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
+    )
+    apply_accepted_prepared_entity_fields(
+        entity,
+        prepared.entity_fields,
+        updated_at=now,
+        user_profile_value=user_profile_value,
+    )
+    await session.flush()
+    return result
+
+
+def apply_accepted_prepared_entity_fields(
+    entity: AcceptedPreparedEntityTarget,
+    entity_fields: AcceptedPreparedEntityFields,
+    *,
+    updated_at: datetime,
+    user_profile_value: str | None,
+) -> None:
+    """Copy prepared accepted markdown fields onto an entity row."""
+    entity.title = entity_fields.title
+    entity.note_type = entity_fields.note_type
+    entity.entity_metadata = entity_fields.entity_metadata
+    entity.content_type = entity_fields.content_type
+    entity.permalink = entity_fields.permalink
+    entity.file_path = entity_fields.file_path
+    entity.updated_at = updated_at
+    entity.last_updated_by = user_profile_value
 
 
 def accepted_pending_entity_write_from_prepared(
