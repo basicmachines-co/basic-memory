@@ -236,7 +236,9 @@ from basic_memory.runtime.storage_project_resolution import (
     storage_project_prefix_from_project_path,
 )
 from basic_memory.runtime.storage_events import (
+    RuntimeStorageEventOperationProcessor,
     StorageEventInput,
+    run_runtime_storage_event_operations,
     storage_event_payload_from_input,
 )
 
@@ -360,6 +362,7 @@ __all__ = [
     "RuntimeStorageObjectChecksumSource",
     "RuntimeStorageEventOperation",
     "RuntimeStorageEventOperationKind",
+    "RuntimeStorageEventOperationProcessor",
     "RuntimeStorageEventProcessingResult",
     "RuntimeStorageEventProjectBatch",
     "RuntimeStorageEventRoutingPlan",
@@ -454,6 +457,7 @@ __all__ = [
     "runtime_note_content_payload_as_json_bytes",
     "runtime_observed_index_file_from_metadata",
     "runtime_observed_index_files_from_metadata_map",
+    "run_runtime_storage_event_operations",
     "select_deleted_note_file_checksum",
     "should_include_runtime_archive_path",
     "should_include_snapshot_archive_path",

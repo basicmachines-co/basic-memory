@@ -1,11 +1,15 @@
 """Tests for portable storage-event helpers."""
 
+import pytest
+
 from basic_memory.runtime import (
+    RuntimeStorageEventOperation,
     StorageEventInput,
     StorageEventPayload,
     StorageObjectIdentity,
     StorageObjectVersion,
     group_storage_events_by_bucket,
+    run_runtime_storage_event_operations,
     storage_event_payload_from_input,
 )
 
@@ -61,3 +65,73 @@ def test_storage_event_payload_from_input_builds_runtime_payload() -> None:
     assert payload.relative_path == "notes/a.md"
     assert payload.etag == '"etag-a"'
     assert payload.size == 42
+
+
+class RecordingStorageEventProcessor:
+    """Fake storage-event processor for portable runner tests."""
+
+    def __init__(self, fail_relative_path: str | None = None) -> None:
+        self.fail_relative_path = fail_relative_path
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:
+        skip_reason = operation.skip_reason
+        if skip_reason is None:
+            raise AssertionError("skip operation missing reason")
+        self.calls.append(
+            (
+                "skip",
+                skip_reason.value,
+                operation.relative_path or "",
+            )
+        )
+
+    async def index_file(self, operation: RuntimeStorageEventOperation) -> None:
+        relative_path = operation.require_relative_path()
+        self.calls.append(("index", "", relative_path))
+        if relative_path == self.fail_relative_path:
+            raise RuntimeError("index failed")
+
+    async def delete_file(self, operation: RuntimeStorageEventOperation) -> None:
+        self.calls.append(("delete", "", operation.require_relative_path()))
+
+    async def event_failed(
+        self,
+        operation: RuntimeStorageEventOperation,
+        exc: Exception,
+    ) -> None:
+        self.calls.append(("failed", str(exc), operation.relative_path or ""))
+
+
+@pytest.mark.asyncio
+async def test_run_runtime_storage_event_operations_counts_adapter_results() -> None:
+    processor = RecordingStorageEventProcessor(fail_relative_path="notes/fail.md")
+
+    result = await run_runtime_storage_event_operations(
+        (
+            storage_event(bucket_name="alpha", key="main/notes/a.md"),
+            storage_event(
+                bucket_name="alpha",
+                key="main/notes/b.md",
+                event_name="OBJECT_DELETED",
+            ),
+            storage_event(bucket_name="alpha", key="main/image.png"),
+            storage_event(
+                bucket_name="alpha",
+                key="main/notes/c.md",
+                event_name="OBJECT_RESTORED",
+            ),
+            storage_event(bucket_name="alpha", key="main/notes/fail.md"),
+        ),
+        processor,
+    )
+
+    assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 2}
+    assert processor.calls == [
+        ("index", "", "notes/a.md"),
+        ("delete", "", "notes/b.md"),
+        ("skip", "non_markdown", "image.png"),
+        ("skip", "unknown_event", "notes/c.md"),
+        ("index", "", "notes/fail.md"),
+        ("failed", "index failed", "notes/fail.md"),
+    ]
