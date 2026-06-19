@@ -202,6 +202,13 @@ from basic_memory.indexing.progress import (
     apply_vector_sync_batch_result,
     initialize_vector_sync_progress,
 )
+from basic_memory.indexing.project_delete_runner import (
+    ProjectDeleteFileDeleter,
+    ProjectDeletePreflightProvider,
+    ProjectDeletePreflightResult,
+    ProjectHardDeleter,
+    run_project_delete,
+)
 from basic_memory.indexing.project_index_progress import (
     ObservedObjectIndexCompletionContext,
     PROJECT_INDEX_PROGRESS_EVENT_INTERVAL,
@@ -408,6 +415,10 @@ __all__ = [
     "ProjectIndexBatchJobPlan",
     "ProjectIndexBatchEnqueuer",
     "ProjectIndexBatchCounterUpdate",
+    "ProjectDeleteFileDeleter",
+    "ProjectDeletePreflightProvider",
+    "ProjectDeletePreflightResult",
+    "ProjectHardDeleter",
     "ProjectIndexCoordinatorResult",
     "ProjectIndexCompletion",
     "ProjectIndexCompletedLiveUpdatePlan",
@@ -532,6 +543,7 @@ __all__ = [
     "run_note_materialization",
     "run_embedding_index",
     "run_embedding_index_batch",
+    "run_project_delete",
     "run_project_index_coordinator",
     "search_text_variants",
     "should_emit_project_index_progress_event",
