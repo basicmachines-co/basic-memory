@@ -184,15 +184,15 @@ class SyncService:
         file_service: FileService,
         session_maker: async_sessionmaker[AsyncSession],
     ):
-        self.app_config = app_config
-        self.entity_service = entity_service
-        self.entity_parser = entity_parser
-        self.entity_repository = entity_repository
-        self.relation_repository = relation_repository
-        self.project_repository = project_repository
-        self.search_service = search_service
-        self.file_service = file_service
-        self.session_maker = session_maker
+        self.app_config: BasicMemoryConfig = app_config
+        self.entity_service: EntityService = entity_service
+        self.entity_parser: EntityParser = entity_parser
+        self.entity_repository: EntityRepository = entity_repository
+        self.relation_repository: RelationRepository = relation_repository
+        self.project_repository: ProjectRepository = project_repository
+        self.search_service: SearchService = search_service
+        self.file_service: FileService = file_service
+        self.session_maker: async_sessionmaker[AsyncSession] = session_maker
         # Load ignore patterns once at initialization for performance
         self._ignore_patterns = load_bmignore_patterns()
         # Circuit breaker: track file failures to prevent infinite retry loops

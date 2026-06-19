@@ -159,7 +159,6 @@ from basic_memory.indexing.relation_resolution import (
     SyncServiceRelationResolutionAdapter,
     SyncServiceRelationResolver,
     UnresolvedRelationCounter,
-    UnresolvedRelationRepository,
     resolve_project_relations,
     resolve_relations_until_stable,
 )
@@ -255,7 +254,6 @@ __all__ = [
     "SyncServiceRelationResolutionAdapter",
     "SyncServiceRelationResolver",
     "UnresolvedRelationCounter",
-    "UnresolvedRelationRepository",
     "VectorSyncBatchSummary",
     "VectorSyncProgress",
     "VectorSyncProgressState",

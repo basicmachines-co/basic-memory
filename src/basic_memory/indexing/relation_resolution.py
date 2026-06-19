@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol
@@ -12,6 +12,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.repository import RelationRepository
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
@@ -32,17 +33,10 @@ class UnresolvedRelationCounter(Protocol):
         """Return the current unresolved relation count."""
 
 
-class UnresolvedRelationRepository(Protocol):
-    """Repository capability used by project-scoped relation resolution."""
-
-    async def find_unresolved_relations(self, session: AsyncSession) -> Sequence[object]:
-        """Return unresolved relation rows visible to the supplied session."""
-
-
 class SyncServiceRelationResolver(Protocol):
     """Minimal SyncService shape needed to resolve one project's relations."""
 
-    relation_repository: UnresolvedRelationRepository
+    relation_repository: RelationRepository
     session_maker: async_sessionmaker[AsyncSession]
 
     async def resolve_relations(self) -> AffectedEntityIds:
