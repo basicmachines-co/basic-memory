@@ -19,6 +19,7 @@ from basic_memory.runtime import (
     NOTE_OBJECT_SOURCE_METADATA,
     RuntimeAcceptedNoteChange,
     RuntimeMode,
+    RuntimeNoteActorOrigin,
     RuntimeNoteObjectMetadata,
     RuntimeNoteObjectProvenance,
     RuntimePreparedNoteWrite,
@@ -844,6 +845,29 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(provenance, "actor_name", "changed")
+
+    def test_note_actor_origin_uses_mcp_client_labels_only(self):
+        assert RuntimeNoteActorOrigin.from_actor_metadata(
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            actor_name="Claude Code",
+        ) == RuntimeNoteActorOrigin(
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            actor_name="Claude Code",
+        )
+        assert (
+            RuntimeNoteActorOrigin.from_actor_metadata(
+                actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+                actor_name=None,
+            )
+            is None
+        )
+        assert (
+            RuntimeNoteActorOrigin.from_actor_metadata(
+                actor_kind="user",
+                actor_name="Pat",
+            )
+            is None
+        )
 
     def test_storage_object_checksum_for_index_match_prefers_note_file_checksum(self):
         assert storage_object_checksum_for_index_match(

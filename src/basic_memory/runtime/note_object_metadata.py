@@ -232,3 +232,22 @@ class RuntimeNoteObjectProvenance:
             actor_name=actor_name,
             source=source_from_object_metadata(metadata),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeNoteActorOrigin:
+    """User-facing client origin that can be safely attached to live updates."""
+
+    actor_kind: RuntimeNoteActorKind
+    actor_name: RuntimeNoteActorName
+
+    @classmethod
+    def from_actor_metadata(
+        cls,
+        *,
+        actor_kind: RuntimeNoteActorKind | None,
+        actor_name: RuntimeNoteActorName | None,
+    ) -> Self | None:
+        if actor_kind != NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT or not actor_name:
+            return None
+        return cls(actor_kind=actor_kind, actor_name=actor_name)
