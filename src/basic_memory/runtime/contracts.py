@@ -145,6 +145,13 @@ class RuntimeAcceptedNoteEntitySource(Protocol):
     def last_updated_by(self) -> str | None: ...
 
 
+class RuntimeAcceptedNoteWriteEntitySource(RuntimeAcceptedNoteEntitySource, Protocol):
+    """Accepted-note entity shape needed to plan write follow-up work."""
+
+    @property
+    def project_id(self) -> ProjectId: ...
+
+
 class RuntimeDeletedNoteEntitySource(Protocol):
     """Minimal deleted-note entity shape needed before row cleanup."""
 
@@ -221,6 +228,14 @@ class RuntimePendingNoteMaterializationSource(Protocol):
 
     @property
     def last_source(self) -> object | None: ...
+
+
+class RuntimeAcceptedNoteWriteContentSource(
+    RuntimeNoteContentStateSource,
+    RuntimePendingNoteMaterializationSource,
+    Protocol,
+):
+    """Accepted note_content shape needed to plan response and write follow-up work."""
 
 
 class RuntimeMaterializedNoteSource(Protocol):
@@ -1719,6 +1734,36 @@ def plan_accepted_note_response(
     return RuntimeAcceptedNoteResponse.from_entity_and_content_state(
         entity,
         note_content_state,
+    )
+
+
+def plan_accepted_note_write_change(
+    *,
+    status_code: int,
+    entity: RuntimeAcceptedNoteWriteEntitySource,
+    note_content: RuntimeAcceptedNoteWriteContentSource,
+    fallback_source: RuntimeNoteChangeSource,
+    actor_user_profile_id: UUID | None = None,
+    actor_kind: RuntimeNoteActorKind | None = None,
+    actor_name: RuntimeNoteActorName | None = None,
+    cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
+) -> RuntimeAcceptedNoteChange[RuntimeAcceptedNoteResponse]:
+    """Build the accepted-note response plus the materialization follow-up marker."""
+    return plan_accepted_note_materialization_change(
+        status_code=status_code,
+        payload=plan_accepted_note_response(
+            entity=entity,
+            note_content=note_content,
+            fallback_source=fallback_source,
+        ),
+        project_id=entity.project_id,
+        entity_id=entity.id,
+        note_content=note_content,
+        fallback_source=fallback_source,
+        actor_user_profile_id=actor_user_profile_id,
+        actor_kind=actor_kind,
+        actor_name=actor_name,
+        cleanup_after_write=cleanup_after_write,
     )
 
 
