@@ -4,9 +4,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pydantic import Field, StrictInt, ValidationError, model_validator
+from pydantic import Field, StrictInt, StrictStr, ValidationError, model_validator
 
 from basic_memory.indexing.progress import CheckpointModel
+from basic_memory.runtime import (
+    ProjectExternalId,
+    ProjectName,
+    ProjectPath,
+    ProjectPermalink,
+    TenantId,
+    WorkflowId,
+)
 
 PROJECT_INDEX_PROGRESS_EVENT_INTERVAL = 50
 
@@ -79,6 +87,21 @@ class ProjectIndexFileOutcomeSummary:
     failed_files: int
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexCompletion:
+    """Workflow completion facts needed by runtime-side live update publishing."""
+
+    tenant_id: TenantId
+    project_id: str | None
+    project_external_id: ProjectExternalId
+    project_name: ProjectName | None
+    project_permalink: ProjectPermalink | None
+    project_path: ProjectPath | None
+    workflow_id: WorkflowId
+    progress: str
+    counters: dict[str, int]
+
+
 class ProjectIndexCountersState(CheckpointModel):
     """JSON payload for project-index aggregate counters."""
 
@@ -121,6 +144,16 @@ class ProjectIndexWorkflowProgressState(CheckpointModel):
     discovery: ProjectIndexDiscoveryState
     counters: ProjectIndexCountersState | None = None
     recorded_batches: list[StrictInt] = Field(default_factory=list)
+
+
+class ProjectIndexWorkflowPayloadState(CheckpointModel):
+    """JSON payload for project identity stored with project-index workflows."""
+
+    project_id: StrictInt | StrictStr | None = None
+    project_external_id: StrictStr | None = None
+    project_name: StrictStr | None = None
+    project_permalink: StrictStr | None = None
+    project_path: StrictStr | None = None
 
 
 def initial_project_index_counters(total_files: int) -> ProjectIndexCounters:
@@ -305,3 +338,43 @@ def project_index_progress_state_from_metadata(
         return ProjectIndexWorkflowProgressState.model_validate(metadata)
     except ValidationError as exc:
         raise RuntimeError(f"Project index workflow {field_name} metadata is invalid") from exc
+
+
+def project_index_completion_from_metadata(
+    *,
+    tenant_id: TenantId | None,
+    workflow_id: WorkflowId,
+    metadata: Mapping[str, object],
+    progress: str,
+    counters: ProjectIndexCounters,
+) -> ProjectIndexCompletion:
+    """Build completion facts from validated workflow metadata."""
+    payload = project_index_payload_state_from_metadata(metadata, workflow_id=workflow_id)
+    if tenant_id is None:
+        raise RuntimeError(f"Project index workflow tenant is missing: {workflow_id}")
+    if payload.project_external_id is None:
+        raise RuntimeError(f"Project index workflow project_external_id is missing: {workflow_id}")
+
+    return ProjectIndexCompletion(
+        tenant_id=tenant_id,
+        project_id=str(payload.project_id) if payload.project_id is not None else None,
+        project_external_id=payload.project_external_id,
+        project_name=payload.project_name,
+        project_permalink=payload.project_permalink,
+        project_path=payload.project_path,
+        workflow_id=workflow_id,
+        progress=progress,
+        counters=counters.to_metadata(),
+    )
+
+
+def project_index_payload_state_from_metadata(
+    metadata: Mapping[str, object],
+    *,
+    workflow_id: object,
+) -> ProjectIndexWorkflowPayloadState:
+    """Validate project-index payload metadata at the workflow JSON boundary."""
+    try:
+        return ProjectIndexWorkflowPayloadState.model_validate(metadata.get("payload"))
+    except ValidationError as exc:
+        raise RuntimeError(f"Project index workflow payload is invalid: {workflow_id}") from exc
