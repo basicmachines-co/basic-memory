@@ -375,6 +375,105 @@ class RuntimeStorageFileIndexJobIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeObservedIndexFile:
+    """Storage metadata observed before a project-index batch is queued."""
+
+    path: RuntimeFilePath
+    checksum: RuntimeFileChecksum | None = None
+    size: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProjectIndexJobRequest:
+    """Queue-neutral request shape for coordinating a project-wide index."""
+
+    tenant_id: TenantId
+    project: ProjectRuntimeReference
+    workflow_id: WorkflowId
+    force_full: bool = False
+    search: bool = True
+    embeddings: bool = True
+
+    def dedupe_key(self) -> str:
+        """Return the logical project-index coordinator queue identity."""
+        return f"index-project:{self.tenant_id}:{self.project.project_id}"
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the project-index coordinator."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project.project_id),
+                "project_path": self.project.project_path,
+                "workflow_id": str(self.workflow_id),
+            }
+        )
+        return routing_headers
+
+
+def plan_project_index_job_request(
+    *,
+    tenant_id: TenantId,
+    project: ProjectRuntimeReference,
+    workflow_id: WorkflowId,
+    force_full: bool = False,
+    search: bool = True,
+    embeddings: bool = True,
+) -> RuntimeProjectIndexJobRequest:
+    """Flatten project-index workflow state into a queue-neutral request."""
+    return RuntimeProjectIndexJobRequest(
+        tenant_id=tenant_id,
+        project=project,
+        workflow_id=workflow_id,
+        force_full=force_full,
+        search=search,
+        embeddings=embeddings,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeIndexFileBatchJobRequest:
+    """Queue-neutral request shape for indexing one project file batch."""
+
+    tenant_id: TenantId
+    project: ProjectRuntimeReference
+    workflow_id: WorkflowId
+    batch_index: int
+    batch_count: int
+    file_paths: tuple[RuntimeFilePath, ...] = ()
+    observed_files: tuple[RuntimeObservedIndexFile, ...] = ()
+    index_embeddings: bool = True
+
+    def dedupe_key(self) -> str:
+        """Return the logical file-batch index queue identity."""
+        return (
+            f"index-file-batch:{self.tenant_id}:{self.project.project_id}:"
+            f"{self.workflow_id}:{self.batch_index}"
+        )
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the file-batch index job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project.project_id),
+                "project_external_id": self.project.project_external_id,
+                "project_path": self.project.project_path,
+                "workflow_id": str(self.workflow_id),
+            }
+        )
+        return routing_headers
+
+    def target_paths(self) -> tuple[RuntimeFilePath, ...]:
+        """Return target paths using observed metadata when it is available."""
+        if self.observed_files:
+            return tuple(observed.path for observed in self.observed_files)
+        return self.file_paths
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeStorageEventOperation:
     """Typed operation selected from a project-scoped storage event."""
 

@@ -45,14 +45,17 @@ from basic_memory.runtime.contracts import (
     RuntimeFileConflictError,
     RuntimeJobCounts,
     RuntimeJobRequest,
+    RuntimeIndexFileBatchJobRequest,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
+    RuntimeProjectIndexJobRequest,
     RuntimeProjectDeleteResult,
     RuntimeStorageFileIndexJobIdentity,
+    RuntimeObservedIndexFile,
     RuntimeQueuedWorkflowMetadata,
     RuntimeStorageFileIndexMode,
     RuntimeStorageFileIndexRequest,
@@ -74,6 +77,7 @@ from basic_memory.runtime.contracts import (
     StorageObjectVersion,
     assert_runtime_file_matches_expected,
     normalize_storage_etag,
+    plan_project_index_job_request,
     plan_note_file_delete_job_request,
     plan_runtime_storage_event_operation,
     plan_runtime_storage_event_operations,
@@ -257,6 +261,95 @@ class TestRuntimeContracts:
                 "workflow_id": "22222222-2222-2222-2222-222222222222",
             },
         )
+
+    def test_runtime_project_index_job_request_matches_cloud_queue_identity(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+        project = ProjectRuntimeReference(
+            project_id=42,
+            project_external_id="project-main",
+            project_name="Main",
+            project_permalink="main",
+            project_path="main",
+        )
+
+        request = plan_project_index_job_request(
+            tenant_id=tenant_id,
+            project=project,
+            workflow_id=workflow_id,
+            force_full=True,
+            search=True,
+            embeddings=False,
+        )
+
+        assert request == RuntimeProjectIndexJobRequest(
+            tenant_id=tenant_id,
+            project=project,
+            workflow_id=workflow_id,
+            force_full=True,
+            search=True,
+            embeddings=False,
+        )
+        assert request.dedupe_key() == ("index-project:11111111-1111-1111-1111-111111111111:42")
+        assert request.routing_headers({"source": "test"}) == {
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "42",
+            "project_path": "main",
+            "workflow_id": str(workflow_id),
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(request, "force_full", False)
+
+    def test_runtime_index_file_batch_job_request_carries_observed_targets(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+        project = ProjectRuntimeReference(
+            project_id=42,
+            project_external_id="project-main",
+            project_path="main",
+        )
+        observed_file = RuntimeObservedIndexFile(
+            path="notes/a.md",
+            checksum="etag-a",
+            size=123,
+        )
+        request = RuntimeIndexFileBatchJobRequest(
+            tenant_id=tenant_id,
+            project=project,
+            workflow_id=workflow_id,
+            batch_index=2,
+            batch_count=5,
+            file_paths=("notes/a.md",),
+            observed_files=(observed_file,),
+            index_embeddings=False,
+        )
+
+        assert request.dedupe_key() == (
+            "index-file-batch:11111111-1111-1111-1111-111111111111:42:"
+            "22222222-2222-2222-2222-222222222222:2"
+        )
+        assert request.routing_headers({"source": "test"}) == {
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "42",
+            "project_external_id": "project-main",
+            "project_path": "main",
+            "workflow_id": str(workflow_id),
+        }
+        assert request.target_paths() == ("notes/a.md",)
+        assert RuntimeIndexFileBatchJobRequest(
+            tenant_id=tenant_id,
+            project=project,
+            workflow_id=workflow_id,
+            batch_index=0,
+            batch_count=1,
+            file_paths=("notes/legacy.md",),
+        ).target_paths() == ("notes/legacy.md",)
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(observed_file, "path", "notes/b.md")
 
     def test_runtime_storage_file_index_context_requires_observed_project_context(self):
         workflow_id = UUID("22222222-2222-2222-2222-222222222222")
