@@ -1,6 +1,6 @@
 """Tests for runtime mode resolution."""
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID
@@ -1414,6 +1414,9 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(response, "file_write_status", "synced")
+
+        nullable_source_response = replace(response, last_source=None)
+        assert nullable_source_response.to_response_payload()["last_source"] is None
 
     def test_plan_previous_note_file_delete_returns_cleanup_for_materialized_moves(self):
         cleanup = plan_previous_note_file_delete(

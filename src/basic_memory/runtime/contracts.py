@@ -1226,7 +1226,7 @@ class RuntimeAcceptedNoteResponse:
     file_version: int | None
     file_checksum: RuntimeFileChecksum | None
     file_write_status: str
-    last_source: str
+    last_source: str | None
     file_updated_at: datetime | None
     last_materialization_error: str | None
 
@@ -1241,7 +1241,7 @@ class RuntimeAcceptedNoteResponse:
         file_version: int | None,
         file_checksum: RuntimeFileChecksum | None,
         file_write_status: str,
-        last_source: str,
+        last_source: str | None,
         file_updated_at: datetime | None,
         last_materialization_error: str | None,
     ) -> Self:
