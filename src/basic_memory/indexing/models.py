@@ -119,6 +119,52 @@ class FileIndexResult:
     checksum: str
     operation: FileIndexOperation
 
+    @classmethod
+    def from_fields(
+        cls,
+        *,
+        file_path: str,
+        entity_id: int,
+        external_id: object,
+        title: object,
+        permalink: object,
+        checksum: str,
+        operation: FileIndexOperation,
+    ) -> FileIndexResult:
+        """Validate entity fields loaded for a completed file-index result."""
+        return cls(
+            file_path=file_path,
+            entity_id=entity_id,
+            external_id=_required_file_index_result_text(
+                external_id,
+                field_name="external_id",
+                file_path=file_path,
+            ),
+            title=_required_file_index_result_text(
+                title,
+                field_name="title",
+                file_path=file_path,
+            ),
+            permalink=_required_file_index_result_text(
+                permalink,
+                field_name="permalink",
+                file_path=file_path,
+            ),
+            checksum=checksum,
+            operation=operation,
+        )
+
+
+def _required_file_index_result_text(
+    value: object,
+    *,
+    field_name: str,
+    file_path: str,
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"Indexed entity for {file_path} is missing {field_name}")
+    return value.strip()
+
 
 class IndexFileJobStatus(StrEnum):
     """Normal outcomes for an index-file job."""

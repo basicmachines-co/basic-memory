@@ -44,6 +44,39 @@ def test_file_index_result_is_a_frozen_success_value():
         setattr(result, "checksum", "checksum-2")
 
 
+def test_file_index_result_from_fields_validates_required_entity_text():
+    result = FileIndexResult.from_fields(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        operation=FileIndexOperation.created,
+    )
+
+    assert result == FileIndexResult(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        operation=FileIndexOperation.created,
+    )
+
+    with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md is missing title"):
+        FileIndexResult.from_fields(
+            file_path="notes/a.md",
+            entity_id=42,
+            external_id="note-42",
+            title="",
+            permalink="notes/a-note",
+            checksum="checksum-1",
+            operation=FileIndexOperation.created,
+        )
+
+
 def test_index_file_job_result_carries_live_update_metadata():
     result = IndexFileJobResult(
         status=IndexFileJobStatus.processed,
