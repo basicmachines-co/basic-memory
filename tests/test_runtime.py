@@ -1,7 +1,7 @@
 """Tests for runtime mode resolution."""
 
 from dataclasses import FrozenInstanceError
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -20,6 +20,8 @@ from basic_memory.runtime import (
     RuntimeAcceptedNoteChange,
     RuntimeMode,
     RuntimeNoteObjectMetadata,
+    RuntimePreparedNoteWrite,
+    RuntimeWrittenFileState,
     actor_kind_from_object_metadata,
     actor_name_from_object_metadata,
     actor_user_profile_id_from_object_metadata,
@@ -354,6 +356,44 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(materialization, "db_version", 4)
+
+    def test_runtime_prepared_note_write_carries_materialization_inputs(self):
+        attempted_at = datetime(2026, 6, 18, 14, 15)
+        metadata = RuntimeNoteObjectMetadata(
+            entity_id=42,
+            db_version=4,
+            db_checksum="db-checksum",
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        )
+
+        prepared_write = RuntimePreparedNoteWrite(
+            file_path="notes/a.md",
+            markdown_content="# A note\n",
+            previous_file_checksum="old-file-sum",
+            cleanup_file_path="notes/old.md",
+            cleanup_file_checksum="old-cleanup-sum",
+            attempted_at=attempted_at,
+            object_metadata=metadata,
+        )
+
+        assert prepared_write.object_metadata == metadata
+        assert prepared_write.cleanup_file_path == "notes/old.md"
+        with pytest.raises(FrozenInstanceError):
+            setattr(prepared_write, "file_path", "notes/b.md")
+
+    def test_runtime_written_file_state_carries_materialized_storage_result(self):
+        file_updated_at = datetime(2026, 6, 18, 14, 16)
+
+        written_file = RuntimeWrittenFileState(
+            file_path="notes/a.md",
+            file_checksum="new-file-sum",
+            file_updated_at=file_updated_at,
+        )
+
+        assert written_file.file_checksum == "new-file-sum"
+        assert written_file.file_updated_at == file_updated_at
+        with pytest.raises(FrozenInstanceError):
+            setattr(written_file, "file_checksum", "other")
 
     def test_runtime_accepted_note_change_carries_payload_and_followup_work(self):
         cleanup = RuntimePendingNoteFileDelete(

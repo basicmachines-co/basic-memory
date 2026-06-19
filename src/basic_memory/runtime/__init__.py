@@ -63,6 +63,10 @@ from basic_memory.runtime.contracts import (
     read_runtime_file_checksum,
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
+from basic_memory.runtime.note_materialization import (
+    RuntimePreparedNoteWrite,
+    RuntimeWrittenFileState,
+)
 from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
     NOTE_OBJECT_ACTOR_KIND_METADATA,
@@ -140,7 +144,9 @@ __all__ = [
     "RuntimeNoteObjectMetadataMap",
     "RuntimePendingNoteFileDelete",
     "RuntimePendingNoteMaterialization",
+    "RuntimePreparedNoteWrite",
     "RuntimeProjectDeleteResult",
+    "RuntimeWrittenFileState",
     "SnapshotName",
     "SnapshotObjectReference",
     "SnapshotProvider",
