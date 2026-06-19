@@ -1672,6 +1672,63 @@ class RuntimeFileDeleteResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeNoteFileDeletePlan:
+    """Pure cleanup decision before a runtime adapter deletes a materialized file."""
+
+    result: RuntimeFileDeleteResult
+    actual_checksum: RuntimeFileChecksum | None
+
+    @property
+    def should_delete_file(self) -> bool:
+        """Return whether the adapter may perform the storage delete."""
+        return self.result.status == RuntimeDeleteStatus.deleted
+
+
+def plan_note_file_delete_cleanup(
+    *,
+    entity_id: RuntimeEntityId,
+    file_path: RuntimeFilePath,
+    accepted_checksum: RuntimeFileChecksum | None,
+    actual_checksum: RuntimeFileChecksum | None,
+) -> RuntimeNoteFileDeletePlan:
+    """Select the safe cleanup outcome for one materialized note file."""
+    if accepted_checksum is None:
+        return RuntimeNoteFileDeletePlan(
+            result=RuntimeFileDeleteResult.no_accepted_checksum(
+                entity_id=entity_id,
+                file_path=file_path,
+            ),
+            actual_checksum=actual_checksum,
+        )
+
+    if actual_checksum is None:
+        return RuntimeNoteFileDeletePlan(
+            result=RuntimeFileDeleteResult.already_absent(
+                entity_id=entity_id,
+                file_path=file_path,
+            ),
+            actual_checksum=actual_checksum,
+        )
+
+    if actual_checksum != accepted_checksum:
+        return RuntimeNoteFileDeletePlan(
+            result=RuntimeFileDeleteResult.changed_before_delete(
+                entity_id=entity_id,
+                file_path=file_path,
+            ),
+            actual_checksum=actual_checksum,
+        )
+
+    return RuntimeNoteFileDeletePlan(
+        result=RuntimeFileDeleteResult.deleted(
+            entity_id=entity_id,
+            file_path=file_path,
+        ),
+        actual_checksum=actual_checksum,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeExpectedFileState:
     """The storage object state a guarded write expects to find."""
 

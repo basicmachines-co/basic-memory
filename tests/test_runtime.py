@@ -63,6 +63,7 @@ from basic_memory.runtime.contracts import (
     RuntimeNoteContentState,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
+    RuntimeNoteFileDeletePlan,
     RuntimeProjectDeleteJobRequest,
     RuntimeProjectFileSnapshot,
     RuntimeProjectIndexJobRequest,
@@ -94,6 +95,7 @@ from basic_memory.runtime.contracts import (
     plan_project_index_job_request,
     plan_directory_file_snapshot,
     plan_note_file_delete_job_request,
+    plan_note_file_delete_cleanup,
     plan_runtime_storage_event_operation,
     plan_runtime_storage_event_operations,
     plan_runtime_storage_events_by_project,
@@ -972,6 +974,61 @@ class TestRuntimeContracts:
             status=RuntimeDeleteStatus.deleted,
             reason="file deleted: notes/a.md",
         )
+
+    def test_plan_note_file_delete_cleanup_selects_safe_storage_action(self):
+        no_guard = plan_note_file_delete_cleanup(
+            entity_id=1,
+            file_path="notes/a.md",
+            accepted_checksum=None,
+            actual_checksum=None,
+        )
+        assert no_guard == RuntimeNoteFileDeletePlan(
+            result=RuntimeFileDeleteResult.no_accepted_checksum(
+                entity_id=1,
+                file_path="notes/a.md",
+            ),
+            actual_checksum=None,
+        )
+        assert no_guard.should_delete_file is False
+
+        missing = plan_note_file_delete_cleanup(
+            entity_id=1,
+            file_path="notes/a.md",
+            accepted_checksum="file-sum",
+            actual_checksum=None,
+        )
+        assert missing.result == RuntimeFileDeleteResult.already_absent(
+            entity_id=1,
+            file_path="notes/a.md",
+        )
+        assert missing.should_delete_file is False
+
+        changed = plan_note_file_delete_cleanup(
+            entity_id=1,
+            file_path="notes/a.md",
+            accepted_checksum="file-sum",
+            actual_checksum="new-file-sum",
+        )
+        assert changed.result == RuntimeFileDeleteResult.changed_before_delete(
+            entity_id=1,
+            file_path="notes/a.md",
+        )
+        assert changed.should_delete_file is False
+
+        matching = plan_note_file_delete_cleanup(
+            entity_id=1,
+            file_path="notes/a.md",
+            accepted_checksum="file-sum",
+            actual_checksum="file-sum",
+        )
+        assert matching.result == RuntimeFileDeleteResult.deleted(
+            entity_id=1,
+            file_path="notes/a.md",
+        )
+        assert matching.should_delete_file is True
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(matching, "actual_checksum", "other")
 
     def test_runtime_note_materialization_result_is_a_frozen_outcome(self):
         result = RuntimeNoteMaterializationResult(
