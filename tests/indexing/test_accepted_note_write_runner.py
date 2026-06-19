@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -20,6 +21,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     create_accepted_pending_entity,
     prepare_accepted_note_create,
     prepare_accepted_note_edit,
+    prepare_accepted_note_move,
     prepare_accepted_note_replace,
     refresh_accepted_note_search_index,
 )
@@ -44,6 +46,14 @@ class _PreparedWrite:
     markdown_content: str
     search_content: str
     entity_fields: _PreparedFields
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedMove:
+    file_path: Path
+    markdown_content: str
+    search_content: str
+    permalink: str | None
 
 
 class _FlushSession:
@@ -158,6 +168,23 @@ class _EditPreparer:
                 session,
             )
         )
+        return self.prepared
+
+
+class _MovePreparer:
+    def __init__(self, prepared: _PreparedMove) -> None:
+        self.prepared = prepared
+        self.calls: list[tuple[Entity, str, str, AsyncSession | None]] = []
+
+    async def prepare_move_entity_content(
+        self,
+        entity: Entity,
+        current_content: str,
+        destination_path: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> _PreparedMove:
+        self.calls.append((entity, current_content, destination_path, session))
         return self.prepared
 
 
@@ -359,6 +386,76 @@ def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
     assert entity.file_path == "schemas/applied.md"
     assert entity.updated_at == now
     assert entity.last_updated_by == "user-3"
+
+
+@pytest.mark.asyncio
+async def test_prepare_accepted_note_move_without_permalink_update_keeps_current_markdown() -> None:
+    session = _FlushSession()
+    entity = _entity()
+    now = datetime(2026, 6, 19, 13, 15, tzinfo=UTC)
+    current = _note_content()
+    current.markdown_content = "---\ntitle: legacy\n\n# Body still matters\n"
+
+    result = await prepare_accepted_note_move(
+        None,
+        cast(AsyncSession, session),
+        entity=entity,
+        current_note_content=current,
+        accepted_file_path="archive/accepted.md",
+        should_update_permalink=False,
+        now=now,
+        user_profile_value="user-4",
+    )
+
+    assert result.file_path == "archive/accepted.md"
+    assert result.markdown_content == current.markdown_content
+    assert result.search_content == current.markdown_content
+    assert result.permalink == "accepted"
+    assert result.db_checksum == sha256(str(current.markdown_content).encode()).hexdigest()
+    assert entity.file_path == "archive/accepted.md"
+    assert entity.permalink == "accepted"
+    assert entity.updated_at == now
+    assert entity.last_updated_by == "user-4"
+    assert session.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_accepted_note_move_with_permalink_update_uses_preparer() -> None:
+    session = _FlushSession()
+    entity = _entity()
+    now = datetime(2026, 6, 19, 13, 30, tzinfo=UTC)
+    prepared = _PreparedMove(
+        file_path=Path("archive/prepared.md"),
+        markdown_content="# Prepared\n",
+        search_content="Prepared",
+        permalink="archive/prepared",
+    )
+    preparer = _MovePreparer(prepared)
+
+    result = await prepare_accepted_note_move(
+        preparer,
+        cast(AsyncSession, session),
+        entity=entity,
+        current_note_content=_note_content(),
+        accepted_file_path="archive/accepted.md",
+        should_update_permalink=True,
+        now=now,
+        user_profile_value=None,
+    )
+
+    assert preparer.calls == [
+        (entity, "# Accepted\n", "archive/accepted.md", cast(AsyncSession, session)),
+    ]
+    assert result.file_path == "archive/prepared.md"
+    assert result.markdown_content == "# Prepared\n"
+    assert result.search_content == "Prepared"
+    assert result.permalink == "archive/prepared"
+    assert result.db_checksum == sha256(b"# Prepared\n").hexdigest()
+    assert entity.file_path == "archive/prepared.md"
+    assert entity.permalink == "archive/prepared"
+    assert entity.updated_at == now
+    assert entity.last_updated_by is None
+    assert session.flush_count == 1
 
 
 def test_accepted_pending_entity_write_from_prepared_maps_core_fields() -> None:

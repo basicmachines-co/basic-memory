@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory import file_utils
 from basic_memory.indexing.accepted_note_search import (
     AcceptedNoteSearchRow,
+    accepted_search_content_from_markdown,
     build_accepted_note_search_row,
 )
 from basic_memory.models import Entity, NoteContent
@@ -134,6 +136,35 @@ class AcceptedNoteEditPreparer(Protocol):
     ) -> AcceptedPreparedMarkdownWriteSource: ...
 
 
+class AcceptedPreparedMoveSource(Protocol):
+    """Prepared accepted markdown and permalink state for a note move."""
+
+    @property
+    def file_path(self) -> Path: ...
+
+    @property
+    def markdown_content(self) -> str: ...
+
+    @property
+    def search_content(self) -> str: ...
+
+    @property
+    def permalink(self) -> str | None: ...
+
+
+class AcceptedNoteMovePreparer(Protocol):
+    """Capability that derives accepted markdown for a note move."""
+
+    async def prepare_move_entity_content(
+        self,
+        entity: Entity,
+        current_content: str,
+        destination_path: str,
+        *,
+        session: AsyncSession | None = ...,
+    ) -> AcceptedPreparedMoveSource: ...
+
+
 class AcceptedNoteContentEntitySource(Protocol):
     """Entity identity required to accept one note_content snapshot."""
 
@@ -209,6 +240,17 @@ class AcceptedPreparedNoteWrite:
     """Prepared accepted markdown plus the checksum of that exact markdown."""
 
     prepared: AcceptedPreparedMarkdownWriteSource
+    db_checksum: RuntimeNoteContentChecksum
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedPreparedNoteMove:
+    """Accepted markdown, path, permalink, and checksum for one DB-first move."""
+
+    file_path: RuntimeFilePath
+    markdown_content: str
+    search_content: str
+    permalink: str | None
     db_checksum: RuntimeNoteContentChecksum
 
 
@@ -318,6 +360,53 @@ async def prepare_accepted_note_edit(
         updated_at=now,
         user_profile_value=user_profile_value,
     )
+    await session.flush()
+    return result
+
+
+async def prepare_accepted_note_move(
+    preparer: AcceptedNoteMovePreparer | None,
+    session: AsyncSession,
+    *,
+    entity: Entity,
+    current_note_content: AcceptedNoteContentSource,
+    accepted_file_path: RuntimeFilePath,
+    should_update_permalink: bool,
+    now: datetime,
+    user_profile_value: str | None,
+) -> AcceptedPreparedNoteMove:
+    """Prepare a DB-first move and apply the accepted path/permalink fields."""
+    current_content = str(current_note_content.markdown_content)
+    file_path = accepted_file_path
+    permalink = entity.permalink
+    markdown_content = current_content
+    search_content = accepted_search_content_from_markdown(markdown_content)
+
+    if should_update_permalink:
+        if preparer is None:
+            raise ValueError("Accepted note move requires a preparer to update the permalink")
+        prepared = await preparer.prepare_move_entity_content(
+            entity,
+            current_content,
+            accepted_file_path,
+            session=session,
+        )
+        file_path = prepared.file_path.as_posix()
+        permalink = prepared.permalink
+        markdown_content = prepared.markdown_content
+        search_content = prepared.search_content
+
+    result = AcceptedPreparedNoteMove(
+        file_path=file_path,
+        markdown_content=markdown_content,
+        search_content=search_content,
+        permalink=permalink,
+        db_checksum=await file_utils.compute_checksum(markdown_content),
+    )
+    entity.file_path = result.file_path
+    entity.permalink = result.permalink
+    entity.updated_at = now
+    entity.last_updated_by = user_profile_value
     await session.flush()
     return result
 
