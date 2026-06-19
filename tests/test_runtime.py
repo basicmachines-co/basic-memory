@@ -45,6 +45,7 @@ from basic_memory.runtime.contracts import (
     RuntimeFileConflictError,
     RuntimeJobCounts,
     RuntimeJobRequest,
+    RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
     RuntimePendingNoteFileDelete,
@@ -75,6 +76,7 @@ from basic_memory.runtime.contracts import (
     plan_runtime_storage_event_operation,
     plan_runtime_storage_event_operations,
     plan_runtime_storage_events_by_project,
+    plan_note_materialization_job_request,
     plan_previous_note_file_delete,
     read_runtime_file_checksum,
     truncate_runtime_workflow_text,
@@ -984,6 +986,56 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(materialization, "db_version", 4)
+
+    def test_plan_note_materialization_job_request_flattens_pending_work(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        actor_user_profile_id = UUID("33333333-3333-3333-3333-333333333333")
+        materialization = RuntimePendingNoteMaterialization(
+            project_id=7,
+            entity_id=42,
+            db_version=3,
+            db_checksum="db-checksum",
+            actor_user_profile_id=actor_user_profile_id,
+            actor_kind="mcp_client",
+            actor_name="Claude Code",
+            source="mcp",
+            cleanup_after_write=RuntimePendingNoteFileDelete(
+                project_id=7,
+                entity_id=42,
+                file_path="notes/old.md",
+                file_checksum="old-checksum",
+            ),
+        )
+
+        request = plan_note_materialization_job_request(
+            tenant_id=tenant_id,
+            materialization=materialization,
+        )
+
+        assert request == RuntimeNoteMaterializationJobRequest(
+            tenant_id=tenant_id,
+            project_id=7,
+            entity_id=42,
+            db_version=3,
+            db_checksum="db-checksum",
+            actor_user_profile_id=actor_user_profile_id,
+            actor_kind="mcp_client",
+            actor_name="Claude Code",
+            source="mcp",
+            cleanup_file_path="notes/old.md",
+            cleanup_file_checksum="old-checksum",
+        )
+        assert request.dedupe_key() == (
+            "materialize-note-file:11111111-1111-1111-1111-111111111111:7:42:3:db-checksum"
+        )
+        assert request.routing_headers({"source": "test"}) == {
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "7",
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(request, "db_version", 4)
 
     def test_runtime_prepared_note_write_carries_materialization_inputs(self):
         attempted_at = datetime(2026, 6, 18, 14, 15)

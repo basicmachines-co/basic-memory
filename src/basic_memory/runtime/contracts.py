@@ -867,6 +867,63 @@ class RuntimePendingNoteMaterialization:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeNoteMaterializationJobRequest:
+    """Queue-neutral request shape for materializing one accepted note version."""
+
+    tenant_id: TenantId
+    project_id: ProjectId
+    entity_id: RuntimeEntityId
+    db_version: RuntimeNoteContentVersion
+    db_checksum: RuntimeNoteContentChecksum
+    actor_user_profile_id: UUID | None = None
+    actor_kind: RuntimeNoteActorKind | None = None
+    actor_name: RuntimeNoteActorName | None = None
+    source: RuntimeNoteChangeSource | None = None
+    cleanup_file_path: RuntimeFilePath | None = None
+    cleanup_file_checksum: RuntimeFileChecksum | None = None
+
+    def dedupe_key(self) -> str:
+        """Return the logical materialization queue identity."""
+        return (
+            f"materialize-note-file:{self.tenant_id}:{self.project_id}:"
+            f"{self.entity_id}:{self.db_version}:{self.db_checksum}"
+        )
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the materialization job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project_id),
+            }
+        )
+        return routing_headers
+
+
+def plan_note_materialization_job_request(
+    *,
+    tenant_id: TenantId,
+    materialization: RuntimePendingNoteMaterialization,
+) -> RuntimeNoteMaterializationJobRequest:
+    """Flatten accepted note follow-up work into a queue-neutral materialization request."""
+    cleanup = materialization.cleanup_after_write
+    return RuntimeNoteMaterializationJobRequest(
+        tenant_id=tenant_id,
+        project_id=materialization.project_id,
+        entity_id=materialization.entity_id,
+        db_version=materialization.db_version,
+        db_checksum=materialization.db_checksum,
+        actor_user_profile_id=materialization.actor_user_profile_id,
+        actor_kind=materialization.actor_kind,
+        actor_name=materialization.actor_name,
+        source=materialization.source,
+        cleanup_file_path=cleanup.file_path if cleanup is not None else None,
+        cleanup_file_checksum=cleanup.file_checksum if cleanup is not None else None,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeAcceptedNoteChange[PayloadT]:
     """Accepted note response plus any post-commit runtime follow-up work."""
 
