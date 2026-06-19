@@ -85,11 +85,16 @@ from basic_memory.indexing.relation_resolution import (
     UnresolvedRelationCounter,
     resolve_relations_until_stable,
 )
+from basic_memory.indexing.vector_sync_planning import (
+    CheckpointPhase,
+    plan_vector_sync_progress,
+)
 
 __all__ = [
     "AffectedEntityIds",
     "BatchIndexer",
     "ChangeReport",
+    "CheckpointPhase",
     "CheckpointModel",
     "CurrentFileChecksumSource",
     "EmbeddingIndexPlan",
@@ -148,6 +153,7 @@ __all__ = [
     "plan_file_changes",
     "plan_moved_files",
     "plan_note_content_reconciliation",
+    "plan_vector_sync_progress",
     "resolve_relations_until_stable",
     "resolve_link_texts",
 ]
