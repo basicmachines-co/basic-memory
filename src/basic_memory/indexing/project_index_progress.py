@@ -138,6 +138,17 @@ class ProjectIndexCompletedLiveUpdatePlan:
 DEFAULT_PROJECT_INDEX_COMPLETED_LIVE_UPDATE_SOURCE: RuntimeNoteChangeSource = "worker"
 
 
+def project_index_completion_cache_project_ids(
+    *project_ids: str | None,
+) -> tuple[str, ...]:
+    """Return every project route id whose directory reads may be cached."""
+    cache_project_ids: list[str] = []
+    for project_id in project_ids:
+        if project_id and project_id not in cache_project_ids:
+            cache_project_ids.append(project_id)
+    return tuple(cache_project_ids)
+
+
 class ProjectIndexCountersState(CheckpointModel):
     """JSON payload for project-index aggregate counters."""
 
@@ -418,6 +429,10 @@ def plan_project_index_completed_live_update(
         project_external_id=completion.project_external_id or None,
         project_name=completion.project_name,
         workflow_id=completion.workflow_id,
+        cache_project_ids=project_index_completion_cache_project_ids(
+            completion.project_external_id,
+            completion.project_permalink,
+        ),
     )
 
 
@@ -432,11 +447,6 @@ def plan_observed_object_index_completed_live_update(
     if not context.project_external_id or not context.project_name:
         return None
 
-    cache_project_ids: list[str] = []
-    for project_id in (context.project_external_id, context.project_path):
-        if project_id and project_id not in cache_project_ids:
-            cache_project_ids.append(project_id)
-
     return ProjectIndexCompletedLiveUpdatePlan(
         event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
         tenant_id=context.tenant_id,
@@ -444,7 +454,10 @@ def plan_observed_object_index_completed_live_update(
         project_external_id=context.project_external_id,
         project_name=context.project_name,
         workflow_id=None,
-        cache_project_ids=tuple(cache_project_ids),
+        cache_project_ids=project_index_completion_cache_project_ids(
+            context.project_external_id,
+            context.project_path,
+        ),
     )
 
 

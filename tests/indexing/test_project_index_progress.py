@@ -263,6 +263,7 @@ def test_project_index_completion_live_update_plan_uses_workflow_completion_fact
         project_external_id="external-project",
         project_name="Project Name",
         workflow_id=workflow_id,
+        cache_project_ids=("external-project", "project-name"),
     )
     assert plan_project_index_completed_live_update(None) is None
 
