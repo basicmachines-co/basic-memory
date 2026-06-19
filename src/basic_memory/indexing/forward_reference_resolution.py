@@ -63,6 +63,55 @@ class ForwardReferenceResolutionPlan:
         return bool(self.updates)
 
 
+class ForwardReferenceResolutionRuntime(Protocol):
+    """Capability that resolves link text and applies exact relation updates."""
+
+    async def resolve_forward_reference_link_texts(
+        self,
+        link_texts: Sequence[LinkText],
+    ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
+        """Resolve link texts to exact target entity ids."""
+
+    async def apply_forward_reference_updates(
+        self,
+        updates: Sequence[ForwardReferenceUpdate],
+    ) -> None:
+        """Persist exact relation target updates."""
+
+
+@dataclass(frozen=True, slots=True)
+class ForwardReferenceResolutionRun:
+    """Applied forward-reference updates and follow-up search refresh targets."""
+
+    plan: ForwardReferenceResolutionPlan
+    resolved_link_text_count: int
+
+    @property
+    def unresolved_before(self) -> int:
+        """Return how many unresolved rows were considered."""
+        return self.plan.unresolved_before
+
+    @property
+    def link_texts(self) -> tuple[LinkText, ...]:
+        """Return unique link texts considered by the run."""
+        return self.plan.link_texts
+
+    @property
+    def resolved_count(self) -> int:
+        """Return how many relation rows were updated."""
+        return self.plan.resolved_count
+
+    @property
+    def remaining_count(self) -> int:
+        """Return how many initially unresolved rows remain unresolved."""
+        return self.plan.remaining_count
+
+    @property
+    def entity_ids_to_refresh(self) -> frozenset[ForwardReferenceEntityId]:
+        """Return exact target entity ids whose search rows should be refreshed."""
+        return self.plan.entity_ids_to_refresh
+
+
 def collect_forward_reference_link_texts(
     unresolved_relations: Sequence[UnresolvedForwardReference],
 ) -> tuple[LinkText, ...]:
@@ -106,4 +155,25 @@ def plan_forward_reference_resolution(
         link_texts=collect_forward_reference_link_texts(unresolved_relations),
         updates=tuple(updates),
         entity_ids_to_refresh=frozenset(entity_ids_to_refresh),
+    )
+
+
+async def run_forward_reference_resolution(
+    runtime: ForwardReferenceResolutionRuntime,
+    unresolved_relations: Sequence[UnresolvedForwardReference],
+) -> ForwardReferenceResolutionRun:
+    """Resolve link texts, apply exact relation updates, and return refresh targets."""
+    link_texts = collect_forward_reference_link_texts(unresolved_relations)
+    resolved_targets = (
+        await runtime.resolve_forward_reference_link_texts(link_texts) if link_texts else {}
+    )
+    plan = plan_forward_reference_resolution(unresolved_relations, resolved_targets)
+    if plan.has_updates:
+        await runtime.apply_forward_reference_updates(plan.updates)
+
+    return ForwardReferenceResolutionRun(
+        plan=plan,
+        resolved_link_text_count=sum(
+            1 for link_text in link_texts if resolved_targets.get(link_text) is not None
+        ),
     )
