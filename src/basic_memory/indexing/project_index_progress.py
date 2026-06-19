@@ -69,6 +69,16 @@ class ProjectIndexBatchCounterUpdate:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexFileOutcomeSummary:
+    """Per-batch summary counts for child file outcomes."""
+
+    total_files: int
+    processed_files: int
+    missing_files: int
+    failed_files: int
+
+
 class ProjectIndexCountersState(CheckpointModel):
     """JSON payload for project-index aggregate counters."""
 
@@ -186,6 +196,22 @@ def apply_project_index_file_outcomes(
         succeeded=succeeded,
         missing=missing,
         failed=failed,
+    )
+
+
+def summarize_project_index_file_outcomes(
+    outcomes: Sequence[ProjectIndexFileOutcome],
+) -> ProjectIndexFileOutcomeSummary:
+    """Summarize child file outcomes for batch-level job results."""
+    counters = apply_project_index_file_outcomes(
+        initial_project_index_counters(total_files=len(outcomes)),
+        outcomes,
+    )
+    return ProjectIndexFileOutcomeSummary(
+        total_files=counters.total,
+        processed_files=counters.succeeded,
+        missing_files=counters.missing,
+        failed_files=counters.failed,
     )
 
 

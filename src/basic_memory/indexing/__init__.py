@@ -87,6 +87,7 @@ from basic_memory.indexing.project_index_progress import (
     ProjectIndexCountersState,
     ProjectIndexDiscoveryState,
     ProjectIndexFileOutcome,
+    ProjectIndexFileOutcomeSummary,
     ProjectIndexMissingBatches,
     ProjectIndexWorkflowProgressState,
     apply_project_index_batch_outcomes,
@@ -100,6 +101,7 @@ from basic_memory.indexing.project_index_progress import (
     project_index_progress_text,
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
+    summarize_project_index_file_outcomes,
 )
 from basic_memory.indexing.relation_resolution import (
     AffectedEntityIds,
@@ -163,6 +165,7 @@ __all__ = [
     "ProjectIndexCountersState",
     "ProjectIndexDiscoveryState",
     "ProjectIndexFileOutcome",
+    "ProjectIndexFileOutcomeSummary",
     "ProjectIndexMissingBatches",
     "ProjectIndexWorkflowProgressState",
     "RelationResolutionPass",
@@ -202,4 +205,5 @@ __all__ = [
     "resolve_relations_until_stable",
     "resolve_link_texts",
     "should_emit_project_index_progress_event",
+    "summarize_project_index_file_outcomes",
 ]

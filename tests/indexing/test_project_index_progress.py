@@ -6,6 +6,7 @@ from basic_memory.indexing.project_index_progress import (
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
     ProjectIndexFileOutcome,
+    ProjectIndexFileOutcomeSummary,
     apply_project_index_batch_outcomes,
     apply_project_index_file_outcome,
     apply_project_index_file_outcomes,
@@ -16,6 +17,7 @@ from basic_memory.indexing.project_index_progress import (
     project_index_progress_text,
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
+    summarize_project_index_file_outcomes,
 )
 
 
@@ -77,6 +79,24 @@ def test_project_index_file_outcomes_update_counters() -> None:
         counters,
         ProjectIndexFileOutcome.current,
     ) == ProjectIndexCounters(total=4, processed=1, succeeded=1, missing=0, failed=0)
+
+
+def test_project_index_file_outcomes_summarize_batch_result_counts() -> None:
+    summary = summarize_project_index_file_outcomes(
+        [
+            ProjectIndexFileOutcome.processed,
+            ProjectIndexFileOutcome.current,
+            ProjectIndexFileOutcome.missing,
+            ProjectIndexFileOutcome.failed,
+        ],
+    )
+
+    assert summary == ProjectIndexFileOutcomeSummary(
+        total_files=4,
+        processed_files=2,
+        missing_files=1,
+        failed_files=1,
+    )
 
 
 def test_project_index_batch_outcomes_record_once_and_report_completion_gate() -> None:
