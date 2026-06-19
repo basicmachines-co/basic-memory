@@ -7,6 +7,7 @@ import pytest
 from basic_memory.runtime import (
     StorageProjectPrefixMatch,
     resolve_storage_project_prefix,
+    storage_project_prefix_from_project_path,
 )
 
 
@@ -16,6 +17,12 @@ class Project:
     name: str
     path: str
     is_active: bool = True
+
+
+def test_storage_project_prefix_from_project_path_strips_legacy_mount_prefix() -> None:
+    assert storage_project_prefix_from_project_path("/app/data/basic-memory") == "basic-memory"
+    assert storage_project_prefix_from_project_path("/basic-memory") == "basic-memory"
+    assert storage_project_prefix_from_project_path("basic-memory") == "basic-memory"
 
 
 def test_storage_project_prefix_resolution_prefers_exact_active_path() -> None:

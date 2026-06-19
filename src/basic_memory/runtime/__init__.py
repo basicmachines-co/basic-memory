@@ -194,6 +194,7 @@ from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixResolution,
     StorageProjectSource,
     resolve_storage_project_prefix,
+    storage_project_prefix_from_project_path,
 )
 
 __all__ = [
@@ -380,5 +381,6 @@ __all__ = [
     "snapshot_restore_folder_prefix",
     "source_from_object_metadata",
     "storage_object_checksum_for_index_match",
+    "storage_project_prefix_from_project_path",
     "truncate_runtime_workflow_text",
 ]

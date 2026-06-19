@@ -50,6 +50,14 @@ class StorageProjectPrefixResolution[ProjectT: StorageProjectSource]:
         return self.project is not None
 
 
+def storage_project_prefix_from_project_path(project_path: ProjectPath) -> ProjectPath:
+    """Normalize a Basic Memory project path into a storage object-key prefix."""
+    normalized_path = project_path
+    if normalized_path.startswith("/app/data/"):
+        normalized_path = normalized_path.removeprefix("/app/data/")
+    return normalized_path.lstrip("/")
+
+
 def resolve_storage_project_prefix[ProjectT: StorageProjectSource](
     bucket_prefix: ProjectPath,
     *,
