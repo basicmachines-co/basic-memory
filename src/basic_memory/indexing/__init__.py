@@ -165,6 +165,8 @@ from basic_memory.indexing.project_index_progress import (
     summarize_project_index_file_outcomes,
 )
 from basic_memory.indexing.project_index_workflow import (
+    ProjectIndexBatchJobActivity,
+    ProjectIndexBatchJobActivityUpdate,
     ProjectIndexBatchJobPlan,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
@@ -173,6 +175,7 @@ from basic_memory.indexing.project_index_workflow import (
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowSource,
     ProjectIndexWorkflowStart,
+    build_project_index_batch_activity_update,
     build_project_index_batch_job_plan,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
@@ -274,6 +277,8 @@ __all__ = [
     "OrphanSearchIndex",
     "PROJECT_INDEX_PROGRESS_EVENT_INTERVAL",
     "MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE",
+    "ProjectIndexBatchJobActivity",
+    "ProjectIndexBatchJobActivityUpdate",
     "ProjectIndexBatchJobPlan",
     "ProjectIndexBatchCounterUpdate",
     "ProjectIndexCompletion",
@@ -317,6 +322,7 @@ __all__ = [
     "build_index_file_batch_job_result",
     "build_index_input_files",
     "build_index_batches",
+    "build_project_index_batch_activity_update",
     "build_project_index_batch_job_plan",
     "build_project_index_workflow_completion_update",
     "build_project_index_workflow_progress_update",

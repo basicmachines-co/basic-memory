@@ -6,12 +6,15 @@ from uuid import UUID
 from basic_memory.indexing import (
     ProjectIndexCounters,
     ProjectIndexBatchJobPlan,
+    ProjectIndexBatchJobActivity,
+    ProjectIndexBatchJobActivityUpdate,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowQueued,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStart,
+    build_project_index_batch_activity_update,
     build_project_index_batch_job_plan,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
@@ -181,6 +184,43 @@ def test_project_index_batch_job_plan_builds_runtime_batch_requests() -> None:
                 index_embeddings=False,
             ),
         ),
+    )
+
+
+def test_project_index_batch_activity_update_builds_last_activity_metadata() -> None:
+    activity = ProjectIndexBatchJobActivity(
+        batch_indexes=(1, 3),
+        queued_count=1,
+        picked_fresh_count=1,
+        picked_stale_count=0,
+    )
+
+    update = build_project_index_batch_activity_update(
+        metadata={
+            "phase": "indexing",
+            "progress": "Indexed 2/4 files, 2 succeeded",
+            "payload": {"project_id": 42},
+        },
+        activity=activity,
+        observed_at="2026-06-19T10:20:30+00:00",
+    )
+
+    assert activity.has_unfinished_jobs is True
+    assert ProjectIndexBatchJobActivity.empty().has_unfinished_jobs is False
+    assert update == ProjectIndexBatchJobActivityUpdate(
+        activity=activity,
+        metadata={
+            "phase": "indexing",
+            "progress": "Indexed 2/4 files, 2 succeeded",
+            "payload": {"project_id": 42},
+            "last_batch_job_activity": {
+                "active_batches": [1, 3],
+                "queued_count": 1,
+                "picked_fresh_count": 1,
+                "picked_stale_count": 0,
+                "observed_at": "2026-06-19T10:20:30+00:00",
+            },
+        },
     )
 
 

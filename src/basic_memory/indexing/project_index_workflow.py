@@ -155,6 +155,50 @@ class ProjectIndexBatchJobPlan:
     batch_requests: tuple[RuntimeIndexFileBatchJobRequest, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexBatchJobActivity:
+    """Unfinished project-index child batch jobs observed by a runtime adapter."""
+
+    batch_indexes: tuple[int, ...]
+    queued_count: int
+    picked_fresh_count: int
+    picked_stale_count: int
+
+    @classmethod
+    def empty(cls) -> Self:
+        """Return an activity snapshot with no unfinished child jobs."""
+        return cls(
+            batch_indexes=(),
+            queued_count=0,
+            picked_fresh_count=0,
+            picked_stale_count=0,
+        )
+
+    @property
+    def has_unfinished_jobs(self) -> bool:
+        return bool(self.batch_indexes)
+
+    def workflow_metadata(self, *, observed_at: str) -> dict[str, object]:
+        """Serialize to the existing stale-workflow activity metadata shape."""
+        if not observed_at:
+            raise ValueError("observed_at is required")
+        return {
+            "active_batches": list(self.batch_indexes),
+            "queued_count": self.queued_count,
+            "picked_fresh_count": self.picked_fresh_count,
+            "picked_stale_count": self.picked_stale_count,
+            "observed_at": observed_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexBatchJobActivityUpdate:
+    """Workflow metadata after observing unfinished child batch activity."""
+
+    activity: ProjectIndexBatchJobActivity
+    metadata: dict[str, object]
+
+
 def project_index_workflow_logical_key(
     *,
     tenant_id: TenantId,
@@ -243,6 +287,23 @@ def build_project_index_batch_job_plan(
         total_files=len(observed_files),
         batch_count=batch_count,
         batch_requests=batch_requests,
+    )
+
+
+def build_project_index_batch_activity_update(
+    *,
+    metadata: Mapping[str, object],
+    activity: ProjectIndexBatchJobActivity,
+    observed_at: str,
+) -> ProjectIndexBatchJobActivityUpdate:
+    """Build metadata that records unfinished child batch job activity."""
+    updated_metadata = dict(metadata)
+    updated_metadata["last_batch_job_activity"] = activity.workflow_metadata(
+        observed_at=observed_at
+    )
+    return ProjectIndexBatchJobActivityUpdate(
+        activity=activity,
+        metadata=updated_metadata,
     )
 
 
