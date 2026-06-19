@@ -2406,12 +2406,17 @@ def snapshot_restore_folder_prefix(prefix: StorageKey) -> StorageKey:
     return prefix if prefix.endswith("/") else f"{prefix}/"
 
 
-def should_include_snapshot_archive_path(archive_path: StorageKey) -> bool:
-    """Return whether a snapshot object key should be included in an archive download."""
+def should_include_runtime_archive_path(archive_path: StorageKey) -> bool:
+    """Return whether a runtime object key should be included in an archive download."""
     parts = PurePosixPath(archive_path).parts
     if any(part.startswith(".") for part in parts):
         return False
     return "__pycache__" not in parts
+
+
+def should_include_snapshot_archive_path(archive_path: StorageKey) -> bool:
+    """Return whether a snapshot object key should be included in an archive download."""
+    return should_include_runtime_archive_path(archive_path)
 
 
 def plan_snapshot_name(

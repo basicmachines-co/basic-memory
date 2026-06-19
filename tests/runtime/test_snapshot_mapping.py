@@ -7,6 +7,7 @@ from basic_memory.runtime import (
     SnapshotObjectReference,
     SnapshotReference,
     plan_snapshot_name,
+    should_include_runtime_archive_path,
     should_include_snapshot_archive_path,
     snapshot_browse_project_names,
     snapshot_key_project_name,
@@ -144,10 +145,15 @@ def test_snapshot_restore_folder_prefix_normalizes_folder_prefix() -> None:
     assert snapshot_restore_folder_prefix("project/notes/") == "project/notes/"
 
 
-def test_should_include_snapshot_archive_path_filters_internal_paths() -> None:
+def test_should_include_runtime_archive_path_filters_internal_paths() -> None:
+    assert should_include_runtime_archive_path("project/notes/visible.md") is True
+    assert should_include_runtime_archive_path("project/.hidden/secret.md") is False
+    assert should_include_runtime_archive_path("project/__pycache__/module.pyc") is False
+
+
+def test_should_include_snapshot_archive_path_uses_runtime_archive_filter() -> None:
     assert should_include_snapshot_archive_path("project/notes/visible.md") is True
     assert should_include_snapshot_archive_path("project/.hidden/secret.md") is False
-    assert should_include_snapshot_archive_path("project/__pycache__/module.pyc") is False
 
 
 def test_plan_snapshot_name_formats_manual_snapshot_name() -> None:
