@@ -203,6 +203,25 @@ class CurrentMaterializedNotePlan:
     checksum_matches_entity: bool | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class IndexedFileLiveUpdatePlan:
+    """Trusted live-update metadata for one freshly indexed file."""
+
+    object_checksum_source: RuntimeStorageObjectChecksumSource
+    object_checksum: RuntimeFileChecksum
+    indexed_checksum: RuntimeFileChecksum
+    checksum_matches_indexed_file: bool
+    metadata_actor_user_profile_id: str | None = None
+    metadata_actor_kind: str | None = None
+    metadata_actor_name: str | None = None
+    metadata_source: RuntimeNoteChangeSource | None = None
+    actor_user_profile_id: str | None = None
+    actor_kind: str | None = None
+    actor_name: str | None = None
+    live_update_source: RuntimeNoteChangeSource | None = None
+    operation: FileIndexOperation | None = None
+
+
 def _required_current_materialized_note_text(
     value: object,
     *,
@@ -279,6 +298,49 @@ def plan_current_materialized_note_result(
         entity_checksum=plan.entity_checksum,
         source=plan.source,
         checksum_matches_entity=True,
+    )
+
+
+def plan_indexed_file_live_update_metadata(
+    *,
+    indexed_file: FileIndexResult,
+    object_checksum: RuntimeFileChecksum,
+    object_metadata: RuntimeNoteObjectMetadataMap | None,
+) -> IndexedFileLiveUpdatePlan:
+    """Plan trusted actor/source metadata for a freshly indexed file."""
+    selected_checksum = storage_object_checksum_for_index_match(
+        object_checksum=object_checksum,
+        object_metadata=object_metadata,
+    )
+    provenance = RuntimeNoteObjectProvenance.from_object_metadata(object_metadata)
+    checksum_matches_indexed_file = selected_checksum.checksum == indexed_file.checksum
+    plan = IndexedFileLiveUpdatePlan(
+        object_checksum_source=selected_checksum.source,
+        object_checksum=selected_checksum.checksum,
+        indexed_checksum=indexed_file.checksum,
+        checksum_matches_indexed_file=checksum_matches_indexed_file,
+        metadata_actor_user_profile_id=provenance.actor_user_profile_id,
+        metadata_actor_kind=provenance.actor_kind,
+        metadata_actor_name=provenance.actor_name,
+        metadata_source=provenance.source,
+    )
+    if not checksum_matches_indexed_file:
+        return plan
+
+    return IndexedFileLiveUpdatePlan(
+        object_checksum_source=plan.object_checksum_source,
+        object_checksum=plan.object_checksum,
+        indexed_checksum=plan.indexed_checksum,
+        checksum_matches_indexed_file=True,
+        metadata_actor_user_profile_id=plan.metadata_actor_user_profile_id,
+        metadata_actor_kind=plan.metadata_actor_kind,
+        metadata_actor_name=plan.metadata_actor_name,
+        metadata_source=plan.metadata_source,
+        actor_user_profile_id=provenance.actor_user_profile_id,
+        actor_kind=provenance.actor_kind,
+        actor_name=provenance.actor_name,
+        live_update_source=provenance.source,
+        operation=file_index_operation_from_note_object_metadata(object_metadata),
     )
 
 

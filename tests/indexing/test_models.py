@@ -8,9 +8,11 @@ from basic_memory.indexing import (
     EmbeddingIndexTarget,
     FileIndexOperation,
     FileIndexResult,
+    IndexedFileLiveUpdatePlan,
     IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
+    plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
 )
 from basic_memory.runtime import (
@@ -186,4 +188,86 @@ def test_plan_current_materialized_note_result_requests_entity_when_metadata_is_
         ),
         requires_entity=True,
         source="mcp",
+    )
+
+
+def test_plan_indexed_file_live_update_metadata_preserves_matching_metadata():
+    indexed_file = FileIndexResult(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        operation=FileIndexOperation.updated,
+    )
+
+    plan = plan_indexed_file_live_update_metadata(
+        indexed_file=indexed_file,
+        object_checksum="storage-native-etag",
+        object_metadata={
+            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-1",
+            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: ("33333333-3333-3333-3333-333333333333"),
+            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
+            NOTE_OBJECT_SOURCE_METADATA: "mcp",
+            NOTE_OBJECT_DB_VERSION_METADATA: "2",
+        },
+    )
+
+    assert plan == IndexedFileLiveUpdatePlan(
+        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
+        object_checksum="checksum-1",
+        indexed_checksum="checksum-1",
+        checksum_matches_indexed_file=True,
+        metadata_actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        metadata_actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        metadata_actor_name="Claude Code",
+        metadata_source="mcp",
+        actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+        live_update_source="mcp",
+        operation=FileIndexOperation.updated,
+    )
+
+
+def test_plan_indexed_file_live_update_metadata_omits_mismatched_metadata():
+    indexed_file = FileIndexResult(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        operation=FileIndexOperation.updated,
+    )
+
+    plan = plan_indexed_file_live_update_metadata(
+        indexed_file=indexed_file,
+        object_checksum="storage-native-etag",
+        object_metadata={
+            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-2",
+            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: ("33333333-3333-3333-3333-333333333333"),
+            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
+            NOTE_OBJECT_SOURCE_METADATA: "mcp",
+            NOTE_OBJECT_DB_VERSION_METADATA: "2",
+        },
+    )
+
+    assert plan == IndexedFileLiveUpdatePlan(
+        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
+        object_checksum="checksum-2",
+        indexed_checksum="checksum-1",
+        checksum_matches_indexed_file=False,
+        metadata_actor_user_profile_id="33333333-3333-3333-3333-333333333333",
+        metadata_actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        metadata_actor_name="Claude Code",
+        metadata_source="mcp",
+        actor_user_profile_id=None,
+        actor_kind=None,
+        actor_name=None,
+        live_update_source=None,
+        operation=None,
     )

@@ -63,6 +63,7 @@ from basic_memory.indexing.models import (
     CurrentMaterializedNotePlan,
     FileIndexOperation,
     FileIndexResult,
+    IndexedFileLiveUpdatePlan,
     IndexedEntity,
     IndexFileBatchJobResult,
     IndexFileJobResult,
@@ -77,6 +78,7 @@ from basic_memory.indexing.models import (
     IndexProgress,
     SyncedMarkdownFile,
     file_index_operation_from_note_object_metadata,
+    plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
 )
 from basic_memory.indexing.note_content_reconciliation import (
@@ -186,6 +188,7 @@ __all__ = [
     "FileIndexResult",
     "FileIndexTarget",
     "FileMoveCandidate",
+    "IndexedFileLiveUpdatePlan",
     "IndexedEntity",
     "IndexFileBatchJobResult",
     "IndexFileJobResult",
@@ -268,6 +271,7 @@ __all__ = [
     "plan_file_changes",
     "plan_moved_files",
     "plan_current_materialized_note_result",
+    "plan_indexed_file_live_update_metadata",
     "plan_note_content_materialization_publish",
     "plan_note_content_materialization_status",
     "plan_note_content_reconciliation",
