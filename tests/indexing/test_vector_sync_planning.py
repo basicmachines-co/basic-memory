@@ -1,10 +1,14 @@
 """Tests for portable vector-sync plan construction."""
 
 from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.vector_sync_planning import (
+    RepositoryVectorSyncEntitySource,
     VectorSyncBatchProgressCallback,
     plan_vector_sync_progress,
     run_vector_sync,
@@ -55,6 +59,108 @@ class RecordingLogger:
 
     def error(self, message: str, **kwargs: object) -> None:
         self.errors.append((message, kwargs))
+
+
+@dataclass(slots=True)
+class FakeRowResult:
+    """Minimal SQLAlchemy row result for repository entity-source tests."""
+
+    rows: list[tuple[int]]
+
+    def all(self) -> list[tuple[int]]:
+        return self.rows
+
+
+@dataclass(slots=True)
+class FakeEntitySourceSession:
+    """Record repository SQL calls and return queued row results."""
+
+    results: list[FakeRowResult]
+    calls: list[tuple[str, dict[str, int]]] = field(default_factory=list)
+
+    async def execute(self, statement: object, params: dict[str, int]) -> FakeRowResult:
+        self.calls.append((str(statement), params))
+        return self.results.pop(0)
+
+
+@dataclass(slots=True)
+class FakeEntitySourceSessionContext:
+    """Async context manager returned by the fake session maker."""
+
+    session: FakeEntitySourceSession
+
+    async def __aenter__(self) -> FakeEntitySourceSession:
+        return self.session
+
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        return None
+
+
+@dataclass(slots=True)
+class FakeEntitySourceSessionMaker:
+    """Callable session maker for repository entity-source tests."""
+
+    session: FakeEntitySourceSession
+
+    def __call__(self) -> FakeEntitySourceSessionContext:
+        return FakeEntitySourceSessionContext(self.session)
+
+
+@pytest.mark.asyncio
+async def test_repository_vector_sync_entity_source_lists_project_entities() -> None:
+    session = FakeEntitySourceSession(results=[FakeRowResult([(3,), (5,)])])
+    source = RepositoryVectorSyncEntitySource(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeEntitySourceSessionMaker(session)),
+        project_id=7,
+    )
+
+    assert await source.list_project_entity_ids() == [3, 5]
+    assert session.calls[0][1] == {"project_id": 7}
+    assert "WHERE project_id = :project_id" in session.calls[0][0]
+    assert "ORDER BY id" in session.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_repository_vector_sync_entity_source_lists_markdown_entities() -> None:
+    session = FakeEntitySourceSession(results=[FakeRowResult([(11,), (13,)])])
+    source = RepositoryVectorSyncEntitySource(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeEntitySourceSessionMaker(session)),
+        project_id=7,
+    )
+
+    assert await source.list_markdown_entity_ids() == [11, 13]
+    assert session.calls[0][1] == {"project_id": 7}
+    assert "content_type = 'text/markdown'" in session.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_repository_vector_sync_entity_source_filters_markdown_entities() -> None:
+    session = FakeEntitySourceSession(results=[FakeRowResult([(10,), (30,)])])
+    source = RepositoryVectorSyncEntitySource(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeEntitySourceSessionMaker(session)),
+        project_id=7,
+    )
+
+    assert await source.filter_markdown_entity_ids({30, 10, 20}) == {10, 30}
+    assert session.calls[0][1] == {
+        "project_id": 7,
+        "entity_id_0": 10,
+        "entity_id_1": 20,
+        "entity_id_2": 30,
+    }
+    assert "id IN (:entity_id_0, :entity_id_1, :entity_id_2)" in session.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_repository_vector_sync_entity_source_skips_empty_filter() -> None:
+    session = FakeEntitySourceSession(results=[])
+    source = RepositoryVectorSyncEntitySource(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeEntitySourceSessionMaker(session)),
+        project_id=7,
+    )
+
+    assert await source.filter_markdown_entity_ids(set()) == set()
+    assert session.calls == []
 
 
 def test_vector_sync_plan_starts_new_progress_for_non_resume_phase() -> None:

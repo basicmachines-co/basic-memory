@@ -2,7 +2,11 @@
 
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import Protocol
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.progress import (
     VectorSyncBatchSummary,
@@ -10,6 +14,7 @@ from basic_memory.indexing.progress import (
     apply_vector_sync_batch_result,
     initialize_vector_sync_progress,
 )
+from basic_memory.runtime import ProjectId
 
 type CheckpointPhase = str | None
 type EntityId = int
@@ -40,6 +45,79 @@ class VectorSyncLogger(Protocol):
 
     def error(self, message: str, **kwargs: object) -> None:
         """Record vector-sync failures."""
+
+
+class VectorSyncEntitySource(Protocol):
+    """Capability that selects project entities for vector sync work."""
+
+    async def list_project_entity_ids(self) -> list[EntityId]: ...
+
+    async def list_markdown_entity_ids(self) -> list[EntityId]: ...
+
+    async def filter_markdown_entity_ids(self, entity_ids: set[EntityId]) -> set[EntityId]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryVectorSyncEntitySource:
+    """Load vector-sync entity candidates from the Basic Memory entity table."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    project_id: ProjectId
+
+    async def list_project_entity_ids(self) -> list[EntityId]:
+        """Return all entity ids for this project in stable order."""
+        async with self.session_maker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT id
+                    FROM entity
+                    WHERE project_id = :project_id
+                    ORDER BY id
+                """),
+                {"project_id": self.project_id},
+            )
+            return [int(row[0]) for row in result.all()]
+
+    async def list_markdown_entity_ids(self) -> list[EntityId]:
+        """Return markdown entity ids for this project in stable order."""
+        async with self.session_maker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT id
+                    FROM entity
+                    WHERE project_id = :project_id
+                      AND content_type = 'text/markdown'
+                    ORDER BY id
+                """),
+                {"project_id": self.project_id},
+            )
+            return [int(row[0]) for row in result.all()]
+
+    async def filter_markdown_entity_ids(self, entity_ids: set[EntityId]) -> set[EntityId]:
+        """Keep only markdown entity ids from a planned vector-sync candidate set."""
+        if not entity_ids:
+            return set()
+
+        params: dict[str, int] = {"project_id": self.project_id}
+        id_placeholders: list[str] = []
+        for index, entity_id in enumerate(sorted(entity_ids)):
+            key = f"entity_id_{index}"
+            params[key] = entity_id
+            id_placeholders.append(f":{key}")
+
+        async with self.session_maker() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT id
+                    FROM entity
+                    WHERE project_id = :project_id
+                      AND content_type = 'text/markdown'
+                      AND id IN ({", ".join(id_placeholders)})
+                    ORDER BY id
+                """),
+                params,
+            )
+            return {int(row[0]) for row in result.all()}
 
 
 def plan_vector_sync_progress(
