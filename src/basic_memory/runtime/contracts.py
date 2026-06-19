@@ -2141,6 +2141,22 @@ class SnapshotProvider(Protocol):
     ) -> None: ...
 
 
+class SnapshotObjectSource(Protocol):
+    """Storage-object shape needed to build portable snapshot listings."""
+
+    @property
+    def key(self) -> StorageKey: ...
+
+    @property
+    def size(self) -> int: ...
+
+    @property
+    def last_modified(self) -> datetime: ...
+
+    @property
+    def etag(self) -> StorageEtag: ...
+
+
 type SnapshotProviderFactory[SnapshotProviderInputT] = Callable[
     [SnapshotProviderInputT], SnapshotProvider
 ]
@@ -2301,3 +2317,13 @@ class SnapshotObjectReference:
     size: int
     last_modified: datetime
     etag: StorageEtag
+
+    @classmethod
+    def from_source(cls, source: SnapshotObjectSource) -> Self:
+        """Build a portable snapshot object reference from storage-provider metadata."""
+        return cls(
+            key=source.key,
+            size=source.size,
+            last_modified=source.last_modified,
+            etag=source.etag,
+        )
