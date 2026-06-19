@@ -8,6 +8,7 @@ from basic_memory.runtime import (
     SnapshotBrowseFile,
     SnapshotObjectReference,
     SnapshotReference,
+    SnapshotRestorePlan,
     plan_snapshot_name,
     should_include_runtime_archive_path,
     should_include_snapshot_archive_path,
@@ -137,6 +138,49 @@ def test_snapshot_archive_request_plans_project_filtered_download() -> None:
 
     assert request.listing_prefix == "project/"
     assert request.filename == "snapshot-project-manual-backup.zip"
+
+
+def test_snapshot_restore_plan_for_file_path_tracks_project_folder() -> None:
+    assert SnapshotRestorePlan.from_file_path("project/notes/a.md") == SnapshotRestorePlan(
+        object_keys=("project/notes/a.md",),
+        project_names=("project",),
+    )
+    assert SnapshotRestorePlan.from_file_path("root.md") == SnapshotRestorePlan(
+        object_keys=("root.md",),
+        project_names=(),
+    )
+
+
+def test_snapshot_restore_plan_from_objects_preserves_keys_and_sorts_projects() -> None:
+    modified_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+
+    plan = SnapshotRestorePlan.from_objects(
+        (
+            _SnapshotObjectSource(
+                key="z-project/notes/a.md",
+                size=1,
+                last_modified=modified_at,
+                etag="etag-a",
+            ),
+            _SnapshotObjectSource(
+                key="a-project/notes/b.md",
+                size=2,
+                last_modified=modified_at,
+                etag="etag-b",
+            ),
+            _SnapshotObjectSource(
+                key="root.md",
+                size=3,
+                last_modified=modified_at,
+                etag="etag-root",
+            ),
+        )
+    )
+
+    assert plan == SnapshotRestorePlan(
+        object_keys=("z-project/notes/a.md", "a-project/notes/b.md", "root.md"),
+        project_names=("a-project", "z-project"),
+    )
 
 
 def test_snapshot_browse_project_names_returns_sorted_unique_top_level_folders() -> None:

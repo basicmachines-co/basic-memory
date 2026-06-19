@@ -2604,6 +2604,32 @@ class SnapshotArchiveRequest:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SnapshotRestorePlan:
+    """Selected snapshot object keys and affected project folders for restore."""
+
+    object_keys: tuple[StorageKey, ...]
+    project_names: tuple[ProjectName, ...]
+
+    @classmethod
+    def from_file_path(cls, path: StorageKey) -> Self:
+        """Build a restore plan for one explicit snapshot object key."""
+        project_name = snapshot_key_project_name(path)
+        return cls(
+            object_keys=(path,),
+            project_names=(project_name,) if project_name is not None else (),
+        )
+
+    @classmethod
+    def from_objects(cls, objects: Iterable[SnapshotObjectSource]) -> Self:
+        """Build a restore plan from a provider object listing."""
+        object_keys = tuple(obj.key for obj in objects)
+        return cls(
+            object_keys=object_keys,
+            project_names=snapshot_key_project_names(object_keys),
+        )
+
+
 def snapshot_browse_project_names(
     files: Iterable[SnapshotBrowseFile],
 ) -> tuple[ProjectName, ...]:
