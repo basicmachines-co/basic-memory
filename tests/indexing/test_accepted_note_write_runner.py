@@ -20,6 +20,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     apply_accepted_prepared_entity_fields,
     create_accepted_pending_entity,
     delete_accepted_note_entity,
+    persist_accepted_note_write,
     prepare_accepted_note_create,
     prepare_accepted_note_edit,
     prepare_accepted_note_move,
@@ -603,6 +604,60 @@ async def test_refresh_accepted_note_search_index_uses_repository_protocol() -> 
     row = repository.calls[0]
     assert row.entity_id == 42
     assert row.project_id == 7
+
+
+@pytest.mark.asyncio
+async def test_persist_accepted_note_write_plans_content_and_refreshes_search() -> None:
+    session = cast(AsyncSession, object())
+    entity = _entity()
+    entity.file_path = "notes/new.md"
+    updated_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+    current_note_content = _note_content()
+    current_note_content.file_path = "notes/old.md"
+    current_note_content.db_version = 4
+    current_note_content.file_version = 3
+    current_note_content.file_checksum = "old-file-checksum"
+    persisted_note_content = _note_content()
+    content_repository = _NoteContentRepository(persisted_note_content)
+    search_repository = _SearchRepository()
+
+    result = await persist_accepted_note_write(
+        session,
+        entity=entity,
+        markdown_content="# New\n",
+        search_content="New body",
+        db_checksum="new-db-checksum",
+        last_source="api",
+        updated_at=updated_at,
+        current_note_content=current_note_content,
+        existing_file_path="notes/old.md",
+        accepted_file_path="notes/new.md",
+        content_repository_factory=lambda project_id: content_repository,
+        search_repository_factory=lambda project_id: search_repository,
+    )
+
+    assert result.note_content is persisted_note_content
+    assert result.previous_file_delete is not None
+    assert result.previous_file_delete.project_id == entity.project_id
+    assert result.previous_file_delete.entity_id == entity.id
+    assert result.previous_file_delete.file_path == "notes/old.md"
+    assert result.previous_file_delete.file_checksum == "old-file-checksum"
+    assert content_repository.calls == [
+        (
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=42,
+                markdown_content="# New\n",
+                db_version=5,
+                db_checksum="new-db-checksum",
+                last_source="api",
+                updated_at=updated_at,
+            ),
+        )
+    ]
+    assert len(search_repository.calls) == 1
+    assert search_repository.calls[0].entity_id == entity.id
+    assert search_repository.calls[0].content_snippet == "New body"
 
 
 @pytest.mark.asyncio

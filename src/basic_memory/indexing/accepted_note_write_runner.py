@@ -26,11 +26,14 @@ from basic_memory.repository.entity_repository import (
 )
 from basic_memory.runtime import (
     ProjectId,
+    RuntimeAcceptedNoteContentWriteSource,
     RuntimeEntityId,
     RuntimeFilePath,
     RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
+    RuntimePendingNoteFileDelete,
+    plan_accepted_note_content_write,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
 
@@ -262,6 +265,14 @@ class AcceptedPreparedNoteMove:
     search_content: str
     permalink: str | None
     db_checksum: RuntimeNoteContentChecksum
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedPersistedNoteWrite:
+    """Accepted note_content row plus any cleanup for a superseded materialized file."""
+
+    note_content: NoteContent
+    previous_file_delete: RuntimePendingNoteFileDelete | None = None
 
 
 def accepted_entity_repository_for_project(
@@ -570,6 +581,55 @@ async def refresh_accepted_note_search_index(
     await repository.refresh_entity(
         session,
         accepted_note_search_row_from_entity(entity, search_content=search_content),
+    )
+
+
+async def persist_accepted_note_write(
+    session: AsyncSession,
+    *,
+    entity: AcceptedNoteSearchEntitySource,
+    markdown_content: str,
+    search_content: str,
+    db_checksum: RuntimeNoteContentChecksum,
+    last_source: RuntimeNoteChangeSource | None,
+    updated_at: datetime,
+    current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
+    existing_file_path: RuntimeFilePath | None = None,
+    accepted_file_path: RuntimeFilePath | None = None,
+    content_repository_factory: AcceptedNoteContentRepositoryFactory = (
+        accepted_note_content_repository_for_project
+    ),
+    search_repository_factory: AcceptedNoteSearchRepositoryFactory = (
+        accepted_note_search_repository_for_project
+    ),
+) -> AcceptedPersistedNoteWrite:
+    """Accept markdown into note_content and refresh search inside one transaction."""
+    content_write = plan_accepted_note_content_write(
+        project_id=entity.project_id,
+        entity_id=entity.id,
+        existing_file_path=existing_file_path,
+        accepted_file_path=accepted_file_path or entity.file_path,
+        current_note_content=current_note_content,
+    )
+    note_content = await accept_note_content_write(
+        session,
+        entity=entity,
+        markdown_content=markdown_content,
+        db_version=content_write.db_version,
+        db_checksum=db_checksum,
+        last_source=last_source,
+        updated_at=updated_at,
+        repository_factory=content_repository_factory,
+    )
+    await refresh_accepted_note_search_index(
+        session,
+        entity=entity,
+        search_content=search_content,
+        repository_factory=search_repository_factory,
+    )
+    return AcceptedPersistedNoteWrite(
+        note_content=note_content,
+        previous_file_delete=content_write.previous_file_delete,
     )
 
 
