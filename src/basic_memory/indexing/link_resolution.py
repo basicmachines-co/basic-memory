@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.models import Entity
 
 type LinkText = str
 
@@ -66,3 +72,38 @@ def resolve_link_texts(
         resolved[original_link_text] = entity_id
 
     return resolved
+
+
+async def resolve_project_link_texts(
+    link_texts: Sequence[LinkText],
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: int,
+) -> dict[LinkText, int | None]:
+    """Resolve link texts against all exact targets in one project."""
+    if not link_texts:
+        return {}
+
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(
+            select(
+                Entity.id,
+                Entity.permalink,
+                Entity.title,
+                Entity.file_path,
+            ).where(Entity.project_id == project_id)
+        )
+        rows = result.all()
+
+    return resolve_link_texts(
+        link_texts,
+        (
+            LinkResolutionTarget(
+                entity_id=row[0],
+                permalink=row[1],
+                title=row[2],
+                file_path=row[3],
+            )
+            for row in rows
+        ),
+    )

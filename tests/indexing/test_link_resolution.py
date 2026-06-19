@@ -1,6 +1,23 @@
 """Tests for portable batch link-text resolution."""
 
-from basic_memory.indexing.link_resolution import LinkResolutionTarget, resolve_link_texts
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, cast
+from unittest.mock import AsyncMock
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+import basic_memory.indexing.link_resolution as link_resolution_module
+from basic_memory.indexing.link_resolution import (
+    LinkResolutionTarget,
+    resolve_link_texts,
+    resolve_project_link_texts,
+)
+
+
+class FakeResult:
+    def all(self) -> list[tuple[int, str, str, str]]:
+        return [(42, "lookup-target", "Lookup Target", "folder/lookup-target.md")]
 
 
 def test_resolve_link_texts_matches_permalink_title_and_file_path() -> None:
@@ -91,3 +108,41 @@ def test_resolve_link_texts_ignores_targets_without_ids() -> None:
     )
 
     assert resolved == {"No Id": None}
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_link_texts_loads_project_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    fake_execute = AsyncMock(return_value=FakeResult())
+    fake_session = cast(
+        AsyncSession,
+        type("FakeSession", (), {"execute": fake_execute})(),
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert scoped_session_maker is session_maker
+        yield fake_session
+
+    monkeypatch.setattr(
+        link_resolution_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    resolved = await resolve_project_link_texts(
+        ["Lookup Target", "folder/lookup-target", "Missing Target"],
+        session_maker=session_maker,
+        project_id=7,
+    )
+
+    assert resolved == {
+        "Lookup Target": 42,
+        "folder/lookup-target": 42,
+        "Missing Target": None,
+    }
+    fake_execute.assert_awaited_once()

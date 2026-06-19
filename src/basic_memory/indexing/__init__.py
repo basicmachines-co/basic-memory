@@ -134,6 +134,7 @@ from basic_memory.indexing.link_resolution import (
     LinkText,
     normalize_link_text,
     resolve_link_texts,
+    resolve_project_link_texts,
 )
 from basic_memory.indexing.note_file_delete_runner import (
     NoteFileDeleteStorage,
@@ -655,6 +656,7 @@ __all__ = [
     "resolve_project_relations",
     "resolve_relations_until_stable",
     "resolve_link_texts",
+    "resolve_project_link_texts",
     "reconcile_indexed_note_content_batch",
     "require_observed_file_should_read",
     "enqueue_cleanup_file",
