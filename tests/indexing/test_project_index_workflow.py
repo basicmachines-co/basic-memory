@@ -27,6 +27,7 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowRequest,
     ProjectIndexStaleWorkflowPlan,
     ProjectIndexWorkflowStart,
+    ProjectIndexWorkflowStartPlan,
     build_project_index_batch_activity_update,
     build_project_index_batch_job_plan,
     build_project_index_delete_batch_plan,
@@ -39,6 +40,7 @@ from basic_memory.indexing import (
     plan_project_index_batch_result_record,
     plan_project_index_file_result_record,
     plan_project_index_stale_workflow,
+    plan_project_index_workflow_start,
 )
 from basic_memory.runtime import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
 
@@ -454,6 +456,211 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
             "project_path": "project",
         },
     )
+
+
+def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    request = ProjectIndexWorkflowRequest.from_source(
+        ProjectIndexSource(
+            tenant_id=tenant_id,
+            project_id=42,
+            project_external_id="external-project",
+            project_name="Project Name",
+            project_permalink="project-name",
+            project_path="project",
+            workflow_id=workflow_id,
+            force_full=True,
+            search=True,
+            embeddings=False,
+        )
+    )
+
+    plan = plan_project_index_workflow_start(
+        request=request,
+        total_files=4,
+        batch_count=2,
+        batch_size=50,
+        discovered_at="2026-06-19T10:20:30+00:00",
+        transport_broker="pgq",
+        transport_entrypoint="index_project",
+        transport_job_id=123,
+    )
+
+    assert plan.status == "running"
+    assert plan.is_complete is False
+    assert plan.completion_update is None
+    assert plan.workflow_start.progress == "Indexed 0/4 files, 0 succeeded"
+    assert plan.workflow_start.metadata["phase"] == "indexing"
+    assert plan.workflow_start.metadata["transport"] == {
+        "broker": "pgq",
+        "entrypoint": "index_project",
+        "pgq_job_id": "123",
+    }
+    with pytest.raises(RuntimeError, match="does not include a completion update"):
+        plan.require_completion_update()
+
+
+def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    request = ProjectIndexWorkflowRequest.from_source(
+        ProjectIndexSource(
+            tenant_id=tenant_id,
+            project_id=42,
+            project_external_id="external-project",
+            project_name="Project Name",
+            project_permalink="project-name",
+            project_path="project",
+            workflow_id=workflow_id,
+            force_full=False,
+            search=True,
+            embeddings=False,
+        )
+    )
+
+    plan = plan_project_index_workflow_start(
+        request=request,
+        total_files=0,
+        batch_count=0,
+        batch_size=50,
+        discovered_at="2026-06-19T10:20:30+00:00",
+        transport_broker="pgq",
+        transport_entrypoint="index_project",
+        transport_job_id=None,
+    )
+
+    assert plan == ProjectIndexWorkflowStartPlan.complete(
+        workflow_start=ProjectIndexWorkflowStart(
+            counters=ProjectIndexCounters(
+                total=0,
+                processed=0,
+                succeeded=0,
+                missing=0,
+                failed=0,
+            ),
+            progress="No files found",
+            metadata={
+                "phase": "indexing",
+                "progress": "No files found",
+                "payload": {
+                    "tenant_id": str(tenant_id),
+                    "project_id": 42,
+                    "project_external_id": "external-project",
+                    "project_name": "Project Name",
+                    "project_permalink": "project-name",
+                    "project_path": "project",
+                    "force_full": False,
+                    "search": True,
+                    "embeddings": False,
+                },
+                "discovery": {
+                    "total_files": 0,
+                    "batch_count": 0,
+                    "batch_size": 50,
+                    "discovered_at": "2026-06-19T10:20:30+00:00",
+                },
+                "counters": {
+                    "total": 0,
+                    "processed": 0,
+                    "succeeded": 0,
+                    "missing": 0,
+                    "failed": 0,
+                },
+                "transport": {
+                    "broker": "pgq",
+                    "entrypoint": "index_project",
+                    "pgq_job_id": None,
+                },
+            },
+            attempt_event_data={
+                "phase": "indexing",
+                "progress": "No files found",
+                "total_files": 0,
+                "batch_count": 0,
+                "batch_size": 50,
+                "pgq_job_id": None,
+                "project_id": 42,
+                "project_name": "Project Name",
+                "project_permalink": "project-name",
+                "project_path": "project",
+            },
+        ),
+        completion_update=ProjectIndexWorkflowCompletionUpdate(
+            counters=ProjectIndexCounters(
+                total=0,
+                processed=0,
+                succeeded=0,
+                missing=0,
+                failed=0,
+            ),
+            progress="No files found",
+            metadata={
+                "phase": "completed",
+                "progress": "No files found",
+                "payload": {
+                    "tenant_id": str(tenant_id),
+                    "project_id": 42,
+                    "project_external_id": "external-project",
+                    "project_name": "Project Name",
+                    "project_permalink": "project-name",
+                    "project_path": "project",
+                    "force_full": False,
+                    "search": True,
+                    "embeddings": False,
+                },
+                "discovery": {
+                    "total_files": 0,
+                    "batch_count": 0,
+                    "batch_size": 50,
+                    "discovered_at": "2026-06-19T10:20:30+00:00",
+                },
+                "counters": {
+                    "total": 0,
+                    "processed": 0,
+                    "succeeded": 0,
+                    "missing": 0,
+                    "failed": 0,
+                },
+                "transport": {
+                    "broker": "pgq",
+                    "entrypoint": "index_project",
+                    "pgq_job_id": None,
+                },
+                "result": {
+                    "total": 0,
+                    "processed": 0,
+                    "succeeded": 0,
+                    "missing": 0,
+                    "failed": 0,
+                },
+            },
+            completed_event_data={
+                "phase": "completed",
+                "progress": "No files found",
+                "payload": {
+                    "tenant_id": str(tenant_id),
+                    "project_id": 42,
+                    "project_external_id": "external-project",
+                    "project_name": "Project Name",
+                    "project_permalink": "project-name",
+                    "project_path": "project",
+                    "force_full": False,
+                    "search": True,
+                    "embeddings": False,
+                },
+                "result": {
+                    "total": 0,
+                    "processed": 0,
+                    "succeeded": 0,
+                    "missing": 0,
+                    "failed": 0,
+                },
+            },
+        ),
+    )
+    assert plan.is_complete is True
+    assert plan.require_completion_update().metadata["phase"] == "completed"
 
 
 def test_project_index_workflow_progress_update_builds_metadata_and_event_data() -> None:

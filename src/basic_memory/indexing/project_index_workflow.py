@@ -201,6 +201,57 @@ class ProjectIndexWorkflowFailureUpdate:
     failed_event_data: dict[str, object]
 
 
+type ProjectIndexWorkflowStartStatus = Literal["running", "complete"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowStartPlan:
+    """Portable decision for starting one project-index workflow."""
+
+    status: ProjectIndexWorkflowStartStatus
+    workflow_start: ProjectIndexWorkflowStart
+    completion_update: ProjectIndexWorkflowCompletionUpdate | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "running":
+            if self.completion_update is not None:
+                raise ValueError("running start plans cannot include a completion update")
+            return
+
+        if self.completion_update is None:
+            raise ValueError("complete start plans require a completion update")
+
+    @classmethod
+    def running(cls, workflow_start: ProjectIndexWorkflowStart) -> Self:
+        """Return a non-terminal start plan."""
+        return cls(status="running", workflow_start=workflow_start)
+
+    @classmethod
+    def complete(
+        cls,
+        *,
+        workflow_start: ProjectIndexWorkflowStart,
+        completion_update: ProjectIndexWorkflowCompletionUpdate,
+    ) -> Self:
+        """Return an immediately terminal start plan."""
+        return cls(
+            status="complete",
+            workflow_start=workflow_start,
+            completion_update=completion_update,
+        )
+
+    @property
+    def is_complete(self) -> bool:
+        """Return whether the workflow should complete immediately after starting."""
+        return self.status == "complete"
+
+    def require_completion_update(self) -> ProjectIndexWorkflowCompletionUpdate:
+        """Return the completion update or fail when this is a running plan."""
+        if self.completion_update is None:
+            raise RuntimeError(f"{self.status} plan does not include a completion update")
+        return self.completion_update
+
+
 type ProjectIndexWorkflowRecordStatus = Literal["progress", "complete", "already_recorded"]
 
 
@@ -767,6 +818,40 @@ def build_project_index_workflow_start(
             "project_path": request.project.project_path,
         },
     )
+
+
+def plan_project_index_workflow_start(
+    *,
+    request: ProjectIndexWorkflowRequest,
+    total_files: int,
+    batch_count: int,
+    batch_size: int,
+    discovered_at: str,
+    transport_broker: RuntimeWorkflowBroker,
+    transport_entrypoint: str,
+    transport_job_id: RuntimeJobId | None,
+) -> ProjectIndexWorkflowStartPlan:
+    """Plan initial workflow metadata and immediate completion for empty projects."""
+    workflow_start = build_project_index_workflow_start(
+        request=request,
+        total_files=total_files,
+        batch_count=batch_count,
+        batch_size=batch_size,
+        discovered_at=discovered_at,
+        transport_broker=transport_broker,
+        transport_entrypoint=transport_entrypoint,
+        transport_job_id=transport_job_id,
+    )
+    if total_files == 0:
+        return ProjectIndexWorkflowStartPlan.complete(
+            workflow_start=workflow_start,
+            completion_update=build_project_index_workflow_completion_update(
+                metadata=workflow_start.metadata,
+                counters=workflow_start.counters,
+                progress=workflow_start.progress,
+            ),
+        )
+    return ProjectIndexWorkflowStartPlan.running(workflow_start)
 
 
 def build_project_index_workflow_progress_update(
