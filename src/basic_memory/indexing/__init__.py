@@ -103,6 +103,10 @@ from basic_memory.indexing.project_index_progress import (
     should_emit_project_index_progress_event,
     summarize_project_index_file_outcomes,
 )
+from basic_memory.indexing.project_index_workflow import (
+    ProjectIndexWorkflowRequest,
+    ProjectIndexWorkflowSource,
+)
 from basic_memory.indexing.relation_resolution import (
     AffectedEntityIds,
     EntityId,
@@ -167,7 +171,9 @@ __all__ = [
     "ProjectIndexFileOutcome",
     "ProjectIndexFileOutcomeSummary",
     "ProjectIndexMissingBatches",
+    "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowProgressState",
+    "ProjectIndexWorkflowSource",
     "RelationResolutionPass",
     "ResolveRelationsResult",
     "SyncedMarkdownFile",
