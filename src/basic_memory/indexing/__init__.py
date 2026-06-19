@@ -74,6 +74,7 @@ from basic_memory.indexing.models import (
     IndexInputFile,
     IndexProgress,
     SyncedMarkdownFile,
+    file_index_operation_from_note_object_metadata,
 )
 from basic_memory.indexing.note_content_reconciliation import (
     AcceptedNoteContentVersion,
@@ -249,6 +250,7 @@ __all__ = [
     "build_index_batches",
     "current_file_index_decision",
     "first_markdown_h1",
+    "file_index_operation_from_note_object_metadata",
     "initial_project_index_counters",
     "note_content_from_bootstrap",
     "note_content_matches_accepted_version",

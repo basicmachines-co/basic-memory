@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any, Protocol, TYPE_CHECKING
 
 from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
+from basic_memory.runtime import RuntimeNoteObjectMetadataMap, db_version_from_object_metadata
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.models import Entity
@@ -86,6 +87,16 @@ class FileIndexOperation(StrEnum):
 
     created = "created"
     updated = "updated"
+
+
+def file_index_operation_from_note_object_metadata(
+    metadata: RuntimeNoteObjectMetadataMap | None,
+) -> FileIndexOperation | None:
+    """Infer the file-index operation from accepted note object metadata."""
+    db_version = db_version_from_object_metadata(metadata)
+    if db_version is None:
+        return None
+    return FileIndexOperation.created if db_version == 1 else FileIndexOperation.updated
 
 
 @dataclass(frozen=True, slots=True)
