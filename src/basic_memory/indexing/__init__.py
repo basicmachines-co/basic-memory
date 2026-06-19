@@ -112,6 +112,15 @@ from basic_memory.indexing.note_content_reconciler import (
     note_content_from_bootstrap,
     note_content_state_from_model,
 )
+from basic_memory.indexing.orphan_cleanup import (
+    OrphanCleanupLogger,
+    OrphanCleanupSessionScope,
+    OrphanEntityCleanupResult,
+    OrphanEntityRepository,
+    OrphanIndexedEntity,
+    OrphanSearchIndex,
+    cleanup_orphan_entities,
+)
 from basic_memory.indexing.progress import (
     CheckpointModel,
     IndexingResult,
@@ -234,6 +243,12 @@ __all__ = [
     "NoteContentWriteStatus",
     "NoteContentUpdatePlan",
     "ObservedNoteContent",
+    "OrphanCleanupLogger",
+    "OrphanCleanupSessionScope",
+    "OrphanEntityCleanupResult",
+    "OrphanEntityRepository",
+    "OrphanIndexedEntity",
+    "OrphanSearchIndex",
     "PROJECT_INDEX_PROGRESS_EVENT_INTERVAL",
     "MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE",
     "ProjectIndexBatchCounterUpdate",
@@ -269,6 +284,7 @@ __all__ = [
     "build_accepted_note_search_row",
     "build_index_input_files",
     "build_index_batches",
+    "cleanup_orphan_entities",
     "current_file_index_decision",
     "first_markdown_h1",
     "file_index_operation_from_note_object_metadata",
