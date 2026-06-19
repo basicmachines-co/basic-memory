@@ -321,6 +321,38 @@ class RuntimeStorageFileIndexJobIdentity:
             raise ValueError("observed_object index jobs require object metadata")
         return f"{base}:observed:{normalize_storage_etag(self.object_etag)}:{self.object_size}"
 
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for the file-index job."""
+        routing_headers = dict(headers or {})
+        routing_headers.update(
+            {
+                "tenant_id": str(self.tenant_id),
+                "project_id": str(self.project_id),
+            }
+        )
+        if self.workflow_id is not None:
+            routing_headers["workflow_id"] = str(self.workflow_id)
+        return routing_headers
+
+    def job_request(
+        self,
+        *,
+        entrypoint: JobEntrypoint,
+        payload: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+        priority: int = 0,
+        execute_after: timedelta | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the runtime queue request for this file-index identity."""
+        return RuntimeJobRequest(
+            entrypoint=entrypoint,
+            payload=payload,
+            priority=priority,
+            execute_after=execute_after,
+            dedupe_key=self.dedupe_key(),
+            headers=self.routing_headers(headers),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeStorageEventOperation:

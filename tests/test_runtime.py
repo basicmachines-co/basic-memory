@@ -218,6 +218,41 @@ class TestRuntimeContracts:
         with pytest.raises(ValueError, match="object metadata"):
             missing_observed_metadata.dedupe_key()
 
+    def test_runtime_storage_file_index_job_identity_builds_queue_request(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+        identity = RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.current_file,
+            workflow_id=workflow_id,
+        )
+
+        request = identity.job_request(
+            entrypoint="index_file",
+            payload=b'{"file_path":"notes/a.md"}',
+            headers={
+                "source": "test",
+                "tenant_id": "caller-tenant",
+            },
+        )
+
+        assert request == RuntimeJobRequest(
+            entrypoint="index_file",
+            payload=b'{"file_path":"notes/a.md"}',
+            dedupe_key=(
+                "index-file:11111111-1111-1111-1111-111111111111:42:"
+                "notes/a.md:current:22222222-2222-2222-2222-222222222222"
+            ),
+            headers={
+                "source": "test",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "project_id": "42",
+                "workflow_id": "22222222-2222-2222-2222-222222222222",
+            },
+        )
+
     def test_runtime_storage_event_routing_plan_groups_projects_and_skips_root_objects(self):
         alpha_put = StorageEventPayload(
             event_name="OBJECT_CREATED_PUT",
