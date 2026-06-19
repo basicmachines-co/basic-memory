@@ -32,7 +32,9 @@ from basic_memory.runtime import (
 from basic_memory.runtime.contracts import (
     RuntimeDeleteStatus,
     RuntimeCapabilities,
+    RuntimeExpectedFileState,
     RuntimeFileDeleteResult,
+    RuntimeFileConflictError,
     RuntimeJobCounts,
     RuntimeJobRequest,
     RuntimeNoteMaterializationResult,
@@ -41,8 +43,27 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     StorageObjectIdentity,
+    assert_runtime_file_matches_expected,
     plan_previous_note_file_delete,
+    read_runtime_file_checksum,
 )
+
+
+class FakeRuntimeFileChecksumReader:
+    def __init__(self, checksum: str | None) -> None:
+        self.checksum = checksum
+        self.exists_calls: list[str] = []
+        self.compute_checksum_calls: list[str] = []
+
+    async def exists(self, path: str) -> bool:
+        self.exists_calls.append(path)
+        return self.checksum is not None
+
+    async def compute_checksum(self, path: str) -> str:
+        self.compute_checksum_calls.append(path)
+        if self.checksum is None:
+            raise AssertionError("missing files should not compute a checksum")
+        return self.checksum
 
 
 class TestRuntimeMode:
@@ -173,6 +194,88 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(result, "reason", "changed")
+
+    @pytest.mark.asyncio
+    async def test_runtime_file_checksum_reader_skips_missing_objects(self):
+        reader = FakeRuntimeFileChecksumReader(checksum=None)
+
+        checksum = await read_runtime_file_checksum(reader, "notes/a.md")
+
+        assert checksum is None
+        assert reader.exists_calls == ["notes/a.md"]
+        assert reader.compute_checksum_calls == []
+
+    @pytest.mark.asyncio
+    async def test_runtime_file_checksum_reader_returns_existing_checksum(self):
+        reader = FakeRuntimeFileChecksumReader(checksum="file-sum")
+
+        checksum = await read_runtime_file_checksum(reader, "notes/a.md")
+
+        assert checksum == "file-sum"
+        assert reader.exists_calls == ["notes/a.md"]
+        assert reader.compute_checksum_calls == ["notes/a.md"]
+
+    @pytest.mark.asyncio
+    async def test_runtime_file_expected_state_accepts_matching_or_missing_objects(self):
+        matching_reader = FakeRuntimeFileChecksumReader(checksum="file-sum")
+        missing_reader = FakeRuntimeFileChecksumReader(checksum=None)
+
+        await assert_runtime_file_matches_expected(
+            matching_reader,
+            RuntimeExpectedFileState(
+                file_path="notes/a.md",
+                expected_checksum="file-sum",
+            ),
+        )
+        await assert_runtime_file_matches_expected(
+            missing_reader,
+            RuntimeExpectedFileState(
+                file_path="notes/a.md",
+                expected_checksum="file-sum",
+            ),
+        )
+
+        assert matching_reader.compute_checksum_calls == ["notes/a.md"]
+        assert missing_reader.compute_checksum_calls == []
+
+    @pytest.mark.asyncio
+    async def test_runtime_file_expected_state_reports_conflicts(self):
+        reader = FakeRuntimeFileChecksumReader(checksum="external-sum")
+
+        with pytest.raises(RuntimeFileConflictError) as exc_info:
+            await assert_runtime_file_matches_expected(
+                reader,
+                RuntimeExpectedFileState(
+                    file_path="notes/a.md",
+                    expected_checksum="file-sum",
+                ),
+            )
+
+        assert exc_info.value.file_path == "notes/a.md"
+        assert exc_info.value.expected_checksum == "file-sum"
+        assert exc_info.value.actual_checksum == "external-sum"
+        assert (
+            str(exc_info.value) == "Refusing to overwrite unexpected file at notes/a.md: "
+            "expected checksum file-sum, found external-sum"
+        )
+
+    @pytest.mark.asyncio
+    async def test_runtime_file_expected_state_reports_unexpected_first_write(self):
+        reader = FakeRuntimeFileChecksumReader(checksum="external-sum")
+
+        with pytest.raises(RuntimeFileConflictError) as exc_info:
+            await assert_runtime_file_matches_expected(
+                reader,
+                RuntimeExpectedFileState(
+                    file_path="notes/a.md",
+                    expected_checksum=None,
+                ),
+            )
+
+        assert str(exc_info.value) == (
+            "Refusing to overwrite unexpected file at notes/a.md: "
+            "expected no existing object, found checksum external-sum"
+        )
 
     def test_note_object_metadata_serializes_storage_metadata(self):
         metadata = RuntimeNoteObjectMetadata(
