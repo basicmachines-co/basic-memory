@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError
 from datetime import timedelta
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -10,6 +11,8 @@ from basic_memory.indexing.relation_resolution import (
     RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
     ResolveRelationsJobRequest,
     ResolveRelationsResult,
+    SyncServiceRelationResolver,
+    resolve_project_relations,
     resolve_relations_until_stable,
 )
 
@@ -37,6 +40,53 @@ class StubRelationResolutionPass:
     async def resolve_relations(self) -> set[int]:
         index = min(self.calls, len(self._affected_per_pass) - 1)
         self.calls += 1
+        return self._affected_per_pass[index]
+
+
+class FakeSession:
+    def get_bind(self) -> object:
+        return type("Bind", (), {"dialect": type("Dialect", (), {"name": "postgresql"})()})()
+
+    async def commit(self) -> None:
+        pass
+
+    async def rollback(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+class StubRelationRepository:
+    """Returns scripted ``find_unresolved_relations`` results, in call order."""
+
+    def __init__(self, unresolved_per_call: list[list[object]]) -> None:
+        self._unresolved_per_call = unresolved_per_call
+        self.calls = 0
+
+    async def find_unresolved_relations(self, session: FakeSession) -> list[object]:
+        assert isinstance(session, FakeSession)
+        index = min(self.calls, len(self._unresolved_per_call) - 1)
+        self.calls += 1
+        return self._unresolved_per_call[index]
+
+
+class StubSyncService:
+    """Returns scripted ``resolve_relations`` affected-entity sets, in call order."""
+
+    def __init__(
+        self,
+        affected_per_pass: list[set[int]],
+        relation_repository: StubRelationRepository,
+    ) -> None:
+        self._affected_per_pass = affected_per_pass
+        self.relation_repository = relation_repository
+        self.session_maker = FakeSession
+        self.resolve_calls = 0
+
+    async def resolve_relations(self) -> set[int]:
+        index = min(self.resolve_calls, len(self._affected_per_pass) - 1)
+        self.resolve_calls += 1
         return self._affected_per_pass[index]
 
 
@@ -112,3 +162,45 @@ async def test_resolution_loop_is_bounded_by_max_passes() -> None:
     assert result.passes == 3
     assert result.remaining == 0
     assert resolver.calls == 3
+
+
+@pytest.mark.asyncio
+async def test_project_relation_resolution_uses_sync_service_and_counts_remaining() -> None:
+    repo = StubRelationRepository([["r1", "r2", "r3"], ["r3"]])
+    sync = StubSyncService([{10, 11}, set()], repo)
+
+    result = await resolve_project_relations(cast(SyncServiceRelationResolver, sync))
+
+    assert result == ResolveRelationsResult(
+        unresolved_before=3,
+        remaining=1,
+        passes=2,
+        affected_entities=2,
+    )
+    assert result.resolved == 2
+    assert sync.resolve_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_project_relation_resolution_stops_when_nothing_resolves() -> None:
+    repo = StubRelationRepository([["r1"], ["r1"]])
+    sync = StubSyncService([set()], repo)
+
+    result = await resolve_project_relations(cast(SyncServiceRelationResolver, sync))
+
+    assert result.passes == 1
+    assert result.resolved == 0
+    assert result.remaining == 1
+    assert sync.resolve_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_project_relation_resolution_respects_pass_limit() -> None:
+    repo = StubRelationRepository([["r1", "r2"], []])
+    sync = StubSyncService([{1}], repo)
+
+    result = await resolve_project_relations(cast(SyncServiceRelationResolver, sync), max_passes=3)
+
+    assert result.passes == 3
+    assert sync.resolve_calls == 3
+    assert result.remaining == 0

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol
 from uuid import UUID
+
+from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
@@ -25,6 +30,40 @@ class UnresolvedRelationCounter(Protocol):
 
     async def count_unresolved_relations(self) -> int:
         """Return the current unresolved relation count."""
+
+
+class UnresolvedRelationRepository(Protocol):
+    """Repository capability used by project-scoped relation resolution."""
+
+    async def find_unresolved_relations(self, session: AsyncSession) -> Sequence[object]:
+        """Return unresolved relation rows visible to the supplied session."""
+
+
+class SyncServiceRelationResolver(Protocol):
+    """Minimal SyncService shape needed to resolve one project's relations."""
+
+    relation_repository: UnresolvedRelationRepository
+    session_maker: async_sessionmaker[AsyncSession]
+
+    async def resolve_relations(self) -> AffectedEntityIds:
+        """Resolve currently visible relations and return affected source entity IDs."""
+
+
+@dataclass(frozen=True, slots=True)
+class SyncServiceRelationResolutionAdapter:
+    """Expose project-scoped sync relation operations as runtime capabilities."""
+
+    sync_service: SyncServiceRelationResolver
+
+    async def resolve_relations(self) -> AffectedEntityIds:
+        """Run one relation-resolution pass through the project-scoped sync service."""
+        return await self.sync_service.resolve_relations()
+
+    async def count_unresolved_relations(self) -> int:
+        """Count unresolved relations through the same project-scoped repository."""
+        relation_repository = self.sync_service.relation_repository
+        async with db.scoped_session(self.sync_service.session_maker) as session:
+            return len(await relation_repository.find_unresolved_relations(session))
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,3 +142,33 @@ async def resolve_relations_until_stable(
         passes=passes,
         affected_entities=len(affected_entities),
     )
+
+
+async def resolve_project_relations(
+    sync_service: SyncServiceRelationResolver,
+    *,
+    max_passes: int = 3,
+) -> ResolveRelationsResult:
+    """Resolve all resolvable forward references for one project-scoped sync service.
+
+    ``SyncService.resolve_relations`` resolves every relation that is unresolved
+    at the moment it reads the table. Queued runtimes can coalesce concurrent
+    writes onto an in-flight resolve job, so run until one pass changes nothing
+    or the pass cap is reached. Relations left after a stable pass are genuine
+    forward references and remain unresolved until their target note exists.
+    """
+    adapter = SyncServiceRelationResolutionAdapter(sync_service)
+    result = await resolve_relations_until_stable(
+        resolver=adapter,
+        unresolved_counter=adapter,
+        max_passes=max_passes,
+    )
+    logger.info(
+        "Resolved project relations",
+        unresolved_before=result.unresolved_before,
+        resolved=result.resolved,
+        remaining=result.remaining,
+        passes=result.passes,
+        affected_entities=result.affected_entities,
+    )
+    return result
