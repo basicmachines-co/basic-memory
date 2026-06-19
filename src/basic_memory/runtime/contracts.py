@@ -270,6 +270,14 @@ class RuntimeNoteContentVersionSource(RuntimeNoteContentDbVersionSource, Protoco
     def db_checksum(self) -> object: ...
 
 
+class RuntimeAcceptedNoteContentWriteSource(
+    RuntimeNoteContentDbVersionSource,
+    RuntimeMaterializedNoteSource,
+    Protocol,
+):
+    """Minimal note_content row shape needed to plan accepted writes."""
+
+
 class RuntimeNoteContentResourceEntitySource(Protocol):
     """Minimal entity shape needed for note-content resource reads."""
 
@@ -1562,6 +1570,35 @@ def next_runtime_note_content_version(
     if current_note_content is None:
         return 1
     return int(current_note_content.db_version) + 1
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeAcceptedNoteContentWritePlan:
+    """Portable write-sequence and cleanup plan for one accepted note_content write."""
+
+    db_version: RuntimeNoteContentVersion
+    previous_file_delete: RuntimePendingNoteFileDelete | None = None
+
+
+def plan_accepted_note_content_write(
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    accepted_file_path: RuntimeFilePath,
+    current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
+    existing_file_path: RuntimeFilePath | None = None,
+) -> RuntimeAcceptedNoteContentWritePlan:
+    """Plan accepted DB versioning and old-file cleanup for a note_content write."""
+    return RuntimeAcceptedNoteContentWritePlan(
+        db_version=next_runtime_note_content_version(current_note_content),
+        previous_file_delete=plan_previous_materialized_note_file_delete(
+            project_id=project_id,
+            entity_id=entity_id,
+            existing_file_path=existing_file_path,
+            accepted_file_path=accepted_file_path,
+            current_note_content=current_note_content,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
