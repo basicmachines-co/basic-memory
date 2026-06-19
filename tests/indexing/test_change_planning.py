@@ -1,9 +1,14 @@
 """Tests for portable project file change planning."""
 
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import AsyncIterator, cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import basic_memory.indexing.change_detector as change_detector_module
 from basic_memory.indexing.change_planning import (
     ChangeDetectionSnapshot,
     ChangeReport,
@@ -12,7 +17,8 @@ from basic_memory.indexing.change_planning import (
     plan_file_changes,
     storage_checksums_from_sources,
 )
-from basic_memory.indexing.change_detector import detect_project_file_changes
+from basic_memory.indexing.change_detector import ChangeDetector, detect_project_file_changes
+from basic_memory.repository import EntityRepository
 
 
 class StorageObject:
@@ -143,6 +149,46 @@ class FakeChangeDetectionStore:
         return (FileMoveCandidate(path="old/moved.md", checksum="moved-checksum"),)
 
 
+class FakeEntityRepository:
+    def __init__(self) -> None:
+        self.loaded_checksum_paths: tuple[str, ...] | None = None
+        self.loaded_move_checksums: tuple[str, ...] | None = None
+        self.loaded_all_paths = False
+
+    async def get_by_file_paths(
+        self,
+        session: object,
+        paths: tuple[str, ...],
+    ) -> list[tuple[str, str | None]]:
+        self.loaded_checksum_paths = paths
+        return [
+            ("unchanged.md", "same-checksum"),
+            ("modified.md", "old-checksum"),
+            ("null-checksum.md", None),
+        ]
+
+    async def find_by_checksums(
+        self,
+        session: object,
+        checksums: list[str],
+    ) -> tuple[SimpleNamespace, ...]:
+        self.loaded_move_checksums = tuple(checksums)
+        return (
+            SimpleNamespace(file_path="old/moved.md", checksum="moved-checksum"),
+            SimpleNamespace(file_path="ignored.md", checksum=None),
+        )
+
+    async def get_all_file_paths(self, session: object) -> list[str]:
+        self.loaded_all_paths = True
+        return [
+            "unchanged.md",
+            "modified.md",
+            "old/moved.md",
+            "deleted.md",
+            "null-checksum.md",
+        ]
+
+
 @pytest.mark.asyncio
 async def test_detect_project_file_changes_loads_store_state_and_plans_moves() -> None:
     store = FakeChangeDetectionStore()
@@ -169,6 +215,55 @@ async def test_detect_project_file_changes_loads_store_state_and_plans_moves() -
     }
     assert report == ChangeReport(
         new_files=["new.md"],
+        modified_files=["modified.md"],
+        deleted_files=["deleted.md"],
+        moved_files={"old/moved.md": "new/moved.md"},
+        unchanged_files=["unchanged.md"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_change_detector_adapts_entity_repository_with_explicit_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FakeEntityRepository()
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    sessions: list[object] = []
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[object]:
+        assert scoped_session_maker is session_maker
+        session = object()
+        sessions.append(session)
+        yield session
+
+    monkeypatch.setattr(change_detector_module.db, "scoped_session", fake_scoped_session)
+
+    detector = ChangeDetector(cast(EntityRepository, repository), session_maker)
+    report = await detector.detect_all_changes(
+        {
+            "unchanged.md": StorageObject("same-checksum"),
+            "modified.md": StorageObject("new-checksum"),
+            "new/moved.md": StorageObject("moved-checksum"),
+            "new.md": StorageObject("new-file-checksum"),
+            "null-checksum.md": StorageObject("now-has-checksum"),
+        }
+    )
+
+    assert repository.loaded_checksum_paths == (
+        "unchanged.md",
+        "modified.md",
+        "new/moved.md",
+        "new.md",
+        "null-checksum.md",
+    )
+    assert repository.loaded_all_paths is True
+    assert repository.loaded_move_checksums == ("moved-checksum", "new-file-checksum")
+    assert len(sessions) == 3
+    assert report == ChangeReport(
+        new_files=["new.md", "null-checksum.md"],
         modified_files=["modified.md"],
         deleted_files=["deleted.md"],
         moved_files={"old/moved.md": "new/moved.md"},

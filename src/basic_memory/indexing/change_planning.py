@@ -55,7 +55,7 @@ class ChangeDetectionSnapshot:
     """Storage and indexed-DB state for one project change-detection pass."""
 
     storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum]
-    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum]
+    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None]
     all_db_paths: tuple[FileIndexPath, ...]
     move_candidates: tuple[FileMoveCandidate, ...] = ()
 
@@ -94,7 +94,7 @@ def plan_change_detection_snapshot(snapshot: ChangeDetectionSnapshot) -> ChangeR
 def plan_file_changes(
     *,
     storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum],
-    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum],
+    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
     all_db_paths: Sequence[FileIndexPath],
     move_candidates: Sequence[FileMoveCandidate],
 ) -> ChangeReport:

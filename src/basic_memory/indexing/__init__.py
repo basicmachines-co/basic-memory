@@ -34,6 +34,7 @@ from basic_memory.indexing.change_planning import (
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.change_detector import (
+    ChangeDetector,
     ChangeDetectionStore,
     detect_project_file_changes,
 )
@@ -360,6 +361,7 @@ __all__ = [
     "BatchIndexer",
     "ChangeDetectionSnapshot",
     "ChangeDetectionStore",
+    "ChangeDetector",
     "ChangeReport",
     "CheckpointPhase",
     "CheckpointModel",

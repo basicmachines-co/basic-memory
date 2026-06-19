@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Protocol
 
 import logfire
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.indexing.change_planning import (
     ChangeDetectionSnapshot,
     ChangeReport,
@@ -17,6 +20,7 @@ from basic_memory.indexing.change_planning import (
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
+from basic_memory.repository import EntityRepository
 
 
 class ChangeDetectionLogger(Protocol):
@@ -33,7 +37,7 @@ class ChangeDetectionStore(Protocol):
     async def load_indexed_file_checksums(
         self,
         paths: tuple[FileIndexPath, ...],
-    ) -> Mapping[FileIndexPath, FileIndexChecksum]: ...
+    ) -> Mapping[FileIndexPath, FileIndexChecksum | None]: ...
 
     async def load_all_indexed_paths(self) -> tuple[FileIndexPath, ...]: ...
 
@@ -41,6 +45,63 @@ class ChangeDetectionStore(Protocol):
         self,
         new_file_checksums: Mapping[FileIndexPath, FileIndexChecksum],
     ) -> tuple[FileMoveCandidate, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeDetector:
+    """Repository-backed project file change detector."""
+
+    entity_repository: EntityRepository
+    session_maker: async_sessionmaker[AsyncSession]
+
+    async def detect_all_changes(
+        self,
+        storage_files: Mapping[FileIndexPath, StorageChecksumSource],
+        bound_logger: ChangeDetectionLogger | None = None,
+    ) -> ChangeReport:
+        """Detect all storage-vs-database changes for this repository's project."""
+        return await detect_project_file_changes(
+            storage_files,
+            store=self,
+            bound_logger=bound_logger,
+        )
+
+    async def load_indexed_file_checksums(
+        self,
+        paths: tuple[FileIndexPath, ...],
+    ) -> dict[FileIndexPath, FileIndexChecksum | None]:
+        """Load indexed checksums for project-relative file paths."""
+        if not paths:
+            return {}
+
+        async with db.scoped_session(self.session_maker) as session:
+            rows = await self.entity_repository.get_by_file_paths(session, paths)
+
+        return {str(row[0]): str(row[1]) if row[1] is not None else None for row in rows}
+
+    async def load_move_candidates(
+        self,
+        new_file_checksums: Mapping[FileIndexPath, FileIndexChecksum],
+    ) -> tuple[FileMoveCandidate, ...]:
+        """Load indexed entities that can prove an observed path is a move."""
+        if not new_file_checksums:
+            return ()
+
+        checksums = sorted(set(new_file_checksums.values()))
+        async with db.scoped_session(self.session_maker) as session:
+            candidates = await self.entity_repository.find_by_checksums(session, checksums)
+
+        return tuple(
+            FileMoveCandidate(path=str(candidate.file_path), checksum=str(candidate.checksum))
+            for candidate in candidates
+            if candidate.checksum
+        )
+
+    async def load_all_indexed_paths(self) -> tuple[FileIndexPath, ...]:
+        """Load all indexed file paths for delete planning."""
+        async with db.scoped_session(self.session_maker) as session:
+            paths = await self.entity_repository.get_all_file_paths(session)
+        return tuple(str(path) for path in paths)
 
 
 async def detect_project_file_changes(
