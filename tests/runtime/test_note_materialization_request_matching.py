@@ -11,7 +11,7 @@ from basic_memory.runtime import (
 
 @dataclass(frozen=True, slots=True)
 class _NoteContentVersion:
-    db_version: object
+    db_version: int | str
     db_checksum: object
 
 

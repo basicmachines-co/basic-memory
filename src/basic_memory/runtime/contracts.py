@@ -8,6 +8,7 @@ and snapshots while sharing the same typed handoff values.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -42,6 +43,7 @@ type RuntimeWorkflowResult = Mapping[str, object]
 type NoteExternalId = str
 type RuntimeFileChecksum = str
 type RuntimeNoteContentVersion = int
+type RuntimeNoteContentVersionInput = RuntimeNoteContentVersion | str
 type RuntimeNoteContentChecksum = str
 type RuntimeNoteActorKind = str
 type RuntimeNoteActorName = str
@@ -212,7 +214,7 @@ class RuntimePendingNoteMaterializationSource(Protocol):
     """Minimal note_content row shape needed to queue materialization work."""
 
     @property
-    def db_version(self) -> object: ...
+    def db_version(self) -> RuntimeNoteContentVersionInput: ...
 
     @property
     def db_checksum(self) -> object: ...
@@ -232,7 +234,7 @@ class RuntimeNoteContentVersionSource(Protocol):
     """Minimal note_content row shape needed to compare accepted DB versions."""
 
     @property
-    def db_version(self) -> object: ...
+    def db_version(self) -> RuntimeNoteContentVersionInput: ...
 
     @property
     def db_checksum(self) -> object: ...
@@ -1159,11 +1161,33 @@ def merge_runtime_workflow_metadata_patch(
     if metadata_patch is not None:
         for key, value in metadata_patch.items():
             current = patch.get(key)
-            if isinstance(current, Mapping) and isinstance(value, Mapping):
-                patch[key] = merge_runtime_workflow_metadata_patch(current, value)
+            current_mapping = runtime_workflow_metadata_mapping_value(current, field_name=key)
+            value_mapping = runtime_workflow_metadata_mapping_value(value, field_name=key)
+            if current_mapping is not None and value_mapping is not None:
+                patch[key] = merge_runtime_workflow_metadata_patch(
+                    current_mapping,
+                    value_mapping,
+                )
                 continue
             patch[key] = value
     return patch
+
+
+def runtime_workflow_metadata_mapping_value(
+    value: object,
+    *,
+    field_name: str,
+) -> dict[str, object] | None:
+    """Return a copied workflow metadata mapping value with string keys."""
+    if not isinstance(value, Mapping):
+        return None
+
+    copied: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise TypeError(f"Workflow {field_name} metadata keys must be strings")
+        copied[key] = item
+    return copied
 
 
 def runtime_workflow_metadata_dict_value(
@@ -1175,12 +1199,7 @@ def runtime_workflow_metadata_dict_value(
     if not isinstance(value, dict):
         return None
 
-    copied: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            raise TypeError(f"Workflow {field_name} metadata keys must be strings")
-        copied[key] = item
-    return copied
+    return runtime_workflow_metadata_mapping_value(value, field_name=field_name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1814,6 +1833,25 @@ class RuntimeAcceptedNoteResponse:
         if self.file_write_status == "external_change_detected":
             payload["sync_error"] = NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR
         return payload
+
+
+type RuntimeNoteContentResponsePayload = RuntimeAcceptedNoteResponse | Mapping[str, object]
+
+
+def runtime_note_content_payload_as_dict(
+    payload: RuntimeNoteContentResponsePayload,
+) -> dict[str, object]:
+    """Serialize a typed note-content payload into the existing JSON object contract."""
+    if isinstance(payload, RuntimeAcceptedNoteResponse):
+        return payload.to_response_payload()
+    return dict(payload)
+
+
+def runtime_note_content_payload_as_json_bytes(
+    payload: RuntimeNoteContentResponsePayload,
+) -> bytes:
+    """Serialize a note-content payload for HTTP and queue transport boundaries."""
+    return json.dumps(runtime_note_content_payload_as_dict(payload)).encode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
