@@ -165,10 +165,12 @@ from basic_memory.indexing.project_index_progress import (
     summarize_project_index_file_outcomes,
 )
 from basic_memory.indexing.project_index_workflow import (
+    ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowSource,
     ProjectIndexWorkflowStart,
+    build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
     build_project_index_workflow_start,
 )
@@ -274,6 +276,7 @@ __all__ = [
     "ProjectIndexFileOutcomeSummary",
     "ProjectIndexMissingBatches",
     "ProjectIndexWorkflowPayloadState",
+    "ProjectIndexWorkflowCompletionUpdate",
     "ProjectIndexWorkflowProgressUpdate",
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowProgressState",
@@ -304,6 +307,7 @@ __all__ = [
     "build_index_file_batch_job_result",
     "build_index_input_files",
     "build_index_batches",
+    "build_project_index_workflow_completion_update",
     "build_project_index_workflow_progress_update",
     "build_project_index_workflow_start",
     "cleanup_orphan_entities",

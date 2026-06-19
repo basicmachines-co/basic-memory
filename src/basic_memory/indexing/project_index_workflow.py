@@ -112,6 +112,16 @@ class ProjectIndexWorkflowProgressUpdate:
     progress_event_data: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowCompletionUpdate:
+    """Portable completion metadata for a successful project-index workflow."""
+
+    counters: ProjectIndexCounters
+    progress: str
+    metadata: dict[str, object]
+    completed_event_data: dict[str, object]
+
+
 def build_project_index_workflow_start(
     *,
     request: ProjectIndexWorkflowRequest,
@@ -190,5 +200,32 @@ def build_project_index_workflow_progress_update(
             "progress": progress,
             "payload": updated_metadata.get("payload") or {},
             "counters": counters_metadata,
+        },
+    )
+
+
+def build_project_index_workflow_completion_update(
+    *,
+    metadata: Mapping[str, object],
+    counters: ProjectIndexCounters,
+    progress: str,
+) -> ProjectIndexWorkflowCompletionUpdate:
+    """Build terminal success metadata for a project-index workflow."""
+    counters_metadata = counters.to_metadata()
+    completed_metadata = dict(metadata)
+    completed_metadata["phase"] = "completed"
+    completed_metadata["progress"] = progress
+    completed_metadata["counters"] = counters_metadata
+    completed_metadata["result"] = counters_metadata
+
+    return ProjectIndexWorkflowCompletionUpdate(
+        counters=counters,
+        progress=progress,
+        metadata=completed_metadata,
+        completed_event_data={
+            "phase": "completed",
+            "progress": progress,
+            "payload": completed_metadata.get("payload") or {},
+            "result": counters_metadata,
         },
     )
