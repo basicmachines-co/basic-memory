@@ -45,6 +45,7 @@ from basic_memory.runtime.contracts import (
     RuntimeFileConflictError,
     RuntimeJobCounts,
     RuntimeJobRequest,
+    RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
@@ -73,6 +74,7 @@ from basic_memory.runtime.contracts import (
     StorageObjectVersion,
     assert_runtime_file_matches_expected,
     normalize_storage_etag,
+    plan_note_file_delete_job_request,
     plan_runtime_storage_event_operation,
     plan_runtime_storage_event_operations,
     plan_runtime_storage_events_by_project,
@@ -1036,6 +1038,50 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "db_version", 4)
+
+    def test_plan_note_file_delete_job_request_flattens_pending_cleanup(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        file_delete = RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-checksum",
+        )
+
+        request = plan_note_file_delete_job_request(
+            tenant_id=tenant_id,
+            file_delete=file_delete,
+        )
+
+        assert request == RuntimeNoteFileDeleteJobRequest(
+            tenant_id=tenant_id,
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-checksum",
+        )
+        assert request.dedupe_key() == (
+            "delete-note-file:11111111-1111-1111-1111-111111111111:7:42:notes/old.md:old-checksum"
+        )
+        assert request.routing_headers({"source": "test"}) == {
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "7",
+        }
+        assert (
+            RuntimeNoteFileDeleteJobRequest(
+                tenant_id=tenant_id,
+                project_id=7,
+                entity_id=42,
+                file_path="notes/old.md",
+                file_checksum=None,
+            ).dedupe_key()
+            == "delete-note-file:11111111-1111-1111-1111-111111111111:"
+            "7:42:notes/old.md:unknown"
+        )
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(request, "file_path", "notes/new.md")
 
     def test_runtime_prepared_note_write_carries_materialization_inputs(self):
         attempted_at = datetime(2026, 6, 18, 14, 15)
