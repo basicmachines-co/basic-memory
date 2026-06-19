@@ -9,13 +9,18 @@ from basic_memory.indexing import (
     EmbeddingIndexJobRequest,
     EmbeddingIndexTarget,
     EmbeddingIndexTargetPayload,
+    IndexFileBatchJobPayload,
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
     IndexFileRuntimeRequest,
+    ObservedIndexFilePayload,
     ResolveRelationsJobPayload,
     ResolveRelationsJobRequest,
 )
 from basic_memory.runtime import (
+    ProjectRuntimeReference,
+    RuntimeIndexFileBatchJobRequest,
+    RuntimeObservedIndexFile,
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
 )
@@ -85,6 +90,71 @@ def test_index_file_job_payload_from_runtime_request_restores_payload() -> None:
         index_embeddings=False,
         workflow_id=workflow_id,
     )
+
+
+def test_index_file_batch_job_payload_round_trips_runtime_request() -> None:
+    """File-batch jobs validate observed storage metadata at the worker boundary."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    runtime_request = RuntimeIndexFileBatchJobRequest(
+        tenant_id=tenant_id,
+        project=ProjectRuntimeReference(
+            project_id=101,
+            project_external_id="project-main",
+            project_path="main",
+        ),
+        workflow_id=workflow_id,
+        batch_index=2,
+        batch_count=5,
+        file_paths=("notes/a.md",),
+        observed_files=(RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=123),),
+        index_embeddings=False,
+    )
+
+    payload = IndexFileBatchJobPayload.from_runtime_request(runtime_request)
+
+    assert payload == IndexFileBatchJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_path="main",
+        file_paths=["notes/a.md"],
+        observed_files=[
+            ObservedIndexFilePayload(path="notes/a.md", checksum="etag-a", size=123),
+        ],
+        batch_index=2,
+        batch_count=5,
+        workflow_id=workflow_id,
+        index_embeddings=False,
+    )
+    assert payload.targets() == [
+        ObservedIndexFilePayload(path="notes/a.md", checksum="etag-a", size=123),
+    ]
+    assert payload.target_paths() == ["notes/a.md"]
+    assert payload.to_runtime_request() == runtime_request
+
+
+def test_index_file_batch_job_payload_uses_file_paths_for_legacy_targets() -> None:
+    """Legacy batch payloads still derive targets from file_paths."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    payload = IndexFileBatchJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_path="main",
+        file_paths=["notes/a.md", "notes/b.md"],
+        observed_files=[],
+        batch_index=0,
+        batch_count=1,
+        workflow_id=workflow_id,
+    )
+
+    assert payload.targets() == [
+        ObservedIndexFilePayload(path="notes/a.md"),
+        ObservedIndexFilePayload(path="notes/b.md"),
+    ]
+    assert payload.target_paths() == ["notes/a.md", "notes/b.md"]
 
 
 def test_resolve_relations_job_payload_round_trips_runtime_request() -> None:

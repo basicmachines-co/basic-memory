@@ -175,8 +175,10 @@ from basic_memory.indexing.job_payloads import (
     EmbeddingIndexBatchJobPayload,
     EmbeddingIndexJobPayload,
     EmbeddingIndexTargetPayload,
+    IndexFileBatchJobPayload,
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
+    ObservedIndexFilePayload,
     ResolveRelationsJobPayload,
 )
 from basic_memory.indexing.link_resolution import (
@@ -550,6 +552,7 @@ __all__ = [
     "IndexedFileLiveUpdatePlan",
     "IndexedEntity",
     "IndexFileBatchJobResult",
+    "IndexFileBatchJobPayload",
     "IndexFileBatchChecker",
     "IndexFileBatchContentClassifier",
     "IndexFileBatchIndexer",
@@ -652,6 +655,7 @@ __all__ = [
     "NoteMaterializationPublisher",
     "NoteMaterializationStatusPublication",
     "NoteMaterializationStatusPublisher",
+    "ObservedIndexFilePayload",
     "ObservedObjectIndexCompletionContext",
     "OrphanCleanupLogger",
     "OrphanCleanupSessionScope",

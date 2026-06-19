@@ -21,6 +21,9 @@ from basic_memory.indexing.project_index_progress import ObservedObjectIndexComp
 from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
 from basic_memory.indexing.relation_resolution import ResolveRelationsJobRequest
 from basic_memory.runtime import (
+    ProjectRuntimeReference,
+    RuntimeIndexFileBatchJobRequest,
+    RuntimeObservedIndexFile,
     RuntimeStorageFileIndexContext,
     RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageFileIndexMode,
@@ -121,6 +124,94 @@ class IndexFileJobPayload(BaseModel):
         result: IndexFileJobResult,
     ) -> IndexFileEmbeddingJobContext:
         return self.to_runtime_request().embedding_job_context(result)
+
+
+class ObservedIndexFilePayload(BaseModel):
+    """Serialized storage metadata for one file-index batch target."""
+
+    path: str
+    checksum: str | None = None
+    size: int | None = None
+
+    @classmethod
+    def from_runtime_observed_file(cls, observed_file: RuntimeObservedIndexFile) -> Self:
+        """Validate runtime observed metadata at a worker boundary."""
+        return cls(
+            path=observed_file.path,
+            checksum=observed_file.checksum,
+            size=observed_file.size,
+        )
+
+    def to_runtime_observed_file(self) -> RuntimeObservedIndexFile:
+        """Map queued observed metadata back to the runtime value."""
+        return RuntimeObservedIndexFile(
+            path=self.path,
+            checksum=self.checksum,
+            size=self.size,
+        )
+
+
+class IndexFileBatchJobPayload(BaseModel):
+    """Serialized worker payload for indexing a project file batch."""
+
+    tenant_id: UUID
+    project_id: int
+    project_external_id: str
+    project_path: str
+    file_paths: list[str] = Field(default_factory=list)
+    observed_files: list[ObservedIndexFilePayload] = Field(default_factory=list)
+    batch_index: int
+    batch_count: int
+    workflow_id: UUID
+    index_embeddings: bool = True
+
+    def targets(self) -> list[ObservedIndexFilePayload]:
+        """Return the file targets this batch should evaluate at runtime."""
+        if self.observed_files:
+            return list(self.observed_files)
+        return [ObservedIndexFilePayload(path=file_path) for file_path in self.file_paths]
+
+    def target_paths(self) -> list[str]:
+        """Return target paths in their batch order."""
+        return [target.path for target in self.targets()]
+
+    @classmethod
+    def from_runtime_request(cls, request: RuntimeIndexFileBatchJobRequest) -> Self:
+        """Validate the runtime file-batch request at a worker boundary."""
+        return cls(
+            tenant_id=request.tenant_id,
+            project_id=request.project.project_id,
+            project_external_id=request.project.project_external_id,
+            project_path=request.project.project_path,
+            file_paths=list(request.file_paths),
+            observed_files=[
+                ObservedIndexFilePayload.from_runtime_observed_file(observed_file)
+                for observed_file in request.observed_files
+            ],
+            batch_index=request.batch_index,
+            batch_count=request.batch_count,
+            workflow_id=request.workflow_id,
+            index_embeddings=request.index_embeddings,
+        )
+
+    def to_runtime_request(self) -> RuntimeIndexFileBatchJobRequest:
+        """Map the validated worker payload back to the runtime request."""
+        return RuntimeIndexFileBatchJobRequest(
+            tenant_id=self.tenant_id,
+            project=ProjectRuntimeReference(
+                project_id=self.project_id,
+                project_external_id=self.project_external_id,
+                project_path=self.project_path,
+            ),
+            workflow_id=self.workflow_id,
+            batch_index=self.batch_index,
+            batch_count=self.batch_count,
+            file_paths=tuple(self.file_paths),
+            observed_files=tuple(
+                observed_file.to_runtime_observed_file() for observed_file in self.observed_files
+            ),
+            index_embeddings=self.index_embeddings,
+        )
 
 
 class EmbeddingIndexJobPayload(BaseModel):
