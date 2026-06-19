@@ -1,5 +1,14 @@
 """Reusable indexing primitives shared by local sync and future remote callers."""
 
+from basic_memory.indexing.accepted_note_search import (
+    MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE,
+    accepted_note_content_stems,
+    accepted_note_tags,
+    accepted_search_content_from_markdown,
+    first_markdown_h1,
+    search_text_variants,
+    strip_search_text,
+)
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.batching import build_index_batches
 from basic_memory.indexing.change_planning import (
@@ -186,6 +195,7 @@ __all__ = [
     "NoteContentUpdatePlan",
     "ObservedNoteContent",
     "PROJECT_INDEX_PROGRESS_EVENT_INTERVAL",
+    "MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE",
     "ProjectIndexBatchCounterUpdate",
     "ProjectIndexCounters",
     "ProjectIndexCountersState",
@@ -203,6 +213,9 @@ __all__ = [
     "VectorSyncBatchSummary",
     "VectorSyncProgress",
     "VectorSyncProgressState",
+    "accepted_note_content_stems",
+    "accepted_note_tags",
+    "accepted_search_content_from_markdown",
     "apply_note_content_update_plan",
     "apply_project_index_batch_outcomes",
     "apply_project_index_file_outcome",
@@ -212,6 +225,7 @@ __all__ = [
     "build_index_input_files",
     "build_index_batches",
     "current_file_index_decision",
+    "first_markdown_h1",
     "initial_project_index_counters",
     "note_content_from_bootstrap",
     "note_content_state_from_model",
@@ -232,7 +246,9 @@ __all__ = [
     "project_index_recorded_batches_from_metadata",
     "resolve_relations_until_stable",
     "resolve_link_texts",
+    "search_text_variants",
     "should_emit_project_index_progress_event",
+    "strip_search_text",
     "summarize_embedding_index_batch_result",
     "summarize_project_index_file_outcomes",
     "summarize_file_index_plan",
