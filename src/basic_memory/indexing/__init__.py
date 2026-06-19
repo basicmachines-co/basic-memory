@@ -14,10 +14,14 @@ from basic_memory.indexing.accepted_note_search import (
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.batching import build_index_batches
 from basic_memory.indexing.change_planning import (
+    ChangeDetectionSnapshot,
     ChangeReport,
     FileMoveCandidate,
+    StorageChecksumSource,
+    plan_change_detection_snapshot,
     plan_file_changes,
     plan_moved_files,
+    storage_checksums_from_sources,
 )
 from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexBatchJobContext,
@@ -225,6 +229,7 @@ __all__ = [
     "AcceptedNoteContentVersion",
     "AcceptedNoteSearchRow",
     "BatchIndexer",
+    "ChangeDetectionSnapshot",
     "ChangeReport",
     "CheckpointPhase",
     "CheckpointModel",
@@ -329,6 +334,7 @@ __all__ = [
     "RESOLVE_RELATIONS_DEBOUNCE_SECONDS",
     "ResolveRelationsJobRequest",
     "ResolveRelationsResult",
+    "StorageChecksumSource",
     "SyncedMarkdownFile",
     "SyncServiceRelationResolutionAdapter",
     "SyncServiceRelationResolver",
@@ -373,6 +379,7 @@ __all__ = [
     "plan_file_index_target_from_current",
     "plan_file_index_target_from_observed",
     "plan_legacy_file_index_targets",
+    "plan_change_detection_snapshot",
     "plan_file_changes",
     "plan_moved_files",
     "plan_current_materialized_note_result",
@@ -405,6 +412,7 @@ __all__ = [
     "search_text_variants",
     "should_emit_project_index_progress_event",
     "strip_search_text",
+    "storage_checksums_from_sources",
     "summarize_embedding_index_batch_result",
     "summarize_project_index_file_outcomes",
     "summarize_file_index_plan",

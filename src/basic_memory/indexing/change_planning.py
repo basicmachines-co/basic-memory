@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
+
+
+class StorageChecksumSource(Protocol):
+    """Minimal storage-object metadata needed for change planning."""
+
+    @property
+    def checksum(self) -> FileIndexChecksum: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +48,47 @@ class ChangeReport:
     def has_changes(self) -> bool:
         """Whether any changes were detected."""
         return self.total_changes > 0
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeDetectionSnapshot:
+    """Storage and indexed-DB state for one project change-detection pass."""
+
+    storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum]
+    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum]
+    all_db_paths: tuple[FileIndexPath, ...]
+    move_candidates: tuple[FileMoveCandidate, ...] = ()
+
+    @property
+    def storage_paths(self) -> tuple[FileIndexPath, ...]:
+        """Return observed storage paths in adapter-provided order."""
+        return tuple(self.storage_checksum_by_path)
+
+    @property
+    def new_file_checksum_by_path(self) -> dict[FileIndexPath, FileIndexChecksum]:
+        """Return storage objects that do not have an indexed row at the same path."""
+        return {
+            path: checksum
+            for path, checksum in self.storage_checksum_by_path.items()
+            if path not in self.db_checksum_by_path
+        }
+
+
+def storage_checksums_from_sources(
+    storage_files: Mapping[FileIndexPath, StorageChecksumSource],
+) -> dict[FileIndexPath, FileIndexChecksum]:
+    """Extract checksums from storage-object metadata without keeping vendor objects."""
+    return {path: file_info.checksum for path, file_info in storage_files.items()}
+
+
+def plan_change_detection_snapshot(snapshot: ChangeDetectionSnapshot) -> ChangeReport:
+    """Classify changes from a typed runtime snapshot."""
+    return plan_file_changes(
+        storage_checksum_by_path=snapshot.storage_checksum_by_path,
+        db_checksum_by_path=snapshot.db_checksum_by_path,
+        all_db_paths=snapshot.all_db_paths,
+        move_candidates=snapshot.move_candidates,
+    )
 
 
 def plan_file_changes(

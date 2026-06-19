@@ -1,10 +1,50 @@
 """Tests for portable project file change planning."""
 
 from basic_memory.indexing.change_planning import (
+    ChangeDetectionSnapshot,
     ChangeReport,
     FileMoveCandidate,
+    plan_change_detection_snapshot,
     plan_file_changes,
+    storage_checksums_from_sources,
 )
+
+
+class StorageObject:
+    def __init__(self, checksum: str) -> None:
+        self.checksum = checksum
+
+
+def test_plan_change_detection_snapshot_maps_typed_runtime_state() -> None:
+    storage_checksum_by_path = storage_checksums_from_sources(
+        {
+            "unchanged.md": StorageObject("same-checksum"),
+            "modified.md": StorageObject("new-checksum"),
+            "new/moved.md": StorageObject("moved-checksum"),
+            "new.md": StorageObject("new-file-checksum"),
+        }
+    )
+    snapshot = ChangeDetectionSnapshot(
+        storage_checksum_by_path=storage_checksum_by_path,
+        db_checksum_by_path={
+            "unchanged.md": "same-checksum",
+            "modified.md": "old-checksum",
+        },
+        all_db_paths=("unchanged.md", "modified.md", "old/moved.md", "deleted.md"),
+        move_candidates=(FileMoveCandidate(path="old/moved.md", checksum="moved-checksum"),),
+    )
+
+    assert snapshot.new_file_checksum_by_path == {
+        "new/moved.md": "moved-checksum",
+        "new.md": "new-file-checksum",
+    }
+    assert plan_change_detection_snapshot(snapshot) == ChangeReport(
+        new_files=["new.md"],
+        modified_files=["modified.md"],
+        deleted_files=["deleted.md"],
+        moved_files={"old/moved.md": "new/moved.md"},
+        unchanged_files=["unchanged.md"],
+    )
 
 
 def test_plan_file_changes_detects_new_modified_unchanged_and_deleted_files() -> None:
