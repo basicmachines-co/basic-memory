@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
+from dataclasses import dataclass
 from typing import Protocol, assert_never
 
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +24,8 @@ from basic_memory.indexing.note_content_reconciliation import (
     plan_note_content_reconciliation,
 )
 from basic_memory.models import Entity, NoteContent
+from basic_memory.repository import NoteContentRepository
+from basic_memory.runtime import ProjectId, RuntimeEntityId
 
 type NoteContentUpdatePlan = (
     NoteContentFileSynced
@@ -31,9 +35,22 @@ type NoteContentUpdatePlan = (
     | NoteContentMaterializationStatusUpdate
     | NoteContentPromoted
 )
+type NoteContentRepositoryFactory = Callable[[ProjectId], NoteContentStateUpdateStore]
 
 
-class NoteContentStore(Protocol):
+class NoteContentStateUpdateStore(Protocol):
+    """Repository capability needed to update note_content state."""
+
+    async def update_state_fields(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        **updates: object,
+    ) -> NoteContent | None:
+        """Update mutable note_content state fields."""
+
+
+class NoteContentStore(NoteContentStateUpdateStore, Protocol):
     """Repository capability needed by note-content reconciliation."""
 
     async def get_by_entity_id(
@@ -50,13 +67,57 @@ class NoteContentStore(Protocol):
     ) -> NoteContent:
         """Create a note_content row."""
 
-    async def update_state_fields(
+
+def note_content_repository_for_project(project_id: ProjectId) -> NoteContentStore:
+    """Build the default note_content repository for one project."""
+    return NoteContentRepository(project_id=project_id)
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryNoteMaterializationFailureMarker:
+    """Repository-backed failure marker for accepted-note materialization enqueue failures."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    note_content_repository_factory: NoteContentRepositoryFactory = (
+        note_content_repository_for_project
+    )
+
+    async def mark_note_materialization_failed(
         self,
-        session: AsyncSession,
-        entity_id: int,
-        **updates: object,
-    ) -> NoteContent | None:
-        """Update mutable note_content state fields."""
+        *,
+        project_id: ProjectId,
+        entity_id: RuntimeEntityId,
+        error_message: str,
+    ) -> None:
+        """Record enqueue failure through the configured note_content repository."""
+        await mark_note_materialization_enqueue_failed(
+            session_maker=self.session_maker,
+            project_id=project_id,
+            entity_id=entity_id,
+            error_message=error_message,
+            note_content_repository_factory=self.note_content_repository_factory,
+        )
+
+
+async def mark_note_materialization_enqueue_failed(
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    error_message: str,
+    note_content_repository_factory: NoteContentRepositoryFactory = note_content_repository_for_project,
+    attempted_at: datetime | None = None,
+) -> None:
+    """Mark accepted note content as failed when queue submission cannot start."""
+    async with session_maker() as session:
+        async with session.begin():
+            await note_content_repository_factory(project_id).update_state_fields(
+                session,
+                entity_id,
+                file_write_status="failed",
+                last_materialization_error=error_message,
+                last_materialization_attempt_at=attempted_at or datetime.now(tz=UTC),
+            )
 
 
 def note_content_state_from_model(note_content: NoteContent) -> NoteContentState:

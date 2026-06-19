@@ -18,7 +18,9 @@ from basic_memory.indexing.note_content_reconciliation import (
 )
 from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
+    RepositoryNoteMaterializationFailureMarker,
     apply_note_content_update_plan,
+    mark_note_materialization_enqueue_failed,
 )
 from basic_memory.models import Entity
 
@@ -31,6 +33,25 @@ class FakeSession:
 
     async def rollback(self) -> None:
         self.rollback_count += 1
+
+
+class FakeTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class FakeRepositorySession(FakeSession):
+    async def __aenter__(self) -> FakeRepositorySession:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    def begin(self) -> FakeTransaction:
+        return FakeTransaction()
 
 
 @pytest.mark.asyncio
@@ -158,3 +179,88 @@ async def test_apply_note_content_update_plan_marks_materialization_status() -> 
         last_materialization_error="write failed",
         last_materialization_attempt_at=attempted_at,
     )
+
+
+@pytest.mark.asyncio
+async def test_mark_note_materialization_enqueue_failed_uses_repository_factory() -> None:
+    """Queue failure bookkeeping should stay in core repository adapter code."""
+    attempted_at = datetime(2026, 4, 13, 14, 59, tzinfo=UTC)
+    session = FakeRepositorySession()
+    repository_calls: list[tuple[int, FakeRepositorySession, int, dict[str, object]]] = []
+
+    def session_maker() -> FakeRepositorySession:
+        return session
+
+    class FakeNoteContentRepository:
+        def __init__(self, project_id: int) -> None:
+            self.project_id = project_id
+
+        async def update_state_fields(
+            self,
+            session: Any,
+            entity_id: int,
+            **updates: object,
+        ) -> None:
+            repository_calls.append((self.project_id, session, entity_id, updates))
+
+    await mark_note_materialization_enqueue_failed(
+        session_maker=cast(Any, session_maker),
+        project_id=7,
+        entity_id=42,
+        error_message="pgq unavailable",
+        note_content_repository_factory=FakeNoteContentRepository,
+        attempted_at=attempted_at,
+    )
+
+    assert repository_calls == [
+        (
+            7,
+            session,
+            42,
+            {
+                "file_write_status": "failed",
+                "last_materialization_error": "pgq unavailable",
+                "last_materialization_attempt_at": attempted_at,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repository_failure_marker_records_materialization_enqueue_failure() -> None:
+    """The failure-marker protocol adapter should be usable by enqueue runners."""
+    session = FakeRepositorySession()
+    repository_calls: list[dict[str, object]] = []
+
+    def session_maker() -> FakeRepositorySession:
+        return session
+
+    class FakeNoteContentRepository:
+        def __init__(self, project_id: int) -> None:
+            self.project_id = project_id
+
+        async def update_state_fields(
+            self,
+            session: Any,
+            entity_id: int,
+            **updates: object,
+        ) -> None:
+            assert session is not None
+            assert entity_id == 42
+            repository_calls.append(updates)
+
+    marker = RepositoryNoteMaterializationFailureMarker(
+        session_maker=cast(Any, session_maker),
+        note_content_repository_factory=FakeNoteContentRepository,
+    )
+
+    await marker.mark_note_materialization_failed(
+        project_id=7,
+        entity_id=42,
+        error_message="pgq unavailable",
+    )
+
+    assert len(repository_calls) == 1
+    assert repository_calls[0]["file_write_status"] == "failed"
+    assert repository_calls[0]["last_materialization_error"] == "pgq unavailable"
+    assert isinstance(repository_calls[0]["last_materialization_attempt_at"], datetime)
