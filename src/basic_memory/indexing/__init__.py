@@ -23,6 +23,10 @@ from basic_memory.indexing.change_planning import (
     plan_moved_files,
     storage_checksums_from_sources,
 )
+from basic_memory.indexing.change_detector import (
+    ChangeDetectionStore,
+    detect_project_file_changes,
+)
 from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexBatchJobContext,
     EmbeddingIndexBatchJobRequest,
@@ -247,6 +251,7 @@ __all__ = [
     "AcceptedNoteSearchRow",
     "BatchIndexer",
     "ChangeDetectionSnapshot",
+    "ChangeDetectionStore",
     "ChangeReport",
     "CheckpointPhase",
     "CheckpointModel",
@@ -397,6 +402,7 @@ __all__ = [
     "build_project_index_workflow_stale_failure_update",
     "cleanup_orphan_entities",
     "current_file_index_decision",
+    "detect_project_file_changes",
     "first_markdown_h1",
     "file_index_operation_from_note_object_metadata",
     "file_index_targets_from_runtime_batch_request",

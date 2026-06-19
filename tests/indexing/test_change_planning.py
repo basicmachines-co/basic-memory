@@ -1,5 +1,9 @@
 """Tests for portable project file change planning."""
 
+from collections.abc import Mapping
+
+import pytest
+
 from basic_memory.indexing.change_planning import (
     ChangeDetectionSnapshot,
     ChangeReport,
@@ -8,6 +12,7 @@ from basic_memory.indexing.change_planning import (
     plan_file_changes,
     storage_checksums_from_sources,
 )
+from basic_memory.indexing.change_detector import detect_project_file_changes
 
 
 class StorageObject:
@@ -113,3 +118,59 @@ def test_change_report_helper_properties_count_real_changes() -> None:
     assert report.has_changes is True
     assert report.total_changes == 4
     assert ChangeReport().has_changes is False
+
+
+class FakeChangeDetectionStore:
+    def __init__(self) -> None:
+        self.loaded_checksum_paths: tuple[str, ...] | None = None
+        self.loaded_move_checksums: dict[str, str] | None = None
+
+    async def load_indexed_file_checksums(self, paths: tuple[str, ...]) -> dict[str, str]:
+        self.loaded_checksum_paths = paths
+        return {
+            "unchanged.md": "same-checksum",
+            "modified.md": "old-checksum",
+        }
+
+    async def load_all_indexed_paths(self) -> tuple[str, ...]:
+        return ("unchanged.md", "modified.md", "old/moved.md", "deleted.md")
+
+    async def load_move_candidates(
+        self,
+        new_file_checksums: Mapping[str, str],
+    ) -> tuple[FileMoveCandidate, ...]:
+        self.loaded_move_checksums = dict(new_file_checksums)
+        return (FileMoveCandidate(path="old/moved.md", checksum="moved-checksum"),)
+
+
+@pytest.mark.asyncio
+async def test_detect_project_file_changes_loads_store_state_and_plans_moves() -> None:
+    store = FakeChangeDetectionStore()
+
+    report = await detect_project_file_changes(
+        {
+            "unchanged.md": StorageObject("same-checksum"),
+            "modified.md": StorageObject("new-checksum"),
+            "new/moved.md": StorageObject("moved-checksum"),
+            "new.md": StorageObject("new-file-checksum"),
+        },
+        store=store,
+    )
+
+    assert store.loaded_checksum_paths == (
+        "unchanged.md",
+        "modified.md",
+        "new/moved.md",
+        "new.md",
+    )
+    assert store.loaded_move_checksums == {
+        "new/moved.md": "moved-checksum",
+        "new.md": "new-file-checksum",
+    }
+    assert report == ChangeReport(
+        new_files=["new.md"],
+        modified_files=["modified.md"],
+        deleted_files=["deleted.md"],
+        moved_files={"old/moved.md": "new/moved.md"},
+        unchanged_files=["unchanged.md"],
+    )
