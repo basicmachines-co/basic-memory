@@ -47,6 +47,7 @@ from basic_memory.runtime.contracts import (
     RuntimeQueuedWorkflowMetadata,
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
+    RuntimeStorageEventProcessingResult,
     RuntimeStorageEventProjectBatch,
     RuntimeStorageEventRoutingPlan,
     RuntimeStorageEventSkipReason,
@@ -452,6 +453,25 @@ class TestRuntimeContracts:
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))
 
         assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 3}
+
+    def test_runtime_storage_event_processing_result_wraps_counts_for_internal_handoffs(self):
+        result = (
+            RuntimeStorageEventProcessingResult.empty()
+            .with_processed(2)
+            .with_failed()
+            .add(RuntimeStorageEventProcessingResult.from_counts(skipped=3))
+        )
+
+        assert result.counts == RuntimeJobCounts(processed=2, failed=1, skipped=3)
+        assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 3}
+        assert result.add_counts(RuntimeJobCounts(processed=4)).as_dict() == {
+            "processed": 6,
+            "failed": 1,
+            "skipped": 3,
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(result, "counts", RuntimeJobCounts())
 
     def test_runtime_capabilities_fail_fast_when_factories_are_missing(self):
         capabilities: RuntimeCapabilities[object, object] = RuntimeCapabilities()
