@@ -3,6 +3,11 @@
 from dataclasses import dataclass
 from typing import Protocol, Self
 
+from basic_memory.indexing.project_index_progress import (
+    ProjectIndexCounters,
+    initial_project_index_counters,
+    project_index_progress_text,
+)
 from basic_memory.runtime import (
     ProjectExternalId,
     ProjectId,
@@ -10,6 +15,8 @@ from basic_memory.runtime import (
     ProjectPath,
     ProjectPermalink,
     ProjectRuntimeReference,
+    RuntimeJobId,
+    RuntimeWorkflowBroker,
     TenantId,
     WorkflowId,
 )
@@ -80,3 +87,65 @@ class ProjectIndexWorkflowRequest:
             "search": self.search,
             "embeddings": self.embeddings,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowStart:
+    """Portable start metadata for a project-index workflow."""
+
+    counters: ProjectIndexCounters
+    progress: str
+    metadata: dict[str, object]
+    attempt_event_data: dict[str, object]
+
+
+def build_project_index_workflow_start(
+    *,
+    request: ProjectIndexWorkflowRequest,
+    total_files: int,
+    batch_count: int,
+    batch_size: int,
+    discovered_at: str,
+    transport_broker: RuntimeWorkflowBroker,
+    transport_entrypoint: str,
+    transport_job_id: RuntimeJobId | None,
+) -> ProjectIndexWorkflowStart:
+    """Build the initial persisted metadata for a project-index workflow."""
+    counters = initial_project_index_counters(total_files)
+    progress = project_index_progress_text(counters)
+    payload = request.workflow_payload_metadata()
+    pgq_job_id = str(transport_job_id) if transport_job_id is not None else None
+    metadata: dict[str, object] = {
+        "phase": "indexing",
+        "progress": progress,
+        "payload": payload,
+        "discovery": {
+            "total_files": total_files,
+            "batch_count": batch_count,
+            "batch_size": batch_size,
+            "discovered_at": discovered_at,
+        },
+        "counters": counters.to_metadata(),
+        "transport": {
+            "broker": transport_broker,
+            "entrypoint": transport_entrypoint,
+            "pgq_job_id": pgq_job_id,
+        },
+    }
+    return ProjectIndexWorkflowStart(
+        counters=counters,
+        progress=progress,
+        metadata=metadata,
+        attempt_event_data={
+            "phase": "indexing",
+            "progress": progress,
+            "total_files": total_files,
+            "batch_count": batch_count,
+            "batch_size": batch_size,
+            "pgq_job_id": pgq_job_id,
+            "project_id": request.project.project_id,
+            "project_name": request.project.project_name,
+            "project_permalink": request.project.project_permalink,
+            "project_path": request.project.project_path,
+        },
+    )

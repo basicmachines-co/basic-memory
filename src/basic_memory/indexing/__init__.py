@@ -167,6 +167,8 @@ from basic_memory.indexing.project_index_progress import (
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowSource,
+    ProjectIndexWorkflowStart,
+    build_project_index_workflow_start,
 )
 from basic_memory.indexing.relation_resolution import (
     AffectedEntityIds,
@@ -273,6 +275,7 @@ __all__ = [
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowProgressState",
     "ProjectIndexWorkflowSource",
+    "ProjectIndexWorkflowStart",
     "RelationResolutionPass",
     "RESOLVE_RELATIONS_DEBOUNCE_SECONDS",
     "ResolveRelationsJobRequest",
@@ -298,6 +301,7 @@ __all__ = [
     "build_index_file_batch_job_result",
     "build_index_input_files",
     "build_index_batches",
+    "build_project_index_workflow_start",
     "cleanup_orphan_entities",
     "current_file_index_decision",
     "first_markdown_h1",
