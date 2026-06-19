@@ -19,6 +19,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     accepted_pending_entity_write_from_prepared,
     apply_accepted_prepared_entity_fields,
     create_accepted_pending_entity,
+    delete_accepted_note,
     delete_accepted_note_entity,
     persist_accepted_note_write,
     prepare_accepted_note_create,
@@ -668,3 +669,48 @@ async def test_delete_accepted_note_entity_uses_session_protocol() -> None:
     await delete_accepted_note_entity(session, entity=entity)
 
     assert session.deleted == [entity]
+
+
+@pytest.mark.asyncio
+async def test_delete_accepted_note_plans_missing_response_without_deleting() -> None:
+    session = _DeleteSession()
+
+    accepted = await delete_accepted_note(session, project_id=7, entity=None)
+
+    assert session.deleted == []
+    assert accepted.status_code == 200
+    assert accepted.payload == {"deleted": False}
+    assert accepted.file_delete is None
+
+
+@pytest.mark.asyncio
+async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
+    session = _DeleteSession()
+    entity = _entity()
+    entity.external_id = "entity-42"
+    entity.checksum = "entity-file-checksum"
+    note_content = _note_content()
+    note_content.file_checksum = "note-file-checksum"
+
+    accepted = await delete_accepted_note(
+        session,
+        project_id=entity.project_id,
+        entity=entity,
+        note_content=note_content,
+    )
+
+    assert session.deleted == [entity]
+    assert accepted.status_code == 200
+    assert accepted.payload == {
+        "deleted": True,
+        "external_id": "entity-42",
+        "title": "Accepted",
+        "permalink": "accepted",
+        "file_path": "notes/accepted.md",
+        "file_delete_status": "pending",
+    }
+    assert accepted.file_delete is not None
+    assert accepted.file_delete.project_id == entity.project_id
+    assert accepted.file_delete.entity_id == entity.id
+    assert accepted.file_delete.file_path == entity.file_path
+    assert accepted.file_delete.file_checksum == "note-file-checksum"

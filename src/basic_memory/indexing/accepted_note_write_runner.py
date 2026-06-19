@@ -26,13 +26,17 @@ from basic_memory.repository.entity_repository import (
 )
 from basic_memory.runtime import (
     ProjectId,
+    RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteContentWriteSource,
+    RuntimeDeletedNoteFileChecksumSource,
+    RuntimeDeletedNoteFileDeleteEntitySource,
     RuntimeEntityId,
     RuntimeFilePath,
     RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
     RuntimePendingNoteFileDelete,
+    plan_accepted_note_delete_change,
     plan_accepted_note_content_write,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -203,7 +207,7 @@ class AcceptedNoteSearchEntitySource(AcceptedNoteContentEntitySource, Protocol):
     def updated_at(self) -> datetime: ...
 
 
-class AcceptedNoteDeleteEntitySource(AcceptedNoteContentEntitySource, Protocol):
+class AcceptedNoteDeleteEntitySource(RuntimeDeletedNoteFileDeleteEntitySource, Protocol):
     """Entity identity required to delete one accepted note row."""
 
 
@@ -640,3 +644,21 @@ async def delete_accepted_note_entity(
 ) -> None:
     """Delete the accepted entity row inside the caller-owned transaction."""
     await session.delete(entity)
+
+
+async def delete_accepted_note(
+    session: AcceptedNoteDeleteSession,
+    *,
+    project_id: ProjectId,
+    entity: AcceptedNoteDeleteEntitySource | None,
+    note_content: RuntimeDeletedNoteFileChecksumSource | None = None,
+) -> RuntimeAcceptedNoteChange[dict[str, object]]:
+    """Plan an accepted note delete and remove the entity when it exists."""
+    accepted = plan_accepted_note_delete_change(
+        project_id=project_id,
+        entity=entity,
+        note_content=note_content,
+    )
+    if entity is not None:
+        await session.delete(entity)
+    return accepted
