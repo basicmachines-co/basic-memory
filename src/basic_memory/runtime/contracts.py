@@ -256,11 +256,15 @@ class RuntimeMaterializedNoteSource(Protocol):
     def file_checksum(self) -> object | None: ...
 
 
-class RuntimeNoteContentVersionSource(Protocol):
-    """Minimal note_content row shape needed to compare accepted DB versions."""
+class RuntimeNoteContentDbVersionSource(Protocol):
+    """Minimal note_content row shape needed to advance accepted DB versions."""
 
     @property
     def db_version(self) -> RuntimeNoteContentVersionInput: ...
+
+
+class RuntimeNoteContentVersionSource(RuntimeNoteContentDbVersionSource, Protocol):
+    """Minimal note_content row shape needed to compare accepted DB versions."""
 
     @property
     def db_checksum(self) -> object: ...
@@ -1549,6 +1553,15 @@ def plan_previous_materialized_note_file_delete(
         accepted_file_path=accepted_file_path,
         file_checksum=file_checksum,
     )
+
+
+def next_runtime_note_content_version(
+    current_note_content: RuntimeNoteContentDbVersionSource | None,
+) -> RuntimeNoteContentVersion:
+    """Return the next accepted DB version for a note_content write."""
+    if current_note_content is None:
+        return 1
+    return int(current_note_content.db_version) + 1
 
 
 @dataclass(frozen=True, slots=True)

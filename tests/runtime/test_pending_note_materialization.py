@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from basic_memory.runtime import (
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
+    next_runtime_note_content_version,
     plan_accepted_note_materialization_change,
     plan_pending_note_materialization,
 )
@@ -12,7 +13,7 @@ from basic_memory.runtime import (
 
 @dataclass(frozen=True, slots=True)
 class _NoteContentState:
-    db_version: int
+    db_version: int | str
     db_checksum: str
     last_source: str | None
 
@@ -64,6 +65,28 @@ def test_plan_pending_note_materialization_prefers_note_source() -> None:
     )
 
     assert materialization.source == "mcp"
+
+
+def test_next_runtime_note_content_version_starts_new_rows_at_one() -> None:
+    assert next_runtime_note_content_version(None) == 1
+
+
+def test_next_runtime_note_content_version_advances_existing_rows() -> None:
+    assert (
+        next_runtime_note_content_version(
+            _NoteContentState(db_version=4, db_checksum="db-checksum", last_source=None)
+        )
+        == 5
+    )
+
+
+def test_next_runtime_note_content_version_accepts_db_string_values() -> None:
+    assert (
+        next_runtime_note_content_version(
+            _NoteContentState(db_version="4", db_checksum="db-checksum", last_source=None)
+        )
+        == 5
+    )
 
 
 def test_plan_accepted_note_materialization_change_wraps_response_and_marker() -> None:
