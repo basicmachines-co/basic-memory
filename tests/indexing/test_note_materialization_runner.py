@@ -8,10 +8,13 @@ import pytest
 
 from basic_memory.indexing.note_materialization_runner import (
     NoteMaterializationPreflightResult,
+    NoteMaterializationPublishAction,
     NoteMaterializationStatusPublication,
     plan_note_materialization_preflight,
+    plan_written_note_materialization_publish,
     run_note_materialization,
 )
+from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.runtime import (
     RuntimeFileConflict,
     RuntimeFileConflictError,
@@ -142,6 +145,21 @@ def written_file() -> RuntimeWrittenFileState:
     )
 
 
+def note_content_state(
+    *,
+    db_version: int = 4,
+    db_checksum: str = "db-checksum",
+    file_version: int | None = None,
+    file_checksum: str | None = "old-file-sum",
+) -> NoteContentState:
+    return NoteContentState(
+        db_version=db_version,
+        db_checksum=db_checksum,
+        file_version=file_version,
+        file_checksum=file_checksum,
+    )
+
+
 def test_plan_note_materialization_preflight_returns_missing_terminal_result() -> None:
     request = materialization_request()
 
@@ -216,6 +234,100 @@ def test_plan_note_materialization_preflight_returns_prepared_write() -> None:
             previous_file_checksum="old-file-sum",
             attempted_at=attempted_at,
         )
+    )
+
+
+def test_plan_written_note_materialization_publish_handles_missing_note_content() -> None:
+    request = materialization_request()
+
+    plan = plan_written_note_materialization_publish(
+        request=request,
+        prepared_write=prepared_write(request),
+        written_file=written_file(),
+        current_note_content=None,
+        current_file_path=None,
+    )
+
+    assert plan.action is NoteMaterializationPublishAction.missing_note_content
+    assert plan.note_content_update is None
+    assert plan.result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.missing,
+        reason="note state disappeared after file write: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+
+
+def test_plan_written_note_materialization_publish_handles_moved_note() -> None:
+    request = materialization_request()
+
+    plan = plan_written_note_materialization_publish(
+        request=request,
+        prepared_write=prepared_write(request),
+        written_file=written_file(),
+        current_note_content=note_content_state(),
+        current_file_path="notes/moved.md",
+    )
+
+    assert plan.action is NoteMaterializationPublishAction.stale_file_path
+    assert plan.note_content_update is None
+    assert plan.result.status is RuntimeNoteMaterializationStatus.stale
+    assert plan.result.reason == "note path changed before file publish: 42"
+
+
+def test_plan_written_note_materialization_publish_records_stale_written_file() -> None:
+    request = materialization_request()
+
+    plan = plan_written_note_materialization_publish(
+        request=request,
+        prepared_write=prepared_write(request),
+        written_file=written_file(),
+        current_note_content=note_content_state(
+            db_version=5,
+            db_checksum="newer-db-checksum",
+        ),
+        current_file_path="notes/a.md",
+    )
+
+    assert plan.action is NoteMaterializationPublishAction.stale_db_version
+    assert plan.should_update_entity is False
+    update = plan.require_note_content_update()
+    assert update.file_write_status == "pending"
+    assert update.file_version == 4
+    assert update.file_checksum == "new-file-sum"
+    assert plan.result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.stale,
+        reason="file written but newer accepted note remains pending: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+
+
+def test_plan_written_note_materialization_publish_records_current_written_file() -> None:
+    request = materialization_request()
+
+    plan = plan_written_note_materialization_publish(
+        request=request,
+        prepared_write=prepared_write(request),
+        written_file=written_file(),
+        current_note_content=note_content_state(),
+        current_file_path="notes/a.md",
+    )
+
+    assert plan.action is NoteMaterializationPublishAction.current
+    assert plan.should_update_entity is True
+    update = plan.require_note_content_update()
+    assert update.file_write_status == "synced"
+    assert update.file_version == 4
+    assert update.file_checksum == "new-file-sum"
+    assert plan.result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.written,
+        reason="note file written: notes/a.md",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
     )
 
 

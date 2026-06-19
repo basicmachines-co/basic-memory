@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol, Self
 
-from basic_memory.indexing.note_content_reconciliation import NoteContentWriteStatus
+from basic_memory.indexing.note_content_reconciliation import (
+    MaterializedNoteContentFile,
+    NoteContentMaterializedCurrent,
+    NoteContentMaterializedStale,
+    NoteContentState,
+    NoteContentWriteStatus,
+    plan_note_content_materialization_publish,
+)
 from basic_memory.runtime import (
     RuntimeFileChecksum,
     RuntimeFileConflictError,
@@ -30,6 +38,18 @@ from basic_memory.services.exceptions import FileOperationError
 type NoteMaterializationPreflightOutcome = (
     RuntimePreparedNoteWrite | RuntimeNoteMaterializationResult
 )
+type NoteMaterializationPublishUpdate = (
+    NoteContentMaterializedCurrent | NoteContentMaterializedStale
+)
+
+
+class NoteMaterializationPublishAction(StrEnum):
+    """Post-write DB work selected for a materialized note file."""
+
+    missing_note_content = "missing_note_content"
+    stale_file_path = "stale_file_path"
+    stale_db_version = "stale_db_version"
+    current = "current"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +98,26 @@ class NoteMaterializationStatusPublication:
     attempted_at: datetime
     actual_file_checksum: RuntimeFileChecksum | None = None
     error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NoteMaterializationPublishPlan:
+    """Pure post-write outcome before an adapter persists materialization state."""
+
+    action: NoteMaterializationPublishAction
+    result: RuntimeNoteMaterializationResult
+    note_content_update: NoteMaterializationPublishUpdate | None = None
+
+    @property
+    def should_update_entity(self) -> bool:
+        """Return whether the adapter must update the owning entity row too."""
+        return self.action is NoteMaterializationPublishAction.current
+
+    def require_note_content_update(self) -> NoteMaterializationPublishUpdate:
+        """Return the note_content update required by this publish plan."""
+        if self.note_content_update is None:
+            raise RuntimeError(f"publish plan has no note_content update: {self.action}")
+        return self.note_content_update
 
 
 class NoteMaterializationPreflightProvider(Protocol):
@@ -180,6 +220,79 @@ def plan_note_materialization_preflight(
             ),
             attempted_at=attempted_at,
         )
+    )
+
+
+def plan_written_note_materialization_publish(
+    *,
+    request: RuntimeNoteMaterializationJobRequest,
+    prepared_write: RuntimePreparedNoteWrite,
+    written_file: RuntimeWrittenFileState,
+    current_note_content: NoteContentState | None,
+    current_file_path: RuntimeFilePath | None,
+) -> NoteMaterializationPublishPlan:
+    """Plan DB publication after storage accepts a materialized note file."""
+    result_kwargs = {
+        "entity_id": request.entity_id,
+        "file_path": written_file.file_path,
+        "file_checksum": written_file.file_checksum,
+    }
+    if current_note_content is None:
+        return NoteMaterializationPublishPlan(
+            action=NoteMaterializationPublishAction.missing_note_content,
+            result=RuntimeNoteMaterializationResult(
+                status=RuntimeNoteMaterializationStatus.missing,
+                reason=f"note state disappeared after file write: {request.entity_id}",
+                **result_kwargs,
+            ),
+        )
+
+    if current_file_path is None:
+        raise ValueError("current file path is required with note_content state")
+
+    if current_file_path != prepared_write.file_path:
+        return NoteMaterializationPublishPlan(
+            action=NoteMaterializationPublishAction.stale_file_path,
+            result=RuntimeNoteMaterializationResult(
+                status=RuntimeNoteMaterializationStatus.stale,
+                reason=f"note path changed before file publish: {request.entity_id}",
+                **result_kwargs,
+            ),
+        )
+
+    materialized_file = MaterializedNoteContentFile(
+        db_version=request.db_version,
+        db_checksum=request.db_checksum,
+        file_checksum=written_file.file_checksum,
+        file_updated_at=written_file.file_updated_at,
+        attempted_at=prepared_write.attempted_at,
+    )
+    note_content_update = plan_note_content_materialization_publish(
+        current=current_note_content,
+        written=materialized_file,
+    )
+
+    if not note_content_matches_materialization_request(current_note_content, request):
+        return NoteMaterializationPublishPlan(
+            action=NoteMaterializationPublishAction.stale_db_version,
+            result=RuntimeNoteMaterializationResult(
+                status=RuntimeNoteMaterializationStatus.stale,
+                reason=(
+                    f"file written but newer accepted note remains pending: {request.entity_id}"
+                ),
+                **result_kwargs,
+            ),
+            note_content_update=note_content_update,
+        )
+
+    return NoteMaterializationPublishPlan(
+        action=NoteMaterializationPublishAction.current,
+        result=RuntimeNoteMaterializationResult(
+            status=RuntimeNoteMaterializationStatus.written,
+            reason=f"note file written: {written_file.file_path}",
+            **result_kwargs,
+        ),
+        note_content_update=note_content_update,
     )
 
 
