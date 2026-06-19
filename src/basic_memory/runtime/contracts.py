@@ -1646,6 +1646,36 @@ class RuntimeAcceptedNoteChange[PayloadT]:
     file_delete: RuntimePendingNoteFileDelete | None = None
 
 
+def plan_accepted_note_materialization_change[PayloadT](
+    *,
+    status_code: int,
+    payload: PayloadT,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    note_content: RuntimePendingNoteMaterializationSource,
+    fallback_source: RuntimeNoteChangeSource,
+    actor_user_profile_id: UUID | None = None,
+    actor_kind: RuntimeNoteActorKind | None = None,
+    actor_name: RuntimeNoteActorName | None = None,
+    cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
+) -> RuntimeAcceptedNoteChange[PayloadT]:
+    """Build an accepted-note response plus materialization follow-up marker."""
+    return RuntimeAcceptedNoteChange(
+        status_code=status_code,
+        payload=payload,
+        materialization=plan_pending_note_materialization(
+            project_id=project_id,
+            entity_id=entity_id,
+            note_content=note_content,
+            fallback_source=fallback_source,
+            actor_user_profile_id=actor_user_profile_id,
+            actor_kind=actor_kind,
+            actor_name=actor_name,
+            cleanup_after_write=cleanup_after_write,
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeNoteContentState:
     """Accepted note_content row state before response serialization."""
