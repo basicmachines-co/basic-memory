@@ -1,15 +1,19 @@
 """Portable project-index workflow request values."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, Self
 
 from basic_memory.indexing.project_index_progress import (
+    ProjectIndexCompletion,
     ProjectIndexCounters,
     initial_project_index_counters,
     project_index_progress_text,
     should_emit_project_index_progress_event,
 )
+from basic_memory.indexing.orphan_cleanup import OrphanEntityCleanupResult
 from basic_memory.runtime import (
     ProjectExternalId,
     ProjectId,
@@ -20,6 +24,7 @@ from basic_memory.runtime import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeJobId,
     RuntimeObservedIndexFile,
+    RuntimeProjectIndexJobRequest,
     RuntimeQueuedWorkflowMetadata,
     RuntimeWorkflowBroker,
     RuntimeWorkflowTransport,
@@ -41,6 +46,56 @@ class ProjectIndexWorkflowSource(Protocol):
     force_full: bool
     search: bool
     embeddings: bool
+
+
+class ProjectIndexObservedFileSource(Protocol):
+    """Capability that lists the current storage objects eligible for indexing."""
+
+    async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]: ...
+
+
+class ProjectIndexOrphanCleaner(Protocol):
+    """Capability that removes indexed rows whose source files disappeared."""
+
+    async def cleanup_orphans(
+        self,
+        current_paths: set[str],
+    ) -> OrphanEntityCleanupResult: ...
+
+
+class ProjectIndexWorkflowStarter(Protocol):
+    """Capability that starts product-visible project-index workflow progress."""
+
+    async def start_project_index_workflow(
+        self,
+        request: ProjectIndexWorkflowRequest,
+        *,
+        total_files: int,
+        batch_count: int,
+        batch_size: int,
+        coordinator_job_id: RuntimeJobId | None,
+    ) -> ProjectIndexCompletion | None: ...
+
+
+class ProjectIndexBatchEnqueuer(Protocol):
+    """Capability that queues one child file-index batch request."""
+
+    async def enqueue_index_file_batch(
+        self,
+        request: RuntimeIndexFileBatchJobRequest,
+    ) -> None: ...
+
+
+class ProjectIndexFanoutFailureRecorder(Protocol):
+    """Capability that records a project-index fan-out failure."""
+
+    async def record_project_index_fanout_failure(
+        self,
+        *,
+        workflow_id: WorkflowId,
+        error_message: str,
+        progress: str,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +208,17 @@ class ProjectIndexBatchJobPlan:
     total_files: int
     batch_count: int
     batch_requests: tuple[RuntimeIndexFileBatchJobRequest, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexCoordinatorResult:
+    """Summary of one project-index coordinator fan-out run."""
+
+    total_files: int
+    enqueued_files: int
+    enqueued_batches: int
+    deleted_files: int
+    completion: ProjectIndexCompletion | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +484,73 @@ def build_project_index_batch_job_plan(
         total_files=len(observed_files),
         batch_count=batch_count,
         batch_requests=batch_requests,
+    )
+
+
+async def run_project_index_coordinator(
+    request: RuntimeProjectIndexJobRequest,
+    *,
+    coordinator_job_id: RuntimeJobId | None,
+    observed_file_source: ProjectIndexObservedFileSource,
+    orphan_cleaner: ProjectIndexOrphanCleaner,
+    workflow_starter: ProjectIndexWorkflowStarter,
+    batch_enqueuer: ProjectIndexBatchEnqueuer,
+    fanout_failure_recorder: ProjectIndexFanoutFailureRecorder,
+    batch_size: int,
+) -> ProjectIndexCoordinatorResult:
+    """Run the storage-neutral project-index coordinator fan-out."""
+    if not request.search:
+        raise ValueError("index_project currently requires search=True")
+
+    observed_files = await observed_file_source.list_observed_index_files()
+    orphan_cleanup = await orphan_cleaner.cleanup_orphans(
+        {observed_file.path for observed_file in observed_files}
+    )
+    workflow_request = ProjectIndexWorkflowRequest(
+        tenant_id=request.tenant_id,
+        workflow_id=request.workflow_id,
+        project=request.project,
+        force_full=request.force_full,
+        search=request.search,
+        embeddings=request.embeddings,
+    )
+    batch_plan = build_project_index_batch_job_plan(
+        request=workflow_request,
+        observed_files=observed_files,
+        batch_size=batch_size,
+    )
+    completion = await workflow_starter.start_project_index_workflow(
+        workflow_request,
+        total_files=batch_plan.total_files,
+        batch_count=batch_plan.batch_count,
+        batch_size=batch_size,
+        coordinator_job_id=coordinator_job_id,
+    )
+
+    enqueued_files = 0
+    enqueued_batches = 0
+    try:
+        for runtime_request in batch_plan.batch_requests:
+            await batch_enqueuer.enqueue_index_file_batch(runtime_request)
+            enqueued_batches += 1
+            enqueued_files += len(runtime_request.target_paths())
+    except Exception as exc:
+        await fanout_failure_recorder.record_project_index_fanout_failure(
+            workflow_id=request.workflow_id,
+            error_message=(
+                "Failed to enqueue project index batch jobs after "
+                f"{enqueued_files}/{batch_plan.total_files} files: {exc}"
+            ),
+            progress="fan-out failed",
+        )
+        raise
+
+    return ProjectIndexCoordinatorResult(
+        total_files=batch_plan.total_files,
+        enqueued_files=enqueued_files,
+        enqueued_batches=enqueued_batches,
+        deleted_files=orphan_cleanup.deleted_count,
+        completion=completion,
     )
 
 
