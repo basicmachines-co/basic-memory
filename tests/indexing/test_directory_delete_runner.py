@@ -7,6 +7,7 @@ import pytest
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteAcceptedResult,
     enqueue_directory_file_delete_jobs,
+    normalize_directory_delete_path,
 )
 from basic_memory.runtime import (
     RuntimeDirectoryFileSnapshot,
@@ -83,6 +84,16 @@ def test_directory_delete_result_serializes_failed_enqueue_error() -> None:
         "file_delete_status": "failed",
         "error": "queue unavailable",
     }
+
+
+def test_normalize_directory_delete_path_allows_root_and_trims_slashes() -> None:
+    assert normalize_directory_delete_path("/") == ""
+    assert normalize_directory_delete_path("/notes/recipes/") == "notes/recipes"
+
+
+def test_normalize_directory_delete_path_rejects_project_traversal() -> None:
+    with pytest.raises(ValueError, match="Invalid directory path"):
+        normalize_directory_delete_path("notes/../other")
 
 
 @pytest.mark.asyncio

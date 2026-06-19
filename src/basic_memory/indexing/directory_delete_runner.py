@@ -14,8 +14,17 @@ from basic_memory.runtime import (
     ProjectId,
     plan_note_file_delete_job_request,
 )
+from basic_memory.utils import valid_project_path_value
 
 type DirectoryDeleteFileStatus = Literal["complete", "pending", "failed"]
+
+
+def normalize_directory_delete_path(directory: str) -> RuntimeFilePath:
+    """Normalize a project-relative directory delete path or reject traversal."""
+    normalized_directory = directory.strip().strip("/")
+    if not valid_project_path_value(normalized_directory):
+        raise ValueError("Invalid directory path")
+    return normalized_directory
 
 
 @dataclass(frozen=True, slots=True)

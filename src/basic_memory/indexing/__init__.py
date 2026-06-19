@@ -42,6 +42,7 @@ from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteFileStatus,
     DirectoryFileDeleteEnqueuer,
     enqueue_directory_file_delete_jobs,
+    normalize_directory_delete_path,
 )
 from basic_memory.indexing.embedding_index_planning import (
     EmbeddingBatchVectorSync,
@@ -565,6 +566,7 @@ __all__ = [
     "note_content_matches_accepted_version",
     "note_content_state_from_model",
     "normalize_link_text",
+    "normalize_directory_delete_path",
     "initialize_vector_sync_progress",
     "plan_file_index_target_from_current",
     "plan_file_index_target_from_observed",
