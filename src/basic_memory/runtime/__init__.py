@@ -192,7 +192,10 @@ from basic_memory.runtime.contracts import (
     truncate_runtime_workflow_text,
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
-from basic_memory.runtime.job_payloads import RuntimeNoteFileDeleteJobPayload
+from basic_memory.runtime.job_payloads import (
+    RuntimeNoteFileDeleteJobPayload,
+    RuntimeNoteMaterializationJobPayload,
+)
 from basic_memory.runtime.note_move import (
     RuntimeNoteMoveDestination,
     normalize_note_move_destination_path,
@@ -352,6 +355,7 @@ __all__ = [
     "RuntimeNoteFileDeleteJobPayload",
     "RuntimeNoteFileDeletePlan",
     "RuntimeNoteMaterializationJobRequest",
+    "RuntimeNoteMaterializationJobPayload",
     "RuntimeNoteMaterializationResult",
     "RuntimeNoteMaterializationStatus",
     "RuntimePendingNoteMaterializationSource",
