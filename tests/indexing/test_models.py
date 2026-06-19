@@ -6,12 +6,15 @@ from basic_memory.indexing import (
     CurrentMaterializedNoteEntity,
     CurrentMaterializedNotePlan,
     EmbeddingIndexTarget,
+    FileIndexDecision,
+    FileIndexDecisionStatus,
     FileIndexOperation,
     FileIndexResult,
     IndexedFileLiveUpdatePlan,
     IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
+    index_file_job_result_from_decision,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
 )
@@ -97,6 +100,43 @@ def test_index_file_job_result_carries_live_update_metadata():
     assert result.operation == FileIndexOperation.updated
     with pytest.raises(FrozenInstanceError):
         setattr(result, "reason", "changed")
+
+
+def test_index_file_job_result_from_terminal_current_decision():
+    decision = FileIndexDecision(
+        path="notes/current.md",
+        status=FileIndexDecisionStatus.current,
+        reason="file already indexed: notes/current.md",
+    )
+
+    assert index_file_job_result_from_decision(decision) == IndexFileJobResult(
+        status=IndexFileJobStatus.current,
+        reason="file already indexed: notes/current.md",
+    )
+
+
+def test_index_file_job_result_from_terminal_missing_decision():
+    decision = FileIndexDecision(
+        path="notes/missing.md",
+        status=FileIndexDecisionStatus.missing,
+        reason="file not found: notes/missing.md",
+    )
+
+    assert index_file_job_result_from_decision(decision) == IndexFileJobResult(
+        status=IndexFileJobStatus.missing,
+        reason="file not found: notes/missing.md",
+    )
+
+
+def test_index_file_job_result_from_read_decision_fails_fast():
+    decision = FileIndexDecision(
+        path="notes/read.md",
+        status=FileIndexDecisionStatus.read,
+        reason="file needs indexing: notes/read.md",
+    )
+
+    with pytest.raises(RuntimeError, match="Unexpected file index decision"):
+        index_file_job_result_from_decision(decision)
 
 
 def test_index_file_batch_job_result_carries_ordered_file_and_vector_targets():

@@ -8,6 +8,10 @@ from enum import StrEnum
 from typing import Any, Protocol, TYPE_CHECKING
 
 from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
+from basic_memory.indexing.file_index_planning import (
+    FileIndexDecision,
+    FileIndexDecisionStatus,
+)
 from basic_memory.runtime import (
     RuntimeFileChecksum,
     RuntimeNoteChangeSource,
@@ -191,6 +195,23 @@ class IndexFileJobResult:
     actor_kind: str | None = None
     actor_name: str | None = None
     live_update_source: str | None = None
+
+
+def index_file_job_result_from_decision(
+    decision: FileIndexDecision,
+) -> IndexFileJobResult:
+    """Convert a terminal file-index decision into a job result."""
+    if decision.status == FileIndexDecisionStatus.current:
+        return IndexFileJobResult(
+            status=IndexFileJobStatus.current,
+            reason=decision.reason,
+        )
+    if decision.status == FileIndexDecisionStatus.missing:
+        return IndexFileJobResult(
+            status=IndexFileJobStatus.missing,
+            reason=decision.reason,
+        )
+    raise RuntimeError(f"Unexpected file index decision: {decision.status}")
 
 
 @dataclass(frozen=True, slots=True)

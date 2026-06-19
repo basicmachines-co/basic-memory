@@ -81,6 +81,7 @@ from basic_memory.indexing.models import (
     IndexProgress,
     SyncedMarkdownFile,
     file_index_operation_from_note_object_metadata,
+    index_file_job_result_from_decision,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
 )
@@ -291,6 +292,7 @@ __all__ = [
     "file_index_operation_from_note_object_metadata",
     "file_index_targets_from_runtime_batch_request",
     "initial_project_index_counters",
+    "index_file_job_result_from_decision",
     "note_content_from_bootstrap",
     "note_content_matches_accepted_version",
     "note_content_state_from_model",
