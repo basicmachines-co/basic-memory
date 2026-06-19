@@ -117,6 +117,15 @@ class RuntimeAcceptedNoteWriteConflictKind(StrEnum):
     generic = "generic"
 
 
+class RuntimeNoteContentReadAction(StrEnum):
+    """Read outcomes for tenant note-content projections."""
+
+    missing_entity = "missing_entity"
+    missing_note_content = "missing_note_content"
+    entity_metadata = "entity_metadata"
+    accepted_note = "accepted_note"
+
+
 class RuntimeAcceptedNoteEntitySource(Protocol):
     """Minimal accepted-note entity shape needed for response payloads."""
 
@@ -309,6 +318,31 @@ class RuntimeNoteContentResourceEntitySource(Protocol):
 
     @property
     def content_type(self) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeNoteContentReadPlan[EntityT, NoteContentT]:
+    """Typed read-side decision for one entity plus optional accepted note_content."""
+
+    action: RuntimeNoteContentReadAction
+    entity: EntityT | None = None
+    note_content: NoteContentT | None = None
+
+    def require_entity_metadata(self) -> EntityT:
+        """Return the entity for metadata-only responses."""
+        if self.action is not RuntimeNoteContentReadAction.entity_metadata or self.entity is None:
+            raise RuntimeError("note-content read plan does not contain metadata-only entity")
+        return self.entity
+
+    def require_accepted_note(self) -> tuple[EntityT, NoteContentT]:
+        """Return the entity and note_content for accepted markdown responses."""
+        if (
+            self.action is not RuntimeNoteContentReadAction.accepted_note
+            or self.entity is None
+            or self.note_content is None
+        ):
+            raise RuntimeError("note-content read plan does not contain accepted note content")
+        return self.entity, self.note_content
 
 
 class RuntimeFileChecksumReader(Protocol):
@@ -1612,6 +1646,33 @@ def accepted_note_file_path_conflicts(
     return (
         conflicting_entity is not None
         and conflicting_entity.external_id != allowed_entity_external_id
+    )
+
+
+def plan_runtime_note_content_read[EntityT: RuntimeContentTypeSource, NoteContentT](
+    entity: EntityT | None,
+    note_content: NoteContentT | None,
+) -> RuntimeNoteContentReadPlan[EntityT, NoteContentT]:
+    """Plan how a note-content read should project one loaded entity."""
+    if entity is None:
+        return RuntimeNoteContentReadPlan(action=RuntimeNoteContentReadAction.missing_entity)
+
+    if not runtime_content_type_is_markdown(entity):
+        return RuntimeNoteContentReadPlan(
+            action=RuntimeNoteContentReadAction.entity_metadata,
+            entity=entity,
+        )
+
+    if note_content is None:
+        return RuntimeNoteContentReadPlan(
+            action=RuntimeNoteContentReadAction.missing_note_content,
+            entity=entity,
+        )
+
+    return RuntimeNoteContentReadPlan(
+        action=RuntimeNoteContentReadAction.accepted_note,
+        entity=entity,
+        note_content=note_content,
     )
 
 
