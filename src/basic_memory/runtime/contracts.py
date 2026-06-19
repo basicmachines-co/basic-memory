@@ -32,6 +32,8 @@ type JobEntrypoint = str
 type RuntimeJobId = str | int
 type WorkflowId = UUID
 type RuntimeWorkflowBroker = str
+type RuntimeWorkflowCheckpoint = Mapping[str, object]
+type RuntimeWorkflowMetadata = Mapping[str, object]
 type RuntimeWorkflowMetadataPatch = Mapping[str, object]
 type RuntimeWorkflowPhase = str
 type RuntimeWorkflowProgress = str
@@ -286,6 +288,44 @@ class RuntimeQueuedWorkflowMetadata:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowMetadataView:
+    """Typed read view over durable workflow metadata."""
+
+    metadata: RuntimeWorkflowMetadata
+
+    @classmethod
+    def from_metadata(cls, metadata: RuntimeWorkflowMetadata | None) -> Self:
+        """Build a read view from optional persisted workflow metadata."""
+        return cls(metadata=dict(metadata or {}))
+
+    @property
+    def phase(self) -> RuntimeWorkflowPhase | None:
+        """Return the latest machine-readable workflow phase."""
+        phase = self.metadata.get("phase")
+        return phase if isinstance(phase, str) else None
+
+    @property
+    def progress(self) -> RuntimeWorkflowProgress | None:
+        """Return human-readable workflow progress, falling back to phase."""
+        progress = self.metadata.get("progress")
+        if isinstance(progress, str) and progress:
+            return progress
+        return self.phase
+
+    @property
+    def checkpoint(self) -> dict[str, object] | None:
+        """Return copied checkpoint metadata for resumable workflow jobs."""
+        checkpoint = self.metadata.get("checkpoint")
+        return runtime_workflow_metadata_dict_value(checkpoint, field_name="checkpoint")
+
+    @property
+    def result(self) -> dict[str, object] | None:
+        """Return copied structured result data from workflow metadata."""
+        result = self.metadata.get("result")
+        return runtime_workflow_metadata_dict_value(result, field_name="result")
+
+
 def truncate_runtime_workflow_text(
     value: str,
     *,
@@ -313,6 +353,23 @@ def merge_runtime_workflow_metadata_patch(
     if metadata_patch is not None:
         patch.update(metadata_patch)
     return patch
+
+
+def runtime_workflow_metadata_dict_value(
+    value: object,
+    *,
+    field_name: str,
+) -> dict[str, object] | None:
+    """Return a copied workflow metadata object value with string keys."""
+    if not isinstance(value, dict):
+        return None
+
+    copied: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise TypeError(f"Workflow {field_name} metadata keys must be strings")
+        copied[key] = item
+    return copied
 
 
 @dataclass(frozen=True, slots=True)

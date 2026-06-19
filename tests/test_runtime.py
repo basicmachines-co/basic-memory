@@ -48,6 +48,7 @@ from basic_memory.runtime.contracts import (
     RuntimeWorkflowAttemptMetadata,
     RuntimeWorkflowCompletionMetadata,
     RuntimeWorkflowFailureMetadata,
+    RuntimeWorkflowMetadataView,
     RuntimeWorkflowProgressMetadata,
     RuntimeWorkflowTransport,
     StorageEventPayload,
@@ -270,6 +271,36 @@ class TestRuntimeContracts:
             truncate_runtime_workflow_text(long_text, max_chars=32)
             == "xxxxxxxx... [truncated 18 chars]"
         )
+
+    def test_runtime_workflow_metadata_view_reads_existing_status_fields(self):
+        view = RuntimeWorkflowMetadataView.from_metadata(
+            {
+                "phase": "indexing_batches",
+                "progress": "Indexed batch 1/3",
+                "checkpoint": {"batch_number": 1, "files_processed": 10},
+                "result": {"files_processed": 30},
+            }
+        )
+
+        assert view.phase == "indexing_batches"
+        assert view.progress == "Indexed batch 1/3"
+        assert view.checkpoint == {"batch_number": 1, "files_processed": 10}
+        assert view.result == {"files_processed": 30}
+
+        queued_view = RuntimeWorkflowMetadataView.from_metadata({"phase": "queued"})
+        assert queued_view.phase == "queued"
+        assert queued_view.progress == "queued"
+        assert queued_view.checkpoint is None
+        assert queued_view.result is None
+
+        empty_view = RuntimeWorkflowMetadataView.from_metadata(None)
+        assert empty_view.phase is None
+        assert empty_view.progress is None
+        assert empty_view.checkpoint is None
+        assert empty_view.result is None
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(view, "metadata", {})
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))
