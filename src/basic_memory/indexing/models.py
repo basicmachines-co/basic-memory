@@ -8,7 +8,15 @@ from enum import StrEnum
 from typing import Any, Protocol, TYPE_CHECKING
 
 from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
-from basic_memory.runtime import RuntimeNoteObjectMetadataMap, db_version_from_object_metadata
+from basic_memory.runtime import (
+    RuntimeFileChecksum,
+    RuntimeNoteChangeSource,
+    RuntimeNoteObjectMetadataMap,
+    RuntimeNoteObjectProvenance,
+    RuntimeStorageObjectChecksumSource,
+    db_version_from_object_metadata,
+    storage_object_checksum_for_index_match,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.models import Entity
@@ -137,6 +145,141 @@ class IndexFileJobResult:
     actor_kind: str | None = None
     actor_name: str | None = None
     live_update_source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentMaterializedNoteEntity:
+    """Indexed entity state needed to build a current materialized note result."""
+
+    entity_id: int
+    external_id: str
+    title: str
+    permalink: str
+    checksum: RuntimeFileChecksum | None
+
+    @classmethod
+    def from_fields(
+        cls,
+        *,
+        entity_id: int,
+        external_id: object,
+        title: object,
+        permalink: object,
+        checksum: object,
+        file_path: str,
+    ) -> CurrentMaterializedNoteEntity:
+        """Validate entity fields loaded for a current materialized note."""
+        return cls(
+            entity_id=entity_id,
+            external_id=_required_current_materialized_note_text(
+                external_id,
+                field_name="external_id",
+                file_path=file_path,
+            ),
+            title=_required_current_materialized_note_text(
+                title,
+                field_name="title",
+                file_path=file_path,
+            ),
+            permalink=_required_current_materialized_note_text(
+                permalink,
+                field_name="permalink",
+                file_path=file_path,
+            ),
+            checksum=str(checksum) if checksum is not None else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentMaterializedNotePlan:
+    """Planned current-file result plus checksum diagnostics for adapter logging."""
+
+    job_result: IndexFileJobResult
+    requires_entity: bool = False
+    object_checksum_source: RuntimeStorageObjectChecksumSource | None = None
+    object_checksum: RuntimeFileChecksum | None = None
+    entity_checksum: RuntimeFileChecksum | None = None
+    source: RuntimeNoteChangeSource | None = None
+    checksum_matches_entity: bool | None = None
+
+
+def _required_current_materialized_note_text(
+    value: object,
+    *,
+    field_name: str,
+    file_path: str,
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"Current entity for {file_path} is missing {field_name}")
+    return value.strip()
+
+
+def plan_current_materialized_note_result(
+    *,
+    reason: str,
+    file_path: str,
+    object_checksum: RuntimeFileChecksum,
+    object_metadata: RuntimeNoteObjectMetadataMap | None,
+    entity: CurrentMaterializedNoteEntity | None,
+) -> CurrentMaterializedNotePlan:
+    """Plan a current file-index result for a DB-first materialized note."""
+    current_result = IndexFileJobResult(status=IndexFileJobStatus.current, reason=reason)
+
+    provenance = RuntimeNoteObjectProvenance.from_object_metadata(object_metadata)
+    if provenance.source is None:
+        return CurrentMaterializedNotePlan(job_result=current_result)
+
+    live_update_operation = file_index_operation_from_note_object_metadata(object_metadata)
+    if live_update_operation is None:
+        return CurrentMaterializedNotePlan(
+            job_result=current_result,
+            source=provenance.source,
+        )
+
+    if entity is None:
+        return CurrentMaterializedNotePlan(
+            job_result=current_result,
+            requires_entity=True,
+            source=provenance.source,
+        )
+
+    selected_checksum = storage_object_checksum_for_index_match(
+        object_checksum=object_checksum,
+        object_metadata=object_metadata,
+    )
+    checksum_matches_entity = selected_checksum.checksum == entity.checksum
+    plan = CurrentMaterializedNotePlan(
+        job_result=current_result,
+        object_checksum_source=selected_checksum.source,
+        object_checksum=selected_checksum.checksum,
+        entity_checksum=entity.checksum,
+        source=provenance.source,
+        checksum_matches_entity=checksum_matches_entity,
+    )
+    if not checksum_matches_entity:
+        return plan
+
+    return CurrentMaterializedNotePlan(
+        job_result=IndexFileJobResult(
+            status=IndexFileJobStatus.current,
+            reason=reason,
+            entity_id=entity.entity_id,
+            note_external_id=entity.external_id,
+            title=entity.title,
+            permalink=entity.permalink,
+            entity_checksum=entity.checksum,
+            operation=live_update_operation,
+            actor_user_profile_id=provenance.actor_user_profile_id,
+            actor_kind=provenance.actor_kind,
+            actor_name=provenance.actor_name,
+            live_update_source=provenance.source,
+        ),
+        object_checksum_source=plan.object_checksum_source,
+        object_checksum=plan.object_checksum,
+        entity_checksum=plan.entity_checksum,
+        source=plan.source,
+        checksum_matches_entity=True,
+    )
 
 
 @dataclass(frozen=True, slots=True)

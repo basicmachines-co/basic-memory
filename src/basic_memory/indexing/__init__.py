@@ -59,6 +59,8 @@ from basic_memory.indexing.link_resolution import (
     resolve_link_texts,
 )
 from basic_memory.indexing.models import (
+    CurrentMaterializedNoteEntity,
+    CurrentMaterializedNotePlan,
     FileIndexOperation,
     FileIndexResult,
     IndexedEntity,
@@ -75,6 +77,7 @@ from basic_memory.indexing.models import (
     IndexProgress,
     SyncedMarkdownFile,
     file_index_operation_from_note_object_metadata,
+    plan_current_materialized_note_result,
 )
 from basic_memory.indexing.note_content_reconciliation import (
     AcceptedNoteContentVersion,
@@ -164,6 +167,8 @@ __all__ = [
     "CheckpointPhase",
     "CheckpointModel",
     "CurrentFileChecksumSource",
+    "CurrentMaterializedNoteEntity",
+    "CurrentMaterializedNotePlan",
     "EmbeddingIndexBatchResult",
     "EmbeddingIndexBatchSummary",
     "EmbeddingIndexPlan",
@@ -262,6 +267,7 @@ __all__ = [
     "plan_legacy_file_index_targets",
     "plan_file_changes",
     "plan_moved_files",
+    "plan_current_materialized_note_result",
     "plan_note_content_materialization_publish",
     "plan_note_content_materialization_status",
     "plan_note_content_reconciliation",
