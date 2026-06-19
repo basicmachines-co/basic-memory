@@ -13,6 +13,8 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentBootstrap,
     NoteContentFileObserved,
     NoteContentFileSynced,
+    NoteContentMaterializedCurrent,
+    NoteContentMaterializedStale,
     NoteContentPromoted,
     NoteContentState,
     ObservedNoteContent,
@@ -20,7 +22,13 @@ from basic_memory.indexing.note_content_reconciliation import (
 )
 from basic_memory.models import Entity, NoteContent
 
-type NoteContentUpdatePlan = NoteContentFileSynced | NoteContentFileObserved | NoteContentPromoted
+type NoteContentUpdatePlan = (
+    NoteContentFileSynced
+    | NoteContentFileObserved
+    | NoteContentMaterializedCurrent
+    | NoteContentMaterializedStale
+    | NoteContentPromoted
+)
 
 
 class NoteContentStore(Protocol):
@@ -108,6 +116,17 @@ async def apply_note_content_update_plan(
                 file_version=plan.file_version,
                 file_checksum=plan.file_checksum,
                 file_updated_at=plan.file_updated_at,
+            )
+        case NoteContentMaterializedCurrent() | NoteContentMaterializedStale():
+            await repository.update_state_fields(
+                session,
+                entity_id,
+                file_version=plan.file_version,
+                file_checksum=plan.file_checksum,
+                file_write_status=plan.file_write_status,
+                file_updated_at=plan.file_updated_at,
+                last_materialization_error=plan.last_materialization_error,
+                last_materialization_attempt_at=plan.last_materialization_attempt_at,
             )
         case NoteContentPromoted():
             await repository.update_state_fields(

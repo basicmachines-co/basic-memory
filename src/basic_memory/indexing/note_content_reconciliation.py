@@ -38,6 +38,17 @@ class NoteContentState:
 
 
 @dataclass(frozen=True, slots=True)
+class MaterializedNoteContentFile:
+    """One file object written from a DB-accepted note_content version."""
+
+    db_version: int
+    db_checksum: NoteContentChecksum
+    file_checksum: NoteContentChecksum
+    file_updated_at: datetime
+    attempted_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class NoteContentBootstrap:
     """Initial state for a note_content row created from an observed file."""
 
@@ -77,6 +88,30 @@ class NoteContentFileObserved:
 
 
 @dataclass(frozen=True, slots=True)
+class NoteContentMaterializedCurrent:
+    """Update when a materialized file still matches the latest accepted DB note."""
+
+    file_version: int
+    file_checksum: NoteContentChecksum
+    file_write_status: NoteContentWriteStatus
+    file_updated_at: datetime
+    last_materialization_error: str | None
+    last_materialization_attempt_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class NoteContentMaterializedStale:
+    """Update when a written file is already behind a newer accepted DB note."""
+
+    file_version: int
+    file_checksum: NoteContentChecksum
+    file_write_status: NoteContentWriteStatus
+    file_updated_at: datetime
+    last_materialization_error: str | None
+    last_materialization_attempt_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class NoteContentPromoted:
     """Update when an external file change becomes the newest accepted content."""
 
@@ -95,6 +130,9 @@ class NoteContentPromoted:
 
 type NoteContentReconciliationPlan = (
     NoteContentBootstrap | NoteContentFileSynced | NoteContentFileObserved | NoteContentPromoted
+)
+type NoteContentMaterializationPublishPlan = (
+    NoteContentMaterializedCurrent | NoteContentMaterializedStale
 )
 
 
@@ -160,4 +198,33 @@ def plan_note_content_reconciliation(
         file_updated_at=observed.observed_at,
         last_materialization_error=None,
         last_materialization_attempt_at=None,
+    )
+
+
+def plan_note_content_materialization_publish(
+    *,
+    current: NoteContentState,
+    written: MaterializedNoteContentFile,
+) -> NoteContentMaterializationPublishPlan:
+    """Choose how note_content should record one completed materialization write."""
+    payload_is_current = (
+        current.db_version == written.db_version and current.db_checksum == written.db_checksum
+    )
+    if payload_is_current:
+        return NoteContentMaterializedCurrent(
+            file_version=written.db_version,
+            file_checksum=written.file_checksum,
+            file_write_status="synced",
+            file_updated_at=written.file_updated_at,
+            last_materialization_error=None,
+            last_materialization_attempt_at=written.attempted_at,
+        )
+
+    return NoteContentMaterializedStale(
+        file_version=written.db_version,
+        file_checksum=written.file_checksum,
+        file_write_status="pending",
+        file_updated_at=written.file_updated_at,
+        last_materialization_error=None,
+        last_materialization_attempt_at=written.attempted_at,
     )

@@ -12,7 +12,11 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import file_utils
-from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
+from basic_memory.indexing.note_content_reconciliation import NoteContentMaterializedCurrent
+from basic_memory.indexing.note_content_reconciler import (
+    NoteContentReconciler,
+    apply_note_content_update_plan,
+)
 from basic_memory.models import Entity
 
 
@@ -88,4 +92,38 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         file_updated_at=observed_at,
         last_materialization_error=None,
         last_materialization_attempt_at=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_note_content_update_plan_publishes_materialized_current_file() -> None:
+    """Materialization publish plans should apply through the note_content repository."""
+    file_updated_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
+    attempted_at = datetime(2026, 4, 13, 14, 59, tzinfo=UTC)
+    repository = SimpleNamespace(update_state_fields=AsyncMock())
+    session = FakeSession()
+
+    await apply_note_content_update_plan(
+        cast(Any, repository),
+        cast(Any, session),
+        42,
+        NoteContentMaterializedCurrent(
+            file_version=4,
+            file_checksum="written-file-checksum",
+            file_write_status="synced",
+            file_updated_at=file_updated_at,
+            last_materialization_error=None,
+            last_materialization_attempt_at=attempted_at,
+        ),
+    )
+
+    repository.update_state_fields.assert_awaited_once_with(
+        session,
+        42,
+        file_version=4,
+        file_checksum="written-file-checksum",
+        file_write_status="synced",
+        file_updated_at=file_updated_at,
+        last_materialization_error=None,
+        last_materialization_attempt_at=attempted_at,
     )

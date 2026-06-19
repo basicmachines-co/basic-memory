@@ -3,12 +3,16 @@
 from datetime import UTC, datetime
 
 from basic_memory.indexing.note_content_reconciliation import (
+    MaterializedNoteContentFile,
     NoteContentBootstrap,
     NoteContentFileObserved,
     NoteContentFileSynced,
+    NoteContentMaterializedCurrent,
+    NoteContentMaterializedStale,
     NoteContentPromoted,
     NoteContentState,
     ObservedNoteContent,
+    plan_note_content_materialization_publish,
     plan_note_content_reconciliation,
 )
 
@@ -103,4 +107,64 @@ def test_plan_promotes_external_file_change_after_latest_known_version() -> None
         file_updated_at=datetime(2026, 6, 18, 12, 30, tzinfo=UTC),
         last_materialization_error=None,
         last_materialization_attempt_at=None,
+    )
+
+
+def test_plan_materialization_publish_marks_current_payload_synced() -> None:
+    attempted_at = datetime(2026, 6, 18, 12, 29, tzinfo=UTC)
+    file_updated_at = datetime(2026, 6, 18, 12, 30, tzinfo=UTC)
+
+    plan = plan_note_content_materialization_publish(
+        current=NoteContentState(
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=3,
+            file_checksum="old-file-checksum",
+        ),
+        written=MaterializedNoteContentFile(
+            db_version=4,
+            db_checksum="db-checksum",
+            file_checksum="written-file-checksum",
+            file_updated_at=file_updated_at,
+            attempted_at=attempted_at,
+        ),
+    )
+
+    assert plan == NoteContentMaterializedCurrent(
+        file_version=4,
+        file_checksum="written-file-checksum",
+        file_write_status="synced",
+        file_updated_at=file_updated_at,
+        last_materialization_error=None,
+        last_materialization_attempt_at=attempted_at,
+    )
+
+
+def test_plan_materialization_publish_leaves_newer_db_version_pending() -> None:
+    attempted_at = datetime(2026, 6, 18, 12, 29, tzinfo=UTC)
+    file_updated_at = datetime(2026, 6, 18, 12, 30, tzinfo=UTC)
+
+    plan = plan_note_content_materialization_publish(
+        current=NoteContentState(
+            db_version=5,
+            db_checksum="newer-db-checksum",
+            file_version=3,
+            file_checksum="old-file-checksum",
+        ),
+        written=MaterializedNoteContentFile(
+            db_version=4,
+            db_checksum="db-checksum",
+            file_checksum="written-file-checksum",
+            file_updated_at=file_updated_at,
+            attempted_at=attempted_at,
+        ),
+    )
+
+    assert plan == NoteContentMaterializedStale(
+        file_version=4,
+        file_checksum="written-file-checksum",
+        file_write_status="pending",
+        file_updated_at=file_updated_at,
+        last_materialization_error=None,
+        last_materialization_attempt_at=attempted_at,
     )
