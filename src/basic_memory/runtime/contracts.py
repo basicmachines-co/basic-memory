@@ -1781,6 +1781,24 @@ def plan_accepted_note_response(
     )
 
 
+def plan_accepted_note_response_change(
+    *,
+    status_code: int,
+    entity: RuntimeAcceptedNoteEntitySource,
+    note_content: RuntimeNoteContentStateSource,
+    fallback_source: RuntimeNoteChangeSource,
+) -> RuntimeAcceptedNoteChange[RuntimeAcceptedNoteResponse]:
+    """Build an accepted-note response when no follow-up runtime work is needed."""
+    return RuntimeAcceptedNoteChange(
+        status_code=status_code,
+        payload=plan_accepted_note_response(
+            entity=entity,
+            note_content=note_content,
+            fallback_source=fallback_source,
+        ),
+    )
+
+
 def plan_accepted_note_write_change(
     *,
     status_code: int,
