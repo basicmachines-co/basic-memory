@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 
 from basic_memory.indexing.project_index_progress import (
+    ObservedObjectIndexCompletionContext,
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCompletedLiveUpdatePlan,
     ProjectIndexCompletedLiveUpdateType,
@@ -16,6 +17,7 @@ from basic_memory.indexing.project_index_progress import (
     apply_project_index_file_outcome,
     apply_project_index_file_outcomes,
     initial_project_index_counters,
+    plan_observed_object_index_completed_live_update,
     plan_project_index_completed_live_update,
     project_index_batch_count_from_metadata,
     project_index_completion_from_metadata,
@@ -26,6 +28,7 @@ from basic_memory.indexing.project_index_progress import (
     should_emit_project_index_progress_event,
     summarize_project_index_file_outcomes,
 )
+from basic_memory.runtime import RuntimeStorageFileIndexMode
 
 
 def test_project_index_counters_format_progress_text() -> None:
@@ -262,6 +265,67 @@ def test_project_index_completion_live_update_plan_uses_workflow_completion_fact
         workflow_id=workflow_id,
     )
     assert plan_project_index_completed_live_update(None) is None
+
+
+def test_observed_object_index_completion_live_update_plan_requires_web_context() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    context = ObservedObjectIndexCompletionContext(
+        tenant_id=tenant_id,
+        project_external_id="external-project",
+        project_name="Project Name",
+        project_path="project",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+    )
+
+    assert plan_observed_object_index_completed_live_update(
+        context
+    ) == ProjectIndexCompletedLiveUpdatePlan(
+        event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
+        tenant_id=tenant_id,
+        source="worker",
+        project_external_id="external-project",
+        project_name="Project Name",
+        workflow_id=None,
+        cache_project_ids=("external-project", "project"),
+    )
+
+    assert (
+        plan_observed_object_index_completed_live_update(
+            ObservedObjectIndexCompletionContext(
+                tenant_id=tenant_id,
+                project_external_id="external-project",
+                project_name="Project Name",
+                project_path="project",
+                mode=RuntimeStorageFileIndexMode.current_file,
+            )
+        )
+        is None
+    )
+    assert (
+        plan_observed_object_index_completed_live_update(
+            ObservedObjectIndexCompletionContext(
+                tenant_id=tenant_id,
+                project_external_id="external-project",
+                project_name="Project Name",
+                project_path="project",
+                mode=RuntimeStorageFileIndexMode.observed_object,
+                workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
+            )
+        )
+        is None
+    )
+    assert (
+        plan_observed_object_index_completed_live_update(
+            ObservedObjectIndexCompletionContext(
+                tenant_id=tenant_id,
+                project_external_id=None,
+                project_name="Project Name",
+                project_path="project",
+                mode=RuntimeStorageFileIndexMode.observed_object,
+            )
+        )
+        is None
+    )
 
 
 def test_project_index_completion_rejects_missing_required_identity() -> None:

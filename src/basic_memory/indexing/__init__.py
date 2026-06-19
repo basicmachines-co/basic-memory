@@ -143,6 +143,7 @@ from basic_memory.indexing.progress import (
     initialize_vector_sync_progress,
 )
 from basic_memory.indexing.project_index_progress import (
+    ObservedObjectIndexCompletionContext,
     PROJECT_INDEX_PROGRESS_EVENT_INTERVAL,
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCompletion,
@@ -160,6 +161,7 @@ from basic_memory.indexing.project_index_progress import (
     apply_project_index_file_outcome,
     apply_project_index_file_outcomes,
     initial_project_index_counters,
+    plan_observed_object_index_completed_live_update,
     plan_project_index_completed_live_update,
     project_index_batch_count_from_metadata,
     project_index_completion_from_metadata,
@@ -280,6 +282,7 @@ __all__ = [
     "NoteContentWriteStatus",
     "NoteContentUpdatePlan",
     "ObservedNoteContent",
+    "ObservedObjectIndexCompletionContext",
     "OrphanCleanupLogger",
     "OrphanCleanupSessionScope",
     "OrphanEntityCleanupResult",
@@ -366,6 +369,7 @@ __all__ = [
     "plan_note_content_materialization_publish",
     "plan_note_content_materialization_status",
     "plan_note_content_reconciliation",
+    "plan_observed_object_index_completed_live_update",
     "plan_project_index_completed_live_update",
     "plan_vector_sync_progress",
     "project_index_batch_count_from_metadata",
