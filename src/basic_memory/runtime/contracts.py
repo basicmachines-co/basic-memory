@@ -220,6 +220,13 @@ class RuntimePendingNoteMaterializationSource(Protocol):
     def last_source(self) -> object | None: ...
 
 
+class RuntimeMaterializedNoteSource(Protocol):
+    """Minimal note_content row shape needed to clean up a materialized file."""
+
+    @property
+    def file_checksum(self) -> object | None: ...
+
+
 class RuntimeNoteContentResourceEntitySource(Protocol):
     """Minimal entity shape needed for note-content resource reads."""
 
@@ -1449,6 +1456,29 @@ def plan_previous_note_file_delete(
         project_id=project_id,
         entity_id=entity_id,
         file_path=existing_file_path,
+        file_checksum=file_checksum,
+    )
+
+
+def plan_previous_materialized_note_file_delete(
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    existing_file_path: RuntimeFilePath | None,
+    accepted_file_path: RuntimeFilePath,
+    current_note_content: RuntimeMaterializedNoteSource | None,
+) -> RuntimePendingNoteFileDelete | None:
+    """Return old-file cleanup work when a moved note has materialized file state."""
+    file_checksum = (
+        str(current_note_content.file_checksum)
+        if current_note_content is not None and current_note_content.file_checksum is not None
+        else None
+    )
+    return plan_previous_note_file_delete(
+        project_id=project_id,
+        entity_id=entity_id,
+        existing_file_path=existing_file_path,
+        accepted_file_path=accepted_file_path,
         file_checksum=file_checksum,
     )
 
