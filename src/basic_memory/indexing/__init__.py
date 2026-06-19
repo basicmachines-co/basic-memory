@@ -11,6 +11,16 @@ from basic_memory.indexing.accepted_note_search import (
     search_text_variants,
     strip_search_text,
 )
+from basic_memory.indexing.accepted_note_enqueue_runner import (
+    AcceptedNoteEnqueueResult,
+    AcceptedNoteFileDeleteEnqueuer,
+    AcceptedNoteMaterializationEnqueuer,
+    AcceptedNoteMaterializationFailureMarker,
+    AcceptedNotePayloadSerializer,
+    enqueue_accepted_note_file_delete,
+    enqueue_accepted_note_materialization,
+    enqueue_accepted_note_write_jobs,
+)
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.batching import build_index_batches
 from basic_memory.indexing.change_planning import (
@@ -308,6 +318,11 @@ from basic_memory.indexing.vector_sync_planning import (
 __all__ = [
     "AffectedEntityIds",
     "AcceptedNoteContentVersion",
+    "AcceptedNoteEnqueueResult",
+    "AcceptedNoteFileDeleteEnqueuer",
+    "AcceptedNoteMaterializationEnqueuer",
+    "AcceptedNoteMaterializationFailureMarker",
+    "AcceptedNotePayloadSerializer",
     "AcceptedNoteSearchRow",
     "BatchIndexer",
     "ChangeDetectionSnapshot",
@@ -547,6 +562,9 @@ __all__ = [
     "resolve_link_texts",
     "require_observed_file_should_read",
     "enqueue_cleanup_file",
+    "enqueue_accepted_note_file_delete",
+    "enqueue_accepted_note_materialization",
+    "enqueue_accepted_note_write_jobs",
     "run_index_file",
     "run_index_file_batch",
     "run_note_file_delete",
