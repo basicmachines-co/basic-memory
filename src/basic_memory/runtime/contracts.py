@@ -25,6 +25,7 @@ type ProjectPath = str
 type ProjectPermalink = str
 type RuntimeEntityId = int
 type RuntimeContentType = str
+type RuntimeIntegrityErrorMessage = str
 type RuntimeFilePath = str
 type StorageBucketName = str
 type StorageKey = str
@@ -105,6 +106,15 @@ class RuntimeNoteMaterializationStatus(StrEnum):
     stale = "stale"
     missing = "missing"
     conflict = "conflict"
+
+
+class RuntimeAcceptedNoteWriteConflictKind(StrEnum):
+    """Known accepted-note uniqueness conflicts from repository writes."""
+
+    file_path = "file_path"
+    external_id = "external_id"
+    permalink = "permalink"
+    generic = "generic"
 
 
 class RuntimeAcceptedNoteEntitySource(Protocol):
@@ -1603,6 +1613,28 @@ def accepted_note_file_path_conflicts(
         conflicting_entity is not None
         and conflicting_entity.external_id != allowed_entity_external_id
     )
+
+
+def classify_accepted_note_write_conflict(
+    error_message: RuntimeIntegrityErrorMessage,
+) -> RuntimeAcceptedNoteWriteConflictKind:
+    """Classify accepted-note repository conflicts without importing a database driver."""
+    normalized_message = error_message.lower()
+
+    if "uix_entity_file_path_project" in normalized_message or (
+        "file_path" in normalized_message and "project" in normalized_message
+    ):
+        return RuntimeAcceptedNoteWriteConflictKind.file_path
+
+    if "external_id" in normalized_message:
+        return RuntimeAcceptedNoteWriteConflictKind.external_id
+
+    if "uix_entity_permalink_project" in normalized_message or (
+        "permalink" in normalized_message and "project" in normalized_message
+    ):
+        return RuntimeAcceptedNoteWriteConflictKind.permalink
+
+    return RuntimeAcceptedNoteWriteConflictKind.generic
 
 
 @dataclass(frozen=True, slots=True)
