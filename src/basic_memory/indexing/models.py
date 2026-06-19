@@ -99,6 +99,33 @@ class FileIndexResult:
     operation: FileIndexOperation
 
 
+class IndexFileJobStatus(StrEnum):
+    """Normal outcomes for an index-file job."""
+
+    processed = "processed"
+    current = "current"
+    missing = "missing"
+    failed = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class IndexFileJobResult:
+    """Summary of what happened while processing one file-index job."""
+
+    status: IndexFileJobStatus
+    reason: str
+    entity_id: int | None = None
+    note_external_id: str | None = None
+    title: str | None = None
+    permalink: str | None = None
+    entity_checksum: str | None = None
+    operation: FileIndexOperation | None = None
+    actor_user_profile_id: str | None = None
+    actor_kind: str | None = None
+    actor_name: str | None = None
+    live_update_source: str | None = None
+
+
 @dataclass(slots=True)
 class SyncedMarkdownFile:
     """Canonical result for syncing one markdown file end-to-end."""
