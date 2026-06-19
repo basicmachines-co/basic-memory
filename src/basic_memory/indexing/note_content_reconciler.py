@@ -23,7 +23,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     ObservedNoteContent,
     plan_note_content_reconciliation,
 )
-from basic_memory.models import Entity, NoteContent
+from basic_memory.models import NoteContent
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime import ProjectId, RuntimeEntityId
 
@@ -66,6 +66,13 @@ class NoteContentStore(NoteContentStateUpdateStore, Protocol):
         data: NoteContent,
     ) -> NoteContent:
         """Create a note_content row."""
+
+
+class NoteContentReconcileEntitySource(Protocol):
+    """Minimal entity shape needed by note-content reconciliation."""
+
+    @property
+    def id(self) -> RuntimeEntityId: ...
 
 
 def note_content_repository_for_project(project_id: ProjectId) -> NoteContentStore:
@@ -235,7 +242,7 @@ class NoteContentReconciler:
     async def reconcile(
         self,
         *,
-        entity: Entity,
+        entity: NoteContentReconcileEntitySource,
         markdown_content: str,
         observed_at: datetime | None,
         source: str,
