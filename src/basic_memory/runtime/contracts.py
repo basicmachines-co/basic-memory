@@ -299,6 +299,30 @@ class RuntimeStorageFileIndexMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeStorageFileIndexJobIdentity:
+    """Stable queue identity for one runtime file-index job."""
+
+    tenant_id: TenantId
+    project_id: ProjectId
+    file_path: RuntimeFilePath
+    mode: RuntimeStorageFileIndexMode
+    workflow_id: WorkflowId | None = None
+    object_etag: StorageEtag | None = None
+    object_size: int | None = None
+
+    def dedupe_key(self) -> str:
+        """Return the existing logical work key for file-index queue requests."""
+        base = f"index-file:{self.tenant_id}:{self.project_id}:{self.file_path}"
+        if self.mode == RuntimeStorageFileIndexMode.current_file:
+            workflow_key = str(self.workflow_id) if self.workflow_id is not None else "current"
+            return f"{base}:current:{workflow_key}"
+
+        if self.object_etag is None:
+            raise ValueError("observed_object index jobs require object metadata")
+        return f"{base}:observed:{normalize_storage_etag(self.object_etag)}:{self.object_size}"
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeStorageEventOperation:
     """Typed operation selected from a project-scoped storage event."""
 

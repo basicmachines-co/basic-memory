@@ -45,6 +45,7 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
+    RuntimeStorageFileIndexJobIdentity,
     RuntimeQueuedWorkflowMetadata,
     RuntimeStorageFileIndexMode,
     RuntimeStorageFileIndexRequest,
@@ -159,6 +160,58 @@ class TestRuntimeContracts:
     def test_runtime_storage_file_index_mode_names_existing_queue_producers(self):
         assert RuntimeStorageFileIndexMode.observed_object.value == "observed_object"
         assert RuntimeStorageFileIndexMode.current_file.value == "current_file"
+
+    def test_runtime_storage_file_index_job_identity_matches_cloud_dedupe_keys(self):
+        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+        observed_identity = RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            object_etag='"etag-a"',
+            object_size=123,
+        )
+        current_identity = RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.current_file,
+            workflow_id=workflow_id,
+        )
+        current_without_workflow = RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.current_file,
+        )
+
+        assert (
+            observed_identity.dedupe_key() == "index-file:11111111-1111-1111-1111-111111111111:42:"
+            "notes/a.md:observed:etag-a:123"
+        )
+        assert (
+            current_identity.dedupe_key() == "index-file:11111111-1111-1111-1111-111111111111:42:"
+            "notes/a.md:current:22222222-2222-2222-2222-222222222222"
+        )
+        assert (
+            current_without_workflow.dedupe_key()
+            == "index-file:11111111-1111-1111-1111-111111111111:42:"
+            "notes/a.md:current:current"
+        )
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(observed_identity, "file_path", "notes/b.md")
+
+        missing_observed_metadata = RuntimeStorageFileIndexJobIdentity(
+            tenant_id=tenant_id,
+            project_id=42,
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.observed_object,
+        )
+        with pytest.raises(ValueError, match="object metadata"):
+            missing_observed_metadata.dedupe_key()
 
     def test_runtime_storage_event_routing_plan_groups_projects_and_skips_root_objects(self):
         alpha_put = StorageEventPayload(
