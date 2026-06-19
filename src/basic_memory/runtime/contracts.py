@@ -8,7 +8,7 @@ and snapshots while sharing the same typed handoff values.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -218,6 +218,56 @@ class StorageEventPayload:
     @property
     def is_object_deleted(self) -> bool:
         return self.event_name == STORAGE_OBJECT_DELETED_EVENT
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStorageEventProjectBatch:
+    """Storage events grouped for one project-prefixed runtime namespace."""
+
+    project_path: ProjectPath
+    events: tuple[StorageEventPayload, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStorageEventRoutingPlan:
+    """Storage events split into project work and root objects that cannot route."""
+
+    project_batches: tuple[RuntimeStorageEventProjectBatch, ...]
+    skipped_events: tuple[StorageEventPayload, ...] = ()
+
+    @property
+    def skipped_count(self) -> int:
+        return len(self.skipped_events)
+
+    @property
+    def skipped_counts(self) -> RuntimeJobCounts:
+        return RuntimeJobCounts(skipped=self.skipped_count)
+
+
+def plan_runtime_storage_events_by_project(
+    events: Iterable[StorageEventPayload],
+) -> RuntimeStorageEventRoutingPlan:
+    """Group storage events by project path while preserving first-seen project order."""
+    events_by_project: dict[ProjectPath, list[StorageEventPayload]] = {}
+    skipped_events: list[StorageEventPayload] = []
+
+    for event in events:
+        project_path = event.project_path
+        if not project_path:
+            skipped_events.append(event)
+            continue
+        events_by_project.setdefault(project_path, []).append(event)
+
+    return RuntimeStorageEventRoutingPlan(
+        project_batches=tuple(
+            RuntimeStorageEventProjectBatch(
+                project_path=project_path,
+                events=tuple(project_events),
+            )
+            for project_path, project_events in events_by_project.items()
+        ),
+        skipped_events=tuple(skipped_events),
+    )
 
 
 @dataclass(frozen=True, slots=True)

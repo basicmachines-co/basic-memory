@@ -45,6 +45,8 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     RuntimeQueuedWorkflowMetadata,
+    RuntimeStorageEventProjectBatch,
+    RuntimeStorageEventRoutingPlan,
     RuntimeWorkflowAttemptMetadata,
     RuntimeWorkflowCompletionMetadata,
     RuntimeWorkflowFailureMetadata,
@@ -53,7 +55,9 @@ from basic_memory.runtime.contracts import (
     RuntimeWorkflowTransport,
     StorageEventPayload,
     StorageObjectIdentity,
+    StorageObjectVersion,
     assert_runtime_file_matches_expected,
+    plan_runtime_storage_events_by_project,
     plan_previous_note_file_delete,
     read_runtime_file_checksum,
     truncate_runtime_workflow_text,
@@ -136,6 +140,75 @@ class TestRuntimeContracts:
 
         assert identity.project_path == "project"
         assert identity.relative_path == "notes/a.md"
+
+    def test_runtime_storage_event_routing_plan_groups_projects_and_skips_root_objects(self):
+        alpha_put = StorageEventPayload(
+            event_name="OBJECT_CREATED_PUT",
+            event_time="2026-06-19T12:00:00Z",
+            object_version=StorageObjectVersion(
+                identity=StorageObjectIdentity(
+                    bucket_name="memory-bucket",
+                    key="alpha/notes/a.md",
+                ),
+                etag="alpha-a",
+            ),
+        )
+        root_put = StorageEventPayload(
+            event_name="OBJECT_CREATED_PUT",
+            event_time="2026-06-19T12:01:00Z",
+            object_version=StorageObjectVersion(
+                identity=StorageObjectIdentity(
+                    bucket_name="memory-bucket",
+                    key="root.md",
+                ),
+                etag="root",
+            ),
+        )
+        beta_deleted = StorageEventPayload(
+            event_name="OBJECT_DELETED",
+            event_time="2026-06-19T12:02:00Z",
+            object_version=StorageObjectVersion(
+                identity=StorageObjectIdentity(
+                    bucket_name="memory-bucket",
+                    key="beta/notes/b.md",
+                ),
+                etag="beta-b",
+            ),
+        )
+        alpha_post = StorageEventPayload(
+            event_name="OBJECT_CREATED_POST",
+            event_time="2026-06-19T12:03:00Z",
+            object_version=StorageObjectVersion(
+                identity=StorageObjectIdentity(
+                    bucket_name="memory-bucket",
+                    key="alpha/notes/c.md",
+                ),
+                etag="alpha-c",
+            ),
+        )
+
+        plan = plan_runtime_storage_events_by_project(
+            [alpha_put, root_put, beta_deleted, alpha_post]
+        )
+
+        assert plan == RuntimeStorageEventRoutingPlan(
+            project_batches=(
+                RuntimeStorageEventProjectBatch(
+                    project_path="alpha",
+                    events=(alpha_put, alpha_post),
+                ),
+                RuntimeStorageEventProjectBatch(
+                    project_path="beta",
+                    events=(beta_deleted,),
+                ),
+            ),
+            skipped_events=(root_put,),
+        )
+        assert plan.skipped_count == 1
+        assert plan.skipped_counts.as_dict() == {"processed": 0, "failed": 0, "skipped": 1}
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(plan, "skipped_events", ())
 
     def test_runtime_job_request_is_immutable(self):
         request = RuntimeJobRequest(
