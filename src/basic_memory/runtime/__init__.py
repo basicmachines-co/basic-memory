@@ -235,6 +235,10 @@ from basic_memory.runtime.storage_project_resolution import (
     resolve_storage_project_prefix,
     storage_project_prefix_from_project_path,
 )
+from basic_memory.runtime.storage_events import (
+    StorageEventInput,
+    storage_event_payload_from_input,
+)
 
 __all__ = [
     "JobEntrypoint",
@@ -388,6 +392,7 @@ __all__ = [
     "SnapshotVersion",
     "StorageBucketName",
     "StorageEtag",
+    "StorageEventInput",
     "StorageEventName",
     "StorageEventPayload",
     "StorageEventSource",
@@ -458,6 +463,7 @@ __all__ = [
     "snapshot_restore_folder_prefix",
     "source_from_object_metadata",
     "storage_object_checksum_for_index_match",
+    "storage_event_payload_from_input",
     "storage_project_prefix_from_project_path",
     "truncate_runtime_workflow_text",
     "write_prepared_note_to_content_store",
