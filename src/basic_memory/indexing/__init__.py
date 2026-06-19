@@ -27,6 +27,12 @@ from basic_memory.indexing.change_detector import (
     ChangeDetectionStore,
     detect_project_file_changes,
 )
+from basic_memory.indexing.directory_delete_runner import (
+    DirectoryDeleteAcceptedResult,
+    DirectoryDeleteFileStatus,
+    DirectoryFileDeleteEnqueuer,
+    enqueue_directory_file_delete_jobs,
+)
 from basic_memory.indexing.embedding_index_planning import (
     EmbeddingBatchVectorSync,
     EmbeddingIndexBatchJobContext,
@@ -312,6 +318,9 @@ __all__ = [
     "CurrentFileChecksumSource",
     "CurrentMaterializedNoteEntity",
     "CurrentMaterializedNotePlan",
+    "DirectoryDeleteAcceptedResult",
+    "DirectoryDeleteFileStatus",
+    "DirectoryFileDeleteEnqueuer",
     "EmbeddingBatchVectorSync",
     "EmbeddingIndexBatchResult",
     "EmbeddingIndexBatchJobContext",
@@ -490,6 +499,7 @@ __all__ = [
     "cleanup_file_from_prepared_write",
     "current_file_index_decision",
     "detect_project_file_changes",
+    "enqueue_directory_file_delete_jobs",
     "first_markdown_h1",
     "file_index_operation_from_note_object_metadata",
     "file_index_targets_from_runtime_batch_request",
