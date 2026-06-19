@@ -98,6 +98,46 @@ class RuntimeNoteMaterializationStatus(StrEnum):
     conflict = "conflict"
 
 
+class RuntimeAcceptedNoteEntitySource(Protocol):
+    """Minimal accepted-note entity shape needed for response payloads."""
+
+    @property
+    def external_id(self) -> str: ...
+
+    @property
+    def id(self) -> RuntimeEntityId: ...
+
+    @property
+    def title(self) -> str: ...
+
+    @property
+    def note_type(self) -> str: ...
+
+    @property
+    def content_type(self) -> str: ...
+
+    @property
+    def permalink(self) -> str | None: ...
+
+    @property
+    def file_path(self) -> RuntimeFilePath: ...
+
+    @property
+    def entity_metadata(self) -> Mapping[str, object] | None: ...
+
+    @property
+    def created_at(self) -> datetime: ...
+
+    @property
+    def updated_at(self) -> datetime: ...
+
+    @property
+    def created_by(self) -> str | None: ...
+
+    @property
+    def last_updated_by(self) -> str | None: ...
+
+
 class RuntimeFileChecksumReader(Protocol):
     """Capability for reading a runtime file checksum if an object exists."""
 
@@ -1162,6 +1202,106 @@ class RuntimeAcceptedNoteChange[PayloadT]:
     payload: PayloadT
     materialization: RuntimePendingNoteMaterialization | None = None
     file_delete: RuntimePendingNoteFileDelete | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeAcceptedNoteResponse:
+    """Accepted note response state before HTTP serialization."""
+
+    external_id: str
+    entity_id: RuntimeEntityId
+    title: str
+    note_type: str
+    content_type: str
+    permalink: str | None
+    file_path: RuntimeFilePath
+    markdown_content: str
+    entity_metadata: Mapping[str, object] | None
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+    last_updated_by: str | None
+    db_version: RuntimeNoteContentVersion
+    db_checksum: RuntimeNoteContentChecksum
+    file_version: int | None
+    file_checksum: RuntimeFileChecksum | None
+    file_write_status: str
+    last_source: str
+    file_updated_at: datetime | None
+    last_materialization_error: str | None
+
+    @classmethod
+    def from_entity(
+        cls,
+        entity: RuntimeAcceptedNoteEntitySource,
+        *,
+        markdown_content: str,
+        db_version: RuntimeNoteContentVersion,
+        db_checksum: RuntimeNoteContentChecksum,
+        file_version: int | None,
+        file_checksum: RuntimeFileChecksum | None,
+        file_write_status: str,
+        last_source: str,
+        file_updated_at: datetime | None,
+        last_materialization_error: str | None,
+    ) -> Self:
+        """Build accepted-note response state from a loaded entity plus note_content markers."""
+        return cls(
+            external_id=entity.external_id,
+            entity_id=entity.id,
+            title=entity.title,
+            note_type=entity.note_type,
+            content_type=entity.content_type,
+            permalink=entity.permalink,
+            file_path=entity.file_path,
+            markdown_content=markdown_content,
+            entity_metadata=entity.entity_metadata,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            created_by=entity.created_by,
+            last_updated_by=entity.last_updated_by,
+            db_version=db_version,
+            db_checksum=db_checksum,
+            file_version=file_version,
+            file_checksum=file_checksum,
+            file_write_status=file_write_status,
+            last_source=last_source,
+            file_updated_at=file_updated_at,
+            last_materialization_error=last_materialization_error,
+        )
+
+    def to_response_payload(self) -> dict[str, object]:
+        """Serialize to the existing v2 entity-plus-note-content response shape."""
+        return {
+            "external_id": self.external_id,
+            "id": self.entity_id,
+            "title": self.title,
+            "note_type": self.note_type,
+            "content_type": self.content_type,
+            "permalink": self.permalink,
+            "file_path": self.file_path,
+            "content": self.markdown_content,
+            "entity_metadata": (
+                dict(self.entity_metadata) if self.entity_metadata is not None else None
+            ),
+            "observations": [],
+            "relations": [],
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "created_by": self.created_by,
+            "last_updated_by": self.last_updated_by,
+            "api_version": "v2",
+            "db_version": self.db_version,
+            "db_checksum": self.db_checksum,
+            "file_version": self.file_version,
+            "file_checksum": self.file_checksum,
+            "file_write_status": self.file_write_status,
+            "last_source": self.last_source,
+            "file_updated_at": (
+                self.file_updated_at.isoformat() if self.file_updated_at is not None else None
+            ),
+            "last_materialization_error": self.last_materialization_error,
+        }
 
 
 @dataclass(frozen=True, slots=True)

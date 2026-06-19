@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -43,6 +44,7 @@ from basic_memory.runtime.contracts import (
     RuntimeCapabilities,
     RuntimeDirectoryFileSnapshot,
     RuntimeExpectedFileState,
+    RuntimeAcceptedNoteResponse,
     RuntimeFileDeleteResult,
     RuntimeFileConflictError,
     RuntimeJobCounts,
@@ -1350,6 +1352,68 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(change, "status_code", 500)
+
+    def test_runtime_accepted_note_response_serializes_existing_payload_shape(self):
+        created_at = datetime(2026, 4, 13, 12, 0, tzinfo=UTC)
+        updated_at = datetime(2026, 4, 13, 12, 30, tzinfo=UTC)
+        file_updated_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
+        entity = SimpleNamespace(
+            external_id="entity-1",
+            id=42,
+            title="Accepted",
+            note_type="note",
+            content_type="text/markdown",
+            permalink="main/accepted",
+            file_path="notes/accepted.md",
+            entity_metadata={"topic": "tests"},
+            created_at=created_at,
+            updated_at=updated_at,
+            created_by="creator",
+            last_updated_by="editor",
+        )
+
+        response = RuntimeAcceptedNoteResponse.from_entity(
+            entity,
+            markdown_content="# Accepted\n",
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=3,
+            file_checksum="file-checksum",
+            file_write_status="pending",
+            last_source="api",
+            file_updated_at=file_updated_at,
+            last_materialization_error=None,
+        )
+
+        assert response.to_response_payload() == {
+            "external_id": "entity-1",
+            "id": 42,
+            "title": "Accepted",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "permalink": "main/accepted",
+            "file_path": "notes/accepted.md",
+            "content": "# Accepted\n",
+            "entity_metadata": {"topic": "tests"},
+            "observations": [],
+            "relations": [],
+            "created_at": created_at.isoformat(),
+            "updated_at": updated_at.isoformat(),
+            "created_by": "creator",
+            "last_updated_by": "editor",
+            "api_version": "v2",
+            "db_version": 4,
+            "db_checksum": "db-checksum",
+            "file_version": 3,
+            "file_checksum": "file-checksum",
+            "file_write_status": "pending",
+            "last_source": "api",
+            "file_updated_at": file_updated_at.isoformat(),
+            "last_materialization_error": None,
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(response, "file_write_status", "synced")
 
     def test_plan_previous_note_file_delete_returns_cleanup_for_materialized_moves(self):
         cleanup = plan_previous_note_file_delete(
