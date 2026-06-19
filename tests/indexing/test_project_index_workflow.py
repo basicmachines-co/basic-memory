@@ -6,6 +6,8 @@ from uuid import UUID
 import pytest
 
 from basic_memory.indexing import (
+    IndexFileJobResult,
+    IndexFileJobStatus,
     ProjectIndexCounters,
     ProjectIndexBatchJobPlan,
     ProjectIndexBatchJobActivity,
@@ -21,6 +23,7 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowQueued,
+    ProjectIndexWorkflowRecordPlan,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStart,
     build_project_index_batch_activity_update,
@@ -32,6 +35,8 @@ from basic_memory.indexing import (
     build_project_index_workflow_queued,
     build_project_index_workflow_start,
     build_project_index_workflow_stale_failure_update,
+    plan_project_index_batch_result_record,
+    plan_project_index_file_result_record,
 )
 from basic_memory.runtime import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
 
@@ -48,6 +53,42 @@ class ProjectIndexSource:
     force_full: bool
     search: bool
     embeddings: bool
+
+
+def project_index_record_metadata(
+    *,
+    total: int,
+    processed: int = 0,
+    succeeded: int = 0,
+    missing: int = 0,
+    failed: int = 0,
+    recorded_batches: list[int] | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "phase": "indexing",
+        "progress": f"Indexed {processed}/{total} files, {succeeded} succeeded",
+        "payload": {
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "project_id": 42,
+            "project_external_id": "external-project",
+        },
+        "discovery": {
+            "total_files": total,
+            "batch_count": 2,
+            "batch_size": 50,
+            "discovered_at": "2026-06-19T10:20:30+00:00",
+        },
+        "counters": {
+            "total": total,
+            "processed": processed,
+            "succeeded": succeeded,
+            "missing": missing,
+            "failed": failed,
+        },
+    }
+    if recorded_batches is not None:
+        metadata["recorded_batches"] = recorded_batches
+    return metadata
 
 
 def test_project_index_workflow_request_serializes_existing_payload_metadata() -> None:
@@ -581,6 +622,164 @@ def test_project_index_workflow_completion_update_builds_metadata_and_event_data
             },
         },
     )
+
+
+def test_project_index_file_result_record_plan_builds_progress_update() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    plan = plan_project_index_file_result_record(
+        metadata=project_index_record_metadata(total=2),
+        workflow_id=workflow_id,
+        result=IndexFileJobResult(
+            status=IndexFileJobStatus.processed,
+            reason="file indexed: notes/a.md",
+        ),
+    )
+
+    assert plan.status == "progress"
+    assert plan.is_complete is False
+    assert plan.should_emit_progress_event is True
+    assert plan.completion_update is None
+    progress_update = plan.require_progress_update()
+    assert progress_update.counters == ProjectIndexCounters(
+        total=2,
+        processed=1,
+        succeeded=1,
+        missing=0,
+        failed=0,
+    )
+    assert progress_update.metadata["phase"] == "indexing"
+    assert progress_update.metadata["progress"] == "Indexed 1/2 files, 1 succeeded"
+    assert progress_update.progress_event_data == {
+        "phase": "indexing",
+        "progress": "Indexed 1/2 files, 1 succeeded",
+        "payload": {
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "project_id": 42,
+            "project_external_id": "external-project",
+        },
+        "counters": {
+            "total": 2,
+            "processed": 1,
+            "succeeded": 1,
+            "missing": 0,
+            "failed": 0,
+        },
+    }
+
+
+def test_project_index_file_result_record_plan_builds_completion_update() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    plan = plan_project_index_file_result_record(
+        metadata=project_index_record_metadata(total=1),
+        workflow_id=workflow_id,
+        result=IndexFileJobResult(
+            status=IndexFileJobStatus.current,
+            reason="file current: notes/a.md",
+        ),
+    )
+
+    assert plan.status == "complete"
+    assert plan.is_complete is True
+    progress_update = plan.require_progress_update()
+    completion_update = plan.require_completion_update()
+    assert progress_update.metadata["phase"] == "indexing"
+    assert completion_update.counters == ProjectIndexCounters(
+        total=1,
+        processed=1,
+        succeeded=1,
+        missing=0,
+        failed=0,
+    )
+    assert completion_update.metadata["phase"] == "completed"
+    assert completion_update.metadata["result"] == {
+        "total": 1,
+        "processed": 1,
+        "succeeded": 1,
+        "missing": 0,
+        "failed": 0,
+    }
+    assert completion_update.completed_event_data == {
+        "phase": "completed",
+        "progress": "Indexed 1/1 files, 1 succeeded",
+        "payload": {
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "project_id": 42,
+            "project_external_id": "external-project",
+        },
+        "result": {
+            "total": 1,
+            "processed": 1,
+            "succeeded": 1,
+            "missing": 0,
+            "failed": 0,
+        },
+    }
+
+
+def test_project_index_batch_result_record_plan_ignores_recorded_batches() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    plan = plan_project_index_batch_result_record(
+        metadata=project_index_record_metadata(
+            total=2,
+            processed=1,
+            succeeded=1,
+            recorded_batches=[0],
+        ),
+        workflow_id=workflow_id,
+        batch_index=0,
+        batch_count=2,
+        results=[
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/a.md",
+            )
+        ],
+    )
+
+    assert plan == ProjectIndexWorkflowRecordPlan.already_recorded()
+    assert plan.should_emit_progress_event is False
+    with pytest.raises(RuntimeError, match="does not include a progress update"):
+        plan.require_progress_update()
+
+
+def test_project_index_batch_result_record_plan_builds_completion_update() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    plan = plan_project_index_batch_result_record(
+        metadata=project_index_record_metadata(
+            total=2,
+            processed=1,
+            succeeded=1,
+            recorded_batches=[0],
+        ),
+        workflow_id=workflow_id,
+        batch_index=1,
+        batch_count=2,
+        results=[
+            IndexFileJobResult(
+                status=IndexFileJobStatus.missing,
+                reason="file missing: notes/b.md",
+            )
+        ],
+    )
+
+    assert plan.status == "complete"
+    assert plan.is_complete is True
+    progress_update = plan.require_progress_update()
+    completion_update = plan.require_completion_update()
+    assert progress_update.metadata["recorded_batches"] == [0, 1]
+    assert completion_update.metadata["phase"] == "completed"
+    assert completion_update.metadata["recorded_batches"] == [0, 1]
+    assert completion_update.metadata["result"] == {
+        "total": 2,
+        "processed": 2,
+        "succeeded": 1,
+        "missing": 1,
+        "failed": 0,
+    }
 
 
 def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_data() -> None:

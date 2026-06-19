@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 
+from basic_memory.indexing.models import (
+    IndexFileJobResult,
+    apply_project_index_batch_job_results,
+    project_index_file_outcome_from_job_result,
+)
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCompletion,
     ProjectIndexCounters,
+    apply_project_index_file_outcome,
     initial_project_index_counters,
+    project_index_counters_from_metadata,
     project_index_progress_text,
+    project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
 )
 from basic_memory.indexing.orphan_cleanup import OrphanEntityCleanupResult
@@ -190,6 +198,85 @@ class ProjectIndexWorkflowFailureUpdate:
     error_message: str
     metadata: dict[str, object]
     failed_event_data: dict[str, object]
+
+
+type ProjectIndexWorkflowRecordStatus = Literal["progress", "complete", "already_recorded"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowRecordPlan:
+    """Portable decision for applying one child result to aggregate workflow state."""
+
+    status: ProjectIndexWorkflowRecordStatus
+    progress_update: ProjectIndexWorkflowProgressUpdate | None = None
+    completion_update: ProjectIndexWorkflowCompletionUpdate | None = None
+
+    def __post_init__(self) -> None:
+        if self.status == "already_recorded":
+            if self.progress_update is not None or self.completion_update is not None:
+                raise ValueError("already_recorded plans cannot include updates")
+            return
+
+        if self.progress_update is None:
+            raise ValueError(f"{self.status} plans require a progress update")
+
+        if self.status == "progress" and self.completion_update is not None:
+            raise ValueError("progress plans cannot include a completion update")
+        if self.status == "complete" and self.completion_update is None:
+            raise ValueError("complete plans require a completion update")
+
+    @classmethod
+    def progress(
+        cls,
+        progress_update: ProjectIndexWorkflowProgressUpdate,
+    ) -> Self:
+        """Return a running progress plan."""
+        return cls(status="progress", progress_update=progress_update)
+
+    @classmethod
+    def complete(
+        cls,
+        *,
+        progress_update: ProjectIndexWorkflowProgressUpdate,
+        completion_update: ProjectIndexWorkflowCompletionUpdate,
+    ) -> Self:
+        """Return a terminal success plan."""
+        return cls(
+            status="complete",
+            progress_update=progress_update,
+            completion_update=completion_update,
+        )
+
+    @classmethod
+    def already_recorded(cls) -> Self:
+        """Return an idempotent no-op plan."""
+        return cls(status="already_recorded")
+
+    @property
+    def is_complete(self) -> bool:
+        """Return whether this plan completes the workflow."""
+        return self.status == "complete"
+
+    @property
+    def should_emit_progress_event(self) -> bool:
+        """Return whether the runtime should append a progress event."""
+        return (
+            self.status == "progress"
+            and self.progress_update is not None
+            and self.progress_update.should_emit_event
+        )
+
+    def require_progress_update(self) -> ProjectIndexWorkflowProgressUpdate:
+        """Return the progress update or fail when this is an idempotent no-op."""
+        if self.progress_update is None:
+            raise RuntimeError(f"{self.status} plan does not include a progress update")
+        return self.progress_update
+
+    def require_completion_update(self) -> ProjectIndexWorkflowCompletionUpdate:
+        """Return the completion update or fail when the plan is not terminal."""
+        if self.completion_update is None:
+            raise RuntimeError(f"{self.status} plan does not include a completion update")
+        return self.completion_update
 
 
 @dataclass(frozen=True, slots=True)
@@ -678,6 +765,89 @@ def build_project_index_workflow_completion_update(
             "result": counters_metadata,
         },
     )
+
+
+def require_project_index_workflow_counters(
+    metadata: Mapping[str, object],
+    *,
+    workflow_id: WorkflowId,
+) -> ProjectIndexCounters:
+    """Read required aggregate counters from project-index workflow metadata."""
+    if not metadata.get("counters"):
+        raise RuntimeError(f"Project index workflow counters are missing: {workflow_id}")
+    return project_index_counters_from_metadata(metadata, workflow_id=workflow_id)
+
+
+def plan_project_index_file_result_record(
+    *,
+    metadata: Mapping[str, object],
+    workflow_id: WorkflowId,
+    result: IndexFileJobResult,
+) -> ProjectIndexWorkflowRecordPlan:
+    """Plan one child file result update for a project-index workflow."""
+    counters = require_project_index_workflow_counters(
+        metadata,
+        workflow_id=workflow_id,
+    )
+    counters = apply_project_index_file_outcome(
+        counters,
+        project_index_file_outcome_from_job_result(result),
+    )
+    progress_update = build_project_index_workflow_progress_update(
+        metadata=metadata,
+        counters=counters,
+    )
+    if counters.processed >= counters.total:
+        return ProjectIndexWorkflowRecordPlan.complete(
+            progress_update=progress_update,
+            completion_update=build_project_index_workflow_completion_update(
+                metadata=progress_update.metadata,
+                counters=counters,
+                progress=progress_update.progress,
+            ),
+        )
+    return ProjectIndexWorkflowRecordPlan.progress(progress_update)
+
+
+def plan_project_index_batch_result_record(
+    *,
+    metadata: Mapping[str, object],
+    workflow_id: WorkflowId,
+    batch_index: int,
+    batch_count: int,
+    results: Sequence[IndexFileJobResult],
+) -> ProjectIndexWorkflowRecordPlan:
+    """Plan one idempotent child batch result update for a project-index workflow."""
+    counters = require_project_index_workflow_counters(
+        metadata,
+        workflow_id=workflow_id,
+    )
+    batch_update = apply_project_index_batch_job_results(
+        counters=counters,
+        recorded_batch_indexes=project_index_recorded_batches_from_metadata(metadata),
+        batch_index=batch_index,
+        batch_count=batch_count,
+        results=results,
+    )
+    if batch_update.already_recorded:
+        return ProjectIndexWorkflowRecordPlan.already_recorded()
+
+    counters = batch_update.counters
+    progress_update = build_project_index_workflow_progress_update(
+        metadata=metadata,
+        counters=counters,
+        recorded_batch_indexes=batch_update.recorded_batch_indexes,
+    )
+    if batch_update.is_complete:
+        return ProjectIndexWorkflowRecordPlan.complete(
+            progress_update=progress_update,
+            completion_update=build_project_index_workflow_completion_update(
+                metadata=progress_update.metadata,
+                counters=counters,
+                progress=progress_update.progress,
+            ),
+        )
+    return ProjectIndexWorkflowRecordPlan.progress(progress_update)
 
 
 def build_project_index_workflow_stale_failure_update(
