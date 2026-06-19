@@ -9,6 +9,9 @@ from basic_memory.runtime import (
     plan_snapshot_name,
     should_include_snapshot_archive_path,
     snapshot_browse_project_names,
+    snapshot_key_project_name,
+    snapshot_key_project_names,
+    snapshot_restore_folder_prefix,
 )
 
 
@@ -118,6 +121,27 @@ def test_snapshot_browse_project_names_returns_sorted_unique_top_level_folders()
     )
 
     assert snapshot_browse_project_names(files) == ("a-project", "z-project")
+
+
+def test_snapshot_key_project_name_returns_top_level_folder() -> None:
+    assert snapshot_key_project_name("project/notes/a.md") == "project"
+    assert snapshot_key_project_name("root.md") is None
+
+
+def test_snapshot_key_project_names_returns_sorted_unique_project_folders() -> None:
+    assert snapshot_key_project_names(
+        (
+            "z-project/notes/a.md",
+            "a-project/notes/b.md",
+            "a-project/notes/c.md",
+            "root.md",
+        )
+    ) == ("a-project", "z-project")
+
+
+def test_snapshot_restore_folder_prefix_normalizes_folder_prefix() -> None:
+    assert snapshot_restore_folder_prefix("project/notes") == "project/notes/"
+    assert snapshot_restore_folder_prefix("project/notes/") == "project/notes/"
 
 
 def test_should_include_snapshot_archive_path_filters_internal_paths() -> None:

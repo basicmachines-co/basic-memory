@@ -2380,12 +2380,30 @@ def snapshot_browse_project_names(
     files: Iterable[SnapshotBrowseFile],
 ) -> tuple[ProjectName, ...]:
     """Return sorted top-level project folders present in snapshot browse results."""
+    return snapshot_key_project_names(file.key for file in files)
+
+
+def snapshot_key_project_name(key: StorageKey) -> ProjectName | None:
+    """Return the top-level project folder for a snapshot object key."""
+    project_name, separator, _ = key.partition("/")
+    if not separator:
+        return None
+    return project_name
+
+
+def snapshot_key_project_names(keys: Iterable[StorageKey]) -> tuple[ProjectName, ...]:
+    """Return sorted unique top-level project folders from snapshot object keys."""
     projects: set[ProjectName] = set()
-    for file in files:
-        project_name, separator, _ = file.key.partition("/")
-        if separator and project_name:
+    for key in keys:
+        project_name = snapshot_key_project_name(key)
+        if project_name:
             projects.add(project_name)
     return tuple(sorted(projects))
+
+
+def snapshot_restore_folder_prefix(prefix: StorageKey) -> StorageKey:
+    """Normalize a snapshot folder restore prefix for storage-provider listing."""
+    return prefix if prefix.endswith("/") else f"{prefix}/"
 
 
 def should_include_snapshot_archive_path(archive_path: StorageKey) -> bool:

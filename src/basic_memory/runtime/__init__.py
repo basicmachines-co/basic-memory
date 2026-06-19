@@ -141,6 +141,9 @@ from basic_memory.runtime.contracts import (
     select_deleted_note_file_checksum,
     should_include_snapshot_archive_path,
     snapshot_browse_project_names,
+    snapshot_key_project_name,
+    snapshot_key_project_names,
+    snapshot_restore_folder_prefix,
     truncate_runtime_workflow_text,
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
@@ -372,6 +375,9 @@ __all__ = [
     "select_deleted_note_file_checksum",
     "should_include_snapshot_archive_path",
     "snapshot_browse_project_names",
+    "snapshot_key_project_name",
+    "snapshot_key_project_names",
+    "snapshot_restore_folder_prefix",
     "source_from_object_metadata",
     "storage_object_checksum_for_index_match",
     "truncate_runtime_workflow_text",
