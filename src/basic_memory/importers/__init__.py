@@ -7,6 +7,11 @@ from basic_memory.importers.claude_conversations_importer import (
 )
 from basic_memory.importers.claude_projects_importer import ClaudeProjectsImporter
 from basic_memory.importers.memory_json_importer import MemoryJsonImporter
+from basic_memory.importers.job_payloads import (
+    IMPORT_DATA_ENTRYPOINT,
+    ImportDataPayload,
+    ImportKind,
+)
 from basic_memory.importers.project_zip_import import (
     ProjectZipEntry,
     ProjectZipImportError,
@@ -26,6 +31,9 @@ __all__ = [
     "ClaudeConversationsImporter",
     "ClaudeProjectsImporter",
     "MemoryJsonImporter",
+    "IMPORT_DATA_ENTRYPOINT",
+    "ImportDataPayload",
+    "ImportKind",
     "ProjectZipEntry",
     "ProjectZipImportError",
     "ProjectZipImportPlan",
