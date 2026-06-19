@@ -3,6 +3,12 @@
 from uuid import UUID
 
 from basic_memory.indexing import (
+    EmbeddingIndexBatchJobPayload,
+    EmbeddingIndexBatchJobRequest,
+    EmbeddingIndexJobPayload,
+    EmbeddingIndexJobRequest,
+    EmbeddingIndexTarget,
+    EmbeddingIndexTargetPayload,
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
     IndexFileRuntimeRequest,
@@ -97,4 +103,56 @@ def test_resolve_relations_job_payload_round_trips_runtime_request() -> None:
         project_id=101,
         project_path="main",
     )
+    assert payload.to_runtime_request() == runtime_request
+
+
+def test_embedding_index_job_payload_round_trips_runtime_request() -> None:
+    """Embedding jobs validate single-entity runtime requests at the worker boundary."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    runtime_request = EmbeddingIndexJobRequest(
+        tenant_id=tenant_id,
+        project_id=101,
+        entity_id=42,
+        entity_checksum="checksum-42",
+    )
+
+    payload = EmbeddingIndexJobPayload.from_runtime_request(runtime_request)
+
+    assert payload == EmbeddingIndexJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        entity_id=42,
+        entity_checksum="checksum-42",
+    )
+    assert payload.to_runtime_request() == runtime_request
+
+
+def test_embedding_index_batch_job_payload_round_trips_runtime_request() -> None:
+    """Embedding batch jobs preserve entity target order at the worker boundary."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    runtime_request = EmbeddingIndexBatchJobRequest(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_path="main",
+        workflow_id=workflow_id,
+        entities=(
+            EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-42"),
+            EmbeddingIndexTarget(entity_id=43, entity_checksum="checksum-43"),
+        ),
+    )
+
+    payload = EmbeddingIndexBatchJobPayload.from_runtime_request(runtime_request)
+
+    assert payload == EmbeddingIndexBatchJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_path="main",
+        entities=[
+            EmbeddingIndexTargetPayload(entity_id=42, entity_checksum="checksum-42"),
+            EmbeddingIndexTargetPayload(entity_id=43, entity_checksum="checksum-43"),
+        ],
+        workflow_id=workflow_id,
+    )
+    assert payload.targets() == list(runtime_request.entities)
     assert payload.to_runtime_request() == runtime_request

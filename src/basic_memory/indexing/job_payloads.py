@@ -5,6 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexBatchJobRequest,
+    EmbeddingIndexJobRequest,
+    EmbeddingIndexTarget,
+)
 from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
 from basic_memory.indexing.models import (
     IndexFileEmbeddingJobContext,
@@ -116,6 +121,94 @@ class IndexFileJobPayload(BaseModel):
         result: IndexFileJobResult,
     ) -> IndexFileEmbeddingJobContext:
         return self.to_runtime_request().embedding_job_context(result)
+
+
+class EmbeddingIndexJobPayload(BaseModel):
+    """Serialized worker payload for indexing one entity's embeddings."""
+
+    tenant_id: UUID
+    project_id: int
+    entity_id: int
+    entity_checksum: str | None = None
+
+    @classmethod
+    def from_runtime_request(cls, request: EmbeddingIndexJobRequest) -> Self:
+        """Validate the runtime embedding request at a worker boundary."""
+        return cls(
+            tenant_id=request.tenant_id,
+            project_id=request.project_id,
+            entity_id=request.entity_id,
+            entity_checksum=request.entity_checksum,
+        )
+
+    def to_runtime_request(self) -> EmbeddingIndexJobRequest:
+        """Map the validated worker payload back to the runtime request."""
+        return EmbeddingIndexJobRequest(
+            tenant_id=self.tenant_id,
+            project_id=self.project_id,
+            entity_id=self.entity_id,
+            entity_checksum=self.entity_checksum,
+        )
+
+
+class EmbeddingIndexTargetPayload(BaseModel):
+    """Serialized entity version that may need semantic embeddings indexed."""
+
+    entity_id: int
+    entity_checksum: str
+
+    @classmethod
+    def from_embedding_target(cls, target: EmbeddingIndexTarget) -> Self:
+        """Validate a runtime embedding target at a worker boundary."""
+        return cls(
+            entity_id=target.entity_id,
+            entity_checksum=target.entity_checksum,
+        )
+
+    def to_embedding_target(self) -> EmbeddingIndexTarget:
+        """Map queued entity metadata back to the runtime planner value."""
+        return EmbeddingIndexTarget(
+            entity_id=self.entity_id,
+            entity_checksum=self.entity_checksum,
+        )
+
+
+class EmbeddingIndexBatchJobPayload(BaseModel):
+    """Serialized worker payload for indexing embeddings for many entities."""
+
+    tenant_id: UUID
+    project_id: int
+    project_path: str
+    entities: list[EmbeddingIndexTargetPayload] = Field(default_factory=list)
+    workflow_id: UUID | None = None
+
+    @classmethod
+    def from_runtime_request(cls, request: EmbeddingIndexBatchJobRequest) -> Self:
+        """Validate the runtime embedding batch request at a worker boundary."""
+        return cls(
+            tenant_id=request.tenant_id,
+            project_id=request.project_id,
+            project_path=request.project_path,
+            entities=[
+                EmbeddingIndexTargetPayload.from_embedding_target(target)
+                for target in request.entities
+            ],
+            workflow_id=request.workflow_id,
+        )
+
+    def targets(self) -> list[EmbeddingIndexTarget]:
+        """Return planner targets in payload order."""
+        return [entity.to_embedding_target() for entity in self.entities]
+
+    def to_runtime_request(self) -> EmbeddingIndexBatchJobRequest:
+        """Map the validated worker payload back to the runtime request."""
+        return EmbeddingIndexBatchJobRequest(
+            tenant_id=self.tenant_id,
+            project_id=self.project_id,
+            project_path=self.project_path,
+            entities=tuple(self.targets()),
+            workflow_id=self.workflow_id,
+        )
 
 
 class ResolveRelationsJobPayload(BaseModel):

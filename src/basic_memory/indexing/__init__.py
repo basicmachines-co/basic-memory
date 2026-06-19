@@ -172,6 +172,9 @@ from basic_memory.indexing.index_file_runner import (
 )
 from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
 from basic_memory.indexing.job_payloads import (
+    EmbeddingIndexBatchJobPayload,
+    EmbeddingIndexJobPayload,
+    EmbeddingIndexTargetPayload,
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
     ResolveRelationsJobPayload,
@@ -517,11 +520,14 @@ __all__ = [
     "EmbeddingIndexBatchJobRequest",
     "EmbeddingIndexBatchSummary",
     "EmbeddingIndexJobRequest",
+    "EmbeddingIndexJobPayload",
     "EmbeddingIndexPlan",
     "EmbeddingIndexPlanner",
     "EmbeddingIndexResult",
     "EmbeddingIndexStatus",
     "EmbeddingIndexTarget",
+    "EmbeddingIndexTargetPayload",
+    "EmbeddingIndexBatchJobPayload",
     "EmbeddingVectorSync",
     "EntityId",
     "ExternalFileDeleteEntities",
