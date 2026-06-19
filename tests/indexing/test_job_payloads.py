@@ -14,6 +14,7 @@ from basic_memory.indexing import (
     IndexFileObjectMetadataPayload,
     IndexFileRuntimeRequest,
     ObservedIndexFilePayload,
+    ProjectIndexJobPayload,
     ResolveRelationsJobPayload,
     ResolveRelationsJobRequest,
 )
@@ -21,6 +22,7 @@ from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
+    RuntimeProjectIndexJobRequest,
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
 )
@@ -155,6 +157,43 @@ def test_index_file_batch_job_payload_uses_file_paths_for_legacy_targets() -> No
         ObservedIndexFilePayload(path="notes/b.md"),
     ]
     assert payload.target_paths() == ["notes/a.md", "notes/b.md"]
+
+
+def test_project_index_job_payload_round_trips_runtime_request() -> None:
+    """Project-index jobs validate coordinator runtime requests at the worker boundary."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    runtime_request = RuntimeProjectIndexJobRequest(
+        tenant_id=tenant_id,
+        project=ProjectRuntimeReference(
+            project_id=101,
+            project_external_id="project-main",
+            project_name="Main",
+            project_permalink="main",
+            project_path="main",
+        ),
+        workflow_id=workflow_id,
+        force_full=True,
+        search=True,
+        embeddings=False,
+    )
+
+    payload = ProjectIndexJobPayload.from_runtime_request(runtime_request)
+
+    assert payload == ProjectIndexJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_name="Main",
+        project_permalink="main",
+        project_path="main",
+        workflow_id=workflow_id,
+        force_full=True,
+        search=True,
+        embeddings=False,
+    )
+    assert payload.project_reference() == runtime_request.project
+    assert payload.to_runtime_request() == runtime_request
 
 
 def test_resolve_relations_job_payload_round_trips_runtime_request() -> None:

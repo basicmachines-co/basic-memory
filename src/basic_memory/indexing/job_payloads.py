@@ -24,6 +24,7 @@ from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
+    RuntimeProjectIndexJobRequest,
     RuntimeStorageFileIndexContext,
     RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageFileIndexMode,
@@ -211,6 +212,58 @@ class IndexFileBatchJobPayload(BaseModel):
                 observed_file.to_runtime_observed_file() for observed_file in self.observed_files
             ),
             index_embeddings=self.index_embeddings,
+        )
+
+
+class ProjectIndexJobPayload(BaseModel):
+    """Serialized worker payload for coordinating a project-wide index."""
+
+    tenant_id: UUID
+    project_id: int
+    project_external_id: str
+    project_name: str | None = None
+    project_permalink: str | None = None
+    project_path: str
+    workflow_id: UUID
+    force_full: bool = False
+    search: bool = True
+    embeddings: bool = True
+
+    @classmethod
+    def from_runtime_request(cls, request: RuntimeProjectIndexJobRequest) -> Self:
+        """Validate the runtime project-index request at a worker boundary."""
+        return cls(
+            tenant_id=request.tenant_id,
+            project_id=request.project.project_id,
+            project_external_id=request.project.project_external_id,
+            project_name=request.project.project_name,
+            project_permalink=request.project.project_permalink,
+            project_path=request.project.project_path,
+            workflow_id=request.workflow_id,
+            force_full=request.force_full,
+            search=request.search,
+            embeddings=request.embeddings,
+        )
+
+    def project_reference(self) -> ProjectRuntimeReference:
+        """Return the typed project identity carried by this queued payload."""
+        return ProjectRuntimeReference(
+            project_id=self.project_id,
+            project_external_id=self.project_external_id,
+            project_name=self.project_name,
+            project_permalink=self.project_permalink,
+            project_path=self.project_path,
+        )
+
+    def to_runtime_request(self) -> RuntimeProjectIndexJobRequest:
+        """Map the validated worker payload back to the runtime request."""
+        return RuntimeProjectIndexJobRequest(
+            tenant_id=self.tenant_id,
+            project=self.project_reference(),
+            workflow_id=self.workflow_id,
+            force_full=self.force_full,
+            search=self.search,
+            embeddings=self.embeddings,
         )
 
 
