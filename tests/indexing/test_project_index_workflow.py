@@ -1,6 +1,6 @@
 """Tests for portable project-index workflow request values."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 import pytest
@@ -15,9 +15,13 @@ from basic_memory.indexing import (
     ProjectIndexDeleteBatch,
     ProjectIndexDeleteBatchPlan,
     ProjectIndexDeleteBatchProgress,
+    ProjectIndexDeleteBatchResult,
+    ProjectIndexDeleteRun,
     ProjectIndexMoveBatch,
     ProjectIndexMoveBatchPlan,
     ProjectIndexMoveBatchProgress,
+    ProjectIndexMoveBatchResult,
+    ProjectIndexMoveRun,
     ProjectIndexMoveTarget,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
@@ -41,8 +45,14 @@ from basic_memory.indexing import (
     plan_project_index_file_result_record,
     plan_project_index_stale_workflow,
     plan_project_index_workflow_start,
+    run_project_index_delete_batches,
+    run_project_index_move_batches,
 )
-from basic_memory.runtime import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
+from basic_memory.runtime import (
+    RuntimeIndexFileBatchJobRequest,
+    RuntimeObservedIndexFile,
+    RuntimeWorkflowMetadataPatch,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +67,32 @@ class ProjectIndexSource:
     force_full: bool
     search: bool
     embeddings: bool
+
+
+@dataclass(slots=True)
+class RecordingMoveBatchStore:
+    results: list[ProjectIndexMoveBatchResult]
+    batches: list[ProjectIndexMoveBatch] = field(default_factory=list)
+
+    async def apply_project_index_move_batch(
+        self,
+        move_batch: ProjectIndexMoveBatch,
+    ) -> ProjectIndexMoveBatchResult:
+        self.batches.append(move_batch)
+        return self.results.pop(0)
+
+
+@dataclass(slots=True)
+class RecordingDeleteBatchStore:
+    results: list[ProjectIndexDeleteBatchResult]
+    batches: list[ProjectIndexDeleteBatch] = field(default_factory=list)
+
+    async def apply_project_index_delete_batch(
+        self,
+        delete_batch: ProjectIndexDeleteBatch,
+    ) -> ProjectIndexDeleteBatchResult:
+        self.batches.append(delete_batch)
+        return self.results.pop(0)
 
 
 def project_index_record_metadata(
@@ -370,6 +406,123 @@ def test_project_index_maintenance_batch_plans_require_positive_batch_size() -> 
 
     with pytest.raises(ValueError, match="batch_size must be greater than zero"):
         build_project_index_delete_batch_plan(deleted_paths=(), batch_size=0)
+
+
+@pytest.mark.asyncio
+async def test_project_index_move_runner_applies_batches_and_reports_progress() -> None:
+    store = RecordingMoveBatchStore(
+        results=[
+            ProjectIndexMoveBatchResult(
+                updated_files=1,
+                missing_paths=("notes/b.md",),
+            ),
+            ProjectIndexMoveBatchResult(updated_files=1),
+        ]
+    )
+    progress_updates: list[RuntimeWorkflowMetadataPatch] = []
+
+    async def record_progress(progress: RuntimeWorkflowMetadataPatch) -> None:
+        progress_updates.append(progress)
+
+    run = await run_project_index_move_batches(
+        moved_files={
+            "notes/a.md": "archive/a.md",
+            "notes/b.md": "archive/b.md",
+            "notes/c.md": "archive/c.md",
+        },
+        batch_size=2,
+        move_store=store,
+        progress_callback=record_progress,
+    )
+
+    assert store.batches == [
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(
+                ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),
+                ProjectIndexMoveTarget("notes/b.md", "archive/b.md"),
+            ),
+        ),
+        ProjectIndexMoveBatch(
+            completed_batches=2,
+            targets=(ProjectIndexMoveTarget("notes/c.md", "archive/c.md"),),
+        ),
+    ]
+    assert run == ProjectIndexMoveRun(
+        total_moves=3,
+        total_updated_files=2,
+        records=run.records,
+    )
+    assert run.missing_paths == ("notes/b.md",)
+    assert progress_updates == [
+        {
+            "moved_files": 3,
+            "completed_batches": 1,
+            "total_batches": 2,
+            "updated_files": 1,
+        },
+        {
+            "moved_files": 3,
+            "completed_batches": 2,
+            "total_batches": 2,
+            "updated_files": 2,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_project_index_delete_runner_applies_batches_and_reports_progress() -> None:
+    store = RecordingDeleteBatchStore(
+        results=[
+            ProjectIndexDeleteBatchResult(
+                deleted_entities=1,
+                relation_cleanup_entity_ids=frozenset({99}),
+                missing_paths=("notes/b.md",),
+            ),
+            ProjectIndexDeleteBatchResult(
+                deleted_entities=0,
+                missing_paths=("notes/c.md",),
+            ),
+        ]
+    )
+    progress_updates: list[RuntimeWorkflowMetadataPatch] = []
+
+    async def record_progress(progress: RuntimeWorkflowMetadataPatch) -> None:
+        progress_updates.append(progress)
+
+    run = await run_project_index_delete_batches(
+        deleted_paths=("notes/a.md", "notes/b.md", "notes/c.md"),
+        batch_size=2,
+        delete_store=store,
+        progress_callback=record_progress,
+    )
+
+    assert store.batches == [
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/a.md", "notes/b.md"),
+        ),
+        ProjectIndexDeleteBatch(
+            completed_batches=2,
+            paths=("notes/c.md",),
+        ),
+    ]
+    assert run == ProjectIndexDeleteRun(
+        total_deletes=3,
+        total_deleted_entities=1,
+        relation_cleanup_entity_ids=frozenset({99}),
+        records=run.records,
+    )
+    assert run.missing_paths == ("notes/b.md", "notes/c.md")
+    assert progress_updates == [
+        {
+            "deleted_files": 3,
+            "completed_batches": 1,
+            "total_batches": 2,
+            "deleted_entities": 1,
+        },
+    ]
+    assert run.records[1].progress is None
 
 
 def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event() -> None:

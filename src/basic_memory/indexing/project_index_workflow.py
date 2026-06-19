@@ -14,6 +14,7 @@ from basic_memory.indexing.models import (
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCompletion,
     ProjectIndexCounters,
+    ProjectIndexProgressCallback,
     apply_project_index_file_outcome,
     initial_project_index_counters,
     project_index_counters_from_metadata,
@@ -105,6 +106,24 @@ class ProjectIndexFanoutFailureRecorder(Protocol):
         error_message: str,
         progress: str,
     ) -> None: ...
+
+
+class ProjectIndexMoveBatchStore(Protocol):
+    """Capability that applies one project-index move-maintenance batch."""
+
+    async def apply_project_index_move_batch(
+        self,
+        move_batch: ProjectIndexMoveBatch,
+    ) -> ProjectIndexMoveBatchResult: ...
+
+
+class ProjectIndexDeleteBatchStore(Protocol):
+    """Capability that applies one project-index delete-maintenance batch."""
+
+    async def apply_project_index_delete_batch(
+        self,
+        delete_batch: ProjectIndexDeleteBatch,
+    ) -> ProjectIndexDeleteBatchResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,6 +526,39 @@ class ProjectIndexMoveBatchProgress:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectIndexMoveBatchResult:
+    """Storage adapter result for one project-index move batch."""
+
+    updated_files: int
+    missing_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMoveBatchRecord:
+    """Observed result and progress metadata for one move batch."""
+
+    batch: ProjectIndexMoveBatch
+    result: ProjectIndexMoveBatchResult
+    progress: ProjectIndexMoveBatchProgress
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMoveRun:
+    """Summary of a complete move-maintenance run."""
+
+    total_moves: int
+    total_updated_files: int
+    records: tuple[ProjectIndexMoveBatchRecord, ...]
+
+    @property
+    def missing_paths(self) -> tuple[str, ...]:
+        """Return every move source path that the runtime could not update."""
+        return tuple(
+            missing_path for record in self.records for missing_path in record.result.missing_paths
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectIndexDeleteBatch:
     """A bounded group of deleted paths for one database delete pass."""
 
@@ -540,6 +592,41 @@ class ProjectIndexDeleteBatchProgress:
             "total_batches": self.total_batches,
             "deleted_entities": self.deleted_entities,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteBatchResult:
+    """Storage adapter result for one project-index delete batch."""
+
+    deleted_entities: int
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
+    missing_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteBatchRecord:
+    """Observed result and progress metadata for one delete batch."""
+
+    batch: ProjectIndexDeleteBatch
+    result: ProjectIndexDeleteBatchResult
+    progress: ProjectIndexDeleteBatchProgress | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteRun:
+    """Summary of a complete delete-maintenance run."""
+
+    total_deletes: int
+    total_deleted_entities: int
+    relation_cleanup_entity_ids: frozenset[int]
+    records: tuple[ProjectIndexDeleteBatchRecord, ...]
+
+    @property
+    def missing_paths(self) -> tuple[str, ...]:
+        """Return every deleted path that the runtime could not find."""
+        return tuple(
+            missing_path for record in self.records for missing_path in record.result.missing_paths
+        )
 
 
 def project_index_workflow_logical_key(
@@ -609,6 +696,108 @@ def build_project_index_delete_batch_plan(
         total_deletes=len(paths),
         batch_count=len(batches),
         batches=batches,
+    )
+
+
+async def run_project_index_move_batches(
+    *,
+    moved_files: Mapping[str, str],
+    batch_size: int,
+    move_store: ProjectIndexMoveBatchStore,
+    progress_callback: ProjectIndexProgressCallback | None = None,
+) -> ProjectIndexMoveRun:
+    """Apply project-index move maintenance through a storage adapter."""
+    move_plan = build_project_index_move_batch_plan(
+        moved_files=moved_files,
+        batch_size=batch_size,
+    )
+    if move_plan.total_moves == 0:
+        return ProjectIndexMoveRun(
+            total_moves=0,
+            total_updated_files=0,
+            records=(),
+        )
+
+    total_updated = 0
+    records: list[ProjectIndexMoveBatchRecord] = []
+    for move_batch in move_plan.batches:
+        batch_result = await move_store.apply_project_index_move_batch(move_batch)
+        total_updated += batch_result.updated_files
+        progress = ProjectIndexMoveBatchProgress(
+            moved_files=move_plan.total_moves,
+            completed_batches=move_batch.completed_batches,
+            total_batches=move_plan.batch_count,
+            updated_files=total_updated,
+        )
+        if progress_callback is not None:
+            await progress_callback(progress.workflow_metadata())
+        records.append(
+            ProjectIndexMoveBatchRecord(
+                batch=move_batch,
+                result=batch_result,
+                progress=progress,
+            )
+        )
+
+    return ProjectIndexMoveRun(
+        total_moves=move_plan.total_moves,
+        total_updated_files=total_updated,
+        records=tuple(records),
+    )
+
+
+async def run_project_index_delete_batches(
+    *,
+    deleted_paths: Sequence[str],
+    batch_size: int,
+    delete_store: ProjectIndexDeleteBatchStore,
+    progress_callback: ProjectIndexProgressCallback | None = None,
+) -> ProjectIndexDeleteRun:
+    """Apply project-index delete maintenance through a storage adapter."""
+    delete_plan = build_project_index_delete_batch_plan(
+        deleted_paths=deleted_paths,
+        batch_size=batch_size,
+    )
+    if delete_plan.total_deletes == 0:
+        return ProjectIndexDeleteRun(
+            total_deletes=0,
+            total_deleted_entities=0,
+            relation_cleanup_entity_ids=frozenset(),
+            records=(),
+        )
+
+    total_deleted = 0
+    relation_cleanup_entity_ids: set[int] = set()
+    records: list[ProjectIndexDeleteBatchRecord] = []
+    for delete_batch in delete_plan.batches:
+        batch_result = await delete_store.apply_project_index_delete_batch(delete_batch)
+        relation_cleanup_entity_ids.update(batch_result.relation_cleanup_entity_ids)
+        total_deleted += batch_result.deleted_entities
+
+        progress: ProjectIndexDeleteBatchProgress | None = None
+        if batch_result.deleted_entities > 0:
+            progress = ProjectIndexDeleteBatchProgress(
+                deleted_files=delete_plan.total_deletes,
+                completed_batches=delete_batch.completed_batches,
+                total_batches=delete_plan.batch_count,
+                deleted_entities=total_deleted,
+            )
+            if progress_callback is not None:
+                await progress_callback(progress.workflow_metadata())
+
+        records.append(
+            ProjectIndexDeleteBatchRecord(
+                batch=delete_batch,
+                result=batch_result,
+                progress=progress,
+            )
+        )
+
+    return ProjectIndexDeleteRun(
+        total_deletes=delete_plan.total_deletes,
+        total_deleted_entities=total_deleted,
+        relation_cleanup_entity_ids=frozenset(relation_cleanup_entity_ids),
+        records=tuple(records),
     )
 
 
