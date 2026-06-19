@@ -146,6 +146,12 @@ from basic_memory.runtime.note_object_metadata import (
     source_from_object_metadata,
     storage_object_checksum_for_index_match,
 )
+from basic_memory.runtime.storage_project_resolution import (
+    StorageProjectPrefixMatch,
+    StorageProjectPrefixResolution,
+    StorageProjectSource,
+    resolve_storage_project_prefix,
+)
 
 __all__ = [
     "JobEntrypoint",
@@ -261,6 +267,9 @@ __all__ = [
     "StorageKey",
     "StorageObjectIdentity",
     "StorageObjectVersion",
+    "StorageProjectPrefixMatch",
+    "StorageProjectPrefixResolution",
+    "StorageProjectSource",
     "StorageVersionId",
     "TenantId",
     "VALID_NOTE_OBJECT_ACTOR_KINDS",
@@ -286,6 +295,7 @@ __all__ = [
     "plan_previous_note_file_delete",
     "read_runtime_file_checksum",
     "resolve_runtime_mode",
+    "resolve_storage_project_prefix",
     "source_from_object_metadata",
     "storage_object_checksum_for_index_match",
     "truncate_runtime_workflow_text",
