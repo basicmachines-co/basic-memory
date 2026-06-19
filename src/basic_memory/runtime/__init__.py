@@ -124,6 +124,10 @@ from basic_memory.runtime.contracts import (
     truncate_runtime_workflow_text,
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
+from basic_memory.runtime.note_move import (
+    RuntimeNoteMoveDestination,
+    normalize_note_move_destination_path,
+)
 from basic_memory.runtime.note_materialization import (
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
@@ -241,6 +245,7 @@ __all__ = [
     "RuntimeNoteMaterializationJobRequest",
     "RuntimeNoteMaterializationResult",
     "RuntimeNoteMaterializationStatus",
+    "RuntimeNoteMoveDestination",
     "RuntimeNoteObjectMetadata",
     "RuntimeNoteObjectMetadataMap",
     "RuntimeNoteObjectProvenance",
@@ -308,8 +313,9 @@ __all__ = [
     "db_version_from_object_metadata",
     "file_checksum_from_object_metadata",
     "merge_runtime_workflow_metadata_patch",
-    "normalize_storage_etag",
     "normalize_actor_name",
+    "normalize_note_move_destination_path",
+    "normalize_storage_etag",
     "plan_directory_file_snapshot",
     "plan_note_file_delete_cleanup",
     "plan_note_file_delete_job_request",

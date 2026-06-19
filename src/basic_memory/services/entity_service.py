@@ -34,6 +34,7 @@ from basic_memory.models.knowledge import Entity
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
 from basic_memory.schemas.response import (
@@ -799,11 +800,8 @@ class EntityService(BaseService[EntityModel]):
             accepted_search_content_from_markdown,
         )
 
-        accepted_path = destination_path.strip()
-        if not accepted_path or accepted_path.startswith("/"):
-            raise ValueError(f"Invalid destination path: {destination_path}")
-
-        file_path = Path(accepted_path)
+        destination = normalize_note_move_destination_path(destination_path)
+        file_path = Path(destination.file_path)
         markdown_content = current_content
         permalink = entity.permalink
         disable_permalinks = bool(self.app_config and self.app_config.disable_permalinks)
