@@ -76,6 +76,19 @@ class EmbeddingIndexBatchJobRequest:
         return routing_headers
 
 
+@dataclass(frozen=True, slots=True)
+class EmbeddingIndexBatchJobContext:
+    """Indexed entity versions that may need batched embedding jobs."""
+
+    tenant_id: UUID
+    project_id: int
+    project_path: str
+    index_embeddings: bool
+    targets: tuple[EmbeddingIndexTarget, ...]
+    batch_size: int
+    workflow_id: UUID | None = None
+
+
 class EmbeddingIndexStatus(StrEnum):
     """Normal outcomes for one semantic-embedding indexing job."""
 
@@ -160,6 +173,29 @@ class EmbeddingIndexPlanner:
             for target in sorted(targets, key=lambda item: (item.entity_id, item.entity_checksum))
         )
         return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def plan_embedding_index_batch_jobs(
+    context: EmbeddingIndexBatchJobContext,
+) -> tuple[EmbeddingIndexBatchJobRequest, ...]:
+    """Plan queue-neutral batch embedding jobs after a file-index batch."""
+    if not context.index_embeddings:
+        return ()
+    if not context.targets:
+        return ()
+    if context.batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    return tuple(
+        EmbeddingIndexBatchJobRequest(
+            tenant_id=context.tenant_id,
+            project_id=context.project_id,
+            project_path=context.project_path,
+            workflow_id=context.workflow_id,
+            entities=context.targets[index : index + context.batch_size],
+        )
+        for index in range(0, len(context.targets), context.batch_size)
+    )
 
 
 def summarize_embedding_index_batch_result(

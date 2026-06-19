@@ -20,6 +20,7 @@ from basic_memory.indexing.change_planning import (
     plan_moved_files,
 )
 from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexBatchJobContext,
     EmbeddingIndexBatchJobRequest,
     EmbeddingIndexBatchResult,
     EmbeddingIndexBatchSummary,
@@ -29,6 +30,7 @@ from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexResult,
     EmbeddingIndexStatus,
     EmbeddingIndexTarget,
+    plan_embedding_index_batch_jobs,
     summarize_embedding_index_batch_result,
 )
 from basic_memory.indexing.file_index_checking import (
@@ -230,6 +232,7 @@ __all__ = [
     "CurrentMaterializedNoteEntity",
     "CurrentMaterializedNotePlan",
     "EmbeddingIndexBatchResult",
+    "EmbeddingIndexBatchJobContext",
     "EmbeddingIndexBatchJobRequest",
     "EmbeddingIndexBatchSummary",
     "EmbeddingIndexJobRequest",
@@ -373,6 +376,7 @@ __all__ = [
     "plan_file_changes",
     "plan_moved_files",
     "plan_current_materialized_note_result",
+    "plan_embedding_index_batch_jobs",
     "plan_index_file_embedding_job",
     "plan_index_file_note_live_update",
     "plan_index_file_relation_resolution",

@@ -6,6 +6,7 @@ from uuid import UUID
 import pytest
 
 from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexBatchJobContext,
     EmbeddingIndexBatchJobRequest,
     EmbeddingIndexBatchResult,
     EmbeddingIndexResult,
@@ -13,6 +14,7 @@ from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexStatus,
     EmbeddingIndexPlanner,
     EmbeddingIndexTarget,
+    plan_embedding_index_batch_jobs,
     summarize_embedding_index_batch_result,
 )
 
@@ -85,6 +87,81 @@ def test_embedding_index_batch_job_request_uses_core_fingerprint() -> None:
         "project_id": "7",
         "project_path": "main",
     }
+
+
+def test_plan_embedding_index_batch_jobs_chunks_enabled_targets() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    targets = (
+        EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-42"),
+        EmbeddingIndexTarget(entity_id=43, entity_checksum="checksum-43"),
+        EmbeddingIndexTarget(entity_id=44, entity_checksum="checksum-44"),
+    )
+
+    assert plan_embedding_index_batch_jobs(
+        EmbeddingIndexBatchJobContext(
+            tenant_id=tenant_id,
+            project_id=7,
+            project_path="main",
+            index_embeddings=True,
+            targets=targets,
+            batch_size=2,
+            workflow_id=workflow_id,
+        )
+    ) == (
+        EmbeddingIndexBatchJobRequest(
+            tenant_id=tenant_id,
+            project_id=7,
+            project_path="main",
+            entities=targets[:2],
+            workflow_id=workflow_id,
+        ),
+        EmbeddingIndexBatchJobRequest(
+            tenant_id=tenant_id,
+            project_id=7,
+            project_path="main",
+            entities=targets[2:],
+            workflow_id=workflow_id,
+        ),
+    )
+    assert (
+        plan_embedding_index_batch_jobs(
+            EmbeddingIndexBatchJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                project_path="main",
+                index_embeddings=False,
+                targets=targets,
+                batch_size=0,
+            )
+        )
+        == ()
+    )
+    assert (
+        plan_embedding_index_batch_jobs(
+            EmbeddingIndexBatchJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                project_path="main",
+                index_embeddings=True,
+                targets=(),
+                batch_size=0,
+            )
+        )
+        == ()
+    )
+
+    with pytest.raises(ValueError, match="batch_size must be greater than zero"):
+        plan_embedding_index_batch_jobs(
+            EmbeddingIndexBatchJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                project_path="main",
+                index_embeddings=True,
+                targets=targets,
+                batch_size=0,
+            )
+        )
 
 
 def test_embedding_index_planner_dedupes_entities_and_fingerprints_versions() -> None:
