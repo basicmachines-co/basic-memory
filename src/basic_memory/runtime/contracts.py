@@ -2563,6 +2563,47 @@ class SnapshotBrowseFile:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SnapshotArchivePlan:
+    """Selected snapshot objects and filename for one archive download."""
+
+    filename: str
+    listing_prefix: StorageKey
+    object_keys: tuple[StorageKey, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotArchiveRequest:
+    """Portable snapshot archive request before a provider reads object bytes."""
+
+    snapshot_name: SnapshotName
+    project: ProjectName | None = None
+
+    @property
+    def listing_prefix(self) -> StorageKey:
+        """Return the storage-provider prefix used to list archive candidates."""
+        return f"{self.project}/" if self.project else ""
+
+    @property
+    def filename(self) -> str:
+        """Return the existing snapshot archive filename shape."""
+        if self.project:
+            return f"snapshot-{self.project}-{self.snapshot_name}.zip"
+        return f"snapshot-{self.snapshot_name}.zip"
+
+    def plan_archive(self, objects: Iterable[SnapshotObjectSource]) -> SnapshotArchivePlan:
+        """Filter listed snapshot objects into archive member keys."""
+        return SnapshotArchivePlan(
+            filename=self.filename,
+            listing_prefix=self.listing_prefix,
+            object_keys=tuple(
+                obj.key
+                for obj in objects
+                if not obj.key.endswith("/") and should_include_snapshot_archive_path(obj.key)
+            ),
+        )
+
+
 def snapshot_browse_project_names(
     files: Iterable[SnapshotBrowseFile],
 ) -> tuple[ProjectName, ...]:

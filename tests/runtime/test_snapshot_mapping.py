@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from basic_memory.runtime import (
+    SnapshotArchivePlan,
+    SnapshotArchiveRequest,
     SnapshotBrowseFile,
     SnapshotObjectReference,
     SnapshotReference,
@@ -90,6 +92,51 @@ def test_snapshot_browse_file_maps_from_storage_source() -> None:
         last_modified=modified_at,
         etag="abc123",
     )
+
+
+def test_snapshot_archive_request_plans_full_archive_download() -> None:
+    modified_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+    objects = (
+        _SnapshotObjectSource(
+            key="project/notes/visible.md",
+            size=1,
+            last_modified=modified_at,
+            etag="etag-a",
+        ),
+        _SnapshotObjectSource(
+            key="project/folder/",
+            size=0,
+            last_modified=modified_at,
+            etag="etag-dir",
+        ),
+        _SnapshotObjectSource(
+            key="project/.hidden/secret.md",
+            size=2,
+            last_modified=modified_at,
+            etag="etag-hidden",
+        ),
+        _SnapshotObjectSource(
+            key="project/__pycache__/module.pyc",
+            size=3,
+            last_modified=modified_at,
+            etag="etag-cache",
+        ),
+    )
+
+    plan = SnapshotArchiveRequest(snapshot_name="manual-backup").plan_archive(objects)
+
+    assert plan == SnapshotArchivePlan(
+        filename="snapshot-manual-backup.zip",
+        listing_prefix="",
+        object_keys=("project/notes/visible.md",),
+    )
+
+
+def test_snapshot_archive_request_plans_project_filtered_download() -> None:
+    request = SnapshotArchiveRequest(snapshot_name="manual-backup", project="project")
+
+    assert request.listing_prefix == "project/"
+    assert request.filename == "snapshot-project-manual-backup.zip"
 
 
 def test_snapshot_browse_project_names_returns_sorted_unique_top_level_folders() -> None:
