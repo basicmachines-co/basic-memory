@@ -784,6 +784,64 @@ class RuntimeDeletedNoteReference:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeDeletedNoteResponse:
+    """Route-facing deleted-note response assembled from typed runtime identity."""
+
+    deleted: bool
+    external_id: NoteExternalId | None = None
+    title: str | None = None
+    permalink: str | None = None
+    file_path: RuntimeFilePath | None = None
+    file_delete_status: str | None = None
+
+    @classmethod
+    def missing(cls) -> Self:
+        return cls(deleted=False)
+
+    @classmethod
+    def pending_file_delete(
+        cls,
+        *,
+        entity: RuntimeDeletedNoteEntitySource,
+        file_path: RuntimeFilePath,
+    ) -> Self:
+        deleted_note = RuntimeDeletedNoteReference.from_entity(entity, file_path=file_path)
+        return cls(
+            deleted=True,
+            external_id=deleted_note.external_id,
+            title=deleted_note.title,
+            permalink=deleted_note.permalink,
+            file_path=file_path,
+            file_delete_status="pending",
+        )
+
+    def as_payload(self) -> dict[str, object]:
+        """Serialize to the existing delete response payload shape."""
+        if not self.deleted:
+            return {"deleted": False}
+
+        if self.external_id is None:
+            raise RuntimeError("Deleted note response is missing external_id")
+        if self.title is None:
+            raise RuntimeError("Deleted note response is missing title")
+        if self.permalink is None:
+            raise RuntimeError("Deleted note response is missing permalink")
+        if self.file_path is None:
+            raise RuntimeError("Deleted note response is missing file_path")
+        if self.file_delete_status is None:
+            raise RuntimeError("Deleted note response is missing file_delete_status")
+
+        return {
+            "deleted": True,
+            "external_id": self.external_id,
+            "title": self.title,
+            "permalink": self.permalink,
+            "file_path": self.file_path,
+            "file_delete_status": self.file_delete_status,
+        }
+
+
 def required_runtime_deleted_note_text(
     value: object,
     *,
