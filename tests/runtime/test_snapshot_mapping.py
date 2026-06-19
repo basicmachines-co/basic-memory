@@ -7,6 +7,7 @@ from basic_memory.runtime import (
     SnapshotObjectReference,
     SnapshotReference,
     plan_snapshot_name,
+    should_include_snapshot_archive_path,
     snapshot_browse_project_names,
 )
 
@@ -117,6 +118,12 @@ def test_snapshot_browse_project_names_returns_sorted_unique_top_level_folders()
     )
 
     assert snapshot_browse_project_names(files) == ("a-project", "z-project")
+
+
+def test_should_include_snapshot_archive_path_filters_internal_paths() -> None:
+    assert should_include_snapshot_archive_path("project/notes/visible.md") is True
+    assert should_include_snapshot_archive_path("project/.hidden/secret.md") is False
+    assert should_include_snapshot_archive_path("project/__pycache__/module.pyc") is False
 
 
 def test_plan_snapshot_name_formats_manual_snapshot_name() -> None:

@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Protocol, Self
 from uuid import UUID
 
@@ -2385,6 +2386,14 @@ def snapshot_browse_project_names(
         if separator and project_name:
             projects.add(project_name)
     return tuple(sorted(projects))
+
+
+def should_include_snapshot_archive_path(archive_path: StorageKey) -> bool:
+    """Return whether a snapshot object key should be included in an archive download."""
+    parts = PurePosixPath(archive_path).parts
+    if any(part.startswith(".") for part in parts):
+        return False
+    return "__pycache__" not in parts
 
 
 def plan_snapshot_name(

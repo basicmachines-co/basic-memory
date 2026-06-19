@@ -139,6 +139,7 @@ from basic_memory.runtime.contracts import (
     read_runtime_file_checksum,
     required_runtime_deleted_note_text,
     select_deleted_note_file_checksum,
+    should_include_snapshot_archive_path,
     snapshot_browse_project_names,
     truncate_runtime_workflow_text,
 )
@@ -369,6 +370,7 @@ __all__ = [
     "runtime_observed_index_file_from_metadata",
     "runtime_observed_index_files_from_metadata_map",
     "select_deleted_note_file_checksum",
+    "should_include_snapshot_archive_path",
     "snapshot_browse_project_names",
     "source_from_object_metadata",
     "storage_object_checksum_for_index_match",
