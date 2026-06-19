@@ -53,6 +53,7 @@ from basic_memory.runtime.contracts import (
     StorageVersionId,
     TenantId,
     WorkflowId,
+    plan_previous_note_file_delete,
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 
@@ -110,5 +111,6 @@ __all__ = [
     "StorageVersionId",
     "TenantId",
     "WorkflowId",
+    "plan_previous_note_file_delete",
     "resolve_runtime_mode",
 ]

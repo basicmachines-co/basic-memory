@@ -253,6 +253,29 @@ class RuntimePendingNoteFileDelete:
     file_checksum: RuntimeFileChecksum | None = None
 
 
+def plan_previous_note_file_delete(
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    existing_file_path: RuntimeFilePath | None,
+    accepted_file_path: RuntimeFilePath,
+    file_checksum: RuntimeFileChecksum | None,
+) -> RuntimePendingNoteFileDelete | None:
+    """Return old-file cleanup work when an accepted note move has materialized storage."""
+    if existing_file_path is None or existing_file_path == accepted_file_path:
+        return None
+
+    if file_checksum is None:
+        return None
+
+    return RuntimePendingNoteFileDelete(
+        project_id=project_id,
+        entity_id=entity_id,
+        file_path=existing_file_path,
+        file_checksum=file_checksum,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimePendingNoteMaterialization:
     """Materialization job arguments captured before queue submission."""

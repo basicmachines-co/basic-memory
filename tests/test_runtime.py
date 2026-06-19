@@ -18,6 +18,7 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     StorageObjectIdentity,
+    plan_previous_note_file_delete,
 )
 
 
@@ -173,6 +174,54 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(materialization, "db_version", 4)
+
+    def test_plan_previous_note_file_delete_returns_cleanup_for_materialized_moves(self):
+        cleanup = plan_previous_note_file_delete(
+            project_id=7,
+            entity_id=42,
+            existing_file_path="notes/old.md",
+            accepted_file_path="notes/new.md",
+            file_checksum="old-checksum",
+        )
+
+        assert cleanup == RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-checksum",
+        )
+
+    def test_plan_previous_note_file_delete_skips_unmoved_or_unmaterialized_notes(self):
+        assert (
+            plan_previous_note_file_delete(
+                project_id=7,
+                entity_id=42,
+                existing_file_path=None,
+                accepted_file_path="notes/new.md",
+                file_checksum="old-checksum",
+            )
+            is None
+        )
+        assert (
+            plan_previous_note_file_delete(
+                project_id=7,
+                entity_id=42,
+                existing_file_path="notes/same.md",
+                accepted_file_path="notes/same.md",
+                file_checksum="old-checksum",
+            )
+            is None
+        )
+        assert (
+            plan_previous_note_file_delete(
+                project_id=7,
+                entity_id=42,
+                existing_file_path="notes/old.md",
+                accepted_file_path="notes/new.md",
+                file_checksum=None,
+            )
+            is None
+        )
 
     def test_runtime_project_delete_result_counts_file_outcomes(self):
         result = RuntimeProjectDeleteResult.from_file_results(
