@@ -2141,6 +2141,22 @@ class SnapshotProvider(Protocol):
     ) -> None: ...
 
 
+class SnapshotReferenceSource(Protocol):
+    """Persisted snapshot shape needed to build portable snapshot identity."""
+
+    @property
+    def tenant_id(self) -> TenantId: ...
+
+    @property
+    def bucket_name(self) -> StorageBucketName: ...
+
+    @property
+    def name(self) -> SnapshotName: ...
+
+    @property
+    def snapshot_version(self) -> SnapshotVersion: ...
+
+
 class SnapshotObjectSource(Protocol):
     """Storage-object shape needed to build portable snapshot listings."""
 
@@ -2307,6 +2323,16 @@ class SnapshotReference:
     bucket_name: StorageBucketName
     snapshot_name: SnapshotName
     snapshot_version: SnapshotVersion
+
+    @classmethod
+    def from_source(cls, source: SnapshotReferenceSource) -> Self:
+        """Build portable snapshot identity from a persisted snapshot record."""
+        return cls(
+            tenant_id=source.tenant_id,
+            bucket_name=source.bucket_name,
+            snapshot_name=source.name,
+            snapshot_version=source.snapshot_version,
+        )
 
 
 @dataclass(frozen=True, slots=True)
