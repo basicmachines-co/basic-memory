@@ -54,6 +54,7 @@ from basic_memory.runtime.contracts import (
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
+    RuntimeNoteContentResource,
     RuntimeNoteContentState,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
@@ -1463,6 +1464,31 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(state, "file_write_status", "pending")
+
+    def test_runtime_note_content_resource_uses_accepted_markdown(self):
+        entity = SimpleNamespace(content_type="text/markdown")
+        state = RuntimeNoteContentState(
+            markdown_content="# Accepted\n",
+            db_version=4,
+            db_checksum="db-checksum",
+            file_version=None,
+            file_checksum=None,
+            file_write_status="pending",
+            last_source="api",
+            file_updated_at=None,
+            last_materialization_error=None,
+        )
+
+        resource = RuntimeNoteContentResource.from_entity_and_content_state(
+            entity,
+            state,
+        )
+
+        assert resource.content == "# Accepted\n"
+        assert resource.content_type == "text/markdown"
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(resource, "content", "# Other\n")
 
     def test_plan_previous_note_file_delete_returns_cleanup_for_materialized_moves(self):
         cleanup = plan_previous_note_file_delete(

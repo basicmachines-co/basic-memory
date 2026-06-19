@@ -169,6 +169,13 @@ class RuntimeNoteContentStateSource(Protocol):
     def last_materialization_error(self) -> str | None: ...
 
 
+class RuntimeNoteContentResourceEntitySource(Protocol):
+    """Minimal entity shape needed for note-content resource reads."""
+
+    @property
+    def content_type(self) -> str: ...
+
+
 class RuntimeFileChecksumReader(Protocol):
     """Capability for reading a runtime file checksum if an object exists."""
 
@@ -1262,6 +1269,26 @@ class RuntimeNoteContentState:
             last_source=source.last_source,
             file_updated_at=source.file_updated_at,
             last_materialization_error=source.last_materialization_error,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeNoteContentResource:
+    """Resource response state for one accepted markdown note."""
+
+    content: str
+    content_type: str
+
+    @classmethod
+    def from_entity_and_content_state(
+        cls,
+        entity: RuntimeNoteContentResourceEntitySource,
+        note_content: RuntimeNoteContentState,
+    ) -> Self:
+        """Build a resource response from typed note_content state."""
+        return cls(
+            content=note_content.markdown_content,
+            content_type=entity.content_type,
         )
 
 
