@@ -21,6 +21,9 @@ from basic_memory.indexing import (
     IndexFileNoteLiveUpdateContext,
     IndexFileNoteLiveUpdatePlan,
     IndexFileNoteLiveUpdateType,
+    IndexFileRelationResolutionContext,
+    IndexFileRuntimeRequest,
+    ObservedObjectIndexCompletionContext,
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
     ProjectIndexFileOutcome,
@@ -44,7 +47,10 @@ from basic_memory.runtime import (
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
     RuntimeStorageFileIndexMode,
+    RuntimeStorageFileIndexContext,
+    RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageObjectChecksumSource,
+    RuntimeStorageObjectObservation,
 )
 
 
@@ -283,6 +289,81 @@ def test_plan_index_file_embedding_job_requires_processed_entity_identity():
                 ),
             )
         )
+
+
+def test_index_file_runtime_request_derives_worker_handoff_contexts():
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    result = IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        entity_id=42,
+        entity_checksum="checksum-1",
+    )
+    request = IndexFileRuntimeRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_external_id="project-7",
+        project_name="Project Seven",
+        project_path="project",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_observation=RuntimeStorageObjectObservation(etag='"etag-1"', size=12),
+        index_embeddings=False,
+        workflow_id=workflow_id,
+    )
+
+    assert request.storage_job_identity() == RuntimeStorageFileIndexJobIdentity(
+        tenant_id=tenant_id,
+        project_id=7,
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        workflow_id=workflow_id,
+        object_etag='"etag-1"',
+        object_size=12,
+    )
+    assert request.storage_index_context() == RuntimeStorageFileIndexContext(
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        project_external_id="project-7",
+        project_name="Project Seven",
+        workflow_id=workflow_id,
+    )
+    assert request.note_live_update_context() == IndexFileNoteLiveUpdateContext(
+        tenant_id=tenant_id,
+        project_external_id="project-7",
+        project_name="Project Seven",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        workflow_id=workflow_id,
+        object_etag='"etag-1"',
+        object_size=12,
+    )
+    assert request.observed_object_completion_context() == ObservedObjectIndexCompletionContext(
+        tenant_id=tenant_id,
+        project_external_id="project-7",
+        project_name="Project Seven",
+        project_path="project",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        workflow_id=workflow_id,
+    )
+    assert request.relation_resolution_context(
+        IndexFileJobStatus.processed
+    ) == IndexFileRelationResolutionContext(
+        tenant_id=tenant_id,
+        project_id=7,
+        project_path="project",
+        workflow_id=workflow_id,
+        status=IndexFileJobStatus.processed,
+    )
+    assert request.embedding_job_context(result) == IndexFileEmbeddingJobContext(
+        tenant_id=tenant_id,
+        project_id=7,
+        index_embeddings=False,
+        result=result,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(request, "file_path", "notes/b.md")
 
 
 def test_plan_index_file_note_live_update_builds_typed_note_change_plan():

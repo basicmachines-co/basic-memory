@@ -61,6 +61,7 @@ from basic_memory.indexing.input_file_adaptation import (
     LoadedIndexFile,
     build_index_input_files,
 )
+from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
 from basic_memory.indexing.link_resolution import (
     LinkResolutionTarget,
     LinkText,
@@ -275,6 +276,7 @@ __all__ = [
     "IndexFileNoteLiveUpdatePlan",
     "IndexFileNoteLiveUpdateType",
     "IndexFileRelationResolutionContext",
+    "IndexFileRuntimeRequest",
     "IndexingResult",
     "IndexingResultState",
     "IndexBatch",
