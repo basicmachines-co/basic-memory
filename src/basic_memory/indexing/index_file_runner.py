@@ -6,6 +6,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.indexing.file_indexer import IndexMarkdownEntity
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecisionStatus,
     FileIndexPlan,
@@ -71,6 +75,48 @@ class IndexFileExecutor(Protocol):
         *,
         source: str,
     ) -> FileIndexResult: ...
+
+
+class CurrentMaterializedNoteEntityRepository(Protocol):
+    """Repository capability needed to load the current materialized note entity."""
+
+    async def get_by_file_path(
+        self,
+        session: AsyncSession,
+        file_path: RuntimeFilePath,
+        *,
+        load_relations: bool = True,
+    ) -> IndexMarkdownEntity | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryCurrentMaterializedNoteSource:
+    """Load accepted note identity from a repository using caller-owned sessions."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: CurrentMaterializedNoteEntityRepository
+
+    async def load_current_materialized_note_entity(
+        self,
+        file_path: RuntimeFilePath,
+    ) -> CurrentMaterializedNoteEntity | None:
+        async with db.scoped_session(self.session_maker) as session:
+            entity = await self.entity_repository.get_by_file_path(
+                session,
+                file_path,
+                load_relations=False,
+            )
+        if entity is None:
+            return None
+
+        return CurrentMaterializedNoteEntity.from_fields(
+            entity_id=int(entity.id),
+            external_id=entity.external_id,
+            title=entity.title,
+            permalink=entity.permalink,
+            checksum=entity.checksum,
+            file_path=file_path,
+        )
 
 
 async def run_index_file(

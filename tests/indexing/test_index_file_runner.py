@@ -1,10 +1,14 @@
 """Tests for portable single-file index orchestration."""
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from typing import cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import basic_memory.indexing.index_file_runner as index_file_runner_module
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -13,6 +17,7 @@ from basic_memory.indexing.file_index_planning import (
 )
 from basic_memory.indexing.index_file_runner import (
     IndexFileObjectMetadata,
+    RepositoryCurrentMaterializedNoteSource,
     run_index_file,
 )
 from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
@@ -72,6 +77,30 @@ class FakeMaterializedNoteSource:
         file_path: str,
     ) -> CurrentMaterializedNoteEntity | None:
         self.paths.append(file_path)
+        return self.entity
+
+
+class FakeRepositoryEntity:
+    id = 42
+    external_id = "note-42"
+    title = "Repository Note"
+    permalink = "notes/repository-note"
+    checksum = "checksum-1"
+
+
+class FakeEntityRepository:
+    def __init__(self, entity: FakeRepositoryEntity | None) -> None:
+        self.entity = entity
+        self.calls: list[tuple[AsyncSession, str, bool]] = []
+
+    async def get_by_file_path(
+        self,
+        session: AsyncSession,
+        file_path: str,
+        *,
+        load_relations: bool = True,
+    ) -> FakeRepositoryEntity | None:
+        self.calls.append((session, file_path, load_relations))
         return self.entity
 
 
@@ -147,6 +176,68 @@ def indexed_file() -> FileIndexResult:
         checksum="checksum-1",
         operation=FileIndexOperation.updated,
     )
+
+
+@pytest.mark.asyncio
+async def test_repository_current_materialized_note_source_loads_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FakeEntityRepository(FakeRepositoryEntity())
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    sessions: list[AsyncSession] = []
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert scoped_session_maker is session_maker
+        session = cast(AsyncSession, object())
+        sessions.append(session)
+        yield session
+
+    monkeypatch.setattr(index_file_runner_module.db, "scoped_session", fake_scoped_session)
+
+    source = RepositoryCurrentMaterializedNoteSource(
+        session_maker=session_maker,
+        entity_repository=repository,
+    )
+
+    result = await source.load_current_materialized_note_entity("notes/a.md")
+
+    assert result == CurrentMaterializedNoteEntity(
+        entity_id=42,
+        external_id="note-42",
+        title="Repository Note",
+        permalink="notes/repository-note",
+        checksum="checksum-1",
+    )
+    assert repository.calls == [(sessions[0], "notes/a.md", False)]
+
+
+@pytest.mark.asyncio
+async def test_repository_current_materialized_note_source_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FakeEntityRepository(None)
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert scoped_session_maker is session_maker
+        yield cast(AsyncSession, object())
+
+    monkeypatch.setattr(index_file_runner_module.db, "scoped_session", fake_scoped_session)
+
+    source = RepositoryCurrentMaterializedNoteSource(
+        session_maker=session_maker,
+        entity_repository=repository,
+    )
+
+    result = await source.load_current_materialized_note_entity("notes/missing.md")
+
+    assert result is None
 
 
 @pytest.mark.asyncio
