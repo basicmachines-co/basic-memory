@@ -1,6 +1,6 @@
 """Portable project-index workflow progress state."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -14,11 +14,17 @@ from basic_memory.runtime import (
     ProjectPermalink,
     RuntimeNoteChangeSource,
     RuntimeStorageFileIndexMode,
+    RuntimeWorkflowMetadataPatch,
     TenantId,
     WorkflowId,
 )
 
 PROJECT_INDEX_PROGRESS_EVENT_INTERVAL = 50
+
+type ProjectIndexProgressCallback = Callable[
+    [RuntimeWorkflowMetadataPatch],
+    Awaitable[None],
+]
 
 
 class ProjectIndexFileOutcome(StrEnum):
