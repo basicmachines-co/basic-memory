@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Self
+
+from basic_memory.runtime import StorageEtag, normalize_storage_etag
 
 type FileIndexPath = str
 type FileIndexChecksum = str
@@ -17,6 +20,20 @@ class FileIndexTarget:
     path: FileIndexPath
     observed_checksum: FileIndexChecksum | None = None
     observed_size: int | None = None
+
+    @classmethod
+    def from_observed_storage_object(
+        cls,
+        *,
+        path: FileIndexPath,
+        etag: StorageEtag,
+        size: int | None = None,
+    ) -> Self:
+        return cls(
+            path=path,
+            observed_checksum=normalize_storage_etag(etag),
+            observed_size=size,
+        )
 
 
 class FileIndexDecisionStatus(StrEnum):

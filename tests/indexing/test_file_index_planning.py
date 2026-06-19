@@ -14,6 +14,20 @@ from basic_memory.indexing.file_index_planning import (
 )
 
 
+def test_file_index_target_from_observed_storage_object_normalizes_etag() -> None:
+    target = FileIndexTarget.from_observed_storage_object(
+        path="notes/current.md",
+        etag='"etag-current"',
+        size=123,
+    )
+
+    assert target == FileIndexTarget(
+        path="notes/current.md",
+        observed_checksum="etag-current",
+        observed_size=123,
+    )
+
+
 def test_observed_checksum_match_plans_current_without_current_metadata() -> None:
     decision = plan_file_index_target_from_observed(
         FileIndexTarget(path="notes/current.md", observed_checksum="etag-current"),
