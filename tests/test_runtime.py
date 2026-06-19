@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pytest
 
-from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
+from basic_memory.runtime import RuntimeAcceptedNoteChange, RuntimeMode, resolve_runtime_mode
 from basic_memory.runtime.contracts import (
     RuntimeDeleteStatus,
     RuntimeCapabilities,
@@ -174,6 +174,34 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(materialization, "db_version", 4)
+
+    def test_runtime_accepted_note_change_carries_payload_and_followup_work(self):
+        cleanup = RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-checksum",
+        )
+        materialization = RuntimePendingNoteMaterialization(
+            project_id=7,
+            entity_id=42,
+            db_version=3,
+            db_checksum="db-checksum",
+            cleanup_after_write=cleanup,
+        )
+        change = RuntimeAcceptedNoteChange[dict[str, object]](
+            status_code=202,
+            payload={"file_write_status": "pending"},
+            materialization=materialization,
+        )
+
+        assert change.status_code == 202
+        assert change.payload == {"file_write_status": "pending"}
+        assert change.materialization == materialization
+        assert change.file_delete is None
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(change, "status_code", 500)
 
     def test_plan_previous_note_file_delete_returns_cleanup_for_materialized_moves(self):
         cleanup = plan_previous_note_file_delete(

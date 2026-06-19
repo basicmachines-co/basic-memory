@@ -292,6 +292,16 @@ class RuntimePendingNoteMaterialization:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeAcceptedNoteChange[PayloadT]:
+    """Accepted note response plus any post-commit runtime follow-up work."""
+
+    status_code: int
+    payload: PayloadT
+    materialization: RuntimePendingNoteMaterialization | None = None
+    file_delete: RuntimePendingNoteFileDelete | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeFileDeleteResult:
     """Summary of one guarded materialized-file cleanup."""
 
