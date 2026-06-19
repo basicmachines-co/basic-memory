@@ -1,4 +1,4 @@
-"""Repository-backed read-repair handoffs for accepted note_content."""
+"""Repository-backed read handoffs for accepted note_content."""
 
 from __future__ import annotations
 
@@ -30,29 +30,35 @@ from basic_memory.runtime import (
 )
 
 
-class NoteContentReadRepairProjectSource(Protocol):
-    """Project identity needed to repair note_content from a canonical file."""
+class NoteContentReadProjectSource(Protocol):
+    """Project identity needed for note-content read lookups."""
 
     @property
     def id(self) -> ProjectId: ...
+
+
+class NoteContentReadRepairProjectSource(NoteContentReadProjectSource, Protocol):
+    """Project identity needed to repair note_content from a canonical file."""
 
     @property
     def path(self) -> ProjectPath: ...
 
 
-class NoteContentReadRepairEntitySource(NoteContentReconcileEntitySource, Protocol):
-    """Entity identity needed to repair note_content from a canonical file."""
+class NoteContentReadEntitySource(NoteContentReconcileEntitySource, Protocol):
+    """Entity identity needed for note-content read lookups."""
 
     @property
     def content_type(self) -> RuntimeContentType: ...
+
+
+class NoteContentReadRepairEntitySource(NoteContentReadEntitySource, Protocol):
+    """Entity identity needed to repair note_content from a canonical file."""
 
     @property
     def file_path(self) -> RuntimeFilePath: ...
 
 
-class NoteContentReadRepairProjectRepository[ProjectT: NoteContentReadRepairProjectSource](
-    Protocol
-):
+class NoteContentReadProjectRepository[ProjectT: NoteContentReadProjectSource](Protocol):
     """Repository capability for loading the project that owns a note read."""
 
     async def get_by_external_id(
@@ -62,7 +68,7 @@ class NoteContentReadRepairProjectRepository[ProjectT: NoteContentReadRepairProj
     ) -> ProjectT | None: ...
 
 
-class NoteContentReadRepairEntityRepository[EntityT: NoteContentReadRepairEntitySource](Protocol):
+class NoteContentReadEntityRepository[EntityT: NoteContentReadEntitySource](Protocol):
     """Repository capability for loading the entity that owns a note read."""
 
     async def get_by_external_id(
@@ -72,14 +78,34 @@ class NoteContentReadRepairEntityRepository[EntityT: NoteContentReadRepairEntity
     ) -> EntityT | None: ...
 
 
-class NoteContentReadRepairNoteContentRepository[NoteContentT](Protocol):
-    """Repository capability for checking whether note_content already exists."""
+class NoteContentReadNoteContentRepository[NoteContentT](Protocol):
+    """Repository capability for loading accepted note_content by entity."""
 
     async def get_by_entity_id(
         self,
         session: AsyncSession,
         entity_id: RuntimeEntityId,
     ) -> NoteContentT | None: ...
+
+
+class NoteContentReadRepairProjectRepository[ProjectT: NoteContentReadRepairProjectSource](
+    NoteContentReadProjectRepository[ProjectT], Protocol
+):
+    """Project repository capability for read repair targets."""
+
+
+class NoteContentReadRepairEntityRepository[EntityT: NoteContentReadRepairEntitySource](
+    NoteContentReadEntityRepository[EntityT],
+    Protocol,
+):
+    """Entity repository capability for read repair targets."""
+
+
+class NoteContentReadRepairNoteContentRepository[NoteContentT](
+    NoteContentReadNoteContentRepository[NoteContentT],
+    Protocol,
+):
+    """Note-content repository capability for read repair preflight."""
 
 
 class NoteContentReadRepairReconciler[EntityT: NoteContentReadRepairEntitySource](Protocol):
@@ -95,6 +121,15 @@ class NoteContentReadRepairReconciler[EntityT: NoteContentReadRepairEntitySource
     ) -> None: ...
 
 
+type NoteContentReadProjectRepositoryFactory[ProjectT: NoteContentReadProjectSource] = Callable[
+    [], NoteContentReadProjectRepository[ProjectT]
+]
+type NoteContentReadEntityRepositoryFactory[EntityT: NoteContentReadEntitySource] = Callable[
+    [ProjectId], NoteContentReadEntityRepository[EntityT]
+]
+type NoteContentReadNoteContentRepositoryFactory[NoteContentT] = Callable[
+    [ProjectId], NoteContentReadNoteContentRepository[NoteContentT]
+]
 type NoteContentReadRepairProjectRepositoryFactory[ProjectT: NoteContentReadRepairProjectSource] = (
     Callable[[], NoteContentReadRepairProjectRepository[ProjectT]]
 )
@@ -107,6 +142,17 @@ type NoteContentReadRepairNoteContentRepositoryFactory[NoteContentT] = Callable[
 type NoteContentReadRepairReconcilerFactory[EntityT: NoteContentReadRepairEntitySource] = Callable[
     [ProjectId, async_sessionmaker[AsyncSession]], NoteContentReadRepairReconciler[EntityT]
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class NoteContentReadView[
+    EntityT: NoteContentReadEntitySource,
+    NoteContentT,
+]:
+    """Joined entity plus accepted note_content used by hot note reads."""
+
+    entity: EntityT
+    note_content: NoteContentT | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +191,74 @@ class NoteContentReadRepairPreflight[
         if self.target is None:
             raise RuntimeError("note-content read repair preflight does not contain a target")
         return self.target
+
+
+def note_content_read_project_repository() -> NoteContentReadProjectRepository[Project]:
+    """Create the default project repository for note-content reads."""
+    return ProjectRepository()
+
+
+def note_content_read_entity_repository(
+    project_id: ProjectId,
+) -> NoteContentReadEntityRepository[Entity]:
+    """Create the default entity repository for note-content reads."""
+    return EntityRepository(project_id=project_id)
+
+
+def note_content_read_note_content_repository(
+    project_id: ProjectId,
+) -> NoteContentReadNoteContentRepository[NoteContent]:
+    """Create the default note_content repository for note-content reads."""
+    return NoteContentRepository(project_id=project_id)
+
+
+async def load_note_content_read_view[
+    ProjectT: NoteContentReadProjectSource,
+    EntityT: NoteContentReadEntitySource,
+    NoteContentT,
+](
+    session: AsyncSession,
+    *,
+    project_external_id: ProjectExternalId,
+    entity_external_id: NoteExternalId,
+    project_repository_factory: NoteContentReadProjectRepositoryFactory[ProjectT],
+    entity_repository_factory: NoteContentReadEntityRepositoryFactory[EntityT],
+    note_content_repository_factory: NoteContentReadNoteContentRepositoryFactory[NoteContentT],
+) -> NoteContentReadView[EntityT, NoteContentT] | None:
+    """Load the DB view needed by hot note-content reads."""
+    project_repository = project_repository_factory()
+    project = await project_repository.get_by_external_id(session, project_external_id)
+    if project is None:
+        return None
+
+    entity_repository = entity_repository_factory(project.id)
+    entity = await entity_repository.get_by_external_id(session, entity_external_id)
+    if entity is None:
+        return None
+
+    note_content = None
+    if runtime_content_type_is_markdown(entity):
+        note_content_repository = note_content_repository_factory(project.id)
+        note_content = await note_content_repository.get_by_entity_id(session, entity.id)
+
+    return NoteContentReadView(entity=entity, note_content=note_content)
+
+
+async def load_note_content_read_view_with_default_repositories(
+    session: AsyncSession,
+    *,
+    project_external_id: ProjectExternalId,
+    entity_external_id: NoteExternalId,
+) -> NoteContentReadView[Entity, NoteContent] | None:
+    """Load the hot read view through the default Basic Memory repositories."""
+    return await load_note_content_read_view(
+        session,
+        project_external_id=project_external_id,
+        entity_external_id=entity_external_id,
+        project_repository_factory=note_content_read_project_repository,
+        entity_repository_factory=note_content_read_entity_repository,
+        note_content_repository_factory=note_content_read_note_content_repository,
+    )
 
 
 def note_content_read_repair_project_repository() -> NoteContentReadRepairProjectRepository[

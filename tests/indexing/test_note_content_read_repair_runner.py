@@ -8,8 +8,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.note_content_read_repair_runner import (
+    NoteContentReadView,
     NoteContentReadRepairTarget,
     apply_note_content_read_repair,
+    load_note_content_read_view,
     prepare_note_content_read_repair,
 )
 from basic_memory.runtime import RuntimeNoteContentReadRepairStatus
@@ -76,6 +78,76 @@ class _NoteContentRepository:
         assert session is not None
         self.entity_ids.append(entity_id)
         return self.note_content
+
+
+@pytest.mark.asyncio
+async def test_load_note_content_read_view_returns_markdown_entity_with_content() -> None:
+    session = cast(AsyncSession, object())
+    project = _Project(id=7, path="/app/data/main")
+    entity = _Entity(id=42, content_type="text/markdown", file_path="notes/read.md")
+    note_content = _NoteContent(markdown_content="# Read\n")
+    project_repository = _ProjectRepository(project)
+    entity_repository = _EntityRepository(entity)
+    note_content_repository = _NoteContentRepository(note_content)
+
+    view = await load_note_content_read_view(
+        session,
+        project_external_id="project-123",
+        entity_external_id="note-456",
+        project_repository_factory=lambda: project_repository,
+        entity_repository_factory=lambda project_id: entity_repository,
+        note_content_repository_factory=lambda project_id: note_content_repository,
+    )
+
+    assert view == NoteContentReadView(entity=entity, note_content=note_content)
+    assert project_repository.external_ids == ["project-123"]
+    assert entity_repository.external_ids == ["note-456"]
+    assert note_content_repository.entity_ids == [42]
+
+
+@pytest.mark.asyncio
+async def test_load_note_content_read_view_returns_none_when_project_is_missing() -> None:
+    session = cast(AsyncSession, object())
+    project_repository = _ProjectRepository(None)
+
+    def fail_entity_repository(_project_id: int) -> _EntityRepository:
+        raise AssertionError("missing project should not load an entity")
+
+    def fail_note_content_repository(_project_id: int) -> _NoteContentRepository:
+        raise AssertionError("missing project should not load note_content")
+
+    view = await load_note_content_read_view(
+        session,
+        project_external_id="project-123",
+        entity_external_id="note-456",
+        project_repository_factory=lambda: project_repository,
+        entity_repository_factory=fail_entity_repository,
+        note_content_repository_factory=fail_note_content_repository,
+    )
+
+    assert view is None
+    assert project_repository.external_ids == ["project-123"]
+
+
+@pytest.mark.asyncio
+async def test_load_note_content_read_view_skips_note_lookup_for_non_markdown() -> None:
+    session = cast(AsyncSession, object())
+    project = _Project(id=7, path="/app/data/main")
+    entity = _Entity(id=42, content_type="image/png", file_path="images/diagram.png")
+
+    def fail_note_content_repository(_project_id: int) -> _NoteContentRepository:
+        raise AssertionError("non-markdown reads should not check note_content")
+
+    view = await load_note_content_read_view(
+        session,
+        project_external_id="project-123",
+        entity_external_id="note-456",
+        project_repository_factory=lambda: _ProjectRepository(project),
+        entity_repository_factory=lambda project_id: _EntityRepository(entity),
+        note_content_repository_factory=fail_note_content_repository,
+    )
+
+    assert view == NoteContentReadView(entity=entity, note_content=None)
 
 
 @pytest.mark.asyncio
