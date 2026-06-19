@@ -1149,6 +1149,7 @@ class SyncService:
         new: bool = True,
         index_search: bool = True,
         resolve_relations: bool = True,
+        refresh_unchanged_derived_state: bool = False,
     ) -> SyncedMarkdownFile:
         """Sync one markdown file and return the final canonical file state.
 
@@ -1171,7 +1172,44 @@ class SyncService:
         initial_checksum = await compute_checksum(initial_markdown_bytes)
         async with self._session_scope() as session:
             existing_entity = await self.entity_repository.get_by_file_path(session, path)
+        input_file = IndexInputFile(
+            path=path,
+            size=file_metadata.size,
+            checksum=initial_checksum,
+            content_type=self.file_service.content_type(path),
+            last_modified=file_metadata.modified_at,
+            created_at=file_metadata.created_at,
+            content=initial_markdown_bytes,
+        )
         if existing_entity is not None and existing_entity.checksum == initial_checksum:
+            if refresh_unchanged_derived_state:
+                logger.debug(
+                    f"Markdown sync refreshing unchanged derived state: path={path}, "
+                    f"entity_id={existing_entity.id}, checksum={initial_checksum[:8]}"
+                )
+                indexed = await self.batch_indexer.index_markdown_file(
+                    input_file,
+                    new=False,
+                    index_search=index_search,
+                    resolve_relations=resolve_relations,
+                )
+                async with self._session_scope() as session:
+                    refreshed_entities = await self.entity_repository.find_by_ids(
+                        session,
+                        [indexed.entity_id],
+                    )
+                if len(refreshed_entities) != 1:  # pragma: no cover
+                    raise ValueError(f"Failed to reload refreshed markdown entity for {path}")
+                return SyncedMarkdownFile(
+                    entity=refreshed_entities[0],
+                    checksum=indexed.checksum,
+                    markdown_content=indexed.markdown_content or initial_markdown_content,
+                    file_path=path,
+                    content_type=self.file_service.content_type(path),
+                    updated_at=file_metadata.modified_at,
+                    size=file_metadata.size,
+                )
+
             logger.debug(
                 f"Markdown sync skipped unchanged file: path={path}, "
                 f"entity_id={existing_entity.id}, checksum={initial_checksum[:8]}"
@@ -1187,15 +1225,7 @@ class SyncService:
             )
 
         indexed = await self.batch_indexer.index_markdown_file(
-            IndexInputFile(
-                path=path,
-                size=file_metadata.size,
-                checksum=initial_checksum,
-                content_type=self.file_service.content_type(path),
-                last_modified=file_metadata.modified_at,
-                created_at=file_metadata.created_at,
-                content=initial_markdown_bytes,
-            ),
+            input_file,
             new=new,
             index_search=False,
             resolve_relations=resolve_relations,

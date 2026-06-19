@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from basic_memory.file_utils import compute_checksum, remove_frontmatter
+from basic_memory.indexing import IndexedEntity, IndexInputFile
 from basic_memory.schemas import Entity as EntitySchema
 
 
@@ -238,6 +239,74 @@ async def test_sync_one_markdown_file_skips_indexing_when_checksum_matches(
     assert result.entity.id == initial.entity.id
     assert len(result.entity.observations) == 1
     assert result.markdown_content == file_path.read_bytes().decode("utf-8")
+    assert result.checksum == initial.checksum
+
+
+@pytest.mark.asyncio
+async def test_sync_one_markdown_file_can_refresh_unchanged_derived_state(
+    sync_service,
+    test_project,
+    monkeypatch,
+):
+    """Cloud callers can rebuild derived rows even when the entity checksum is current."""
+    original_content = dedent(
+        f"""\
+        ---
+        title: Already Current
+        type: note
+        permalink: {test_project.name}/notes/already-current
+        ---
+
+        # Already Current
+
+        - [note] Derived indexes need repair after a DB-first write.
+        """
+    )
+    file_path = _write_markdown(
+        Path(test_project.path),
+        "notes/already-current.md",
+        original_content,
+    )
+
+    initial = await sync_service.sync_one_markdown_file(
+        "notes/already-current.md",
+        index_search=False,
+    )
+    indexed_markdown = IndexedEntity(
+        path="notes/already-current.md",
+        entity_id=initial.entity.id,
+        permalink=initial.entity.permalink,
+        checksum=initial.checksum,
+        content_type="text/markdown",
+        markdown_content=original_content,
+    )
+    index_markdown_file = AsyncMock(return_value=indexed_markdown)
+    index_entity_data = AsyncMock(side_effect=AssertionError("search should not refresh twice"))
+    monkeypatch.setattr(sync_service.batch_indexer, "index_markdown_file", index_markdown_file)
+    monkeypatch.setattr(sync_service.search_service, "index_entity_data", index_entity_data)
+
+    result = await sync_service.sync_one_markdown_file(
+        "notes/already-current.md",
+        refresh_unchanged_derived_state=True,
+        resolve_relations=False,
+    )
+
+    index_markdown_file.assert_awaited_once()
+    index_markdown_file_args = index_markdown_file.await_args
+    assert index_markdown_file_args is not None
+    indexed_input = index_markdown_file_args.args[0]
+    assert isinstance(indexed_input, IndexInputFile)
+    assert indexed_input.path == "notes/already-current.md"
+    assert indexed_input.checksum == initial.checksum
+    assert indexed_input.content == file_path.read_bytes()
+    assert index_markdown_file_args.kwargs == {
+        "new": False,
+        "index_search": True,
+        "resolve_relations": False,
+    }
+    index_entity_data.assert_not_awaited()
+    assert result.entity.id == initial.entity.id
+    assert result.markdown_content == original_content
     assert result.checksum == initial.checksum
 
 
