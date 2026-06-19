@@ -41,7 +41,9 @@ from basic_memory.runtime import (
 from basic_memory.runtime.contracts import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     ProjectRuntimeReference,
+    RUNTIME_ACTIVE_WORKFLOW_STATUSES,
     RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS,
+    RUNTIME_TERMINAL_WORKFLOW_STATUSES,
     RuntimeDeleteStatus,
     RuntimeCapabilities,
     RuntimeDirectoryFileSnapshot,
@@ -93,6 +95,7 @@ from basic_memory.runtime.contracts import (
     StorageObjectVersion,
     assert_runtime_file_matches_expected,
     normalize_storage_etag,
+    parse_runtime_workflow_id,
     plan_project_index_job_request,
     plan_directory_file_snapshot,
     plan_note_file_delete_job_request,
@@ -103,6 +106,7 @@ from basic_memory.runtime.contracts import (
     plan_note_materialization_job_request,
     plan_previous_note_file_delete,
     read_runtime_file_checksum,
+    runtime_job_status_from_workflow_status,
     truncate_runtime_workflow_text,
 )
 
@@ -814,6 +818,22 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(view, "metadata", {})
+
+    def test_runtime_workflow_status_helpers_match_job_status_vocabulary(self):
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+        assert RUNTIME_ACTIVE_WORKFLOW_STATUSES == frozenset({"queued", "running"})
+        assert RUNTIME_TERMINAL_WORKFLOW_STATUSES == frozenset(
+            {"completed", "failed", "cancelled"}
+        )
+        assert runtime_job_status_from_workflow_status("queued") == "queued"
+        assert runtime_job_status_from_workflow_status("running") == "in_progress"
+        assert runtime_job_status_from_workflow_status("completed") == "complete"
+        assert runtime_job_status_from_workflow_status("failed") == "failed"
+        assert runtime_job_status_from_workflow_status("cancelled") == "cancelled"
+        assert runtime_job_status_from_workflow_status("paused") == "unknown"
+        assert parse_runtime_workflow_id(str(workflow_id)) == workflow_id
+        assert parse_runtime_workflow_id("not-a-workflow-id") is None
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))

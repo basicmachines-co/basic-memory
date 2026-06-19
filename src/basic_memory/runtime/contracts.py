@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 from uuid import UUID
 
 type TenantId = UUID
@@ -40,10 +40,21 @@ type RuntimeWorkflowBroker = str
 type RuntimeWorkflowCheckpoint = Mapping[str, object]
 type RuntimeWorkflowMetadata = Mapping[str, object]
 type RuntimeWorkflowMetadataPatch = Mapping[str, object]
+type RuntimeWorkflowStatus = str
 type RuntimeWorkflowPhase = str
 type RuntimeWorkflowProgress = str
 type RuntimeWorkflowResult = Mapping[str, object]
 type RuntimeSchedulerTaskPayload = Mapping[str, object]
+type RuntimeJobStatusType = Literal[
+    "queued",
+    "in_progress",
+    "complete",
+    "failed",
+    "deferred",
+    "not_found",
+    "unknown",
+    "cancelled",
+]
 type NoteExternalId = str
 type RuntimeFileChecksum = str
 type RuntimeNoteContentVersion = int
@@ -60,12 +71,40 @@ STORAGE_OBJECT_CREATED_EVENTS: frozenset[StorageEventName] = frozenset(
 )
 STORAGE_OBJECT_DELETED_EVENT: StorageEventName = "OBJECT_DELETED"
 WORKFLOW_EVENT_TEXT_MAX_CHARS = 4096
+RUNTIME_ACTIVE_WORKFLOW_STATUSES: frozenset[RuntimeWorkflowStatus] = frozenset(
+    {"queued", "running"}
+)
+RUNTIME_TERMINAL_WORKFLOW_STATUSES: frozenset[RuntimeWorkflowStatus] = frozenset(
+    {"completed", "failed", "cancelled"}
+)
 RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS = 0.001
 NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR = (
     "An external file change was detected before this note could be written. "
     "Refresh to review the latest content, then retry your write if you want it to win."
 )
 RUNTIME_MARKDOWN_CONTENT_TYPE: RuntimeContentType = "text/markdown"
+
+
+def runtime_job_status_from_workflow_status(
+    workflow_status: RuntimeWorkflowStatus,
+) -> RuntimeJobStatusType:
+    """Translate durable workflow states to the portable job-status vocabulary."""
+    status_map: Mapping[RuntimeWorkflowStatus, RuntimeJobStatusType] = {
+        "queued": "queued",
+        "running": "in_progress",
+        "completed": "complete",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }
+    return status_map.get(workflow_status, "unknown")
+
+
+def parse_runtime_workflow_id(job_id: str) -> WorkflowId | None:
+    """Best-effort workflow-id parsing for durable runtime status lookups."""
+    try:
+        return UUID(job_id)
+    except ValueError:
+        return None
 
 
 class ProjectRuntimeSource(Protocol):
