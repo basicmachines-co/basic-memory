@@ -18,7 +18,9 @@ from basic_memory.runtime import (
     ProjectPermalink,
     ProjectRuntimeReference,
     RuntimeJobId,
+    RuntimeQueuedWorkflowMetadata,
     RuntimeWorkflowBroker,
+    RuntimeWorkflowTransport,
     TenantId,
     WorkflowId,
 )
@@ -131,6 +133,71 @@ class ProjectIndexWorkflowFailureUpdate:
     error_message: str
     metadata: dict[str, object]
     failed_event_data: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowQueued:
+    """Portable queued metadata for a project-index workflow handoff."""
+
+    logical_key: str
+    metadata: dict[str, object]
+    queued_event_data: dict[str, object]
+
+
+def project_index_workflow_logical_key(
+    *,
+    tenant_id: TenantId,
+    project_name: ProjectName | None,
+    force_full: bool,
+    search: bool,
+    embeddings: bool,
+) -> str:
+    """Return the legacy project-index workflow dedupe key."""
+    logical_key = f"index-{tenant_id}-{project_name or 'all'}"
+    if force_full:
+        logical_key = f"{logical_key}-full"
+    if not search:
+        logical_key = f"{logical_key}-emb"
+    elif not embeddings:
+        logical_key = f"{logical_key}-search"
+    return logical_key
+
+
+def build_project_index_workflow_queued(
+    *,
+    request: ProjectIndexWorkflowRequest,
+    transport_broker: RuntimeWorkflowBroker,
+    transport_entrypoint: str,
+) -> ProjectIndexWorkflowQueued:
+    """Build queued workflow metadata before the coordinator starts."""
+    logical_key = project_index_workflow_logical_key(
+        tenant_id=request.tenant_id,
+        project_name=request.project.project_name,
+        force_full=request.force_full,
+        search=request.search,
+        embeddings=request.embeddings,
+    )
+    queued_metadata = RuntimeQueuedWorkflowMetadata(
+        workflow_id=request.workflow_id,
+        progress="queued for index",
+        payload=request.workflow_payload_metadata(),
+        transport=RuntimeWorkflowTransport(
+            broker=transport_broker,
+            entrypoint=transport_entrypoint,
+        ),
+    )
+
+    return ProjectIndexWorkflowQueued(
+        logical_key=logical_key,
+        metadata=queued_metadata.workflow_metadata(),
+        queued_event_data={
+            "logical_key": logical_key,
+            "entrypoint": transport_entrypoint,
+            "phase": "queued",
+            "progress": "queued for index",
+            **request.project.workflow_metadata(),
+        },
+    )
 
 
 def build_project_index_workflow_start(

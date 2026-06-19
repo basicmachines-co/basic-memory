@@ -8,10 +8,12 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
+    ProjectIndexWorkflowQueued,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStart,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
+    build_project_index_workflow_queued,
     build_project_index_workflow_start,
     build_project_index_workflow_stale_failure_update,
 )
@@ -60,6 +62,66 @@ def test_project_index_workflow_request_serializes_existing_payload_metadata() -
         "search": True,
         "embeddings": False,
     }
+
+
+def test_project_index_workflow_queued_builds_metadata_event_and_logical_key() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    request = ProjectIndexWorkflowRequest.from_source(
+        ProjectIndexSource(
+            tenant_id=tenant_id,
+            project_id=42,
+            project_external_id="external-project",
+            project_name="Project Name",
+            project_permalink="project-name",
+            project_path="project",
+            workflow_id=workflow_id,
+            force_full=True,
+            search=True,
+            embeddings=False,
+        )
+    )
+
+    queued = build_project_index_workflow_queued(
+        request=request,
+        transport_broker="pgq",
+        transport_entrypoint="index_project",
+    )
+
+    assert queued == ProjectIndexWorkflowQueued(
+        logical_key=f"index-{tenant_id}-Project Name-full-search",
+        metadata={
+            "job_id": str(workflow_id),
+            "phase": "queued",
+            "progress": "queued for index",
+            "payload": {
+                "tenant_id": str(tenant_id),
+                "project_id": 42,
+                "project_external_id": "external-project",
+                "project_name": "Project Name",
+                "project_permalink": "project-name",
+                "project_path": "project",
+                "force_full": True,
+                "search": True,
+                "embeddings": False,
+            },
+            "transport": {
+                "broker": "pgq",
+                "entrypoint": "index_project",
+            },
+        },
+        queued_event_data={
+            "logical_key": f"index-{tenant_id}-Project Name-full-search",
+            "entrypoint": "index_project",
+            "phase": "queued",
+            "progress": "queued for index",
+            "project_id": 42,
+            "project_external_id": "external-project",
+            "project_name": "Project Name",
+            "project_permalink": "project-name",
+            "project_path": "project",
+        },
+    )
 
 
 def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event() -> None:
