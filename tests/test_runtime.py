@@ -46,6 +46,7 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     RuntimeQueuedWorkflowMetadata,
+    RuntimeStorageFileIndexMode,
     RuntimeStorageFileIndexRequest,
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
@@ -154,6 +155,10 @@ class TestRuntimeContracts:
         assert normalize_storage_etag('"etag-1"') == "etag-1"
         assert normalize_storage_etag("etag-1") == "etag-1"
         assert normalize_storage_etag('""etag-1""') == "etag-1"
+
+    def test_runtime_storage_file_index_mode_names_existing_queue_producers(self):
+        assert RuntimeStorageFileIndexMode.observed_object.value == "observed_object"
+        assert RuntimeStorageFileIndexMode.current_file.value == "current_file"
 
     def test_runtime_storage_event_routing_plan_groups_projects_and_skips_root_objects(self):
         alpha_put = StorageEventPayload(

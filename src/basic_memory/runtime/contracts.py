@@ -291,6 +291,13 @@ class RuntimeStorageEventSkipReason(StrEnum):
     unknown_event = "unknown_event"
 
 
+class RuntimeStorageFileIndexMode(StrEnum):
+    """Producer mode for one runtime file-index job."""
+
+    observed_object = "observed_object"
+    current_file = "current_file"
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeStorageEventOperation:
     """Typed operation selected from a project-scoped storage event."""
