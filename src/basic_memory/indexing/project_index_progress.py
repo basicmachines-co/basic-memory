@@ -12,6 +12,7 @@ from basic_memory.runtime import (
     ProjectName,
     ProjectPath,
     ProjectPermalink,
+    RuntimeNoteChangeSource,
     TenantId,
     WorkflowId,
 )
@@ -100,6 +101,27 @@ class ProjectIndexCompletion:
     workflow_id: WorkflowId
     progress: str
     counters: dict[str, int]
+
+
+class ProjectIndexCompletedLiveUpdateType(StrEnum):
+    """Project-level live-update events produced by project indexing."""
+
+    index_completed = "index.completed"
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexCompletedLiveUpdatePlan:
+    """Typed project-index completion update for runtime adapters to publish."""
+
+    event_type: ProjectIndexCompletedLiveUpdateType
+    tenant_id: TenantId
+    source: RuntimeNoteChangeSource
+    project_external_id: ProjectExternalId | None
+    project_name: ProjectName | None
+    workflow_id: WorkflowId
+
+
+DEFAULT_PROJECT_INDEX_COMPLETED_LIVE_UPDATE_SOURCE: RuntimeNoteChangeSource = "worker"
 
 
 class ProjectIndexCountersState(CheckpointModel):
@@ -365,6 +387,23 @@ def project_index_completion_from_metadata(
         workflow_id=workflow_id,
         progress=progress,
         counters=counters.to_metadata(),
+    )
+
+
+def plan_project_index_completed_live_update(
+    completion: ProjectIndexCompletion | None,
+) -> ProjectIndexCompletedLiveUpdatePlan | None:
+    """Plan a project-level live update for a terminal project-index workflow."""
+    if completion is None:
+        return None
+
+    return ProjectIndexCompletedLiveUpdatePlan(
+        event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
+        tenant_id=completion.tenant_id,
+        source=DEFAULT_PROJECT_INDEX_COMPLETED_LIVE_UPDATE_SOURCE,
+        project_external_id=completion.project_external_id or None,
+        project_name=completion.project_name,
+        workflow_id=completion.workflow_id,
     )
 
 
