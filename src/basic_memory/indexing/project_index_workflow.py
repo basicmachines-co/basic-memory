@@ -199,6 +199,86 @@ class ProjectIndexBatchJobActivityUpdate:
     metadata: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMoveTarget:
+    """One persisted file-path move for project-index maintenance."""
+
+    old_path: str
+    new_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMoveBatch:
+    """A bounded group of move targets for one database update."""
+
+    completed_batches: int
+    targets: tuple[ProjectIndexMoveTarget, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMoveBatchPlan:
+    """Portable move-maintenance work for a project-index run."""
+
+    total_moves: int
+    batch_count: int
+    batches: tuple[ProjectIndexMoveBatch, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMoveBatchProgress:
+    """Existing workflow progress payload for completed move batches."""
+
+    moved_files: int
+    completed_batches: int
+    total_batches: int
+    updated_files: int
+
+    def workflow_metadata(self) -> dict[str, object]:
+        """Serialize to the existing cloud workflow progress metadata shape."""
+        return {
+            "moved_files": self.moved_files,
+            "completed_batches": self.completed_batches,
+            "total_batches": self.total_batches,
+            "updated_files": self.updated_files,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteBatch:
+    """A bounded group of deleted paths for one database delete pass."""
+
+    completed_batches: int
+    paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteBatchPlan:
+    """Portable delete-maintenance work for a project-index run."""
+
+    total_deletes: int
+    batch_count: int
+    batches: tuple[ProjectIndexDeleteBatch, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteBatchProgress:
+    """Existing workflow progress payload for completed delete batches."""
+
+    deleted_files: int
+    completed_batches: int
+    total_batches: int
+    deleted_entities: int
+
+    def workflow_metadata(self) -> dict[str, object]:
+        """Serialize to the existing cloud workflow progress metadata shape."""
+        return {
+            "deleted_files": self.deleted_files,
+            "completed_batches": self.completed_batches,
+            "total_batches": self.total_batches,
+            "deleted_entities": self.deleted_entities,
+        }
+
+
 def project_index_workflow_logical_key(
     *,
     tenant_id: TenantId,
@@ -216,6 +296,57 @@ def project_index_workflow_logical_key(
     elif not embeddings:
         logical_key = f"{logical_key}-search"
     return logical_key
+
+
+def build_project_index_move_batch_plan(
+    *,
+    moved_files: Mapping[str, str],
+    batch_size: int,
+) -> ProjectIndexMoveBatchPlan:
+    """Build bounded move batches while preserving the caller's path order."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    targets = tuple(
+        ProjectIndexMoveTarget(old_path=old_path, new_path=new_path)
+        for old_path, new_path in moved_files.items()
+    )
+    batches = tuple(
+        ProjectIndexMoveBatch(
+            completed_batches=batch_offset // batch_size + 1,
+            targets=targets[batch_offset : batch_offset + batch_size],
+        )
+        for batch_offset in range(0, len(targets), batch_size)
+    )
+    return ProjectIndexMoveBatchPlan(
+        total_moves=len(targets),
+        batch_count=len(batches),
+        batches=batches,
+    )
+
+
+def build_project_index_delete_batch_plan(
+    *,
+    deleted_paths: Sequence[str],
+    batch_size: int,
+) -> ProjectIndexDeleteBatchPlan:
+    """Build bounded delete batches while preserving the caller's path order."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    paths = tuple(deleted_paths)
+    batches = tuple(
+        ProjectIndexDeleteBatch(
+            completed_batches=batch_offset // batch_size + 1,
+            paths=paths[batch_offset : batch_offset + batch_size],
+        )
+        for batch_offset in range(0, len(paths), batch_size)
+    )
+    return ProjectIndexDeleteBatchPlan(
+        total_deletes=len(paths),
+        batch_count=len(batches),
+        batches=batches,
+    )
 
 
 def build_project_index_workflow_queued(

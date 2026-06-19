@@ -3,11 +3,20 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+import pytest
+
 from basic_memory.indexing import (
     ProjectIndexCounters,
     ProjectIndexBatchJobPlan,
     ProjectIndexBatchJobActivity,
     ProjectIndexBatchJobActivityUpdate,
+    ProjectIndexDeleteBatch,
+    ProjectIndexDeleteBatchPlan,
+    ProjectIndexDeleteBatchProgress,
+    ProjectIndexMoveBatch,
+    ProjectIndexMoveBatchPlan,
+    ProjectIndexMoveBatchProgress,
+    ProjectIndexMoveTarget,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
@@ -16,6 +25,8 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowStart,
     build_project_index_batch_activity_update,
     build_project_index_batch_job_plan,
+    build_project_index_delete_batch_plan,
+    build_project_index_move_batch_plan,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
     build_project_index_workflow_queued,
@@ -222,6 +233,98 @@ def test_project_index_batch_activity_update_builds_last_activity_metadata() -> 
             },
         },
     )
+
+
+def test_project_index_move_batch_plan_builds_batches_and_progress_metadata() -> None:
+    plan = build_project_index_move_batch_plan(
+        moved_files={
+            "notes/a.md": "archive/a.md",
+            "notes/b.md": "archive/b.md",
+            "notes/c.md": "archive/c.md",
+        },
+        batch_size=2,
+    )
+
+    assert plan == ProjectIndexMoveBatchPlan(
+        total_moves=3,
+        batch_count=2,
+        batches=(
+            ProjectIndexMoveBatch(
+                completed_batches=1,
+                targets=(
+                    ProjectIndexMoveTarget(
+                        old_path="notes/a.md",
+                        new_path="archive/a.md",
+                    ),
+                    ProjectIndexMoveTarget(
+                        old_path="notes/b.md",
+                        new_path="archive/b.md",
+                    ),
+                ),
+            ),
+            ProjectIndexMoveBatch(
+                completed_batches=2,
+                targets=(
+                    ProjectIndexMoveTarget(
+                        old_path="notes/c.md",
+                        new_path="archive/c.md",
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert ProjectIndexMoveBatchProgress(
+        moved_files=plan.total_moves,
+        completed_batches=plan.batches[0].completed_batches,
+        total_batches=plan.batch_count,
+        updated_files=2,
+    ).workflow_metadata() == {
+        "moved_files": 3,
+        "completed_batches": 1,
+        "total_batches": 2,
+        "updated_files": 2,
+    }
+
+
+def test_project_index_delete_batch_plan_builds_batches_and_progress_metadata() -> None:
+    plan = build_project_index_delete_batch_plan(
+        deleted_paths=("notes/a.md", "notes/b.md", "notes/c.md"),
+        batch_size=2,
+    )
+
+    assert plan == ProjectIndexDeleteBatchPlan(
+        total_deletes=3,
+        batch_count=2,
+        batches=(
+            ProjectIndexDeleteBatch(
+                completed_batches=1,
+                paths=("notes/a.md", "notes/b.md"),
+            ),
+            ProjectIndexDeleteBatch(
+                completed_batches=2,
+                paths=("notes/c.md",),
+            ),
+        ),
+    )
+    assert ProjectIndexDeleteBatchProgress(
+        deleted_files=plan.total_deletes,
+        completed_batches=plan.batches[1].completed_batches,
+        total_batches=plan.batch_count,
+        deleted_entities=3,
+    ).workflow_metadata() == {
+        "deleted_files": 3,
+        "completed_batches": 2,
+        "total_batches": 2,
+        "deleted_entities": 3,
+    }
+
+
+def test_project_index_maintenance_batch_plans_require_positive_batch_size() -> None:
+    with pytest.raises(ValueError, match="batch_size must be greater than zero"):
+        build_project_index_move_batch_plan(moved_files={}, batch_size=0)
+
+    with pytest.raises(ValueError, match="batch_size must be greater than zero"):
+        build_project_index_delete_batch_plan(deleted_paths=(), batch_size=0)
 
 
 def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event() -> None:
