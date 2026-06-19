@@ -7,7 +7,10 @@ import pytest
 from basic_memory import db
 from basic_memory.models import NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.note_content_repository import (
+    AcceptedNoteContentWrite,
+    NoteContentRepository,
+)
 from basic_memory.repository.project_repository import ProjectRepository
 
 
@@ -59,6 +62,90 @@ async def test_create_and_lookup_note_content(
     assert by_entity.entity_id == created.entity_id
     assert by_external.entity_id == created.entity_id
     assert by_path.entity_id == created.entity_id
+
+
+@pytest.mark.asyncio
+async def test_accept_write_inserts_pending_snapshot(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+):
+    """Accepted DB-first note writes should insert pending materialization state."""
+    repository = NoteContentRepository(project_id=test_project.id)
+    updated_at = datetime.now(timezone.utc)
+
+    async with db.scoped_session(session_maker) as session:
+        created = await repository.accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=sample_entity.id,
+                markdown_content="# Accepted content",
+                db_version=1,
+                db_checksum="db-checksum-1",
+                last_source="api",
+                updated_at=updated_at,
+            ),
+        )
+
+    assert created.entity_id == sample_entity.id
+    assert created.project_id == sample_entity.project_id
+    assert created.external_id == sample_entity.external_id
+    assert created.file_path == sample_entity.file_path
+    assert created.markdown_content == "# Accepted content"
+    assert created.db_version == 1
+    assert created.db_checksum == "db-checksum-1"
+    assert created.file_write_status == "pending"
+    assert created.last_source == "api"
+    assert created.file_version is None
+    assert created.file_checksum is None
+    assert created.file_updated_at is None
+    assert created.last_materialization_error is None
+    assert created.last_materialization_attempt_at is None
+
+
+@pytest.mark.asyncio
+async def test_accept_write_updates_snapshot_without_forgetting_file_state(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+):
+    """A newer accepted DB write should preserve last materialized file metadata."""
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.create(session, build_note_content_payload(sample_entity.id))
+        current = await repository.get_by_entity_id(session, sample_entity.id)
+        assert current is not None
+        current.file_version = 3
+        current.file_checksum = "file-checksum-3"
+        current.file_write_status = "external_change_detected"
+        current.last_materialization_error = "conflict"
+        current.last_materialization_attempt_at = datetime.now(timezone.utc)
+        await session.flush()
+
+        updated_at = datetime.now(timezone.utc)
+        updated = await repository.accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=sample_entity.id,
+                markdown_content="# New accepted content",
+                db_version=2,
+                db_checksum="db-checksum-2",
+                last_source="mcp",
+                updated_at=updated_at,
+            ),
+        )
+
+    assert updated.entity_id == sample_entity.id
+    assert updated.markdown_content == "# New accepted content"
+    assert updated.db_version == 2
+    assert updated.db_checksum == "db-checksum-2"
+    assert updated.file_write_status == "pending"
+    assert updated.last_source == "mcp"
+    assert updated.updated_at == updated_at
+    assert updated.last_materialization_error is None
+    assert updated.last_materialization_attempt_at is None
+    assert updated.file_version == 3
+    assert updated.file_checksum == "file-checksum-3"
 
 
 @pytest.mark.asyncio

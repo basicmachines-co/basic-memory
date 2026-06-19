@@ -1,5 +1,7 @@
 """Repository for managing note materialization state."""
 
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -24,6 +26,18 @@ NOTE_CONTENT_MUTABLE_FIELDS = frozenset(
         "last_materialization_attempt_at",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedNoteContentWrite:
+    """DB-accepted note_content snapshot before file materialization catches up."""
+
+    entity_id: int
+    markdown_content: str
+    db_version: int
+    db_checksum: str
+    last_source: str | None
+    updated_at: datetime
 
 
 class NoteContentRepository(Repository[NoteContent]):
@@ -160,6 +174,59 @@ class NoteContentRepository(Repository[NoteContent]):
         updated = await self.select_by_id(session, existing.entity_id)
         if updated is None:  # pragma: no cover
             raise ValueError(f"Can't find NoteContent for entity {existing.entity_id} after upsert")
+        return updated
+
+    async def accept_write(
+        self,
+        session: AsyncSession,
+        write: AcceptedNoteContentWrite,
+    ) -> NoteContent:
+        """Insert or update the DB-accepted note snapshot for a pending file write."""
+        note_content = NoteContent(
+            entity_id=write.entity_id,
+            markdown_content=write.markdown_content,
+            db_version=write.db_version,
+            db_checksum=write.db_checksum,
+            file_write_status="pending",
+            last_source=write.last_source,
+            updated_at=write.updated_at,
+            file_version=None,
+            file_checksum=None,
+            file_updated_at=None,
+            last_materialization_error=None,
+            last_materialization_attempt_at=None,
+        )
+        await self._align_identity_fields(session, note_content)
+
+        existing = await self.select_by_id(session, write.entity_id)
+        if existing is None:
+            session.add(note_content)
+            await session.flush()
+            created = await self.select_by_id(session, write.entity_id)
+            if created is None:  # pragma: no cover
+                raise ValueError(
+                    f"Can't find NoteContent for entity {write.entity_id} after accept_write"
+                )
+            return created
+
+        existing.project_id = note_content.project_id
+        existing.external_id = note_content.external_id
+        existing.file_path = note_content.file_path
+        existing.markdown_content = write.markdown_content
+        existing.db_version = write.db_version
+        existing.db_checksum = write.db_checksum
+        existing.file_write_status = "pending"
+        existing.last_source = write.last_source
+        existing.updated_at = write.updated_at
+        existing.last_materialization_error = None
+        existing.last_materialization_attempt_at = None
+
+        await session.flush()
+        updated = await self.select_by_id(session, write.entity_id)
+        if updated is None:  # pragma: no cover
+            raise ValueError(
+                f"Can't find NoteContent for entity {write.entity_id} after accept_write"
+            )
         return updated
 
     async def update_state_fields(
