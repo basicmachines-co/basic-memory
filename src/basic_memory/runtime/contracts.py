@@ -299,6 +299,26 @@ class RuntimeStorageFileIndexMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeStorageFileIndexContext:
+    """Project context required before enqueueing one runtime file-index job."""
+
+    mode: RuntimeStorageFileIndexMode
+    project_external_id: ProjectExternalId | None = None
+    project_name: ProjectName | None = None
+    workflow_id: WorkflowId | None = None
+
+    def require_enqueue_context(self) -> None:
+        """Raise when an observed object job lacks UI-facing project context."""
+        if self.mode != RuntimeStorageFileIndexMode.observed_object or self.workflow_id is not None:
+            return
+
+        if not self.project_external_id:
+            raise ValueError("observed_object index jobs require project_external_id")
+        if not self.project_name:
+            raise ValueError("observed_object index jobs require project_name")
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeStorageFileIndexJobIdentity:
     """Stable queue identity for one runtime file-index job."""
 

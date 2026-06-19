@@ -60,6 +60,7 @@ from basic_memory.runtime.contracts import (
     RuntimeStorageEventProjectBatch,
     RuntimeStorageEventRoutingPlan,
     RuntimeStorageEventSkipReason,
+    RuntimeStorageFileIndexContext,
     RuntimeWorkflowAttemptMetadata,
     RuntimeWorkflowCompletionMetadata,
     RuntimeWorkflowFailureMetadata,
@@ -252,6 +253,41 @@ class TestRuntimeContracts:
                 "workflow_id": "22222222-2222-2222-2222-222222222222",
             },
         )
+
+    def test_runtime_storage_file_index_context_requires_observed_project_context(self):
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+        RuntimeStorageFileIndexContext(
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            project_external_id="project-main",
+            project_name="Main",
+        ).require_enqueue_context()
+        RuntimeStorageFileIndexContext(
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            workflow_id=workflow_id,
+        ).require_enqueue_context()
+        RuntimeStorageFileIndexContext(
+            mode=RuntimeStorageFileIndexMode.current_file,
+        ).require_enqueue_context()
+
+        with pytest.raises(ValueError, match="project_external_id"):
+            RuntimeStorageFileIndexContext(
+                mode=RuntimeStorageFileIndexMode.observed_object,
+                project_name="Main",
+            ).require_enqueue_context()
+        with pytest.raises(ValueError, match="project_name"):
+            RuntimeStorageFileIndexContext(
+                mode=RuntimeStorageFileIndexMode.observed_object,
+                project_external_id="project-main",
+            ).require_enqueue_context()
+
+        context = RuntimeStorageFileIndexContext(
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            project_external_id="project-main",
+            project_name="Main",
+        )
+        with pytest.raises(FrozenInstanceError):
+            setattr(context, "project_name", "Other")
 
     def test_runtime_storage_event_routing_plan_groups_projects_and_skips_root_objects(self):
         alpha_put = StorageEventPayload(
