@@ -6,6 +6,7 @@ import pytest
 from basic_memory.indexing import (
     CurrentMaterializedNoteEntity,
     CurrentMaterializedNotePlan,
+    EmbeddingIndexJobRequest,
     EmbeddingIndexTarget,
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -14,6 +15,7 @@ from basic_memory.indexing import (
     IndexedFileLiveUpdatePlan,
     IndexedEntity,
     IndexFileBatchJobResult,
+    IndexFileEmbeddingJobContext,
     IndexFileJobResult,
     IndexFileJobStatus,
     IndexFileNoteLiveUpdateContext,
@@ -27,6 +29,7 @@ from basic_memory.indexing import (
     index_file_job_result_from_indexed_file,
     index_file_job_result_from_decision,
     plan_index_file_note_live_update,
+    plan_index_file_embedding_job,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
     project_index_file_outcome_from_job_result,
@@ -204,6 +207,82 @@ def test_index_file_job_result_from_indexed_file_uses_trusted_live_update_plan()
         entity_checksum="checksum-1",
         operation=FileIndexOperation.updated,
     )
+
+
+def test_plan_index_file_embedding_job_requires_processed_entity_identity():
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    processed = IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        entity_id=42,
+        entity_checksum="checksum-1",
+    )
+
+    assert plan_index_file_embedding_job(
+        IndexFileEmbeddingJobContext(
+            tenant_id=tenant_id,
+            project_id=7,
+            index_embeddings=True,
+            result=processed,
+        )
+    ) == EmbeddingIndexJobRequest(
+        tenant_id=tenant_id,
+        project_id=7,
+        entity_id=42,
+        entity_checksum="checksum-1",
+    )
+    assert (
+        plan_index_file_embedding_job(
+            IndexFileEmbeddingJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                index_embeddings=False,
+                result=processed,
+            )
+        )
+        is None
+    )
+    assert (
+        plan_index_file_embedding_job(
+            IndexFileEmbeddingJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                index_embeddings=True,
+                result=IndexFileJobResult(
+                    status=IndexFileJobStatus.current,
+                    reason="file already indexed: notes/a.md",
+                ),
+            )
+        )
+        is None
+    )
+
+    with pytest.raises(RuntimeError, match="processed without an entity id"):
+        plan_index_file_embedding_job(
+            IndexFileEmbeddingJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                index_embeddings=True,
+                result=IndexFileJobResult(
+                    status=IndexFileJobStatus.processed,
+                    reason="file indexed: notes/a.md",
+                    entity_checksum="checksum-1",
+                ),
+            )
+        )
+    with pytest.raises(RuntimeError, match="processed without an entity checksum"):
+        plan_index_file_embedding_job(
+            IndexFileEmbeddingJobContext(
+                tenant_id=tenant_id,
+                project_id=7,
+                index_embeddings=True,
+                result=IndexFileJobResult(
+                    status=IndexFileJobStatus.processed,
+                    reason="file indexed: notes/a.md",
+                    entity_id=42,
+                ),
+            )
+        )
 
 
 def test_plan_index_file_note_live_update_builds_typed_note_change_plan():

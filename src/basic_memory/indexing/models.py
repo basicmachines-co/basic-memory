@@ -8,7 +8,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Protocol, TYPE_CHECKING
 
-from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
+from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexJobRequest,
+    EmbeddingIndexTarget,
+)
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -214,6 +217,37 @@ class IndexFileJobResult:
     actor_kind: str | None = None
     actor_name: str | None = None
     live_update_source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexFileEmbeddingJobContext:
+    """Index-file facts needed to decide whether embeddings should be queued."""
+
+    tenant_id: TenantId
+    project_id: int
+    index_embeddings: bool
+    result: IndexFileJobResult
+
+
+def plan_index_file_embedding_job(
+    context: IndexFileEmbeddingJobContext,
+) -> EmbeddingIndexJobRequest | None:
+    """Plan single-entity embedding work after one file-index job."""
+    if not context.index_embeddings:
+        return None
+    if context.result.status != IndexFileJobStatus.processed:
+        return None
+    if context.result.entity_id is None:
+        raise RuntimeError("index_file processed without an entity id")
+    if context.result.entity_checksum is None:
+        raise RuntimeError("index_file processed without an entity checksum")
+
+    return EmbeddingIndexJobRequest(
+        tenant_id=context.tenant_id,
+        project_id=context.project_id,
+        entity_id=context.result.entity_id,
+        entity_checksum=context.result.entity_checksum,
+    )
 
 
 class IndexFileNoteLiveUpdateType(StrEnum):
