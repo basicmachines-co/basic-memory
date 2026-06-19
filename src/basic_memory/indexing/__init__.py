@@ -28,6 +28,7 @@ from basic_memory.indexing.change_detector import (
     detect_project_file_changes,
 )
 from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingBatchVectorSync,
     EmbeddingIndexBatchJobContext,
     EmbeddingIndexBatchJobRequest,
     EmbeddingIndexBatchResult,
@@ -38,7 +39,10 @@ from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexResult,
     EmbeddingIndexStatus,
     EmbeddingIndexTarget,
+    EmbeddingVectorSync,
     plan_embedding_index_batch_jobs,
+    run_embedding_index,
+    run_embedding_index_batch,
     summarize_embedding_index_batch_result,
 )
 from basic_memory.indexing.file_index_checking import (
@@ -266,6 +270,7 @@ __all__ = [
     "CurrentFileChecksumSource",
     "CurrentMaterializedNoteEntity",
     "CurrentMaterializedNotePlan",
+    "EmbeddingBatchVectorSync",
     "EmbeddingIndexBatchResult",
     "EmbeddingIndexBatchJobContext",
     "EmbeddingIndexBatchJobRequest",
@@ -276,6 +281,7 @@ __all__ = [
     "EmbeddingIndexResult",
     "EmbeddingIndexStatus",
     "EmbeddingIndexTarget",
+    "EmbeddingVectorSync",
     "EntityId",
     "FileIndexDecision",
     "FileIndexDecisionStatus",
@@ -461,6 +467,8 @@ __all__ = [
     "resolve_relations_until_stable",
     "resolve_link_texts",
     "run_index_file_batch",
+    "run_embedding_index",
+    "run_embedding_index_batch",
     "search_text_variants",
     "should_emit_project_index_progress_event",
     "strip_search_text",

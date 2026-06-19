@@ -15,6 +15,8 @@ from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexPlanner,
     EmbeddingIndexTarget,
     plan_embedding_index_batch_jobs,
+    run_embedding_index,
+    run_embedding_index_batch,
     summarize_embedding_index_batch_result,
 )
 
@@ -24,6 +26,23 @@ class BatchResult:
     entities_skipped = 1
     entities_failed = 0
     entities_deferred = 1
+
+
+class SingleVectorSync:
+    def __init__(self) -> None:
+        self.synced_entity_ids: list[int] = []
+
+    async def sync_entity_vectors(self, entity_id: int) -> None:
+        self.synced_entity_ids.append(entity_id)
+
+
+class BatchVectorSync:
+    def __init__(self) -> None:
+        self.synced_entity_ids: list[list[int]] = []
+
+    async def sync_entity_vectors_batch(self, entity_ids: list[int]) -> BatchResult:
+        self.synced_entity_ids.append(entity_ids)
+        return BatchResult()
 
 
 def test_embedding_index_job_request_matches_cloud_queue_identity() -> None:
@@ -226,4 +245,52 @@ def test_embedding_index_result_describes_one_entity_outcome() -> None:
         entity_id=42,
         status=EmbeddingIndexStatus.processed,
         reason="entity embeddings indexed: 42",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_embedding_index_syncs_one_entity_and_returns_result() -> None:
+    vector_sync = SingleVectorSync()
+    request = EmbeddingIndexJobRequest(
+        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        project_id=7,
+        entity_id=42,
+        entity_checksum="checksum-42",
+    )
+
+    result = await run_embedding_index(request, vector_sync=vector_sync)
+
+    assert vector_sync.synced_entity_ids == [42]
+    assert result == EmbeddingIndexResult(
+        entity_id=42,
+        status=EmbeddingIndexStatus.processed,
+        reason="entity embeddings indexed: 42",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_embedding_index_batch_dedupes_and_summarizes_vector_sync() -> None:
+    vector_sync = BatchVectorSync()
+    request = EmbeddingIndexBatchJobRequest(
+        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+        project_id=7,
+        project_path="main",
+        entities=(
+            EmbeddingIndexTarget(entity_id=43, entity_checksum="checksum-43"),
+            EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-42"),
+            EmbeddingIndexTarget(entity_id=42, entity_checksum="newer-checksum-42"),
+        ),
+    )
+
+    result = await run_embedding_index_batch(request, vector_sync=vector_sync)
+
+    assert vector_sync.synced_entity_ids == [[42, 43]]
+    assert result == EmbeddingIndexBatchResult(
+        total_entities=3,
+        unique_entities=2,
+        synced_entities=2,
+        skipped_entities=1,
+        failed_entities=0,
+        deferred_entities=1,
+        reason="entity embedding batch indexed: 2 entities",
     )

@@ -128,6 +128,21 @@ class EmbeddingIndexBatchSummary(Protocol):
     entities_deferred: int
 
 
+class EmbeddingVectorSync(Protocol):
+    """Capability that refreshes vectors for one entity."""
+
+    async def sync_entity_vectors(self, entity_id: int) -> object: ...
+
+
+class EmbeddingBatchVectorSync(Protocol):
+    """Capability that refreshes vectors for a batch of entities."""
+
+    async def sync_entity_vectors_batch(
+        self,
+        entity_ids: list[int],
+    ) -> EmbeddingIndexBatchSummary: ...
+
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingIndexBatchResult:
     """Summary of a batch embedding index operation."""
@@ -196,6 +211,35 @@ def plan_embedding_index_batch_jobs(
         )
         for index in range(0, len(context.targets), context.batch_size)
     )
+
+
+async def run_embedding_index(
+    request: EmbeddingIndexJobRequest,
+    *,
+    vector_sync: EmbeddingVectorSync,
+) -> EmbeddingIndexResult:
+    """Run one embedding index request through a concrete vector sync backend."""
+    await vector_sync.sync_entity_vectors(request.entity_id)
+    return EmbeddingIndexResult(
+        entity_id=request.entity_id,
+        status=EmbeddingIndexStatus.processed,
+        reason=f"entity embeddings indexed: {request.entity_id}",
+    )
+
+
+async def run_embedding_index_batch(
+    request: EmbeddingIndexBatchJobRequest,
+    *,
+    vector_sync: EmbeddingBatchVectorSync,
+    planner: EmbeddingIndexPlanner | None = None,
+) -> EmbeddingIndexBatchResult:
+    """Run one batch embedding request through a concrete vector sync backend."""
+    if not request.entities:
+        return EmbeddingIndexBatchResult.no_entities()
+
+    index_plan = (planner or EmbeddingIndexPlanner()).plan(request.entities)
+    batch_result = await vector_sync.sync_entity_vectors_batch(list(index_plan.entity_ids))
+    return summarize_embedding_index_batch_result(index_plan, batch_result)
 
 
 def summarize_embedding_index_batch_result(
