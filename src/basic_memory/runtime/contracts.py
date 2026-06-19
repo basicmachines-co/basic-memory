@@ -227,6 +227,16 @@ class RuntimeMaterializedNoteSource(Protocol):
     def file_checksum(self) -> object | None: ...
 
 
+class RuntimeNoteContentVersionSource(Protocol):
+    """Minimal note_content row shape needed to compare accepted DB versions."""
+
+    @property
+    def db_version(self) -> object: ...
+
+    @property
+    def db_checksum(self) -> object: ...
+
+
 class RuntimeNoteContentResourceEntitySource(Protocol):
     """Minimal entity shape needed for note-content resource reads."""
 
@@ -1557,6 +1567,17 @@ class RuntimeNoteMaterializationJobRequest:
             }
         )
         return routing_headers
+
+
+def note_content_matches_materialization_request(
+    note_content: RuntimeNoteContentVersionSource,
+    request: RuntimeNoteMaterializationJobRequest,
+) -> bool:
+    """Return whether note_content still matches one queued materialization request."""
+    return (
+        int(note_content.db_version) == request.db_version
+        and str(note_content.db_checksum) == request.db_checksum
+    )
 
 
 def plan_note_materialization_job_request(
