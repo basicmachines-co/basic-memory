@@ -31,6 +31,9 @@ type StorageVersionId = str
 type JobEntrypoint = str
 type RuntimeJobId = str | int
 type WorkflowId = UUID
+type RuntimeWorkflowBroker = str
+type RuntimeWorkflowPhase = str
+type RuntimeWorkflowProgress = str
 type NoteExternalId = str
 type RuntimeFileChecksum = str
 type RuntimeNoteContentVersion = int
@@ -232,6 +235,52 @@ class RuntimeJobRequest:
     execute_after: timedelta | None = None
     dedupe_key: str | None = None
     headers: Mapping[str, str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowTransport:
+    """Queue transport identity stored on workflow metadata."""
+
+    broker: RuntimeWorkflowBroker
+    entrypoint: JobEntrypoint
+
+    def workflow_metadata(self) -> dict[str, object]:
+        """Serialize transport identity for existing workflow metadata contracts."""
+        return {
+            "broker": self.broker,
+            "entrypoint": self.entrypoint,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeQueuedWorkflowMetadata:
+    """Workflow metadata and queued event data for one runtime job handoff."""
+
+    workflow_id: WorkflowId
+    progress: RuntimeWorkflowProgress
+    payload: Mapping[str, object]
+    transport: RuntimeWorkflowTransport
+    phase: RuntimeWorkflowPhase = "queued"
+
+    def workflow_metadata(self) -> dict[str, object]:
+        """Serialize to the existing durable workflow metadata shape."""
+        return {
+            "job_id": str(self.workflow_id),
+            "phase": self.phase,
+            "progress": self.progress,
+            "payload": dict(self.payload),
+            "transport": self.transport.workflow_metadata(),
+        }
+
+    def queued_event_data(self, *, logical_key: str) -> dict[str, object]:
+        """Serialize to the existing queued workflow event payload shape."""
+        return {
+            "logical_key": logical_key,
+            "entrypoint": self.transport.entrypoint,
+            "phase": self.phase,
+            "progress": self.progress,
+            **dict(self.payload),
+        }
 
 
 class JobRuntime(Protocol):

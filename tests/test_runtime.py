@@ -44,6 +44,8 @@ from basic_memory.runtime.contracts import (
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
+    RuntimeQueuedWorkflowMetadata,
+    RuntimeWorkflowTransport,
     StorageObjectIdentity,
     assert_runtime_file_matches_expected,
     plan_previous_note_file_delete,
@@ -138,6 +140,41 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "entrypoint", "other")
+
+    def test_runtime_queued_workflow_metadata_serializes_existing_shapes(self):
+        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+        payload = {"tenant_id": "tenant-1", "project_id": 42}
+        metadata = RuntimeQueuedWorkflowMetadata(
+            workflow_id=workflow_id,
+            progress="queued for indexing",
+            payload=payload,
+            transport=RuntimeWorkflowTransport(
+                broker="pgq",
+                entrypoint="index_project",
+            ),
+        )
+
+        assert metadata.workflow_metadata() == {
+            "job_id": str(workflow_id),
+            "phase": "queued",
+            "progress": "queued for indexing",
+            "payload": payload,
+            "transport": {
+                "broker": "pgq",
+                "entrypoint": "index_project",
+            },
+        }
+        assert metadata.queued_event_data(logical_key="index-tenant-project") == {
+            "logical_key": "index-tenant-project",
+            "entrypoint": "index_project",
+            "phase": "queued",
+            "progress": "queued for indexing",
+            "tenant_id": "tenant-1",
+            "project_id": 42,
+        }
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(metadata, "progress", "changed")
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))
