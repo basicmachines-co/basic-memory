@@ -164,9 +164,12 @@ from basic_memory.runtime.note_move import (
     normalize_note_move_destination_path,
 )
 from basic_memory.runtime.note_materialization import (
+    RuntimeFileMetadataSource,
+    RuntimeNoteContentStore,
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
     plan_prepared_note_write,
+    write_prepared_note_to_content_store,
 )
 from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
@@ -259,6 +262,7 @@ __all__ = [
     "RuntimeExternalFileDeletePlan",
     "RuntimeExternalFileDeleteRequest",
     "RuntimeExpectedFileState",
+    "RuntimeFileMetadataSource",
     "RuntimeFileChecksum",
     "RuntimeFileChecksumReader",
     "RuntimeFileConflict",
@@ -285,6 +289,7 @@ __all__ = [
     "RuntimeNoteContentResourceEntitySource",
     "RuntimeNoteContentState",
     "RuntimeNoteContentStateSource",
+    "RuntimeNoteContentStore",
     "RuntimeNoteContentVersion",
     "RuntimeNoteContentVersionInput",
     "RuntimeNoteContentVersionSource",
@@ -407,4 +412,5 @@ __all__ = [
     "storage_object_checksum_for_index_match",
     "storage_project_prefix_from_project_path",
     "truncate_runtime_workflow_text",
+    "write_prepared_note_to_content_store",
 ]

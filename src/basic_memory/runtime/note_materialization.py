@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from basic_memory.runtime.contracts import (
+    RuntimeExpectedFileState,
     RuntimeFileChecksum,
+    RuntimeFileChecksumReader,
     RuntimeFilePath,
     RuntimeNoteMaterializationJobRequest,
+    assert_runtime_file_matches_expected,
 )
 from basic_memory.runtime.note_object_metadata import RuntimeNoteObjectMetadata
 
@@ -33,6 +37,27 @@ class RuntimeWrittenFileState:
     file_path: RuntimeFilePath
     file_checksum: RuntimeFileChecksum
     file_updated_at: datetime
+
+
+class RuntimeFileMetadataSource(Protocol):
+    """Minimal metadata returned after a runtime content-store write."""
+
+    @property
+    def modified_at(self) -> datetime: ...
+
+
+class RuntimeNoteContentStore(RuntimeFileChecksumReader, Protocol):
+    """Storage capability needed to materialize one accepted note file."""
+
+    async def write_file(
+        self,
+        path: RuntimeFilePath,
+        content: str,
+        *,
+        metadata: dict[str, str] | None = None,
+    ) -> RuntimeFileChecksum: ...
+
+    async def get_file_metadata(self, path: RuntimeFilePath) -> RuntimeFileMetadataSource: ...
 
 
 def plan_prepared_note_write(
@@ -60,4 +85,29 @@ def plan_prepared_note_write(
             actor_name=request.actor_name,
             source=request.source,
         ),
+    )
+
+
+async def write_prepared_note_to_content_store(
+    content_store: RuntimeNoteContentStore,
+    prepared_write: RuntimePreparedNoteWrite,
+) -> RuntimeWrittenFileState:
+    """Write one prepared accepted note after checking the expected file state."""
+    await assert_runtime_file_matches_expected(
+        content_store,
+        RuntimeExpectedFileState(
+            file_path=prepared_write.file_path,
+            expected_checksum=prepared_write.previous_file_checksum,
+        ),
+    )
+    file_checksum = await content_store.write_file(
+        prepared_write.file_path,
+        prepared_write.markdown_content,
+        metadata=prepared_write.object_metadata.to_storage_metadata(),
+    )
+    file_metadata = await content_store.get_file_metadata(prepared_write.file_path)
+    return RuntimeWrittenFileState(
+        file_path=prepared_write.file_path,
+        file_checksum=file_checksum,
+        file_updated_at=file_metadata.modified_at,
     )
