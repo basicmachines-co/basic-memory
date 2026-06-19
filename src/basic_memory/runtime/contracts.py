@@ -33,6 +33,11 @@ type RuntimeJobId = str | int
 type WorkflowId = UUID
 type NoteExternalId = str
 type RuntimeFileChecksum = str
+type RuntimeNoteContentVersion = int
+type RuntimeNoteContentChecksum = str
+type RuntimeNoteActorKind = str
+type RuntimeNoteActorName = str
+type RuntimeNoteChangeSource = str
 type SnapshotName = str
 type SnapshotVersion = str
 
@@ -236,6 +241,31 @@ class RuntimeNoteMaterializationResult:
     reason: str
     file_path: RuntimeFilePath | None = None
     file_checksum: RuntimeFileChecksum | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePendingNoteFileDelete:
+    """Delete job arguments captured before a note file changes ownership."""
+
+    project_id: ProjectId
+    entity_id: RuntimeEntityId
+    file_path: RuntimeFilePath
+    file_checksum: RuntimeFileChecksum | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePendingNoteMaterialization:
+    """Materialization job arguments captured before queue submission."""
+
+    project_id: ProjectId
+    entity_id: RuntimeEntityId
+    db_version: RuntimeNoteContentVersion
+    db_checksum: RuntimeNoteContentChecksum
+    actor_user_profile_id: UUID | None = None
+    actor_kind: RuntimeNoteActorKind | None = None
+    actor_name: RuntimeNoteActorName | None = None
+    source: RuntimeNoteChangeSource | None = None
+    cleanup_after_write: RuntimePendingNoteFileDelete | None = None
 
 
 @dataclass(frozen=True, slots=True)

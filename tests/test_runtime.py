@@ -14,6 +14,8 @@ from basic_memory.runtime.contracts import (
     RuntimeJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
+    RuntimePendingNoteFileDelete,
+    RuntimePendingNoteMaterialization,
     RuntimeProjectDeleteResult,
     StorageObjectIdentity,
 )
@@ -147,6 +149,30 @@ class TestRuntimeContracts:
 
         with pytest.raises(FrozenInstanceError):
             setattr(result, "reason", "changed")
+
+    def test_pending_note_materialization_carries_cleanup_work(self):
+        cleanup = RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-checksum",
+        )
+        materialization = RuntimePendingNoteMaterialization(
+            project_id=7,
+            entity_id=42,
+            db_version=3,
+            db_checksum="db-checksum",
+            actor_kind="user",
+            actor_name="Pat",
+            source="mcp",
+            cleanup_after_write=cleanup,
+        )
+
+        assert materialization.cleanup_after_write == cleanup
+        assert materialization.db_checksum == "db-checksum"
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(materialization, "db_version", 4)
 
     def test_runtime_project_delete_result_counts_file_outcomes(self):
         result = RuntimeProjectDeleteResult.from_file_results(
