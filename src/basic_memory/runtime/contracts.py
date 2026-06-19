@@ -1038,10 +1038,15 @@ def merge_runtime_workflow_metadata_patch(
     base: Mapping[str, object],
     metadata_patch: RuntimeWorkflowMetadataPatch | None,
 ) -> dict[str, object]:
-    """Merge adapter-specific workflow metadata without changing existing precedence."""
+    """Recursively merge adapter-specific workflow metadata patches."""
     patch = dict(base)
     if metadata_patch is not None:
-        patch.update(metadata_patch)
+        for key, value in metadata_patch.items():
+            current = patch.get(key)
+            if isinstance(current, Mapping) and isinstance(value, Mapping):
+                patch[key] = merge_runtime_workflow_metadata_patch(current, value)
+                continue
+            patch[key] = value
     return patch
 
 
