@@ -2353,3 +2353,16 @@ class SnapshotObjectReference:
             last_modified=source.last_modified,
             etag=source.etag,
         )
+
+
+def plan_snapshot_name(
+    *,
+    description: str,
+    created_at: datetime,
+    auto: bool = False,
+) -> SnapshotName:
+    """Build the portable snapshot name persisted by runtime snapshot records."""
+    timestamp = created_at.strftime("%Y%m%d-%H%M%S")
+    prefix = "auto" if auto else "manual"
+    description_slug = description.replace(" ", "-").lower()[:50]
+    return f"{prefix}-{description_slug}-{timestamp}"
