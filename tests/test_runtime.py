@@ -20,6 +20,7 @@ from basic_memory.runtime import (
     RuntimeAcceptedNoteChange,
     RuntimeMode,
     RuntimeNoteObjectMetadata,
+    RuntimeNoteObjectProvenance,
     RuntimePreparedNoteWrite,
     RuntimeStorageObjectChecksum,
     RuntimeStorageObjectChecksumSource,
@@ -809,6 +810,40 @@ class TestRuntimeContracts:
         assert actor_kind_from_object_metadata(unsafe_metadata) is None
         assert db_version_from_object_metadata(unsafe_metadata) is None
         assert source_from_object_metadata(unsafe_metadata) is None
+
+    def test_note_object_provenance_parses_trusted_actor_and_source(self):
+        provenance = RuntimeNoteObjectProvenance.from_object_metadata(
+            {
+                NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: " user-1 ",
+                NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+                NOTE_OBJECT_ACTOR_NAME_METADATA: " Pat\t\n<script>! ",
+                NOTE_OBJECT_SOURCE_METADATA: "mcp",
+            }
+        )
+
+        assert provenance == RuntimeNoteObjectProvenance(
+            actor_user_profile_id="user-1",
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+            actor_name="Pat script",
+            source="mcp",
+        )
+
+        untrusted_actor_name = RuntimeNoteObjectProvenance.from_object_metadata(
+            {
+                NOTE_OBJECT_ACTOR_KIND_METADATA: "spoofed",
+                NOTE_OBJECT_ACTOR_NAME_METADATA: "Pat",
+                NOTE_OBJECT_SOURCE_METADATA: "spoofed",
+            }
+        )
+        assert untrusted_actor_name == RuntimeNoteObjectProvenance(
+            actor_user_profile_id=None,
+            actor_kind=None,
+            actor_name=None,
+            source=None,
+        )
+
+        with pytest.raises(FrozenInstanceError):
+            setattr(provenance, "actor_name", "changed")
 
     def test_storage_object_checksum_for_index_match_prefers_note_file_checksum(self):
         assert storage_object_checksum_for_index_match(

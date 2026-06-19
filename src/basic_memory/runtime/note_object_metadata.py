@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Self
 from uuid import UUID
 
 from basic_memory.runtime.contracts import (
@@ -210,3 +211,24 @@ def source_from_object_metadata(
     if stripped in VALID_NOTE_OBJECT_SOURCES:
         return stripped
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeNoteObjectProvenance:
+    """Trusted actor and source metadata parsed from a materialized note object."""
+
+    actor_user_profile_id: str | None = None
+    actor_kind: RuntimeNoteActorKind | None = None
+    actor_name: RuntimeNoteActorName | None = None
+    source: RuntimeNoteChangeSource | None = None
+
+    @classmethod
+    def from_object_metadata(cls, metadata: RuntimeNoteObjectMetadataMap | None) -> Self:
+        actor_kind = actor_kind_from_object_metadata(metadata)
+        actor_name = actor_name_from_object_metadata(metadata) if actor_kind is not None else None
+        return cls(
+            actor_user_profile_id=actor_user_profile_id_from_object_metadata(metadata),
+            actor_kind=actor_kind,
+            actor_name=actor_name,
+            source=source_from_object_metadata(metadata),
+        )
