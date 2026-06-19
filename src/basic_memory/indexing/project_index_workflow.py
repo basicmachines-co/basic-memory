@@ -17,7 +17,9 @@ from basic_memory.runtime import (
     ProjectPath,
     ProjectPermalink,
     ProjectRuntimeReference,
+    RuntimeIndexFileBatchJobRequest,
     RuntimeJobId,
+    RuntimeObservedIndexFile,
     RuntimeQueuedWorkflowMetadata,
     RuntimeWorkflowBroker,
     RuntimeWorkflowTransport,
@@ -144,6 +146,15 @@ class ProjectIndexWorkflowQueued:
     queued_event_data: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectIndexBatchJobPlan:
+    """Portable project-index child batch job requests."""
+
+    total_files: int
+    batch_count: int
+    batch_requests: tuple[RuntimeIndexFileBatchJobRequest, ...]
+
+
 def project_index_workflow_logical_key(
     *,
     tenant_id: TenantId,
@@ -197,6 +208,41 @@ def build_project_index_workflow_queued(
             "progress": "queued for index",
             **request.project.workflow_metadata(),
         },
+    )
+
+
+def build_project_index_batch_job_plan(
+    *,
+    request: ProjectIndexWorkflowRequest,
+    observed_files: Sequence[RuntimeObservedIndexFile],
+    batch_size: int,
+) -> ProjectIndexBatchJobPlan:
+    """Build runtime child job requests for one project-index fan-out."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    batches = tuple(
+        tuple(observed_files[index : index + batch_size])
+        for index in range(0, len(observed_files), batch_size)
+    )
+    batch_count = len(batches)
+    batch_requests = tuple(
+        RuntimeIndexFileBatchJobRequest(
+            tenant_id=request.tenant_id,
+            project=request.project,
+            workflow_id=request.workflow_id,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            file_paths=tuple(target.path for target in batch_targets),
+            observed_files=batch_targets,
+            index_embeddings=request.embeddings,
+        )
+        for batch_index, batch_targets in enumerate(batches)
+    )
+    return ProjectIndexBatchJobPlan(
+        total_files=len(observed_files),
+        batch_count=batch_count,
+        batch_requests=batch_requests,
     )
 
 

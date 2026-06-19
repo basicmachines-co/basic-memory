@@ -5,18 +5,21 @@ from uuid import UUID
 
 from basic_memory.indexing import (
     ProjectIndexCounters,
+    ProjectIndexBatchJobPlan,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowQueued,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStart,
+    build_project_index_batch_job_plan,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
     build_project_index_workflow_queued,
     build_project_index_workflow_start,
     build_project_index_workflow_stale_failure_update,
 )
+from basic_memory.runtime import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,63 @@ def test_project_index_workflow_queued_builds_metadata_event_and_logical_key() -
             "project_permalink": "project-name",
             "project_path": "project",
         },
+    )
+
+
+def test_project_index_batch_job_plan_builds_runtime_batch_requests() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    request = ProjectIndexWorkflowRequest.from_source(
+        ProjectIndexSource(
+            tenant_id=tenant_id,
+            project_id=42,
+            project_external_id="external-project",
+            project_name="Project Name",
+            project_permalink="project-name",
+            project_path="project",
+            workflow_id=workflow_id,
+            force_full=False,
+            search=True,
+            embeddings=False,
+        )
+    )
+    observed_files = (
+        RuntimeObservedIndexFile(path="notes/a.md", checksum="a", size=10),
+        RuntimeObservedIndexFile(path="notes/b.txt", checksum="b", size=20),
+        RuntimeObservedIndexFile(path="notes/c.md", checksum="c", size=30),
+    )
+
+    plan = build_project_index_batch_job_plan(
+        request=request,
+        observed_files=observed_files,
+        batch_size=2,
+    )
+
+    assert plan == ProjectIndexBatchJobPlan(
+        total_files=3,
+        batch_count=2,
+        batch_requests=(
+            RuntimeIndexFileBatchJobRequest(
+                tenant_id=tenant_id,
+                project=request.project,
+                workflow_id=workflow_id,
+                batch_index=0,
+                batch_count=2,
+                file_paths=("notes/a.md", "notes/b.txt"),
+                observed_files=observed_files[:2],
+                index_embeddings=False,
+            ),
+            RuntimeIndexFileBatchJobRequest(
+                tenant_id=tenant_id,
+                project=request.project,
+                workflow_id=workflow_id,
+                batch_index=1,
+                batch_count=2,
+                file_paths=("notes/c.md",),
+                observed_files=observed_files[2:],
+                index_embeddings=False,
+            ),
+        ),
     )
 
 
