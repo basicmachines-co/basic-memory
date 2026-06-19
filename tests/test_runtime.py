@@ -68,6 +68,16 @@ class FakeRuntimeFileChecksumReader:
         return self.checksum
 
 
+class FakeJobRuntime:
+    async def enqueue(self, request: RuntimeJobRequest) -> str:
+        return f"fake:{request.entrypoint}"
+
+
+class FakeStorageEventSource:
+    def events_by_bucket(self) -> dict[str, tuple[object, ...]]:
+        return {}
+
+
 class TestRuntimeMode:
     """Tests for RuntimeMode enum."""
 
@@ -142,6 +152,25 @@ class TestRuntimeContracts:
 
         with pytest.raises(RuntimeError, match="Note history provider factory"):
             capabilities.require_note_history_provider_factory()
+
+    def test_runtime_capabilities_require_configured_adapters(self):
+        empty_capabilities: RuntimeCapabilities[object, object] = RuntimeCapabilities()
+
+        with pytest.raises(RuntimeError, match="Job runtime"):
+            empty_capabilities.require_job_runtime()
+
+        with pytest.raises(RuntimeError, match="Storage event source"):
+            empty_capabilities.require_storage_event_source()
+
+        job_runtime = FakeJobRuntime()
+        storage_event_source = FakeStorageEventSource()
+        capabilities = RuntimeCapabilities(
+            job_runtime=job_runtime,
+            storage_event_source=storage_event_source,
+        )
+
+        assert capabilities.require_job_runtime() is job_runtime
+        assert capabilities.require_storage_event_source() is storage_event_source
 
     def test_runtime_file_delete_result_factories_preserve_cleanup_reasons(self):
         assert RuntimeFileDeleteResult.no_accepted_checksum(

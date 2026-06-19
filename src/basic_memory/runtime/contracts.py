@@ -562,6 +562,16 @@ class RuntimeCapabilities[SnapshotProviderInputT, NoteHistoryProviderInputT]:
         None
     )
 
+    def require_job_runtime(self) -> JobRuntime:
+        if self.job_runtime is None:
+            raise RuntimeError("Job runtime is not configured")
+        return self.job_runtime
+
+    def require_storage_event_source(self) -> StorageEventSource:
+        if self.storage_event_source is None:
+            raise RuntimeError("Storage event source is not configured")
+        return self.storage_event_source
+
     def require_snapshot_provider_factory(
         self,
     ) -> SnapshotProviderFactory[SnapshotProviderInputT]:
