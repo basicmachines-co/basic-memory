@@ -11,14 +11,20 @@ from basic_memory.indexing import (
     FileIndexOperation,
     FileIndexResult,
     IndexedFileLiveUpdatePlan,
+    IndexedEntity,
     IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
-    IndexedEntity,
+    ProjectIndexBatchCounterUpdate,
+    ProjectIndexCounters,
+    ProjectIndexFileOutcome,
+    apply_project_index_batch_job_results,
     build_index_file_batch_job_result,
     index_file_job_result_from_decision,
     plan_indexed_file_live_update_metadata,
     plan_current_materialized_note_result,
+    project_index_file_outcome_from_job_result,
+    project_index_file_outcomes_from_job_results,
 )
 from basic_memory.runtime import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
@@ -227,6 +233,64 @@ def test_build_index_file_batch_job_result_preserves_order_and_embedding_targets
             ),
         ),
         vector_targets=(EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-processed"),),
+    )
+
+
+def test_project_index_outcomes_from_file_job_results_update_batch_counters():
+    results = (
+        IndexFileJobResult(
+            status=IndexFileJobStatus.processed,
+            reason="file indexed: notes/processed.md",
+        ),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.current,
+            reason="file already indexed: notes/current.md",
+        ),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.missing,
+            reason="file not found: notes/missing.md",
+        ),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.failed,
+            reason="file indexing failed: notes/failed.md: parse failed",
+        ),
+    )
+
+    assert (
+        project_index_file_outcome_from_job_result(results[0]) == ProjectIndexFileOutcome.processed
+    )
+    assert project_index_file_outcomes_from_job_results(results) == (
+        ProjectIndexFileOutcome.processed,
+        ProjectIndexFileOutcome.current,
+        ProjectIndexFileOutcome.missing,
+        ProjectIndexFileOutcome.failed,
+    )
+
+    update = apply_project_index_batch_job_results(
+        counters=ProjectIndexCounters(
+            total=4,
+            processed=0,
+            succeeded=0,
+            missing=0,
+            failed=0,
+        ),
+        recorded_batch_indexes=[],
+        batch_index=0,
+        batch_count=1,
+        results=results,
+    )
+
+    assert update == ProjectIndexBatchCounterUpdate(
+        counters=ProjectIndexCounters(
+            total=4,
+            processed=4,
+            succeeded=2,
+            missing=1,
+            failed=1,
+        ),
+        recorded_batch_indexes=[0],
+        already_recorded=False,
+        all_batches_recorded=True,
     )
 
 

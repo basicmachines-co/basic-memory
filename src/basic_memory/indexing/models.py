@@ -14,7 +14,10 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexDecisionStatus,
 )
 from basic_memory.indexing.project_index_progress import (
+    ProjectIndexBatchCounterUpdate,
+    ProjectIndexCounters,
     ProjectIndexFileOutcome,
+    apply_project_index_batch_outcomes,
     summarize_project_index_file_outcomes,
 )
 from basic_memory.runtime import (
@@ -428,6 +431,38 @@ class IndexFileBatchJobResult:
     vector_targets: tuple[EmbeddingIndexTarget, ...]
 
 
+def project_index_file_outcome_from_job_result(
+    result: IndexFileJobResult,
+) -> ProjectIndexFileOutcome:
+    """Map one file job result to the aggregate project-index outcome."""
+    return ProjectIndexFileOutcome(result.status.value)
+
+
+def project_index_file_outcomes_from_job_results(
+    results: Sequence[IndexFileJobResult],
+) -> tuple[ProjectIndexFileOutcome, ...]:
+    """Map file job results to aggregate project-index outcomes."""
+    return tuple(project_index_file_outcome_from_job_result(result) for result in results)
+
+
+def apply_project_index_batch_job_results(
+    *,
+    counters: ProjectIndexCounters,
+    recorded_batch_indexes: Sequence[int],
+    batch_index: int,
+    batch_count: int,
+    results: Sequence[IndexFileJobResult],
+) -> ProjectIndexBatchCounterUpdate:
+    """Apply one batch's file job results exactly once to aggregate counters."""
+    return apply_project_index_batch_outcomes(
+        counters=counters,
+        recorded_batch_indexes=recorded_batch_indexes,
+        batch_index=batch_index,
+        batch_count=batch_count,
+        outcomes=project_index_file_outcomes_from_job_results(results),
+    )
+
+
 def build_index_file_batch_job_result(
     *,
     target_paths: Sequence[str],
@@ -477,7 +512,7 @@ def build_index_file_batch_job_result(
             ordered_file_results.append(terminal_result)
 
     outcome_summary = summarize_project_index_file_outcomes(
-        [ProjectIndexFileOutcome(result.status.value) for result in ordered_file_results]
+        project_index_file_outcomes_from_job_results(ordered_file_results)
     )
     return IndexFileBatchJobResult(
         total_files=outcome_summary.total_files,
