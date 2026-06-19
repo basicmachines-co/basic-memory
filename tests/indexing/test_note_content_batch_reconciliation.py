@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import basic_memory.indexing.note_content_batch_reconciliation as batch_reconciliation_module
 from basic_memory.indexing.models import IndexedEntity
 from basic_memory.indexing.note_content_batch_reconciliation import (
+    indexed_note_content_observed_at,
     reconcile_indexed_note_content_batch,
     run_indexing_tasks_with_retries,
 )
@@ -29,6 +30,11 @@ class FakeEntity:
 @dataclass(frozen=True, slots=True)
 class FakeFileInfo:
     observed_at: datetime
+    checksum: str = "checksum-ok"
+
+    @property
+    def last_modified(self) -> datetime:
+        return self.observed_at
 
 
 class FakeEntityRepository:
@@ -177,3 +183,54 @@ async def test_run_indexing_tasks_with_retries_uses_fresh_task_factory() -> None
 
     assert results == ("ok",)
     assert attempts == 2
+
+
+def test_indexed_note_content_observed_at_uses_original_timestamp_when_unchanged() -> None:
+    observed_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+
+    result = indexed_note_content_observed_at(
+        IndexedEntity(
+            path="ok.md",
+            entity_id=42,
+            permalink="ok",
+            checksum="checksum-ok",
+            markdown_content="# OK\n",
+        ),
+        FakeFileInfo(checksum="checksum-ok", observed_at=observed_at),
+    )
+
+    assert result == observed_at
+
+
+def test_indexed_note_content_observed_at_uses_clock_when_frontmatter_rewrites_file() -> None:
+    observed_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
+    rewritten_at = datetime(2026, 6, 19, 14, 5, tzinfo=UTC)
+
+    result = indexed_note_content_observed_at(
+        IndexedEntity(
+            path="ok.md",
+            entity_id=42,
+            permalink="ok",
+            checksum="rewritten-checksum",
+            markdown_content="# OK\n",
+        ),
+        FakeFileInfo(checksum="checksum-ok", observed_at=observed_at),
+        clock=lambda: rewritten_at,
+    )
+
+    assert result == rewritten_at
+
+
+def test_indexed_note_content_observed_at_handles_missing_file_info() -> None:
+    result = indexed_note_content_observed_at(
+        IndexedEntity(
+            path="ok.md",
+            entity_id=42,
+            permalink="ok",
+            checksum="checksum-ok",
+            markdown_content="# OK\n",
+        ),
+        None,
+    )
+
+    assert result is None

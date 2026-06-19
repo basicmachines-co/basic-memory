@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol, TypeVar
 
 from loguru import logger
@@ -21,12 +21,23 @@ type IndexedNoteContentObservedAt[FileInfoT] = Callable[
     [IndexedEntity, FileInfoT | None],
     datetime | None,
 ]
+type IndexedNoteContentClock = Callable[[], datetime]
 
 
 class IndexedNoteContentEntity(Protocol):
     """Minimal entity identity needed after a batch index write."""
 
     id: int
+
+
+class IndexedNoteContentFileInfo(Protocol):
+    """Minimal loaded-file state needed to timestamp indexed note_content."""
+
+    @property
+    def checksum(self) -> str: ...
+
+    @property
+    def last_modified(self) -> datetime | None: ...
 
 
 EntityT = TypeVar("EntityT", bound=IndexedNoteContentEntity)
@@ -67,6 +78,24 @@ class IndexedNoteContentReconciliationError:
     def as_tuple(self) -> tuple[FileIndexPath, str]:
         """Return the existing IndexingBatchResult error tuple shape."""
         return self.path, self.message
+
+
+def indexed_note_content_observed_at(
+    indexed: IndexedEntity,
+    file_info: IndexedNoteContentFileInfo | None,
+    *,
+    clock: IndexedNoteContentClock | None = None,
+) -> datetime | None:
+    """Choose the file timestamp that matches an indexed markdown version."""
+    if file_info is None:
+        return None
+
+    if indexed.checksum != file_info.checksum:
+        # Frontmatter rewrites create a new storage object during indexing, so the
+        # original file timestamp no longer describes the indexed markdown version.
+        return (clock or (lambda: datetime.now(tz=UTC)))()
+
+    return file_info.last_modified
 
 
 async def run_indexing_tasks_with_retries[ResultT](

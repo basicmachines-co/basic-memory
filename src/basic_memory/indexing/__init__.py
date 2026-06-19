@@ -228,10 +228,12 @@ from basic_memory.indexing.note_content_reconciler import (
 from basic_memory.indexing.note_content_batch_reconciliation import (
     IndexedNoteContentEntity,
     IndexedNoteContentEntityRepository,
+    IndexedNoteContentFileInfo,
     IndexedNoteContentObservedAt,
     IndexedNoteContentReconciliationError,
     IndexedNoteContentReconciler,
     IndexingTaskFactory,
+    indexed_note_content_observed_at,
     reconcile_indexed_note_content_batch,
     run_indexing_tasks_with_retries,
 )
@@ -463,6 +465,7 @@ __all__ = [
     "IndexProgress",
     "IndexedNoteContentEntity",
     "IndexedNoteContentEntityRepository",
+    "IndexedNoteContentFileInfo",
     "IndexedNoteContentObservedAt",
     "IndexedNoteContentReconciliationError",
     "IndexedNoteContentReconciler",
@@ -622,6 +625,7 @@ __all__ = [
     "index_file_source_for_mode",
     "index_file_job_result_from_decision",
     "index_file_job_result_from_indexed_file",
+    "indexed_note_content_observed_at",
     "mark_note_materialization_enqueue_failed",
     "note_content_from_bootstrap",
     "note_content_matches_accepted_version",
