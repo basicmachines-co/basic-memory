@@ -200,8 +200,11 @@ from basic_memory.runtime.contracts import (
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 from basic_memory.runtime.job_payloads import (
+    RuntimeJobPayloadFactory,
     RuntimeNoteFileDeleteJobPayload,
     RuntimeNoteMaterializationJobPayload,
+    RuntimePayloadJobEnqueuer,
+    RuntimeSerializedJobPayload,
 )
 from basic_memory.runtime.note_move import (
     RuntimeNoteMoveDestination,
@@ -336,6 +339,7 @@ __all__ = [
     "RuntimeJobDedupeKey",
     "RuntimeJobCounts",
     "RuntimeJobId",
+    "RuntimeJobPayloadFactory",
     "RuntimeJobReference",
     "RuntimeJobRequest",
     "RuntimeJobRequestSource",
@@ -372,6 +376,7 @@ __all__ = [
     "RuntimeNoteMaterializationJobPayload",
     "RuntimeNoteMaterializationResult",
     "RuntimeNoteMaterializationStatus",
+    "RuntimePayloadJobEnqueuer",
     "RuntimePendingNoteMaterializationSource",
     "RuntimeNoteMoveDestination",
     "RuntimeNoteObjectMetadata",
@@ -403,6 +408,7 @@ __all__ = [
     "RuntimeStorageEventProjectBatch",
     "RuntimeStorageEventRoutingPlan",
     "RuntimeStorageEventSkipReason",
+    "RuntimeSerializedJobPayload",
     "RuntimeWorkflowBroker",
     "RuntimeWorkflowAttemptMetadata",
     "RuntimeWorkflowCheckpoint",

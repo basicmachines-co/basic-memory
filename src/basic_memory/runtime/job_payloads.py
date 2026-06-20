@@ -1,19 +1,69 @@
 """Pydantic boundary models for portable runtime worker payloads."""
 
-from typing import Self
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Protocol, Self
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
 from basic_memory.runtime.contracts import (
+    JobEntrypoint,
+    JobRuntime,
+    RuntimeJobId,
+    RuntimeJobRequestSource,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
+    runtime_job_request_from_source,
 )
 from basic_memory.runtime.note_object_metadata import (
     VALID_NOTE_OBJECT_ACTOR_KINDS,
     VALID_NOTE_OBJECT_SOURCES,
     normalize_actor_name,
 )
+
+
+class RuntimeSerializedJobPayload(Protocol):
+    """Validated payload that can cross a runtime worker boundary."""
+
+    def model_dump_json(self) -> str: ...
+
+
+type RuntimeJobPayloadFactory[RequestT: RuntimeJobRequestSource] = Callable[
+    [RequestT],
+    RuntimeSerializedJobPayload,
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePayloadJobEnqueuer[RequestT: RuntimeJobRequestSource]:
+    """Queue a typed runtime request after validating its serialized payload."""
+
+    runtime: JobRuntime
+    entrypoint: JobEntrypoint
+    payload_factory: RuntimeJobPayloadFactory[RequestT]
+
+    async def enqueue(
+        self,
+        request: RequestT,
+        *,
+        headers: Mapping[str, str] | None = None,
+        priority: int = 0,
+        execute_after: timedelta | None = None,
+    ) -> RuntimeJobId:
+        """Validate, serialize, and enqueue one runtime request."""
+        payload = self.payload_factory(request)
+        return await self.runtime.enqueue(
+            runtime_job_request_from_source(
+                request,
+                entrypoint=self.entrypoint,
+                payload=payload.model_dump_json().encode("utf-8"),
+                headers=headers,
+                priority=priority,
+                execute_after=execute_after,
+            )
+        )
 
 
 class RuntimeNoteFileDeleteJobPayload(BaseModel):
