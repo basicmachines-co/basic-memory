@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol, Self
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.models import Entity, NoteContent, Project
+from basic_memory.repository import ProjectRepository
 from basic_memory.runtime import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
@@ -15,6 +22,11 @@ from basic_memory.runtime import (
     RuntimeProjectFileSnapshot,
     plan_note_file_delete_job_request,
 )
+
+type ProjectDeleteSessionScope = Callable[
+    [async_sessionmaker[AsyncSession]],
+    AbstractAsyncContextManager[AsyncSession],
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +73,108 @@ class ProjectHardDeleter(Protocol):
     """Capability that hard-deletes the project row after file cleanup."""
 
     async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool: ...
+
+
+class ProjectDeleteRepository(Protocol):
+    """Repository capability needed to hard-delete one project."""
+
+    async def delete(self, session: AsyncSession, entity_id: int) -> bool: ...
+
+
+type ProjectDeleteRepositoryFactory = Callable[[], ProjectDeleteRepository]
+
+
+def project_delete_repository() -> ProjectDeleteRepository:
+    """Build the default repository used for project hard-delete cleanup."""
+    return ProjectRepository()
+
+
+async def load_project_file_snapshots(
+    session: AsyncSession,
+    *,
+    project_id: int,
+) -> list[RuntimeProjectFileSnapshot]:
+    """Return accepted file snapshots needed for guarded project cleanup."""
+    result = await session.execute(
+        select(
+            Entity.id,
+            Entity.file_path,
+            NoteContent.file_checksum,
+        )
+        .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
+        .where(Entity.project_id == project_id)
+        .order_by(Entity.file_path.asc())
+    )
+    return [
+        RuntimeProjectFileSnapshot(
+            entity_id=int(row.id),
+            file_path=str(row.file_path),
+            file_checksum=str(row.file_checksum) if row.file_checksum is not None else None,
+        )
+        for row in result.all()
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryProjectDeletePreflight:
+    """Repository-backed preflight for one project hard-delete job."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    session_scope: ProjectDeleteSessionScope = db.scoped_session
+
+    async def prepare_project_delete(
+        self,
+        request: RuntimeProjectDeleteJobRequest,
+    ) -> ProjectDeletePreflightResult:
+        async with self.session_scope(self.session_maker) as session:
+            project = await session.get(Project, request.project_id)
+            if project is None:
+                return ProjectDeletePreflightResult.terminal(
+                    RuntimeProjectDeleteResult(
+                        project_id=request.project_id,
+                        project_external_id=request.project_external_id,
+                        status=RuntimeDeleteStatus.missing,
+                        deleted_project=False,
+                        deleted_files=0,
+                        skipped_files=0,
+                        missing_files=0,
+                        reason=f"project already absent: {request.project_id}",
+                    )
+                )
+
+            if project.is_active:
+                return ProjectDeletePreflightResult.terminal(
+                    RuntimeProjectDeleteResult(
+                        project_id=request.project_id,
+                        project_external_id=request.project_external_id,
+                        status=RuntimeDeleteStatus.skipped,
+                        deleted_project=False,
+                        deleted_files=0,
+                        skipped_files=0,
+                        missing_files=0,
+                        reason=f"project is active: {request.project_id}",
+                    )
+                )
+
+            file_snapshots = (
+                await load_project_file_snapshots(session, project_id=request.project_id)
+                if request.delete_notes
+                else []
+            )
+            return ProjectDeletePreflightResult.ready(file_snapshots)
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryProjectHardDeleter:
+    """Repository-backed hard deleter for one inactive project."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    session_scope: ProjectDeleteSessionScope = db.scoped_session
+    project_repository_factory: ProjectDeleteRepositoryFactory = project_delete_repository
+
+    async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool:
+        async with self.session_scope(self.session_maker) as session:
+            return await self.project_repository_factory().delete(session, request.project_id)
 
 
 async def run_project_delete(

@@ -1,13 +1,22 @@
 """Tests for portable project-delete cleanup orchestration."""
 
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from basic_memory.indexing.project_delete_runner import (
     ProjectDeletePreflightResult,
+    RepositoryProjectDeletePreflight,
+    RepositoryProjectHardDeleter,
     run_project_delete,
 )
+from basic_memory.models import Base as BasicMemoryBase
+from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.runtime import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
@@ -16,6 +25,26 @@ from basic_memory.runtime import (
     RuntimeProjectDeleteResult,
     RuntimeProjectFileSnapshot,
 )
+
+
+@pytest_asyncio.fixture
+async def project_delete_session_maker() -> AsyncGenerator[
+    async_sessionmaker[AsyncSession],
+    None,
+]:
+    """Create an isolated Basic Memory tenant database."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(BasicMemoryBase.metadata.create_all)
+
+    try:
+        yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    finally:
+        await engine.dispose()
 
 
 class FakeProjectDeletePreflight:
@@ -54,14 +83,18 @@ class FakeProjectHardDeleter:
         return self.deleted
 
 
-def project_delete_request() -> RuntimeProjectDeleteJobRequest:
+def project_delete_request(
+    *,
+    project_id: int = 101,
+    delete_notes: bool = True,
+) -> RuntimeProjectDeleteJobRequest:
     return RuntimeProjectDeleteJobRequest(
         tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
-        project_id=101,
+        project_id=project_id,
         project_external_id="project-main",
         project_name="Main",
         project_path="basic-memory",
-        delete_notes=True,
+        delete_notes=delete_notes,
     )
 
 
@@ -76,6 +109,120 @@ def project_file_snapshot(
         file_path=file_path,
         file_checksum=file_checksum,
     )
+
+
+async def create_project_with_note(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    is_active: bool,
+) -> Project:
+    async with session_maker() as session:
+        project = Project(
+            name="Main",
+            path="basic-memory",
+            permalink="main",
+            external_id="project-main",
+            is_active=is_active,
+            is_default=False,
+        )
+        session.add(project)
+        await session.flush()
+        entity = Entity(
+            title="Alpha",
+            note_type="note",
+            entity_metadata={"title": "Alpha"},
+            content_type="text/markdown",
+            project_id=project.id,
+            permalink="alpha",
+            file_path="notes/a.md",
+            checksum="entity-sum",
+            mtime=datetime(2026, 5, 22, 12, 0, tzinfo=UTC).timestamp(),
+            size=42,
+        )
+        session.add(entity)
+        await session.flush()
+        session.add(
+            NoteContent(
+                entity_id=entity.id,
+                project_id=project.id,
+                external_id=entity.external_id,
+                file_path=entity.file_path,
+                markdown_content="# Alpha\n",
+                db_version=1,
+                db_checksum="db-sum",
+                file_version=1,
+                file_checksum="file-sum",
+                file_write_status="synced",
+                file_updated_at=datetime(2026, 5, 22, 12, 0, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+        return project
+
+
+@pytest.mark.asyncio
+async def test_repository_project_delete_preflight_snapshots_inactive_project_files(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    request = project_delete_request(project_id=project.id)
+
+    result = await RepositoryProjectDeletePreflight(
+        session_maker=project_delete_session_maker
+    ).prepare_project_delete(request)
+
+    assert result == ProjectDeletePreflightResult.ready(
+        [
+            RuntimeProjectFileSnapshot(
+                entity_id=1,
+                file_path="notes/a.md",
+                file_checksum="file-sum",
+            )
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_project_delete_preflight_skips_active_project(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    project = await create_project_with_note(project_delete_session_maker, is_active=True)
+    request = project_delete_request(project_id=project.id)
+
+    result = await RepositoryProjectDeletePreflight(
+        session_maker=project_delete_session_maker
+    ).prepare_project_delete(request)
+
+    assert result == ProjectDeletePreflightResult.terminal(
+        RuntimeProjectDeleteResult(
+            project_id=project.id,
+            project_external_id="project-main",
+            status=RuntimeDeleteStatus.skipped,
+            deleted_project=False,
+            deleted_files=0,
+            skipped_files=0,
+            missing_files=0,
+            reason=f"project is active: {project.id}",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_project_hard_deleter_deletes_project(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    request = project_delete_request(project_id=project.id)
+
+    deleted = await RepositoryProjectHardDeleter(
+        session_maker=project_delete_session_maker
+    ).hard_delete_project(request)
+
+    async with project_delete_session_maker() as session:
+        stored_project = await session.get(Project, project.id)
+
+    assert deleted is True
+    assert stored_project is None
 
 
 @pytest.mark.asyncio
