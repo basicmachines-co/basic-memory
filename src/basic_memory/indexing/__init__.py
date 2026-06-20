@@ -63,7 +63,7 @@ from basic_memory.indexing.accepted_note_enqueue_runner import (
     enqueue_accepted_note_materialization,
     enqueue_accepted_note_write_jobs,
 )
-from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.batch_indexer import BatchIndexer, MarkdownOnlyIndexEntitySearchWriter
 from basic_memory.indexing.batching import build_index_batches
 from basic_memory.indexing.change_planning import (
     ChangeDetectionSnapshot,
@@ -647,6 +647,7 @@ __all__ = [
     "LoadedIndexFile",
     "LinkResolutionTarget",
     "LinkText",
+    "MarkdownOnlyIndexEntitySearchWriter",
     "MaterializedNoteContentFile",
     "NoteContentBootstrap",
     "NoteContentFileObserved",

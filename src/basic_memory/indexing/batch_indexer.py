@@ -34,6 +34,19 @@ from basic_memory.repository import EntityRepository, RelationRepository
 T = TypeVar("T")
 
 
+@dataclass(frozen=True, slots=True)
+class MarkdownOnlyIndexEntitySearchWriter:
+    """Filter regular file entities out of batch search indexing."""
+
+    search_writer: IndexEntitySearchWriter
+
+    async def index_entity_data(self, entity: Entity, content: str | None = None) -> None:
+        if not entity.is_markdown:
+            return
+
+        await self.search_writer.index_entity_data(entity, content=content)
+
+
 @dataclass(slots=True)
 class _PreparedMarkdownFile:
     file: IndexInputFile
