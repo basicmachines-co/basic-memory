@@ -121,6 +121,18 @@ class NoteContentReadRepairReconciler[EntityT: NoteContentReadRepairEntitySource
     ) -> None: ...
 
 
+class NoteContentReadRepairFileReader[
+    ProjectT: NoteContentReadRepairProjectSource,
+    EntityT: NoteContentReadRepairEntitySource,
+](Protocol):
+    """Capability that reads the canonical markdown file for read repair."""
+
+    async def read_note_content_repair_file(
+        self,
+        target: NoteContentReadRepairTarget[ProjectT, EntityT],
+    ) -> NoteContentReadRepairFile | None: ...
+
+
 type NoteContentReadProjectRepositoryFactory[ProjectT: NoteContentReadProjectSource] = Callable[
     [], NoteContentReadProjectRepository[ProjectT]
 ]
@@ -167,6 +179,14 @@ class NoteContentReadRepairTarget[
 
 
 @dataclass(frozen=True, slots=True)
+class NoteContentReadRepairFile:
+    """Canonical markdown content observed by a read-repair storage adapter."""
+
+    markdown_content: str | None
+    observed_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class NoteContentReadRepairPreflight[
     ProjectT: NoteContentReadRepairProjectSource,
     EntityT: NoteContentReadRepairEntitySource,
@@ -191,6 +211,21 @@ class NoteContentReadRepairPreflight[
         if self.target is None:
             raise RuntimeError("note-content read repair preflight does not contain a target")
         return self.target
+
+
+@dataclass(frozen=True, slots=True)
+class NoteContentReadRepairRun:
+    """Typed outcome for a complete note-content read-repair attempt."""
+
+    status: RuntimeNoteContentReadRepairStatus
+
+    @property
+    def repaired(self) -> bool:
+        """Return whether note_content is usable after the repair attempt."""
+        return self.status in {
+            RuntimeNoteContentReadRepairStatus.already_present,
+            RuntimeNoteContentReadRepairStatus.repaired,
+        }
 
 
 def note_content_read_project_repository() -> NoteContentReadProjectRepository[Project]:
@@ -385,6 +420,61 @@ async def apply_note_content_read_repair_with_default_reconciler(
         session_maker=session_maker,
         markdown_content=markdown_content,
         observed_at=observed_at,
+        source=source,
+        reconciler_factory=note_content_read_repair_reconciler,
+    )
+
+
+async def run_note_content_read_repair[
+    ProjectT: NoteContentReadRepairProjectSource,
+    EntityT: NoteContentReadRepairEntitySource,
+](
+    preflight: NoteContentReadRepairPreflight[ProjectT, EntityT],
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    file_reader: NoteContentReadRepairFileReader[ProjectT, EntityT] | None,
+    source: RuntimeNoteChangeSource,
+    reconciler_factory: NoteContentReadRepairReconcilerFactory[EntityT],
+) -> NoteContentReadRepairRun:
+    """Run storage-neutral read repair after the database preflight decision."""
+    if not preflight.should_read_file:
+        return NoteContentReadRepairRun(status=preflight.status)
+
+    if file_reader is None:
+        raise RuntimeError("note-content read repair requires a file reader")
+
+    target = preflight.require_target()
+    repair_file = await file_reader.read_note_content_repair_file(target)
+    if repair_file is None:
+        return NoteContentReadRepairRun(
+            status=RuntimeNoteContentReadRepairStatus.file_missing
+        )
+    if repair_file.markdown_content is None:
+        return NoteContentReadRepairRun(status=RuntimeNoteContentReadRepairStatus.empty_file)
+
+    await apply_note_content_read_repair(
+        target,
+        session_maker=session_maker,
+        markdown_content=repair_file.markdown_content,
+        observed_at=repair_file.observed_at,
+        source=source,
+        reconciler_factory=reconciler_factory,
+    )
+    return NoteContentReadRepairRun(status=RuntimeNoteContentReadRepairStatus.repaired)
+
+
+async def run_note_content_read_repair_with_default_reconciler(
+    preflight: NoteContentReadRepairPreflight[Project, Entity],
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    file_reader: NoteContentReadRepairFileReader[Project, Entity] | None,
+    source: RuntimeNoteChangeSource,
+) -> NoteContentReadRepairRun:
+    """Run read repair through the default Basic Memory note_content reconciler."""
+    return await run_note_content_read_repair(
+        preflight,
+        session_maker=session_maker,
+        file_reader=file_reader,
         source=source,
         reconciler_factory=note_content_read_repair_reconciler,
     )
