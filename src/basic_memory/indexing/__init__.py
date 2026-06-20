@@ -441,6 +441,11 @@ from basic_memory.indexing.project_index_progress import (
     should_emit_project_index_progress_event,
     summarize_project_index_file_outcomes,
 )
+from basic_memory.indexing.project_index_runtime import (
+    ProjectIndexForwardReferenceRun,
+    ProjectIndexProgressReporter,
+    ProjectIndexRuntime,
+)
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexBatchJobActivity,
     ProjectIndexBatchJobActivityUpdate,
@@ -789,6 +794,7 @@ __all__ = [
     "ProjectIndexFanoutFailureRecorder",
     "ProjectIndexFileOutcome",
     "ProjectIndexFileOutcomeSummary",
+    "ProjectIndexForwardReferenceRun",
     "ProjectIndexMissingBatches",
     "ProjectIndexMoveBatch",
     "ProjectIndexMoveBatchPlan",
@@ -801,7 +807,9 @@ __all__ = [
     "ProjectIndexObservedFileSource",
     "ProjectIndexOrphanCleaner",
     "ProjectIndexProgressCallback",
+    "ProjectIndexProgressReporter",
     "RepositoryProjectIndexMaintenanceStore",
+    "ProjectIndexRuntime",
     "ProjectIndexStaleWorkflowPlan",
     "ProjectIndexStaleWorkflowStatus",
     "ProjectIndexWorkflowPayloadState",
