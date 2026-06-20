@@ -37,6 +37,8 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
+from basic_memory.index import build_local_markdown_file_indexer
+from basic_memory.indexing import BatchIndexer, IndexFileExecutor, StorageIndexFileWriter
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.services import EntityService, ProjectService
@@ -390,6 +392,47 @@ async def get_context_service_v2_external(
 
 
 ContextServiceV2ExternalDep = Annotated[ContextService, Depends(get_context_service_v2_external)]
+
+
+# --- File Indexing ---
+
+
+async def get_index_file_executor_v2_external(
+    app_config: AppConfigDep,
+    entity_service: EntityServiceV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    relation_repository: RelationRepositoryV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
+) -> IndexFileExecutor:
+    """Create the event-indexing single-file executor for v2 API routes."""
+    project_id = entity_repository.project_id
+    if project_id is None:  # pragma: no cover
+        raise RuntimeError("Index file executor requires a project-scoped entity repository")
+
+    batch_indexer = BatchIndexer(
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=session_maker,
+    )
+    return build_local_markdown_file_indexer(
+        project_id=project_id,
+        file_service=file_service,
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        batch_indexer=batch_indexer,
+        search_service=search_service,
+    )
+
+
+IndexFileExecutorV2ExternalDep = Annotated[
+    IndexFileExecutor, Depends(get_index_file_executor_v2_external)
+]
 
 
 # --- Sync Service ---

@@ -25,6 +25,7 @@ from basic_memory.ignore_utils import (
 )
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
+    FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
     LinkResolverV2ExternalDep,
     ProjectRepositoryDep,
@@ -33,7 +34,7 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
-    SyncServiceV2ExternalDep,
+    IndexFileExecutorV2ExternalDep,
     TaskSchedulerDep,
     SessionDep,
     SessionMakerDep,
@@ -309,7 +310,9 @@ def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
 async def sync_file(
     data: SyncFileRequest,
     project_id: ProjectExternalIdPathDep,
-    sync_service: SyncServiceV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+    file_indexer: IndexFileExecutorV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
@@ -407,32 +410,31 @@ async def sync_file(
                 detail=f"File path '{data.file_path}' {IGNORED_PATH_REJECTION_DETAIL} "
                 "and cannot be indexed",
             )
-        if not sync_service.file_service.is_markdown(file_path):
+        if not file_service.is_markdown(file_path):
             raise HTTPException(
                 status_code=400,
                 detail=f"Only markdown files can be indexed: '{data.file_path}'",
             )
 
-        # Trigger: the file may already have a DB row (e.g. modified on disk after indexing)
-        # Why: the indexer needs to know whether to insert or update the entity
-        # Outcome: new is computed from the database instead of assumed by the caller
+        indexed = await file_indexer.index_markdown_file(file_path, source="api-sync-file")
         async with db.scoped_session(session_maker) as session:
-            existing = await sync_service.entity_repository.get_by_file_path(session, file_path)
-        synced = await sync_service.sync_one_markdown_file(
-            file_path, new=existing is None, index_search=True
-        )
+            entity = await entity_repository.get_by_id(session, indexed.entity_id)
+        if entity is None:  # pragma: no cover
+            raise HTTPException(
+                status_code=500,
+                detail=f"Indexed entity not found after indexing: '{data.file_path}'",
+            )
 
         # Trigger: semantic search is enabled and the entity index was just refreshed
-        # Why: the project sync flow awaits sync_entity_vectors_batch() inline after
-        #      indexing changed files (SyncService.sync); without the single-entity
-        #      equivalent, a note recovered via sync-file stays missing or stale in
-        #      semantic search until a later edit or full project sync
+        # Why: project indexing refreshes embedding vectors after changed files are
+        #      indexed; without the single-entity equivalent, a note recovered via
+        #      sync-file stays missing or stale in semantic search until later work
         # Outcome: vectors refresh synchronously before the response returns,
-        #          mirroring the sync flow instead of the out-of-band scheduler
+        #          mirroring project indexing instead of the out-of-band scheduler
         if app_config.semantic_search_enabled:
-            await search_service.sync_entity_vectors_batch([synced.entity.id])
+            await search_service.sync_entity_vectors_batch([entity.id])
 
-        result = EntityResponseV2.model_validate(synced.entity)
+        result = EntityResponseV2.model_validate(entity)
         logger.info(
             f"API v2 response: sync_file file_path='{file_path}' external_id={result.external_id}"
         )

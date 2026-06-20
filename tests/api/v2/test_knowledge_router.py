@@ -19,6 +19,7 @@ from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
 from basic_memory.services.search_service import SearchService
+from basic_memory.sync import SyncService
 
 
 async def _find_all_entities(entity_repository, session_maker):
@@ -1008,6 +1009,40 @@ async def test_sync_file_indexes_file_on_disk(
     assert resolve_response.status_code == 200
     resolved = EntityResolveResponse.model_validate(resolve_response.json())
     assert resolved.external_id == entity.external_id
+
+
+@pytest.mark.asyncio
+async def test_sync_file_uses_event_indexer_not_sync_service(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """sync-file should use the new event-indexing primitive, not legacy SyncService."""
+    sync_calls: list[str] = []
+    original_sync_one_markdown_file = SyncService.sync_one_markdown_file
+
+    async def record_sync_one_markdown_file(self, file_path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        sync_calls.append(str(file_path))
+        return await original_sync_one_markdown_file(self, file_path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        SyncService,
+        "sync_one_markdown_file",
+        record_sync_one_markdown_file,
+    )
+
+    note_path = Path(test_project.path) / "incoming" / "event-indexed-note.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Event Indexed\n\nWritten directly to disk.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/sync-file",
+        json={"file_path": "incoming/event-indexed-note.md"},
+    )
+
+    assert response.status_code == 200
+    assert sync_calls == []
 
 
 @pytest.mark.asyncio
