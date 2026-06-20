@@ -258,6 +258,7 @@ from basic_memory.runtime.observed_index_files import (
     runtime_observed_index_files_from_metadata_map,
 )
 from basic_memory.runtime.process import runtime_process_rss_bytes
+from basic_memory.runtime.sample_notes import RuntimeSampleNotesInitializationResult
 from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixMatch,
     StorageProjectPrefixResolution,
@@ -399,6 +400,7 @@ __all__ = [
     "RuntimeProjectIndexJobRequest",
     "RuntimeProjectDeleteResult",
     "RuntimeSchedulerTaskPayload",
+    "RuntimeSampleNotesInitializationResult",
     "RuntimeScheduledProjectSyncTask",
     "RuntimeScheduledTask",
     "RuntimeScheduledTaskName",
