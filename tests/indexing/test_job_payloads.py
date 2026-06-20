@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from basic_memory import indexing as indexing_module
 from basic_memory.indexing import (
     EmbeddingIndexBatchJobPayload,
     EmbeddingIndexBatchJobRequest,
@@ -22,6 +23,7 @@ from basic_memory.indexing import (
 from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
+    RuntimeJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectDeleteJobRequest,
     RuntimeProjectIndexJobRequest,
@@ -223,6 +225,47 @@ def test_project_index_job_payload_round_trips_runtime_request() -> None:
     )
     assert payload.project_reference() == runtime_request.project
     assert payload.to_runtime_request() == runtime_request
+
+
+def test_project_index_entrypoint_exports_cloud_queue_name() -> None:
+    """The portable indexing contract owns the project-index queue name."""
+    assert indexing_module.INDEX_PROJECT_ENTRYPOINT == "index_project"
+
+
+def test_project_index_job_payload_builds_runtime_queue_request() -> None:
+    """Project-index payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    runtime_request = RuntimeProjectIndexJobRequest(
+        tenant_id=tenant_id,
+        project=ProjectRuntimeReference(
+            project_id=101,
+            project_external_id="project-main",
+            project_name="Main",
+            project_permalink="main",
+            project_path="main",
+        ),
+        workflow_id=workflow_id,
+        force_full=True,
+        search=True,
+        embeddings=False,
+    )
+    payload = ProjectIndexJobPayload.from_runtime_request(runtime_request)
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="index_project",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key="index-project:11111111-1111-1111-1111-111111111111:101",
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+            "project_path": "main",
+            "workflow_id": str(workflow_id),
+        },
+    )
 
 
 def test_project_delete_job_payload_round_trips_runtime_request() -> None:

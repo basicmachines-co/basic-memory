@@ -1,5 +1,6 @@
 """Pydantic boundary models for portable indexing worker payloads."""
 
+from collections.abc import Mapping
 from typing import Self
 from uuid import UUID
 
@@ -21,8 +22,10 @@ from basic_memory.indexing.project_index_progress import ObservedObjectIndexComp
 from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
 from basic_memory.indexing.relation_resolution import ResolveRelationsJobRequest
 from basic_memory.runtime import (
+    JobEntrypoint,
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
+    RuntimeJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectDeleteJobRequest,
     RuntimeProjectIndexJobRequest,
@@ -30,7 +33,10 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
+    runtime_job_request_from_source,
 )
+
+INDEX_PROJECT_ENTRYPOINT: JobEntrypoint = "index_project"
 
 
 class IndexFileObjectMetadataPayload(BaseModel):
@@ -265,6 +271,19 @@ class ProjectIndexJobPayload(BaseModel):
             force_full=self.force_full,
             search=self.search,
             embeddings=self.embeddings,
+        )
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for project-index coordination."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=INDEX_PROJECT_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
         )
 
 
