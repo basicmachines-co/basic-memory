@@ -66,9 +66,12 @@ from basic_memory.index.project_index import (
     run_project_index_coordinator,
 )
 from basic_memory.index.storage_events import (
+    StorageEventBucketProcessor,
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
+    StorageEventSourceIndexRuntime,
+    run_storage_event_source_indexing,
     run_storage_event_indexing,
 )
 
@@ -100,7 +103,9 @@ __all__ = [
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowStarter",
     "RuntimeStorageEventSource",
+    "StorageEventBucketProcessor",
     "StorageEventIndexRuntime",
+    "StorageEventSourceIndexRuntime",
     "StorageBucketName",
     "StorageEtag",
     "StorageEventName",
@@ -124,6 +129,7 @@ __all__ = [
     "run_local_watch_event_indexing",
     "run_local_project_index",
     "run_project_index_coordinator",
+    "run_storage_event_source_indexing",
     "run_storage_event_indexing",
     "storage_event_payload_from_input",
 ]
