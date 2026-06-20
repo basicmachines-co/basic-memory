@@ -464,6 +464,7 @@ from basic_memory.indexing.project_index_runtime import (
     ProjectIndexForwardReferenceRun,
     ProjectIndexProgressReporter,
     ProjectIndexRuntime,
+    build_default_project_index_runtime,
 )
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexBatchJobActivity,
@@ -908,6 +909,7 @@ __all__ = [
     "build_accepted_note_search_row",
     "build_default_index_batch_runtime",
     "build_default_file_indexer",
+    "build_default_project_index_runtime",
     "build_index_file_batch_job_result",
     "build_index_input_files",
     "build_index_batches",

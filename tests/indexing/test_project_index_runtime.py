@@ -6,15 +6,26 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.forward_reference_resolution import ForwardReferenceUpdate
 from basic_memory.indexing.progress import VectorSyncProgress
-from basic_memory.indexing.project_index_runtime import ProjectIndexRuntime
+from basic_memory.indexing.project_index_runtime import (
+    ProjectIndexRuntime,
+    build_default_project_index_runtime,
+)
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexDeleteBatch,
     ProjectIndexDeleteBatchResult,
     ProjectIndexMoveBatch,
     ProjectIndexMoveBatchResult,
+    RepositoryProjectIndexMaintenanceStore,
+)
+from basic_memory.indexing.vector_sync_planning import RepositoryVectorSyncEntitySource
+from basic_memory.indexing.forward_reference_resolution import (
+    RepositoryForwardReferenceEntityRefreshRuntime,
+    RepositoryForwardReferenceRelationSource,
+    RepositoryForwardReferenceResolutionRuntime,
 )
 from basic_memory.runtime import RuntimeWorkflowMetadataPatch
 
@@ -119,6 +130,20 @@ class NoopVectorSync:
         raise AssertionError(msg)
 
 
+@dataclass(slots=True)
+class NoopEntityRepository:
+    async def find_by_id(self, session, entity_id: int):
+        msg = "find_by_id should not be called by the construction test"
+        raise AssertionError(msg)
+
+
+@dataclass(slots=True)
+class NoopEntityIndexer:
+    async def index_entity(self, entity) -> object:
+        msg = "index_entity should not be called by the construction test"
+        raise AssertionError(msg)
+
+
 def make_runtime(
     *,
     vector_entity_source: RecordingVectorEntitySource | None = None,
@@ -141,6 +166,50 @@ def make_runtime(
         forward_reference_entity_refresher=refresher
         or RecordingForwardReferenceEntityRefresher(outcomes={}),
     )
+
+
+async def resolve_no_links(_link_texts: Sequence[str]) -> dict[str, int | None]:
+    return {}
+
+
+def test_build_default_project_index_runtime_composes_repository_backed_runtime() -> None:
+    session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker()
+    vector_sync = NoopVectorSync()
+    entity_repository = NoopEntityRepository()
+    entity_indexer = NoopEntityIndexer()
+
+    runtime = build_default_project_index_runtime(
+        project_id=7,
+        session_maker=session_maker,
+        vector_sync=vector_sync,
+        entity_repository=entity_repository,
+        entity_indexer=entity_indexer,
+        resolve_link_texts=resolve_no_links,
+    )
+
+    assert isinstance(runtime, ProjectIndexRuntime)
+    assert runtime.project_id == 7
+    assert runtime.vector_sync is vector_sync
+    assert isinstance(runtime.vector_entity_source, RepositoryVectorSyncEntitySource)
+    assert runtime.vector_entity_source.session_maker is session_maker
+    assert runtime.vector_entity_source.project_id == 7
+    assert isinstance(runtime.move_store, RepositoryProjectIndexMaintenanceStore)
+    assert runtime.move_store is runtime.delete_store
+    assert isinstance(
+        runtime.forward_reference_relation_source,
+        RepositoryForwardReferenceRelationSource,
+    )
+    assert isinstance(
+        runtime.forward_reference_resolution_runtime,
+        RepositoryForwardReferenceResolutionRuntime,
+    )
+    assert runtime.forward_reference_resolution_runtime.resolve_link_texts is resolve_no_links
+    assert isinstance(
+        runtime.forward_reference_entity_refresher,
+        RepositoryForwardReferenceEntityRefreshRuntime,
+    )
+    assert runtime.forward_reference_entity_refresher.entity_repository is entity_repository
+    assert runtime.forward_reference_entity_refresher.entity_indexer is entity_indexer
 
 
 def test_project_index_runtime_plans_vector_sync_candidates() -> None:

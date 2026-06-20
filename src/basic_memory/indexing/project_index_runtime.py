@@ -10,13 +10,21 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from basic_memory.indexing.forward_reference_resolution import (
+    ForwardReferenceEntityIndexer,
+    ForwardReferenceEntityRepository,
     ForwardReferenceEntityRefreshFailure,
     ForwardReferenceEntityRefreshRun,
     ForwardReferenceEntityRefreshRuntime,
+    ForwardReferenceLinkTextResolver,
     ForwardReferenceRelationSource,
     ForwardReferenceResolutionRun,
     ForwardReferenceResolutionRuntime,
+    RepositoryForwardReferenceEntityRefreshRuntime,
+    RepositoryForwardReferenceRelationSource,
+    RepositoryForwardReferenceResolutionRuntime,
     run_forward_reference_entity_refresh,
     run_forward_reference_resolution,
 )
@@ -27,12 +35,14 @@ from basic_memory.indexing.project_index_workflow import (
     ProjectIndexDeleteRun,
     ProjectIndexMoveBatchStore,
     ProjectIndexMoveRun,
+    RepositoryProjectIndexMaintenanceStore,
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
 from basic_memory.indexing.vector_sync_planning import (
     CheckpointPhase,
     EntityId,
+    RepositoryVectorSyncEntitySource,
     VectorSyncEntitySource,
     VectorSyncExecutor,
     VectorSyncLogger,
@@ -204,3 +214,43 @@ class ProjectIndexRuntime:
             resolution=resolution,
             refresh=refresh,
         )
+
+
+def build_default_project_index_runtime(
+    *,
+    project_id: ProjectId,
+    session_maker: async_sessionmaker[AsyncSession],
+    vector_sync: VectorSyncExecutor,
+    entity_repository: ForwardReferenceEntityRepository,
+    entity_indexer: ForwardReferenceEntityIndexer,
+    resolve_link_texts: ForwardReferenceLinkTextResolver,
+) -> ProjectIndexRuntime:
+    """Compose the default repository-backed project-index runtime."""
+    vector_entity_source = RepositoryVectorSyncEntitySource(
+        session_maker=session_maker,
+        project_id=project_id,
+    )
+    maintenance_store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=project_id,
+    )
+    return ProjectIndexRuntime(
+        project_id=project_id,
+        vector_sync=vector_sync,
+        vector_entity_source=vector_entity_source,
+        move_store=maintenance_store,
+        delete_store=maintenance_store,
+        forward_reference_relation_source=RepositoryForwardReferenceRelationSource(
+            session_maker=session_maker,
+            project_id=project_id,
+        ),
+        forward_reference_resolution_runtime=RepositoryForwardReferenceResolutionRuntime(
+            session_maker=session_maker,
+            resolve_link_texts=resolve_link_texts,
+        ),
+        forward_reference_entity_refresher=RepositoryForwardReferenceEntityRefreshRuntime(
+            session_maker=session_maker,
+            entity_repository=entity_repository,
+            entity_indexer=entity_indexer,
+        ),
+    )
