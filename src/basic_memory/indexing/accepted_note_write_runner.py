@@ -300,6 +300,24 @@ def accepted_note_search_repository_for_project(
     return AcceptedNoteSearchRepository(project_id=project_id)
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptedNoteRepositoryFactories:
+    """Repository factory set needed by accepted-note DB-first writes."""
+
+    pending_entity_repository_factory: AcceptedPendingEntityRepositoryFactory
+    note_content_repository_factory: AcceptedNoteContentRepositoryFactory
+    search_repository_factory: AcceptedNoteSearchRepositoryFactory
+
+
+def build_default_accepted_note_repository_factories() -> AcceptedNoteRepositoryFactories:
+    """Compose the default repository adapters for accepted-note write persistence."""
+    return AcceptedNoteRepositoryFactories(
+        pending_entity_repository_factory=accepted_entity_repository_for_project,
+        note_content_repository_factory=accepted_note_content_repository_for_project,
+        search_repository_factory=accepted_note_search_repository_for_project,
+    )
+
+
 async def prepare_accepted_note_create(
     preparer: AcceptedNoteCreatePreparer,
     data: EntitySchema,
@@ -486,12 +504,11 @@ async def create_accepted_pending_entity(
     now: datetime,
     user_profile_value: str | None,
     external_id: str | None = None,
-    repository_factory: AcceptedPendingEntityRepositoryFactory = (
-        accepted_entity_repository_for_project
-    ),
+    repositories: AcceptedNoteRepositoryFactories | None = None,
 ) -> Entity:
     """Insert a prepared accepted entity row without materializing a file."""
-    repository = repository_factory(project_id)
+    repository_factories = repositories or build_default_accepted_note_repository_factories()
+    repository = repository_factories.pending_entity_repository_factory(project_id)
     return await repository.create_pending_accepted_entity(
         session,
         accepted_pending_entity_write_from_prepared(
@@ -532,12 +549,11 @@ async def accept_note_content_write(
     db_checksum: RuntimeNoteContentChecksum,
     last_source: RuntimeNoteChangeSource | None,
     updated_at: datetime,
-    repository_factory: AcceptedNoteContentRepositoryFactory = (
-        accepted_note_content_repository_for_project
-    ),
+    repositories: AcceptedNoteRepositoryFactories | None = None,
 ) -> NoteContent:
     """Accept markdown into note_content before object storage catches up."""
-    repository = repository_factory(entity.project_id)
+    repository_factories = repositories or build_default_accepted_note_repository_factories()
+    repository = repository_factories.note_content_repository_factory(entity.project_id)
     return await repository.accept_write(
         session,
         accepted_note_content_write_from_markdown(
@@ -576,12 +592,11 @@ async def refresh_accepted_note_search_index(
     *,
     entity: AcceptedNoteSearchEntitySource,
     search_content: str,
-    repository_factory: AcceptedNoteSearchRepositoryFactory = (
-        accepted_note_search_repository_for_project
-    ),
+    repositories: AcceptedNoteRepositoryFactories | None = None,
 ) -> None:
     """Refresh the hot accepted-note search row inside the caller's transaction."""
-    repository = repository_factory(entity.project_id)
+    repository_factories = repositories or build_default_accepted_note_repository_factories()
+    repository = repository_factories.search_repository_factory(entity.project_id)
     await repository.refresh_entity(
         session,
         accepted_note_search_row_from_entity(entity, search_content=search_content),
@@ -600,14 +615,10 @@ async def persist_accepted_note_write(
     current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
     existing_file_path: RuntimeFilePath | None = None,
     accepted_file_path: RuntimeFilePath | None = None,
-    content_repository_factory: AcceptedNoteContentRepositoryFactory = (
-        accepted_note_content_repository_for_project
-    ),
-    search_repository_factory: AcceptedNoteSearchRepositoryFactory = (
-        accepted_note_search_repository_for_project
-    ),
+    repositories: AcceptedNoteRepositoryFactories | None = None,
 ) -> AcceptedPersistedNoteWrite:
     """Accept markdown into note_content and refresh search inside one transaction."""
+    repository_factories = repositories or build_default_accepted_note_repository_factories()
     content_write = plan_accepted_note_content_write(
         project_id=entity.project_id,
         entity_id=entity.id,
@@ -623,13 +634,13 @@ async def persist_accepted_note_write(
         db_checksum=db_checksum,
         last_source=last_source,
         updated_at=updated_at,
-        repository_factory=content_repository_factory,
+        repositories=repository_factories,
     )
     await refresh_accepted_note_search_index(
         session,
         entity=entity,
         search_content=search_content,
-        repository_factory=search_repository_factory,
+        repositories=repository_factories,
     )
     return AcceptedPersistedNoteWrite(
         note_content=note_content,

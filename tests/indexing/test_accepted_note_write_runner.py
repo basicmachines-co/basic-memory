@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
 from basic_memory.indexing.accepted_note_write_runner import (
+    AcceptedNoteRepositoryFactories,
     accept_note_content_write,
     accepted_note_content_write_from_markdown,
     accepted_note_search_row_from_entity,
     accepted_pending_entity_write_from_prepared,
     apply_accepted_prepared_entity_fields,
+    build_default_accepted_note_repository_factories,
     create_accepted_pending_entity,
     delete_accepted_note,
     delete_accepted_note_entity,
@@ -29,8 +31,10 @@ from basic_memory.indexing.accepted_note_write_runner import (
     refresh_accepted_note_search_index,
 )
 from basic_memory.models import Entity, NoteContent
-from basic_memory.repository import AcceptedNoteContentWrite
+from basic_memory.repository import AcceptedNoteContentWrite, NoteContentRepository
+from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
+from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 
 
@@ -199,6 +203,53 @@ class _MovePreparer:
         return self.prepared
 
 
+def _unexpected_pending_entity_repository(_project_id: int) -> _PendingEntityRepository:
+    raise AssertionError("pending entity repository was not expected")
+
+
+def _unexpected_note_content_repository(_project_id: int) -> _NoteContentRepository:
+    raise AssertionError("note content repository was not expected")
+
+
+def _unexpected_search_repository(_project_id: int) -> _SearchRepository:
+    raise AssertionError("search repository was not expected")
+
+
+def _repository_factories(
+    *,
+    pending_entity_repository: _PendingEntityRepository | None = None,
+    note_content_repository: _NoteContentRepository | None = None,
+    search_repository: _SearchRepository | None = None,
+) -> AcceptedNoteRepositoryFactories:
+    """Build a fail-fast fake repository factory bundle for one focused test."""
+    pending_entity_repository_factory = _unexpected_pending_entity_repository
+    if pending_entity_repository is not None:
+        pending_repository = pending_entity_repository
+
+        def pending_entity_repository_factory(_project_id: int) -> _PendingEntityRepository:
+            return pending_repository
+
+    note_content_repository_factory = _unexpected_note_content_repository
+    if note_content_repository is not None:
+        content_repository = note_content_repository
+
+        def note_content_repository_factory(_project_id: int) -> _NoteContentRepository:
+            return content_repository
+
+    search_repository_factory = _unexpected_search_repository
+    if search_repository is not None:
+        accepted_search_repository = search_repository
+
+        def search_repository_factory(_project_id: int) -> _SearchRepository:
+            return accepted_search_repository
+
+    return AcceptedNoteRepositoryFactories(
+        pending_entity_repository_factory=pending_entity_repository_factory,
+        note_content_repository_factory=note_content_repository_factory,
+        search_repository_factory=search_repository_factory,
+    )
+
+
 def _prepared(
     *,
     markdown_content: str = "# Accepted\n",
@@ -258,6 +309,14 @@ def _note_content() -> NoteContent:
         file_write_status="pending",
         last_source="api",
     )
+
+
+def test_build_default_accepted_note_repository_factories_wires_core_repositories() -> None:
+    factories = build_default_accepted_note_repository_factories()
+
+    assert isinstance(factories.pending_entity_repository_factory(7), EntityRepository)
+    assert isinstance(factories.note_content_repository_factory(7), NoteContentRepository)
+    assert isinstance(factories.search_repository_factory(7), AcceptedNoteSearchRepository)
 
 
 @pytest.mark.asyncio
@@ -507,7 +566,7 @@ async def test_create_accepted_pending_entity_uses_repository_protocol() -> None
         project_id=7,
         now=now,
         user_profile_value=None,
-        repository_factory=lambda project_id: repository,
+        repositories=_repository_factories(pending_entity_repository=repository),
     )
 
     assert result is entity
@@ -556,7 +615,7 @@ async def test_accept_note_content_write_uses_repository_protocol() -> None:
         db_checksum="db-checksum",
         last_source="api",
         updated_at=updated_at,
-        repository_factory=lambda project_id: repository,
+        repositories=_repository_factories(note_content_repository=repository),
     )
 
     assert result is note_content
@@ -598,7 +657,7 @@ async def test_refresh_accepted_note_search_index_uses_repository_protocol() -> 
         session,
         entity=entity,
         search_content="Accepted body",
-        repository_factory=lambda project_id: repository,
+        repositories=_repository_factories(search_repository=repository),
     )
 
     assert len(repository.calls) == 1
@@ -633,8 +692,10 @@ async def test_persist_accepted_note_write_plans_content_and_refreshes_search() 
         current_note_content=current_note_content,
         existing_file_path="notes/old.md",
         accepted_file_path="notes/new.md",
-        content_repository_factory=lambda project_id: content_repository,
-        search_repository_factory=lambda project_id: search_repository,
+        repositories=_repository_factories(
+            note_content_repository=content_repository,
+            search_repository=search_repository,
+        ),
     )
 
     assert result.note_content is persisted_note_content
