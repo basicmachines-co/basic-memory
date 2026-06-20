@@ -119,6 +119,18 @@ def test_import_data_result_carries_import_and_index_summary() -> None:
         setattr(result, "index_job_id", "other")
 
 
+def test_import_data_result_builds_workflow_metadata_shapes() -> None:
+    payload = ImportDataResultPayload.from_mapping({"success": True, "files_imported": 3})
+    result = ImportDataResult(
+        result=payload,
+        index_job_id="index-workflow-id",
+    )
+
+    assert payload.progress_metadata_patch() == {"result": {"success": True, "files_imported": 3}}
+    assert result.workflow_result() == {"success": True, "files_imported": 3}
+    assert result.completion_metadata_patch() == {"index_job_id": "index-workflow-id"}
+
+
 def test_import_data_result_payload_validates_api_response_shape() -> None:
     payload = ImportDataResultPayload.from_response_body({"success": True, "entities": 2})
 

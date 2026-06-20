@@ -90,6 +90,10 @@ class ImportDataResultPayload(Mapping[str, object]):
         """Return a mutable workflow/admin payload copy."""
         return dict(self.values)
 
+    def progress_metadata_patch(self) -> dict[str, object]:
+        """Return the workflow metadata patch stored after import work finishes."""
+        return {"result": self.as_dict()}
+
 
 @dataclass(frozen=True, slots=True)
 class ImportDataResult:
@@ -101,6 +105,14 @@ class ImportDataResult:
     def result_payload(self) -> dict[str, object]:
         """Return a mutable workflow/admin payload copy."""
         return self.result.as_dict()
+
+    def workflow_result(self) -> dict[str, object]:
+        """Return the durable workflow result payload."""
+        return self.result_payload()
+
+    def completion_metadata_patch(self) -> dict[str, object]:
+        """Return the workflow metadata patch for the downstream index workflow."""
+        return {"index_job_id": self.index_job_id}
 
 
 class ImportDataPayload(BaseModel):
