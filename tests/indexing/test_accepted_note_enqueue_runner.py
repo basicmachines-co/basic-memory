@@ -1,6 +1,6 @@
 """Tests for portable accepted-note follow-up enqueue orchestration."""
 
-from collections.abc import Mapping
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -13,6 +13,8 @@ from basic_memory.indexing.accepted_note_enqueue_runner import (
 )
 from basic_memory.runtime import (
     RuntimeAcceptedNoteChange,
+    RuntimeAcceptedNoteResponse,
+    RuntimeNoteContentResponsePayload,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
@@ -66,11 +68,9 @@ def tenant_id() -> UUID:
     return UUID("11111111-1111-1111-1111-111111111111")
 
 
-def payload_as_dict(payload: Mapping[str, object]) -> dict[str, object]:
-    return dict(payload)
-
-
-def accepted_materialization_change() -> RuntimeAcceptedNoteChange[Mapping[str, object]]:
+def accepted_materialization_change() -> RuntimeAcceptedNoteChange[
+    RuntimeNoteContentResponsePayload
+]:
     return RuntimeAcceptedNoteChange(
         status_code=202,
         payload={"file_write_status": "pending", "last_materialization_error": None},
@@ -87,7 +87,7 @@ def accepted_materialization_change() -> RuntimeAcceptedNoteChange[Mapping[str, 
     )
 
 
-def accepted_delete_change() -> RuntimeAcceptedNoteChange[Mapping[str, object]]:
+def accepted_delete_change() -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
     return RuntimeAcceptedNoteChange(
         status_code=200,
         payload={"deleted": True, "file_delete_status": "pending"},
@@ -107,7 +107,6 @@ async def test_enqueue_accepted_note_materialization_queues_runtime_request() ->
     result = await enqueue_accepted_note_materialization(
         accepted_materialization_change(),
         tenant_id=tenant_id(),
-        payload_serializer=payload_as_dict,
         materialization_enqueuer=materialization_enqueuer,
         failure_marker=FakeMaterializationFailureMarker(),
     )
@@ -132,13 +131,63 @@ async def test_enqueue_accepted_note_materialization_queues_runtime_request() ->
 
 
 @pytest.mark.asyncio
+async def test_enqueue_accepted_note_materialization_keeps_typed_payload_on_failure() -> None:
+    response = RuntimeAcceptedNoteResponse(
+        external_id="note-1",
+        entity_id=42,
+        title="Typed note",
+        note_type="note",
+        content_type="text/markdown",
+        permalink="typed-note",
+        file_path="notes/typed.md",
+        markdown_content="# Typed\n",
+        entity_metadata={"topic": "runtime"},
+        created_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 20, 12, 0, tzinfo=UTC),
+        created_by="creator",
+        last_updated_by="editor",
+        db_version=3,
+        db_checksum="db-checksum",
+        file_version=None,
+        file_checksum=None,
+        file_write_status="pending",
+        last_source="api",
+        file_updated_at=None,
+        last_materialization_error=None,
+    )
+    failure_marker = FakeMaterializationFailureMarker()
+
+    result = await enqueue_accepted_note_materialization(
+        RuntimeAcceptedNoteChange(
+            status_code=202,
+            payload=response,
+            materialization=RuntimePendingNoteMaterialization(
+                project_id=7,
+                entity_id=42,
+                db_version=3,
+                db_checksum="db-checksum",
+            ),
+        ),
+        tenant_id=tenant_id(),
+        materialization_enqueuer=FakeMaterializationEnqueuer(error=RuntimeError("pgq unavailable")),
+        failure_marker=failure_marker,
+    )
+
+    assert result.status_code == 202
+    assert isinstance(result.payload, RuntimeAcceptedNoteResponse)
+    assert result.payload.file_write_status == "failed"
+    assert result.payload.last_materialization_error == "pgq unavailable"
+    assert result.payload.to_response_payload()["external_id"] == "note-1"
+    assert failure_marker.calls == [(7, 42, "pgq unavailable")]
+
+
+@pytest.mark.asyncio
 async def test_enqueue_accepted_note_materialization_marks_failed_status() -> None:
     failure_marker = FakeMaterializationFailureMarker()
 
     result = await enqueue_accepted_note_materialization(
         accepted_materialization_change(),
         tenant_id=tenant_id(),
-        payload_serializer=payload_as_dict,
         materialization_enqueuer=FakeMaterializationEnqueuer(error=RuntimeError("pgq unavailable")),
         failure_marker=failure_marker,
     )
@@ -159,7 +208,6 @@ async def test_enqueue_accepted_note_materialization_preserves_double_failure() 
         await enqueue_accepted_note_materialization(
             accepted_materialization_change(),
             tenant_id=tenant_id(),
-            payload_serializer=payload_as_dict,
             materialization_enqueuer=FakeMaterializationEnqueuer(
                 error=RuntimeError("pgq unavailable")
             ),
@@ -201,7 +249,6 @@ async def test_enqueue_accepted_note_write_jobs_embeds_cleanup_in_materializatio
     result = await enqueue_accepted_note_write_jobs(
         accepted,
         tenant_id=tenant_id(),
-        payload_serializer=payload_as_dict,
         materialization_enqueuer=materialization_enqueuer,
         failure_marker=FakeMaterializationFailureMarker(),
         file_delete_enqueuer=file_delete_enqueuer,
@@ -225,7 +272,6 @@ async def test_enqueue_accepted_note_file_delete_queues_runtime_request() -> Non
     result = await enqueue_accepted_note_file_delete(
         accepted_delete_change(),
         tenant_id=tenant_id(),
-        payload_serializer=payload_as_dict,
         file_delete_enqueuer=file_delete_enqueuer,
     )
 
@@ -249,7 +295,6 @@ async def test_enqueue_accepted_note_file_delete_marks_enqueue_failure() -> None
     result = await enqueue_accepted_note_file_delete(
         accepted_delete_change(),
         tenant_id=tenant_id(),
-        payload_serializer=payload_as_dict,
         file_delete_enqueuer=FakeFileDeleteEnqueuer(error=RuntimeError("pgq unavailable")),
     )
 
@@ -269,7 +314,6 @@ async def test_enqueue_accepted_note_materialization_requires_materialization() 
         await enqueue_accepted_note_materialization(
             accepted_delete_change(),
             tenant_id=tenant_id(),
-            payload_serializer=payload_as_dict,
             materialization_enqueuer=FakeMaterializationEnqueuer(),
             failure_marker=FakeMaterializationFailureMarker(),
         )
@@ -281,6 +325,5 @@ async def test_enqueue_accepted_note_file_delete_requires_file_delete() -> None:
         await enqueue_accepted_note_file_delete(
             accepted_materialization_change(),
             tenant_id=tenant_id(),
-            payload_serializer=payload_as_dict,
             file_delete_enqueuer=FakeFileDeleteEnqueuer(),
         )

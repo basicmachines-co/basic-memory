@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from basic_memory.runtime import (
     ProjectId,
     RuntimeAcceptedNoteChange,
+    RuntimeAcceptedNoteResponse,
     RuntimeEntityId,
+    RuntimeNoteContentResponsePayload,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
@@ -17,9 +18,8 @@ from basic_memory.runtime import (
     TenantId,
     plan_note_file_delete_job_request,
     plan_note_materialization_job_request,
+    runtime_note_content_payload_as_dict,
 )
-
-type AcceptedNotePayloadSerializer[PayloadT] = Callable[[PayloadT], dict[str, object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +27,7 @@ class AcceptedNoteEnqueueResult:
     """Immediate response state after accepted-note follow-up enqueueing."""
 
     status_code: int
-    payload: dict[str, object]
+    payload: RuntimeNoteContentResponsePayload
 
 
 class AcceptedNoteMaterializationEnqueuer(Protocol):
@@ -57,16 +57,14 @@ class AcceptedNoteMaterializationFailureMarker(Protocol):
     ) -> None: ...
 
 
-async def enqueue_accepted_note_materialization[PayloadT](
-    accepted: RuntimeAcceptedNoteChange[PayloadT],
+async def enqueue_accepted_note_materialization(
+    accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
     tenant_id: TenantId,
-    payload_serializer: AcceptedNotePayloadSerializer[PayloadT],
     materialization_enqueuer: AcceptedNoteMaterializationEnqueuer,
     failure_marker: AcceptedNoteMaterializationFailureMarker,
 ) -> AcceptedNoteEnqueueResult:
     """Queue materialization for an already-committed accepted note write."""
-    payload = payload_serializer(accepted.payload)
     materialization = require_accepted_note_materialization(accepted)
 
     try:
@@ -76,7 +74,10 @@ async def enqueue_accepted_note_materialization[PayloadT](
                 materialization=materialization,
             )
         )
-        return AcceptedNoteEnqueueResult(status_code=accepted.status_code, payload=payload)
+        return AcceptedNoteEnqueueResult(
+            status_code=accepted.status_code,
+            payload=accepted.payload,
+        )
     except Exception as exc:
         await mark_failed_materialization_enqueue(
             failure_marker,
@@ -85,15 +86,17 @@ async def enqueue_accepted_note_materialization[PayloadT](
         )
         return AcceptedNoteEnqueueResult(
             status_code=accepted.status_code,
-            payload=note_materialization_enqueue_failed_payload(payload, error=exc),
+            payload=note_materialization_enqueue_failed_payload(
+                accepted.payload,
+                error=exc,
+            ),
         )
 
 
-async def enqueue_accepted_note_write_jobs[PayloadT](
-    accepted: RuntimeAcceptedNoteChange[PayloadT],
+async def enqueue_accepted_note_write_jobs(
+    accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
     tenant_id: TenantId,
-    payload_serializer: AcceptedNotePayloadSerializer[PayloadT],
     materialization_enqueuer: AcceptedNoteMaterializationEnqueuer,
     failure_marker: AcceptedNoteMaterializationFailureMarker,
     file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
@@ -102,7 +105,6 @@ async def enqueue_accepted_note_write_jobs[PayloadT](
     result = await enqueue_accepted_note_materialization(
         accepted,
         tenant_id=tenant_id,
-        payload_serializer=payload_serializer,
         materialization_enqueuer=materialization_enqueuer,
         failure_marker=failure_marker,
     )
@@ -118,17 +120,16 @@ async def enqueue_accepted_note_write_jobs[PayloadT](
     )
 
 
-async def enqueue_accepted_note_file_delete[PayloadT](
-    accepted: RuntimeAcceptedNoteChange[PayloadT],
+async def enqueue_accepted_note_file_delete(
+    accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
     tenant_id: TenantId,
-    payload_serializer: AcceptedNotePayloadSerializer[PayloadT],
     file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
 ) -> AcceptedNoteEnqueueResult:
     """Queue file cleanup for an already-committed accepted note delete."""
     return await enqueue_accepted_note_file_delete_request(
         status_code=accepted.status_code,
-        payload=payload_serializer(accepted.payload),
+        payload=accepted.payload,
         tenant_id=tenant_id,
         file_delete=require_accepted_note_file_delete(accepted),
         file_delete_enqueuer=file_delete_enqueuer,
@@ -138,7 +139,7 @@ async def enqueue_accepted_note_file_delete[PayloadT](
 async def enqueue_accepted_note_file_delete_request(
     *,
     status_code: int,
-    payload: dict[str, object],
+    payload: RuntimeNoteContentResponsePayload,
     tenant_id: TenantId,
     file_delete: RuntimePendingNoteFileDelete,
     file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
@@ -179,8 +180,8 @@ async def mark_failed_materialization_enqueue(
         ) from error
 
 
-def require_accepted_note_materialization[PayloadT](
-    accepted: RuntimeAcceptedNoteChange[PayloadT],
+def require_accepted_note_materialization(
+    accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
 ) -> RuntimePendingNoteMaterialization:
     """Return accepted materialization work or fail for the wrong operation shape."""
     if accepted.materialization is None:
@@ -188,8 +189,8 @@ def require_accepted_note_materialization[PayloadT](
     return accepted.materialization
 
 
-def require_accepted_note_file_delete[PayloadT](
-    accepted: RuntimeAcceptedNoteChange[PayloadT],
+def require_accepted_note_file_delete(
+    accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
 ) -> RuntimePendingNoteFileDelete:
     """Return accepted file cleanup work or fail for the wrong operation shape."""
     if accepted.file_delete is None:
@@ -198,24 +199,31 @@ def require_accepted_note_file_delete[PayloadT](
 
 
 def note_materialization_enqueue_failed_payload(
-    payload: dict[str, object],
+    payload: RuntimeNoteContentResponsePayload,
     *,
     error: Exception,
-) -> dict[str, object]:
-    """Return the accepted-note payload state after materialization enqueue failure."""
-    failed_payload = dict(payload)
+) -> RuntimeNoteContentResponsePayload:
+    """Return accepted-note response state after materialization enqueue failure."""
+    if isinstance(payload, RuntimeAcceptedNoteResponse):
+        return replace(
+            payload,
+            file_write_status="failed",
+            last_materialization_error=str(error),
+        )
+
+    failed_payload = runtime_note_content_payload_as_dict(payload)
     failed_payload["file_write_status"] = "failed"
     failed_payload["last_materialization_error"] = str(error)
     return failed_payload
 
 
 def note_file_delete_enqueue_failed_payload(
-    payload: dict[str, object],
+    payload: RuntimeNoteContentResponsePayload,
     *,
     error: Exception,
-) -> dict[str, object]:
-    """Return the accepted-note payload state after file-delete enqueue failure."""
-    failed_payload = dict(payload)
+) -> RuntimeNoteContentResponsePayload:
+    """Return accepted-note response state after file-delete enqueue failure."""
+    failed_payload = runtime_note_content_payload_as_dict(payload)
     failed_payload["file_delete_status"] = "failed"
     failed_payload["error"] = str(error)
     return failed_payload
