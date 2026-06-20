@@ -750,3 +750,9 @@ class IndexFileWriter(Protocol):
     async def write_frontmatter(
         self, update: IndexFrontmatterUpdate
     ) -> IndexFrontmatterWriteResult: ...
+
+
+class IndexEntitySearchWriter(Protocol):
+    """Narrow protocol for search writes during indexing."""
+
+    async def index_entity_data(self, entity: Entity, content: str | None = None) -> None: ...

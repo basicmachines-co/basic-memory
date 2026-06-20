@@ -19,6 +19,7 @@ from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import compute_checksum, has_frontmatter, remove_frontmatter
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.indexing.models import (
+    IndexEntitySearchWriter,
     IndexedEntity,
     IndexFileWriter,
     IndexFrontmatterUpdate,
@@ -28,7 +29,6 @@ from basic_memory.indexing.models import (
 from basic_memory.models import Entity, Relation
 from basic_memory.services import EntityService
 from basic_memory.services.exceptions import SyncFatalError
-from basic_memory.services.search_service import SearchService
 from basic_memory.repository import EntityRepository, RelationRepository
 
 T = TypeVar("T")
@@ -70,7 +70,7 @@ class BatchIndexer:
         entity_service: EntityService,
         entity_repository: EntityRepository,
         relation_repository: RelationRepository,
-        search_service: SearchService,
+        search_service: IndexEntitySearchWriter,
         file_writer: IndexFileWriter,
         session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
