@@ -6,6 +6,12 @@ from basic_memory.index.filesystem import (
     local_storage_event_inputs_from_watchfiles_changes,
     local_storage_events_from_watchfiles_changes,
 )
+from basic_memory.index.inline_operations import (
+    InlineStorageEventIndexRuntime,
+    InlineStorageEventOperationProcessor,
+    InlineStorageEventResultRecorder,
+    NoopInlineStorageEventResultRecorder,
+)
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
@@ -15,6 +21,10 @@ from basic_memory.index.storage_events import (
 
 __all__ = [
     "LOCAL_FILESYSTEM_BUCKET_NAME",
+    "InlineStorageEventIndexRuntime",
+    "InlineStorageEventOperationProcessor",
+    "InlineStorageEventResultRecorder",
+    "NoopInlineStorageEventResultRecorder",
     "StorageEventIndexRuntime",
     "StorageEventOperationProcessorFactory",
     "StorageEventProjectResolver",
