@@ -18,7 +18,12 @@ from basic_memory.runtime import (
     ProjectRuntimeReference,
     ProjectRuntimeSource,
     RuntimeQueuedWorkflowMetadata,
+    RuntimeJobId,
+    RuntimeWorkflowAttemptTransportMetadata,
     RuntimeWorkflowBroker,
+    RuntimeWorkflowMetadataPatch,
+    RuntimeWorkflowPhase,
+    RuntimeWorkflowProgress,
     RuntimeWorkflowTransport,
     StorageKey,
     TenantId,
@@ -35,6 +40,15 @@ class ImportDataWorkflowQueued:
 
     metadata: dict[str, object]
     queued_event_data: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportDataWorkflowStart:
+    """Portable running metadata for a claimed import workflow attempt."""
+
+    phase: RuntimeWorkflowPhase
+    progress: RuntimeWorkflowProgress
+    metadata_patch: RuntimeWorkflowMetadataPatch
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,4 +265,21 @@ def build_import_data_workflow_queued(
             "import_type": payload.import_type,
             **payload.project_reference().workflow_metadata(),
         },
+    )
+
+
+def build_import_data_workflow_start(
+    *,
+    payload: ImportDataPayload,
+    pgq_job_id: RuntimeJobId | None,
+    transport_entrypoint: JobEntrypoint,
+) -> ImportDataWorkflowStart:
+    """Build running workflow metadata for a claimed import worker job."""
+    return ImportDataWorkflowStart(
+        phase="running",
+        progress=f"importing {payload.import_type}",
+        metadata_patch=RuntimeWorkflowAttemptTransportMetadata.pgq(
+            entrypoint=transport_entrypoint,
+            pgq_job_id=pgq_job_id,
+        ).metadata_patch(),
     )

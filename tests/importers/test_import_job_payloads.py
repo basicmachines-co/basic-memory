@@ -132,6 +132,41 @@ def test_import_data_workflow_queued_preserves_cloud_workflow_shapes() -> None:
     )
 
 
+def test_import_data_workflow_start_preserves_cloud_attempt_shapes() -> None:
+    payload = ImportDataPayload(
+        tenant_id=uuid4(),
+        import_type="memory-json",
+        s3_input_key="tenants/test/jobs/import/input.json",
+        destination_folder="imports",
+        project_id=101,
+        project_name="Main",
+        project_permalink="main",
+        project_external_id="project-ext",
+        project_path="main",
+        workflow_id=uuid4(),
+    )
+
+    workflow_start = import_job_payloads.build_import_data_workflow_start(
+        payload=payload,
+        pgq_job_id="job-11",
+        transport_entrypoint="import_data",
+    )
+
+    assert workflow_start.phase == "running"
+    assert workflow_start.progress == "importing memory-json"
+    assert workflow_start.metadata_patch == {
+        "transport": {
+            "broker": "pgq",
+            "entrypoint": "import_data",
+            "pgq_job_id": "job-11",
+            "state": "running",
+        },
+    }
+    assert importers_module.build_import_data_workflow_start is (
+        import_job_payloads.build_import_data_workflow_start
+    )
+
+
 def test_import_data_payload_rejects_unknown_import_kind() -> None:
     with pytest.raises(ValidationError):
         ImportDataPayload.model_validate(
