@@ -104,9 +104,18 @@ fast-check:
     just typecheck
     just testmon
 
+# Fast local loop with live OpenAI-backed checks disabled.
+fast-check-no-openai:
+    OPENAI_API_KEY= just fast-check
+
 # ==============================================================================
 # Runtime / Event Indexing Refactor
 # ==============================================================================
+
+# Focused project-wide indexing orchestration surface tests.
+project-index-contract-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_project_index_surface.py
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:
@@ -120,6 +129,9 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
         tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_when_opted_in
 
+# Focused indexing contract suite for the cloud/core extraction loop.
+index-contract-test: project-index-contract-test event-index-contract-test
+
 # Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
 runtime-refactor-contract-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -130,7 +142,7 @@ runtime-refactor-contract-test:
         tests/runtime/test_deleted_note_response.py \
         tests/runtime/test_pending_note_materialization.py \
         tests/runtime/test_note_content_read_planning.py
-    just event-index-contract-test
+    just index-contract-test
 
 # Reset Postgres test database (drops and recreates schema)
 # Useful when Alembic migration state gets out of sync during development
