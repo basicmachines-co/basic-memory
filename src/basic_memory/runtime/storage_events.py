@@ -15,6 +15,7 @@ from basic_memory.runtime.contracts import (
     StorageKey,
     StorageObjectIdentity,
     StorageObjectVersion,
+    group_storage_events_by_bucket,
     plan_runtime_storage_event_operations,
 )
 
@@ -65,6 +66,22 @@ def storage_event_payload_from_input(event: StorageEventInput) -> StorageEventPa
             size=event.size,
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStorageEventSource:
+    """Normalized storage events grouped for runtime processing."""
+
+    events: tuple[StorageEventPayload, ...]
+
+    @classmethod
+    def from_inputs(cls, events: Iterable[StorageEventInput]) -> "RuntimeStorageEventSource":
+        """Build a source from validated ingress event fields."""
+        return cls(tuple(storage_event_payload_from_input(event) for event in events))
+
+    def events_by_bucket(self) -> dict[StorageBucketName, tuple[StorageEventPayload, ...]]:
+        """Return events grouped by bucket in arrival order."""
+        return group_storage_events_by_bucket(self.events)
 
 
 async def run_runtime_storage_event_operations(

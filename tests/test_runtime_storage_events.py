@@ -4,6 +4,7 @@ import pytest
 
 from basic_memory.runtime import (
     RuntimeStorageEventOperation,
+    RuntimeStorageEventSource,
     StorageEventInput,
     StorageEventPayload,
     StorageObjectIdentity,
@@ -65,6 +66,43 @@ def test_storage_event_payload_from_input_builds_runtime_payload() -> None:
     assert payload.relative_path == "notes/a.md"
     assert payload.etag == '"etag-a"'
     assert payload.size == 42
+
+
+def test_runtime_storage_event_source_groups_inputs_by_bucket() -> None:
+    source = RuntimeStorageEventSource.from_inputs(
+        (
+            StorageEventInput(
+                event_name="OBJECT_CREATED_PUT",
+                event_time="2026-06-19T10:15:00Z",
+                bucket_name="alpha",
+                object_key="main/a.md",
+                etag="a",
+                size=1,
+            ),
+            StorageEventInput(
+                event_name="OBJECT_CREATED_POST",
+                event_time="2026-06-19T10:16:00Z",
+                bucket_name="beta",
+                object_key="main/b.md",
+                etag="b",
+                size=2,
+            ),
+            StorageEventInput(
+                event_name="OBJECT_DELETED",
+                event_time="2026-06-19T10:17:00Z",
+                bucket_name="alpha",
+                object_key="main/c.md",
+                etag="c",
+                size=3,
+            ),
+        )
+    )
+
+    grouped = source.events_by_bucket()
+
+    assert list(grouped) == ["alpha", "beta"]
+    assert [event.object_key for event in grouped["alpha"]] == ["main/a.md", "main/c.md"]
+    assert grouped["beta"][0].etag == "b"
 
 
 class RecordingStorageEventProcessor:

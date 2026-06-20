@@ -263,6 +263,7 @@ from basic_memory.runtime.storage_project_resolution import (
 )
 from basic_memory.runtime.storage_events import (
     RuntimeStorageEventOperationProcessor,
+    RuntimeStorageEventSource,
     StorageEventInput,
     run_runtime_storage_event_operations,
     storage_event_payload_from_input,
@@ -408,6 +409,7 @@ __all__ = [
     "RuntimeStorageEventProjectBatch",
     "RuntimeStorageEventRoutingPlan",
     "RuntimeStorageEventSkipReason",
+    "RuntimeStorageEventSource",
     "RuntimeSerializedJobPayload",
     "RuntimeWorkflowBroker",
     "RuntimeWorkflowAttemptMetadata",
