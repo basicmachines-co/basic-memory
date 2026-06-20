@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 from uuid import UUID
+
+from sqlalchemy.engine import Row
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index import (
     InlineProjectIndexBatchEnqueuer,
     LocalProjectIndexObservedFileSource,
+    LocalProjectIndexFileRunner,
+    LocalProjectIndexRuntimeFactory,
     LocalProjectIndexRuntime,
     NoopProjectIndexFanoutFailureRecorder,
     NoopProjectIndexWorkflowStarter,
@@ -20,10 +27,15 @@ from basic_memory.index import (
 from basic_memory.indexing import (
     IndexFileJobResult,
     IndexFileJobStatus,
+    IndexFileObjectMetadata,
     IndexFileRuntimeRequest,
+    FileIndexOperation,
+    FileIndexResult,
     OrphanEntityCleanupResult,
     ProjectIndexWorkflowRequest,
+    SyncedMarkdownFile,
 )
+from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
@@ -279,3 +291,154 @@ async def test_inline_project_index_batch_enqueuer_runs_each_file_request() -> N
         RuntimeStorageObjectObservation(etag="etag-a", size=11),
         RuntimeStorageObjectObservation(etag="etag-b", size=12),
     ]
+
+
+class NeverCalledChecker:
+    async def detect(self, targets):
+        raise AssertionError("current-file request should not call observed metadata checker")
+
+
+class EmptyMaterializedNoteSource:
+    async def load_current_materialized_note_entity(self, file_path: str):
+        return None
+
+
+@dataclass(slots=True)
+class StaticMetadataSource:
+    checksum: str
+
+    async def load_current_file_metadata(self, file_path: str) -> IndexFileObjectMetadata | None:
+        return IndexFileObjectMetadata(checksum=self.checksum)
+
+
+@dataclass(slots=True)
+class RecordingMarkdownFileIndexer:
+    indexed_paths: list[str] = field(default_factory=list)
+
+    async def index_markdown_file(self, file_path: str, *, source: str) -> FileIndexResult:
+        self.indexed_paths.append(file_path)
+        return FileIndexResult.from_fields(
+            file_path=file_path,
+            entity_id=99,
+            external_id="note-99",
+            title="Note 99",
+            permalink="notes/note-99",
+            checksum="indexed-checksum",
+            operation=FileIndexOperation.updated,
+        )
+
+
+async def test_local_project_index_file_runner_runs_core_index_file() -> None:
+    """Concrete local file runner uses the core per-file index runner."""
+    file_indexer = RecordingMarkdownFileIndexer()
+    runner = LocalProjectIndexFileRunner(
+        checker=NeverCalledChecker(),
+        metadata_source=StaticMetadataSource("current-checksum"),
+        materialized_note_source=EmptyMaterializedNoteSource(),
+        file_indexer=file_indexer,
+    )
+
+    result = await runner.run_index_file_request(
+        IndexFileRuntimeRequest(
+            tenant_id=TENANT_ID,
+            project_id=12,
+            project_external_id="project-12",
+            project_name="Local",
+            project_path="local-project",
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.current_file,
+            object_observation=None,
+            index_embeddings=False,
+            workflow_id=WORKFLOW_ID,
+        )
+    )
+
+    assert result.status == IndexFileJobStatus.processed
+    assert result.entity_id == 99
+    assert file_indexer.indexed_paths == ["notes/a.md"]
+
+
+class RuntimeFactoryEntityRepository:
+    async def get_all_file_paths(self, session: AsyncSession) -> Sequence[str]:
+        return ()
+
+    async def get_by_file_path(
+        self,
+        session: AsyncSession,
+        file_path: Path | str,
+        *,
+        load_relations: bool = True,
+    ) -> Entity | None:
+        return None
+
+    async def get_by_file_paths(
+        self,
+        session: AsyncSession,
+        file_paths: Sequence[Path | str],
+    ) -> Sequence[Row[Any]]:
+        return ()
+
+    async def delete_by_fields(
+        self,
+        session: AsyncSession,
+        **filters: object,
+    ) -> bool:
+        return False
+
+
+class RuntimeFactorySearchIndex:
+    async def handle_delete(self, entity: Entity) -> None:
+        return None
+
+
+@dataclass(slots=True)
+class RuntimeFactorySyncService:
+    file_service: FileService
+    session_maker: async_sessionmaker[AsyncSession] = field(default_factory=async_sessionmaker)
+    entity_repository: RuntimeFactoryEntityRepository = field(
+        default_factory=RuntimeFactoryEntityRepository
+    )
+    search_service: RuntimeFactorySearchIndex = field(default_factory=RuntimeFactorySearchIndex)
+
+    async def sync_one_markdown_file(
+        self,
+        path: str,
+        *,
+        new: bool = False,
+        index_search: bool = True,
+        resolve_relations: bool = True,
+        refresh_unchanged_derived_state: bool = False,
+    ) -> SyncedMarkdownFile:
+        raise AssertionError("runtime factory composition should not index files")
+
+
+async def test_local_project_index_runtime_factory_composes_inline_runtime(
+    tmp_path: Path,
+) -> None:
+    """Local project indexing can be wired from sync-service-like dependencies."""
+    sync_service = RuntimeFactorySyncService(file_service=FileService(tmp_path))
+    seen_projects: list[Project] = []
+
+    async def sync_service_factory(project: Project) -> RuntimeFactorySyncService:
+        seen_projects.append(project)
+        return sync_service
+
+    factory = LocalProjectIndexRuntimeFactory(
+        sync_service_factory=sync_service_factory,
+        batch_size=3,
+    )
+    project = Project(
+        id=12,
+        external_id="project-12",
+        name="Local",
+        permalink="local",
+        path="local-project",
+    )
+
+    runtime = await factory.runtime_for_project(project)
+
+    assert seen_projects == [project]
+    assert isinstance(runtime.observed_file_source, LocalProjectIndexObservedFileSource)
+    assert isinstance(runtime.batch_enqueuer, InlineProjectIndexBatchEnqueuer)
+    assert isinstance(runtime.batch_enqueuer.file_runner, LocalProjectIndexFileRunner)
+    assert runtime.batch_size == 3

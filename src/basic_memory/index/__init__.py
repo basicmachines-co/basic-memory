@@ -30,7 +30,9 @@ from basic_memory.index.local_watch import (
 )
 from basic_memory.index.local_project import (
     InlineProjectIndexBatchEnqueuer,
+    LocalProjectIndexFileRunner,
     LocalProjectIndexObservedFileSource,
+    LocalProjectIndexRuntimeFactory,
     LocalProjectIndexRuntime,
     NoopProjectIndexFanoutFailureRecorder,
     NoopProjectIndexWorkflowStarter,
@@ -72,7 +74,9 @@ __all__ = [
     "InlineStorageEventResultRecorder",
     "InlineProjectIndexBatchEnqueuer",
     "NoopInlineStorageEventResultRecorder",
+    "LocalProjectIndexFileRunner",
     "LocalProjectIndexObservedFileSource",
+    "LocalProjectIndexRuntimeFactory",
     "LocalProjectIndexRuntime",
     "LocalWatchEventIndexRequest",
     "LocalWatchEventIndexRuntimeFactory",
