@@ -11,6 +11,7 @@ from watchfiles import Change
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.index import StorageEventIndexRuntime
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.models.project import Project
 from basic_memory.runtime import (
     ProjectRuntimeReference,
@@ -263,7 +264,7 @@ async def test_handle_changes_can_route_through_event_index_runtime(
             return OperationProcessor()
 
     class EventIndexRuntimeFactory:
-        def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
+        async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
             assert project == test_project
             return StorageEventIndexRuntime(
                 project_resolver=ProjectResolver(),
@@ -281,6 +282,92 @@ async def test_handle_changes_can_route_through_event_index_runtime(
     await watch_service.handle_changes(test_project, {(Change.added, str(file_path))})
 
     assert processor_calls == [("index", "event-index.md")]
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_indexes_markdown_file(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    sync_service,
+    entity_repository,
+):
+    """The concrete local event-index runtime can index watcher-created markdown files."""
+
+    file_path = project_config.home / "local-event-index.md"
+    await create_test_file(file_path, "# Local Event Index\n\nIndexed from watcher event.\n")
+
+    async def sync_service_factory(project: Project):
+        assert project == test_project
+        return sync_service
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        sync_service_factory=sync_service_factory,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(
+            sync_service_factory=sync_service_factory,
+        ),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.added, str(file_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "local-event-index.md")
+    assert entity is not None
+    assert entity.title == "local-event-index"
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    sync_service,
+    entity_repository,
+):
+    """The concrete local event-index runtime reconciles watcher delete events."""
+
+    file_path = project_config.home / "local-event-delete.md"
+    await create_test_file(file_path, "# Local Event Delete\n\nDelete me.\n")
+    await sync_service.sync(project_config.home)
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(session, "local-event-delete.md")
+    assert before is not None
+
+    file_path.unlink()
+
+    async def sync_service_factory(project: Project):
+        assert project == test_project
+        return sync_service
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        sync_service_factory=sync_service_factory,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(
+            sync_service_factory=sync_service_factory,
+        ),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.deleted, str(file_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        after = await entity_repository.get_by_file_path(session, "local-event-delete.md")
+    assert after is None
     assert watch_service.state.synced_files == 1
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"

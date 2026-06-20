@@ -104,6 +104,33 @@ fast-check:
     just typecheck
     just testmon
 
+# ==============================================================================
+# Runtime / Event Indexing Refactor
+# ==============================================================================
+
+# Focused event-based indexing contract tests for the cloud/core extraction loop.
+event-index-contract-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/test_runtime_storage_events.py \
+        tests/index/test_filesystem_events.py \
+        tests/index/test_inline_storage_event_processor.py \
+        tests/index/test_storage_event_orchestration.py \
+        tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file
+
+# Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
+runtime-refactor-contract-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_accepted_note_write_runner.py \
+        tests/indexing/test_accepted_note_enqueue_runner.py \
+        tests/indexing/test_note_content_read_repair_runner.py \
+        tests/runtime/test_accepted_note_response_planning.py \
+        tests/runtime/test_deleted_note_response.py \
+        tests/runtime/test_pending_note_materialization.py \
+        tests/runtime/test_note_content_read_planning.py
+    just event-index-contract-test
+
 # Reset Postgres test database (drops and recreates schema)
 # Useful when Alembic migration state gets out of sync during development
 # Uses credentials from docker-compose-postgres.yml

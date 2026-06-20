@@ -100,7 +100,7 @@ SyncServiceFactory = Callable[[Project], Awaitable["SyncService"]]
 class WatchEventIndexRuntimeFactory(Protocol):
     """Build event-index runtime dependencies for one watched project."""
 
-    def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime: ...
+    async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime: ...
 
 
 class WatchService:
@@ -671,7 +671,7 @@ class WatchService:
         )
         result = await run_storage_event_indexing(
             events,
-            self._event_index_runtime_factory.runtime_for_project(project),
+            await self._event_index_runtime_factory.runtime_for_project(project),
         )
 
         self.state.last_scan = datetime.now()
