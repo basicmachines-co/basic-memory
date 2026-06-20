@@ -1,14 +1,19 @@
 """Tests for portable forward-reference resolution planning."""
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import FrozenInstanceError, dataclass
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import basic_memory.indexing.forward_reference_resolution as forward_resolution_module
 from basic_memory.indexing.forward_reference_resolution import (
     ForwardReferenceResolutionPlan,
     ForwardReferenceResolutionRun,
     ForwardReferenceUpdate,
+    RepositoryForwardReferenceResolutionRuntime,
     collect_forward_reference_link_texts,
     plan_forward_reference_resolution,
     run_forward_reference_resolution,
@@ -40,6 +45,16 @@ class RecordingForwardReferenceRuntime:
         updates: Sequence[ForwardReferenceUpdate],
     ) -> None:
         self.applied_updates = tuple(updates)
+
+
+class FakeForwardReferenceSession:
+    """Record relation update statements issued by the repository runtime."""
+
+    def __init__(self) -> None:
+        self.statements: list[object] = []
+
+    async def execute(self, statement: object) -> None:
+        self.statements.append(statement)
 
 
 def test_collect_forward_reference_link_texts_dedupes_in_first_seen_order() -> None:
@@ -154,6 +169,96 @@ async def test_run_forward_reference_resolution_skips_apply_without_updates() ->
     assert result.entity_ids_to_refresh == frozenset()
     assert runtime.resolve_calls == [("Missing",)]
     assert runtime.applied_updates == ()
+
+
+@pytest.mark.asyncio
+async def test_repository_forward_reference_runtime_uses_link_resolver() -> None:
+    calls: list[tuple[str, ...]] = []
+
+    async def resolve_link_texts(link_texts: Sequence[str]) -> dict[str, int | None]:
+        calls.append(tuple(link_texts))
+        return {"Target": 20, "Missing": None}
+
+    runtime = RepositoryForwardReferenceResolutionRuntime(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        resolve_link_texts=resolve_link_texts,
+    )
+
+    result = await runtime.resolve_forward_reference_link_texts(("Target", "Missing"))
+
+    assert result == {"Target": 20, "Missing": None}
+    assert calls == [("Target", "Missing")]
+
+
+@pytest.mark.asyncio
+async def test_repository_forward_reference_runtime_applies_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeForwardReferenceSession()
+
+    async def resolve_link_texts(_link_texts: Sequence[str]) -> dict[str, int | None]:
+        return {}
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeForwardReferenceSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(forward_resolution_module.db, "scoped_session", fake_scoped_session)
+
+    runtime = RepositoryForwardReferenceResolutionRuntime(
+        session_maker=session_maker,
+        resolve_link_texts=resolve_link_texts,
+    )
+
+    await runtime.apply_forward_reference_updates(
+        (
+            ForwardReferenceUpdate(
+                relation_id=1,
+                source_entity_id=10,
+                target_entity_id=20,
+                link_text="Target",
+            ),
+            ForwardReferenceUpdate(
+                relation_id=2,
+                source_entity_id=11,
+                target_entity_id=21,
+                link_text="Other",
+            ),
+        )
+    )
+
+    assert len(session.statements) == 1
+    statement_text = str(session.statements[0])
+    assert "UPDATE relation" in statement_text
+    assert "relation.id IN" in statement_text
+
+
+@pytest.mark.asyncio
+async def test_repository_forward_reference_runtime_skips_empty_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def resolve_link_texts(_link_texts: Sequence[str]) -> dict[str, int | None]:
+        return {}
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        _scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeForwardReferenceSession]:
+        raise AssertionError("empty updates should not open a session")
+        yield FakeForwardReferenceSession()
+
+    monkeypatch.setattr(forward_resolution_module.db, "scoped_session", fake_scoped_session)
+
+    runtime = RepositoryForwardReferenceResolutionRuntime(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        resolve_link_texts=resolve_link_texts,
+    )
+
+    await runtime.apply_forward_reference_updates(())
 
 
 @pytest.mark.asyncio

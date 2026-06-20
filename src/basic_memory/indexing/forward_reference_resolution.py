@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from sqlalchemy import case, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 from basic_memory.indexing.link_resolution import LinkText
+from basic_memory.models import Relation
 
 type ForwardReferenceEntityId = int
 type ForwardReferenceRelationId = int
+type ForwardReferenceLinkTextResolver = Callable[
+    [Sequence[LinkText]],
+    Awaitable[Mapping[LinkText, ForwardReferenceEntityId | None]],
+]
 
 
 class UnresolvedForwardReference(Protocol):
@@ -77,6 +86,40 @@ class ForwardReferenceResolutionRuntime(Protocol):
         updates: Sequence[ForwardReferenceUpdate],
     ) -> None:
         """Persist exact relation target updates."""
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryForwardReferenceResolutionRuntime:
+    """Resolve link text and persist exact relation targets with explicit sessions."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    resolve_link_texts: ForwardReferenceLinkTextResolver
+
+    async def resolve_forward_reference_link_texts(
+        self,
+        link_texts: Sequence[LinkText],
+    ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
+        return await self.resolve_link_texts(link_texts)
+
+    async def apply_forward_reference_updates(
+        self,
+        updates: Sequence[ForwardReferenceUpdate],
+    ) -> None:
+        if not updates:
+            return
+
+        relation_ids = [update.relation_id for update in updates]
+        target_entity_ids_by_relation_id = {
+            update.relation_id: update.target_entity_id for update in updates
+        }
+
+        async with db.scoped_session(self.session_maker) as session:
+            stmt = (
+                update(Relation)
+                .where(Relation.id.in_(relation_ids))
+                .values(to_id=case(target_entity_ids_by_relation_id, value=Relation.id))
+            )
+            await session.execute(stmt)
 
 
 @dataclass(frozen=True, slots=True)
