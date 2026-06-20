@@ -1,5 +1,6 @@
 """Tests for portable indexing worker payload boundaries."""
 
+from datetime import timedelta
 from uuid import UUID
 
 from basic_memory import indexing as indexing_module
@@ -125,6 +126,38 @@ def test_index_file_runtime_request_exposes_queue_identity() -> None:
     }
 
 
+def test_index_file_job_payload_builds_runtime_queue_request() -> None:
+    """Index-file payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    payload = IndexFileJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_name="Main",
+        project_path="main",
+        file_path="notes/a.md",
+        object_metadata=IndexFileObjectMetadataPayload(etag='"etag-1"', size=12),
+        workflow_id=workflow_id,
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="index_file",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=(
+            "index-file:11111111-1111-1111-1111-111111111111:101:notes/a.md:observed:etag-1:12"
+        ),
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+            "workflow_id": str(workflow_id),
+        },
+    )
+
+
 def test_index_file_batch_job_payload_round_trips_runtime_request() -> None:
     """File-batch jobs validate observed storage metadata at the worker boundary."""
     tenant_id = UUID("11111111-1111-1111-1111-111111111111")
@@ -190,6 +223,43 @@ def test_index_file_batch_job_payload_uses_file_paths_for_legacy_targets() -> No
     assert payload.target_paths() == ["notes/a.md", "notes/b.md"]
 
 
+def test_index_file_batch_job_payload_builds_runtime_queue_request() -> None:
+    """File-batch payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    payload = IndexFileBatchJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_path="main",
+        file_paths=["notes/a.md"],
+        observed_files=[ObservedIndexFilePayload(path="notes/a.md", checksum="etag-a", size=123)],
+        batch_index=2,
+        batch_count=5,
+        workflow_id=workflow_id,
+        index_embeddings=False,
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="index_file_batch",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=(
+            "index-file-batch:11111111-1111-1111-1111-111111111111:"
+            "101:22222222-2222-2222-2222-222222222222:2"
+        ),
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+            "project_external_id": "project-main",
+            "project_path": "main",
+            "workflow_id": str(workflow_id),
+        },
+    )
+
+
 def test_project_index_job_payload_round_trips_runtime_request() -> None:
     """Project-index jobs validate coordinator runtime requests at the worker boundary."""
     tenant_id = UUID("11111111-1111-1111-1111-111111111111")
@@ -227,9 +297,15 @@ def test_project_index_job_payload_round_trips_runtime_request() -> None:
     assert payload.to_runtime_request() == runtime_request
 
 
-def test_project_index_entrypoint_exports_cloud_queue_name() -> None:
-    """The portable indexing contract owns the project-index queue name."""
+def test_indexing_entrypoints_export_cloud_queue_names() -> None:
+    """The portable indexing contract owns cloud indexing queue names."""
+    assert indexing_module.INDEX_FILE_ENTRYPOINT == "index_file"
+    assert indexing_module.INDEX_FILE_BATCH_ENTRYPOINT == "index_file_batch"
     assert indexing_module.INDEX_PROJECT_ENTRYPOINT == "index_project"
+    assert indexing_module.DELETE_PROJECT_ENTRYPOINT == "delete_project"
+    assert indexing_module.INDEX_EMBEDDINGS_ENTRYPOINT == "index_embeddings"
+    assert indexing_module.INDEX_EMBEDDINGS_BATCH_ENTRYPOINT == "index_embeddings_batch"
+    assert indexing_module.RESOLVE_RELATIONS_ENTRYPOINT == "resolve_relations"
 
 
 def test_project_index_job_payload_builds_runtime_queue_request() -> None:
@@ -293,6 +369,32 @@ def test_project_delete_job_payload_round_trips_runtime_request() -> None:
     assert payload.to_runtime_request() == runtime_request
 
 
+def test_project_delete_job_payload_builds_runtime_queue_request() -> None:
+    """Project-delete payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    payload = ProjectDeleteJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_name="Main",
+        project_path="main",
+        delete_notes=False,
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="delete_project",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key="delete-project:11111111-1111-1111-1111-111111111111:101",
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+        },
+    )
+
+
 def test_resolve_relations_job_payload_round_trips_runtime_request() -> None:
     """Relation-resolution jobs validate the core runtime request at the worker boundary."""
     tenant_id = UUID("11111111-1111-1111-1111-111111111111")
@@ -310,6 +412,30 @@ def test_resolve_relations_job_payload_round_trips_runtime_request() -> None:
         project_path="main",
     )
     assert payload.to_runtime_request() == runtime_request
+
+
+def test_resolve_relations_job_payload_builds_runtime_queue_request() -> None:
+    """Relation-resolution payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    payload = ResolveRelationsJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_path="main",
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="resolve_relations",
+        payload=payload.model_dump_json().encode("utf-8"),
+        execute_after=timedelta(seconds=10),
+        dedupe_key="resolve-relations:11111111-1111-1111-1111-111111111111:101",
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+        },
+    )
 
 
 def test_embedding_index_job_payload_round_trips_runtime_request() -> None:
@@ -331,6 +457,30 @@ def test_embedding_index_job_payload_round_trips_runtime_request() -> None:
         entity_checksum="checksum-42",
     )
     assert payload.to_runtime_request() == runtime_request
+
+
+def test_embedding_index_job_payload_builds_runtime_queue_request() -> None:
+    """Single-entity embedding payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    payload = EmbeddingIndexJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        entity_id=42,
+        entity_checksum="checksum-42",
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="index_embeddings",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=("index-embeddings:11111111-1111-1111-1111-111111111111:101:42:checksum-42"),
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+        },
+    )
 
 
 def test_embedding_index_batch_job_payload_round_trips_runtime_request() -> None:
@@ -362,3 +512,34 @@ def test_embedding_index_batch_job_payload_round_trips_runtime_request() -> None
     )
     assert payload.targets() == list(runtime_request.entities)
     assert payload.to_runtime_request() == runtime_request
+
+
+def test_embedding_index_batch_job_payload_builds_runtime_queue_request() -> None:
+    """Embedding batch payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    payload = EmbeddingIndexBatchJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_path="main",
+        entities=[
+            EmbeddingIndexTargetPayload(entity_id=42, entity_checksum="checksum-42"),
+            EmbeddingIndexTargetPayload(entity_id=43, entity_checksum="checksum-43"),
+        ],
+        workflow_id=workflow_id,
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="index_embeddings_batch",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=payload.to_runtime_request().dedupe_key(),
+        headers={
+            "source": "test",
+            "tenant_id": str(tenant_id),
+            "project_id": "101",
+            "project_path": "main",
+            "workflow_id": str(workflow_id),
+        },
+    )

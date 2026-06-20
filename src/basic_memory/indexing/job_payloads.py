@@ -36,7 +36,13 @@ from basic_memory.runtime import (
     runtime_job_request_from_source,
 )
 
+INDEX_FILE_ENTRYPOINT: JobEntrypoint = "index_file"
+INDEX_FILE_BATCH_ENTRYPOINT: JobEntrypoint = "index_file_batch"
 INDEX_PROJECT_ENTRYPOINT: JobEntrypoint = "index_project"
+DELETE_PROJECT_ENTRYPOINT: JobEntrypoint = "delete_project"
+INDEX_EMBEDDINGS_ENTRYPOINT: JobEntrypoint = "index_embeddings"
+INDEX_EMBEDDINGS_BATCH_ENTRYPOINT: JobEntrypoint = "index_embeddings_batch"
+RESOLVE_RELATIONS_ENTRYPOINT: JobEntrypoint = "resolve_relations"
 
 
 class IndexFileObjectMetadataPayload(BaseModel):
@@ -133,6 +139,21 @@ class IndexFileJobPayload(BaseModel):
     ) -> IndexFileEmbeddingJobContext:
         return self.to_runtime_request().embedding_job_context(result)
 
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for file indexing."""
+        runtime_request = self.to_runtime_request()
+        runtime_request.storage_index_context().require_enqueue_context()
+        return runtime_job_request_from_source(
+            runtime_request,
+            entrypoint=INDEX_FILE_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
+        )
+
 
 class ObservedIndexFilePayload(BaseModel):
     """Serialized storage metadata for one file-index batch target."""
@@ -219,6 +240,19 @@ class IndexFileBatchJobPayload(BaseModel):
                 observed_file.to_runtime_observed_file() for observed_file in self.observed_files
             ),
             index_embeddings=self.index_embeddings,
+        )
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for file-batch indexing."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=INDEX_FILE_BATCH_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
         )
 
 
@@ -320,6 +354,19 @@ class ProjectDeleteJobPayload(BaseModel):
             delete_notes=self.delete_notes,
         )
 
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for project deletion."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=DELETE_PROJECT_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
+        )
+
 
 class EmbeddingIndexJobPayload(BaseModel):
     """Serialized worker payload for indexing one entity's embeddings."""
@@ -346,6 +393,19 @@ class EmbeddingIndexJobPayload(BaseModel):
             project_id=self.project_id,
             entity_id=self.entity_id,
             entity_checksum=self.entity_checksum,
+        )
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for embedding indexing."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=INDEX_EMBEDDINGS_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
         )
 
 
@@ -408,6 +468,19 @@ class EmbeddingIndexBatchJobPayload(BaseModel):
             workflow_id=self.workflow_id,
         )
 
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for embedding-batch indexing."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=INDEX_EMBEDDINGS_BATCH_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
+        )
+
 
 class ResolveRelationsJobPayload(BaseModel):
     """Serialized worker payload for resolving one project's relations."""
@@ -431,4 +504,19 @@ class ResolveRelationsJobPayload(BaseModel):
             tenant_id=self.tenant_id,
             project_id=self.project_id,
             project_path=self.project_path,
+        )
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for relation resolution."""
+        runtime_request = self.to_runtime_request()
+        return runtime_job_request_from_source(
+            runtime_request,
+            entrypoint=RESOLVE_RELATIONS_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
+            execute_after=runtime_request.execute_after,
         )
