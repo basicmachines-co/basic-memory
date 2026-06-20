@@ -8,19 +8,29 @@ from pathlib import Path
 from uuid import UUID
 
 from basic_memory.index import (
+    InlineProjectIndexBatchEnqueuer,
     LocalProjectIndexObservedFileSource,
     LocalProjectIndexRuntime,
     NoopProjectIndexFanoutFailureRecorder,
     NoopProjectIndexWorkflowStarter,
     local_project_index_file_paths,
+    project_index_file_requests_from_batch_request,
     run_local_project_index,
 )
-from basic_memory.indexing import OrphanEntityCleanupResult, ProjectIndexWorkflowRequest
+from basic_memory.indexing import (
+    IndexFileJobResult,
+    IndexFileJobStatus,
+    IndexFileRuntimeRequest,
+    OrphanEntityCleanupResult,
+    ProjectIndexWorkflowRequest,
+)
 from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
+    RuntimeStorageFileIndexMode,
+    RuntimeStorageObjectObservation,
 )
 from basic_memory.services import FileService
 
@@ -167,3 +177,105 @@ async def test_noop_local_project_index_workflow_starter_returns_no_completion()
     )
 
     assert completion is None
+
+
+def test_project_index_file_requests_from_batch_request_preserve_observed_metadata() -> None:
+    """Project batch requests become typed per-file index requests for inline runtimes."""
+    batch_request = RuntimeIndexFileBatchJobRequest(
+        tenant_id=TENANT_ID,
+        project=project_ref(),
+        workflow_id=WORKFLOW_ID,
+        batch_index=0,
+        batch_count=1,
+        observed_files=(
+            RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=11),
+            RuntimeObservedIndexFile(path="notes/b.md", checksum="etag-b", size=12),
+        ),
+        index_embeddings=False,
+    )
+
+    requests = project_index_file_requests_from_batch_request(batch_request)
+
+    assert requests == (
+        IndexFileRuntimeRequest(
+            tenant_id=TENANT_ID,
+            project_id=12,
+            project_external_id="project-12",
+            project_name="Local",
+            project_path="local-project",
+            file_path="notes/a.md",
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            object_observation=RuntimeStorageObjectObservation(etag="etag-a", size=11),
+            index_embeddings=False,
+            workflow_id=WORKFLOW_ID,
+        ),
+        IndexFileRuntimeRequest(
+            tenant_id=TENANT_ID,
+            project_id=12,
+            project_external_id="project-12",
+            project_name="Local",
+            project_path="local-project",
+            file_path="notes/b.md",
+            mode=RuntimeStorageFileIndexMode.observed_object,
+            object_observation=RuntimeStorageObjectObservation(etag="etag-b", size=12),
+            index_embeddings=False,
+            workflow_id=WORKFLOW_ID,
+        ),
+    )
+
+
+def test_project_index_file_requests_from_batch_request_support_current_file_paths() -> None:
+    """Inline local fanout can still run when only paths are present."""
+    batch_request = RuntimeIndexFileBatchJobRequest(
+        tenant_id=TENANT_ID,
+        project=project_ref(),
+        workflow_id=WORKFLOW_ID,
+        batch_index=0,
+        batch_count=1,
+        file_paths=("notes/a.md",),
+    )
+
+    request = project_index_file_requests_from_batch_request(batch_request)[0]
+
+    assert request.file_path == "notes/a.md"
+    assert request.mode == RuntimeStorageFileIndexMode.current_file
+    assert request.object_observation is None
+
+
+@dataclass(slots=True)
+class RecordingIndexFileRequestRunner:
+    requests: list[IndexFileRuntimeRequest] = field(default_factory=list)
+
+    async def run_index_file_request(
+        self,
+        request: IndexFileRuntimeRequest,
+    ) -> IndexFileJobResult:
+        self.requests.append(request)
+        return IndexFileJobResult(status=IndexFileJobStatus.processed, reason="indexed")
+
+
+async def test_inline_project_index_batch_enqueuer_runs_each_file_request() -> None:
+    """Inline project fanout executes child batch requests in-process."""
+    runner = RecordingIndexFileRequestRunner()
+    enqueuer = InlineProjectIndexBatchEnqueuer(runner)
+
+    await enqueuer.enqueue_index_file_batch(
+        RuntimeIndexFileBatchJobRequest(
+            tenant_id=TENANT_ID,
+            project=project_ref(),
+            workflow_id=WORKFLOW_ID,
+            batch_index=0,
+            batch_count=1,
+            observed_files=(
+                RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=11),
+                RuntimeObservedIndexFile(path="notes/b.md", checksum="etag-b", size=12),
+            ),
+            index_embeddings=False,
+        )
+    )
+
+    assert [request.file_path for request in runner.requests] == ["notes/a.md", "notes/b.md"]
+    assert [request.object_observation for request in runner.requests] == [
+        RuntimeStorageObjectObservation(etag="etag-a", size=11),
+        RuntimeStorageObjectObservation(etag="etag-b", size=12),
+    ]

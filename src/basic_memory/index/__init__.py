@@ -29,11 +29,13 @@ from basic_memory.index.local_watch import (
     run_local_watch_event_indexing,
 )
 from basic_memory.index.local_project import (
+    InlineProjectIndexBatchEnqueuer,
     LocalProjectIndexObservedFileSource,
     LocalProjectIndexRuntime,
     NoopProjectIndexFanoutFailureRecorder,
     NoopProjectIndexWorkflowStarter,
     local_project_index_file_paths,
+    project_index_file_requests_from_batch_request,
     run_local_project_index,
 )
 from basic_memory.index.local_runtime import (
@@ -68,6 +70,7 @@ __all__ = [
     "InlineStorageEventIndexRuntime",
     "InlineStorageEventOperationProcessor",
     "InlineStorageEventResultRecorder",
+    "InlineProjectIndexBatchEnqueuer",
     "NoopInlineStorageEventResultRecorder",
     "LocalProjectIndexObservedFileSource",
     "LocalProjectIndexRuntime",
@@ -102,6 +105,7 @@ __all__ = [
     "local_storage_events_from_watchfiles_changes",
     "local_project_index_file_paths",
     "local_project_prefix",
+    "project_index_file_requests_from_batch_request",
     "project_index_workflow_logical_key",
     "run_local_watch_event_indexing",
     "run_local_project_index",

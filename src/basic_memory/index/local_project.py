@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.indexing import (
+    IndexFileJobResult,
+    IndexFileRuntimeRequest,
     ProjectIndexBatchEnqueuer,
     ProjectIndexCompletion,
     ProjectIndexCoordinatorResult,
@@ -21,13 +24,25 @@ from basic_memory.indexing import (
 )
 from basic_memory.runtime import (
     RuntimeJobId,
+    RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
+    RuntimeStorageFileIndexMode,
+    RuntimeStorageObjectObservation,
     WorkflowId,
 )
 from basic_memory.services import FileService
 
 type LocalProjectIndexIgnorePatterns = set[str]
+
+
+class ProjectIndexFileRequestRunner(Protocol):
+    """Capability that runs one typed file-index request inline."""
+
+    async def run_index_file_request(
+        self,
+        request: IndexFileRuntimeRequest,
+    ) -> IndexFileJobResult: ...
 
 
 def local_project_index_file_paths(
@@ -124,6 +139,88 @@ class LocalProjectIndexRuntime:
     )
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
+
+
+def project_index_file_requests_from_batch_request(
+    request: RuntimeIndexFileBatchJobRequest,
+) -> tuple[IndexFileRuntimeRequest, ...]:
+    """Return per-file index requests represented by one project-index batch."""
+    if request.observed_files:
+        return tuple(
+            index_file_request_from_observed_file(
+                request,
+                observed_file=observed_file,
+            )
+            for observed_file in request.observed_files
+        )
+
+    return tuple(
+        index_file_request_from_path(
+            request,
+            file_path=file_path,
+        )
+        for file_path in request.file_paths
+    )
+
+
+def index_file_request_from_observed_file(
+    request: RuntimeIndexFileBatchJobRequest,
+    *,
+    observed_file: RuntimeObservedIndexFile,
+) -> IndexFileRuntimeRequest:
+    """Build a file-index request from observed project-index storage metadata."""
+    if observed_file.checksum is None:
+        return index_file_request_from_path(request, file_path=observed_file.path)
+
+    return IndexFileRuntimeRequest(
+        tenant_id=request.tenant_id,
+        project_id=request.project.project_id,
+        project_external_id=request.project.project_external_id,
+        project_name=request.project.project_name,
+        project_path=request.project.project_path,
+        file_path=observed_file.path,
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_observation=RuntimeStorageObjectObservation(
+            etag=observed_file.checksum,
+            size=observed_file.size,
+        ),
+        index_embeddings=request.index_embeddings,
+        workflow_id=request.workflow_id,
+    )
+
+
+def index_file_request_from_path(
+    request: RuntimeIndexFileBatchJobRequest,
+    *,
+    file_path: str,
+) -> IndexFileRuntimeRequest:
+    """Build a current-file index request when no observed storage metadata exists."""
+    return IndexFileRuntimeRequest(
+        tenant_id=request.tenant_id,
+        project_id=request.project.project_id,
+        project_external_id=request.project.project_external_id,
+        project_name=request.project.project_name,
+        project_path=request.project.project_path,
+        file_path=file_path,
+        mode=RuntimeStorageFileIndexMode.current_file,
+        object_observation=None,
+        index_embeddings=request.index_embeddings,
+        workflow_id=request.workflow_id,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class InlineProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
+    """Run project-index child batches immediately in the current process."""
+
+    file_runner: ProjectIndexFileRequestRunner
+
+    async def enqueue_index_file_batch(
+        self,
+        request: RuntimeIndexFileBatchJobRequest,
+    ) -> None:
+        for file_request in project_index_file_requests_from_batch_request(request):
+            await self.file_runner.run_index_file_request(file_request)
 
 
 async def run_local_project_index(
