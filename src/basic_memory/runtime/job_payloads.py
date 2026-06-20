@@ -41,6 +41,26 @@ class RuntimeSerializedJobPayload(Protocol):
     def model_dump_json(self) -> str: ...
 
 
+class RuntimeJobPayloadSource(Protocol):
+    """Validated payload that owns concrete runtime job request construction."""
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest: ...
+
+
+async def enqueue_runtime_job_payload(
+    runtime: JobRuntime,
+    payload: RuntimeJobPayloadSource,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> RuntimeJobId:
+    """Queue one validated payload through the selected runtime adapter."""
+    return await runtime.enqueue(payload.runtime_job_request(headers=headers))
+
+
 type RuntimeJobPayloadFactory[RequestT: RuntimeJobRequestSource] = Callable[
     [RequestT],
     RuntimeSerializedJobPayload,

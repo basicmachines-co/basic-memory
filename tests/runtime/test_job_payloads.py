@@ -1,5 +1,6 @@
 """Tests for portable runtime worker payload boundaries."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
 from uuid import UUID
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from basic_memory import runtime as runtime_module
 from basic_memory.runtime import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+    RuntimeJobPayloadSource,
     RuntimeJobRequest,
     RuntimeNoteFileDeleteJobPayload,
     RuntimeNoteFileDeleteJobRequest,
@@ -17,6 +19,7 @@ from basic_memory.runtime import (
     RuntimeNoteMaterializationJobRequest,
     RuntimePayloadJobEnqueuer,
     RuntimeWorkflowQueueEnvelope,
+    enqueue_runtime_job_payload,
 )
 
 
@@ -30,6 +33,22 @@ class FakeJobRuntime:
     async def enqueue(self, request: RuntimeJobRequest) -> str:
         self.requests.append(request)
         return self.job_id
+
+
+class FakeRuntimeJobPayload:
+    """Payload double that owns concrete runtime request construction."""
+
+    def __init__(self, request: RuntimeJobRequest) -> None:
+        self.request = request
+        self.headers: Mapping[str, str] | None = None
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        self.headers = headers
+        return self.request
 
 
 class FakeWorkflowPayload(BaseModel):
@@ -124,6 +143,31 @@ async def test_runtime_payload_job_enqueuer_validates_serializes_and_queues() ->
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_enqueue_runtime_job_payload_uses_payload_owned_request_builder() -> None:
+    """Queueable payloads keep special request semantics while adapters stay generic."""
+    request = RuntimeJobRequest(
+        entrypoint="custom_entrypoint",
+        payload=b"{}",
+        dedupe_key="custom-dedupe",
+        headers={"tenant_id": "tenant-1"},
+        execute_after=timedelta(seconds=10),
+    )
+    payload_source: RuntimeJobPayloadSource = FakeRuntimeJobPayload(request)
+    runtime = FakeJobRuntime(job_id="job-99")
+
+    job_id = await enqueue_runtime_job_payload(
+        runtime,
+        payload_source,
+        headers={"source": "test"},
+    )
+
+    assert job_id == "job-99"
+    assert isinstance(payload_source, FakeRuntimeJobPayload)
+    assert payload_source.headers == {"source": "test"}
+    assert runtime.requests == [request]
 
 
 def test_runtime_workflow_queue_envelope_builds_metadata_and_job_request() -> None:

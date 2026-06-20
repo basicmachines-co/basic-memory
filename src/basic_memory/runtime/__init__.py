@@ -203,11 +203,13 @@ from basic_memory.runtime.job_payloads import (
     DELETE_NOTE_FILE_ENTRYPOINT,
     MATERIALIZE_NOTE_FILE_ENTRYPOINT,
     RuntimeJobPayloadFactory,
+    RuntimeJobPayloadSource,
     RuntimeNoteFileDeleteJobPayload,
     RuntimeNoteMaterializationJobPayload,
     RuntimePayloadJobEnqueuer,
     RuntimeSerializedJobPayload,
     RuntimeWorkflowQueueEnvelope,
+    enqueue_runtime_job_payload,
 )
 from basic_memory.runtime.job_identity import RuntimeTenantWorkflowJobIdentity
 from basic_memory.runtime.job_status import (
@@ -360,6 +362,7 @@ __all__ = [
     "RuntimeJobCounts",
     "RuntimeJobId",
     "RuntimeJobPayloadFactory",
+    "RuntimeJobPayloadSource",
     "RuntimeJobReference",
     "RuntimeJobRequest",
     "RuntimeJobRequestSource",
@@ -553,4 +556,5 @@ __all__ = [
     "storage_project_prefix_from_project_path",
     "truncate_runtime_workflow_text",
     "write_prepared_note_to_content_store",
+    "enqueue_runtime_job_payload",
 ]
