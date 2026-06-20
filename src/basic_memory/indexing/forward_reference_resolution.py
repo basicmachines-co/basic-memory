@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from sqlalchemy import case, update
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.link_resolution import LinkText
-from basic_memory.models import Relation
+from basic_memory.models import Entity, Relation
 
 type ForwardReferenceEntityId = int
 type ForwardReferenceRelationId = int
@@ -35,6 +35,43 @@ class UnresolvedForwardReference(Protocol):
     @property
     def to_name(self) -> LinkText | None:
         """Return the unresolved target link text."""
+
+
+class ForwardReferenceRelationSource(Protocol):
+    """Capability that lists unresolved forward-reference relations."""
+
+    async def list_unresolved_forward_references(
+        self,
+    ) -> tuple[UnresolvedForwardReference, ...]:
+        """Return unresolved relation rows for one project."""
+
+
+class ForwardReferenceEntityRefreshRuntime(Protocol):
+    """Capability that refreshes search rows for one forward-reference target."""
+
+    async def refresh_forward_reference_entity(
+        self,
+        entity_id: ForwardReferenceEntityId,
+    ) -> bool:
+        """Refresh one entity and return whether the entity still exists."""
+
+
+class ForwardReferenceEntityRepository(Protocol):
+    """Repository capability required to load forward-reference target entities."""
+
+    async def find_by_id(
+        self,
+        session: AsyncSession,
+        entity_id: ForwardReferenceEntityId,
+    ) -> Entity | None:
+        """Return one entity by id."""
+
+
+class ForwardReferenceEntityIndexer(Protocol):
+    """Search capability required to refresh one forward-reference target entity."""
+
+    async def index_entity(self, entity: Entity) -> object:
+        """Refresh one entity in the search index."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +126,26 @@ class ForwardReferenceResolutionRuntime(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class RepositoryForwardReferenceRelationSource:
+    """Load unresolved forward-reference relations with explicit sessions."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    project_id: int
+
+    async def list_unresolved_forward_references(
+        self,
+    ) -> tuple[UnresolvedForwardReference, ...]:
+        async with db.scoped_session(self.session_maker) as session:
+            result = await session.execute(
+                select(Relation).where(
+                    Relation.project_id == self.project_id,
+                    Relation.to_id.is_(None),
+                )
+            )
+            return tuple(result.scalars().all())
+
+
+@dataclass(frozen=True, slots=True)
 class RepositoryForwardReferenceResolutionRuntime:
     """Resolve link text and persist exact relation targets with explicit sessions."""
 
@@ -120,6 +177,48 @@ class RepositoryForwardReferenceResolutionRuntime:
                 .values(to_id=case(target_entity_ids_by_relation_id, value=Relation.id))
             )
             await session.execute(stmt)
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryForwardReferenceEntityRefreshRuntime:
+    """Refresh forward-reference target entity search rows with explicit sessions."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: ForwardReferenceEntityRepository
+    entity_indexer: ForwardReferenceEntityIndexer
+
+    async def refresh_forward_reference_entity(
+        self,
+        entity_id: ForwardReferenceEntityId,
+    ) -> bool:
+        async with db.scoped_session(self.session_maker) as session:
+            entity = await self.entity_repository.find_by_id(session, entity_id)
+        if entity is None:
+            return False
+        await self.entity_indexer.index_entity(entity)
+        return True
+
+
+@dataclass(frozen=True, slots=True)
+class ForwardReferenceEntityRefreshFailure:
+    """One target entity whose search refresh raised."""
+
+    entity_id: ForwardReferenceEntityId
+    error: Exception
+
+
+@dataclass(frozen=True, slots=True)
+class ForwardReferenceEntityRefreshRun:
+    """Search refresh results for target entities touched by forward refs."""
+
+    successful_entity_ids: frozenset[ForwardReferenceEntityId]
+    missing_entity_ids: frozenset[ForwardReferenceEntityId]
+    failures: tuple[ForwardReferenceEntityRefreshFailure, ...]
+
+    @property
+    def failed_entity_ids(self) -> frozenset[ForwardReferenceEntityId]:
+        """Return entity ids whose refresh raised."""
+        return frozenset(failure.entity_id for failure in self.failures)
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,4 +318,34 @@ async def run_forward_reference_resolution(
         resolved_link_text_count=sum(
             1 for link_text in link_texts if resolved_targets.get(link_text) is not None
         ),
+    )
+
+
+async def run_forward_reference_entity_refresh(
+    runtime: ForwardReferenceEntityRefreshRuntime,
+    entity_ids: Iterable[ForwardReferenceEntityId],
+) -> ForwardReferenceEntityRefreshRun:
+    """Refresh forward-reference target search rows and report per-entity failures."""
+    successful_entity_ids: set[ForwardReferenceEntityId] = set()
+    missing_entity_ids: set[ForwardReferenceEntityId] = set()
+    failures: list[ForwardReferenceEntityRefreshFailure] = []
+
+    for entity_id in entity_ids:
+        try:
+            if await runtime.refresh_forward_reference_entity(entity_id):
+                successful_entity_ids.add(entity_id)
+            else:
+                missing_entity_ids.add(entity_id)
+        except Exception as exc:
+            failures.append(
+                ForwardReferenceEntityRefreshFailure(
+                    entity_id=entity_id,
+                    error=exc,
+                )
+            )
+
+    return ForwardReferenceEntityRefreshRun(
+        successful_entity_ids=frozenset(successful_entity_ids),
+        missing_entity_ids=frozenset(missing_entity_ids),
+        failures=tuple(failures),
     )

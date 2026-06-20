@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import FrozenInstanceError, dataclass
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -13,11 +14,15 @@ from basic_memory.indexing.forward_reference_resolution import (
     ForwardReferenceResolutionPlan,
     ForwardReferenceResolutionRun,
     ForwardReferenceUpdate,
+    RepositoryForwardReferenceEntityRefreshRuntime,
+    RepositoryForwardReferenceRelationSource,
     RepositoryForwardReferenceResolutionRuntime,
     collect_forward_reference_link_texts,
     plan_forward_reference_resolution,
+    run_forward_reference_entity_refresh,
     run_forward_reference_resolution,
 )
+from basic_memory.models import Entity
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,14 +52,73 @@ class RecordingForwardReferenceRuntime:
         self.applied_updates = tuple(updates)
 
 
+class RecordingForwardReferenceEntityRefreshRuntime:
+    def __init__(self, outcomes: dict[int, bool | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[int] = []
+
+    async def refresh_forward_reference_entity(self, entity_id: int) -> bool:
+        self.calls.append(entity_id)
+        outcome = self.outcomes[entity_id]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class RecordingForwardReferenceEntityRepository:
+    def __init__(self, entity: Entity | None) -> None:
+        self.entity = entity
+        self.calls: list[tuple[object, int]] = []
+
+    async def find_by_id(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> Entity | None:
+        self.calls.append((session, entity_id))
+        return self.entity
+
+
+class RecordingForwardReferenceEntityIndexer:
+    def __init__(self) -> None:
+        self.entities: list[Entity] = []
+
+    async def index_entity(self, entity: Entity) -> None:
+        self.entities.append(entity)
+
+
+class FakeForwardReferenceScalarResult:
+    """Minimal scalar result stand-in for repository runtime tests."""
+
+    def __init__(self, values: list[object]) -> None:
+        self.values = values
+
+    def all(self) -> list[object]:
+        return self.values
+
+
+class FakeForwardReferenceResult:
+    """Minimal SQLAlchemy result stand-in for repository runtime tests."""
+
+    def __init__(self, *, scalar_values: list[object] | None = None) -> None:
+        self.scalar_values = scalar_values or []
+
+    def scalars(self) -> FakeForwardReferenceScalarResult:
+        return FakeForwardReferenceScalarResult(self.scalar_values)
+
+
 class FakeForwardReferenceSession:
     """Record relation update statements issued by the repository runtime."""
 
-    def __init__(self) -> None:
+    def __init__(self, results: list[FakeForwardReferenceResult] | None = None) -> None:
+        self.results = results or []
         self.statements: list[object] = []
 
-    async def execute(self, statement: object) -> None:
+    async def execute(self, statement: object) -> FakeForwardReferenceResult:
         self.statements.append(statement)
+        if self.results:
+            return self.results.pop(0)
+        return FakeForwardReferenceResult()
 
 
 def test_collect_forward_reference_link_texts_dedupes_in_first_seen_order() -> None:
@@ -191,6 +255,41 @@ async def test_repository_forward_reference_runtime_uses_link_resolver() -> None
 
 
 @pytest.mark.asyncio
+async def test_repository_forward_reference_relation_source_lists_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    unresolved = [
+        StubUnresolvedRelation(id=1, from_id=10, to_name="Target"),
+        StubUnresolvedRelation(id=2, from_id=11, to_name="Other"),
+    ]
+    session = FakeForwardReferenceSession(
+        results=[FakeForwardReferenceResult(scalar_values=list(unresolved))]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeForwardReferenceSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(forward_resolution_module.db, "scoped_session", fake_scoped_session)
+
+    source = RepositoryForwardReferenceRelationSource(
+        session_maker=session_maker,
+        project_id=7,
+    )
+
+    result = await source.list_unresolved_forward_references()
+
+    assert result == tuple(unresolved)
+    assert len(session.statements) == 1
+    assert "WHERE relation.project_id = :project_id_1" in str(session.statements[0])
+    assert "relation.to_id IS NULL" in str(session.statements[0])
+
+
+@pytest.mark.asyncio
 async def test_repository_forward_reference_runtime_applies_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -259,6 +358,91 @@ async def test_repository_forward_reference_runtime_skips_empty_updates(
     )
 
     await runtime.apply_forward_reference_updates(())
+
+
+@pytest.mark.asyncio
+async def test_repository_forward_reference_entity_refresh_indexes_existing_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = cast(AsyncSession, object())
+    entity = cast(Entity, SimpleNamespace(id=20))
+    entity_repository = RecordingForwardReferenceEntityRepository(entity)
+    entity_indexer = RecordingForwardReferenceEntityIndexer()
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(forward_resolution_module.db, "scoped_session", fake_scoped_session)
+
+    runtime = RepositoryForwardReferenceEntityRefreshRuntime(
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        entity_indexer=entity_indexer,
+    )
+
+    refreshed = await runtime.refresh_forward_reference_entity(20)
+
+    assert refreshed is True
+    assert entity_repository.calls == [(session, 20)]
+    assert entity_indexer.entities == [entity]
+
+
+@pytest.mark.asyncio
+async def test_repository_forward_reference_entity_refresh_reports_missing_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = cast(AsyncSession, object())
+    entity_repository = RecordingForwardReferenceEntityRepository(None)
+    entity_indexer = RecordingForwardReferenceEntityIndexer()
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(forward_resolution_module.db, "scoped_session", fake_scoped_session)
+
+    runtime = RepositoryForwardReferenceEntityRefreshRuntime(
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        entity_indexer=entity_indexer,
+    )
+
+    refreshed = await runtime.refresh_forward_reference_entity(20)
+
+    assert refreshed is False
+    assert entity_repository.calls == [(session, 20)]
+    assert entity_indexer.entities == []
+
+
+@pytest.mark.asyncio
+async def test_run_forward_reference_entity_refresh_collects_success_missing_and_failures() -> None:
+    error = RuntimeError("index failed")
+    runtime = RecordingForwardReferenceEntityRefreshRuntime(
+        {
+            10: True,
+            20: False,
+            30: error,
+        }
+    )
+
+    result = await run_forward_reference_entity_refresh(runtime, (10, 20, 30))
+
+    assert runtime.calls == [10, 20, 30]
+    assert result.successful_entity_ids == frozenset({10})
+    assert result.missing_entity_ids == frozenset({20})
+    assert result.failed_entity_ids == frozenset({30})
+    assert len(result.failures) == 1
+    assert result.failures[0].entity_id == 30
+    assert result.failures[0].error is error
 
 
 @pytest.mark.asyncio
