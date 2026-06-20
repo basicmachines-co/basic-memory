@@ -15,6 +15,7 @@ from typing import (
     Callable,
     Awaitable,
     TYPE_CHECKING,
+    Protocol,
 )
 
 if TYPE_CHECKING:
@@ -25,6 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
+from basic_memory.index import (
+    StorageEventIndexRuntime,
+    local_storage_events_from_watchfiles_changes,
+    run_storage_event_indexing,
+)
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from loguru import logger
@@ -91,6 +97,12 @@ class WatchServiceState(BaseModel):
 SyncServiceFactory = Callable[[Project], Awaitable["SyncService"]]
 
 
+class WatchEventIndexRuntimeFactory(Protocol):
+    """Build event-index runtime dependencies for one watched project."""
+
+    def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime: ...
+
+
 class WatchService:
     def __init__(
         self,
@@ -99,6 +111,7 @@ class WatchService:
         session_maker: async_sessionmaker[AsyncSession],
         quiet: bool = False,
         sync_service_factory: Optional[SyncServiceFactory] = None,
+        event_index_runtime_factory: Optional[WatchEventIndexRuntimeFactory] = None,
         constrained_project: Optional[str] = None,
     ):
         self.app_config = app_config
@@ -110,6 +123,7 @@ class WatchService:
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
         self._sorted_watch_filter_roots: tuple[Path, ...] | None = None
         self._sync_service_factory = sync_service_factory
+        self._event_index_runtime_factory = event_index_runtime_factory
         # When set (typically from BASIC_MEMORY_MCP_PROJECT), the watch cycle
         # only observes this project. Without it, each `basic-memory mcp --project X`
         # process spawns a watcher over every project and racing writers collide
@@ -378,6 +392,10 @@ class WatchService:
             )
             return
 
+        if self._event_index_runtime_factory is not None:
+            await self._handle_changes_with_event_index(project, changes)
+            return
+
         sync_service = await self._get_sync_service(project)
         file_service = sync_service.file_service
 
@@ -632,4 +650,44 @@ class WatchService:
             f"duration_ms={duration_ms}"
         )
 
+        await self.write_status()
+
+    async def _handle_changes_with_event_index(
+        self,
+        project: Project,
+        changes: Set[FileChange],
+    ) -> None:
+        """Process a project change batch through the opt-in event-index runtime."""
+        if self._event_index_runtime_factory is None:
+            raise RuntimeError("event-index change handling requires a runtime factory")
+
+        start_time = time.time()
+        directory = Path(project.path).resolve()
+        project_prefix = directory.name
+        events = local_storage_events_from_watchfiles_changes(
+            project_root=directory,
+            project_prefix=project_prefix,
+            changes=changes,
+        )
+        result = await run_storage_event_indexing(
+            events,
+            self._event_index_runtime_factory.runtime_for_project(project),
+        )
+
+        self.state.last_scan = datetime.now()
+        self.state.synced_files += result.counts.processed
+        self.state.add_event(
+            path=project_prefix,
+            action="index",
+            status="success",
+        )
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "Event-index file change processing completed, "
+            f"processed_files={result.counts.processed}, "
+            f"failed_files={result.counts.failed}, "
+            f"skipped_files={result.counts.skipped}, "
+            f"total_synced_files={self.state.synced_files}, "
+            f"duration_ms={duration_ms}"
+        )
         await self.write_status()
