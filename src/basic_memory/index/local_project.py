@@ -14,7 +14,6 @@ from basic_memory import db
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
-    LocalIndexEntityRepository,
     LocalIndexProjectDependencies,
     LocalIndexProjectDependencyProvider,
     build_local_index_project_dependencies,
@@ -24,6 +23,7 @@ from basic_memory.index.local_runtime import (
     LocalStorageFileMetadataSource,
 )
 from basic_memory.indexing import (
+    ChangeDetector,
     FileIndexChecker,
     IndexFileExecutor,
     IndexFileJobResult,
@@ -31,25 +31,24 @@ from basic_memory.indexing import (
     IndexFileMetadataSource,
     IndexFileRunnerChecker,
     IndexFileRuntimeRequest,
-    OrphanCleanupLogger,
-    OrphanEntityCleanupResult,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
+    RepositoryProjectIndexMaintenanceStore,
     StorageCurrentFileChecksumSource,
-    cleanup_orphan_entities,
     ProjectIndexBatchEnqueuer,
+    ProjectIndexChangeDetector,
     ProjectIndexCompletion,
     ProjectIndexCoordinatorResult,
     ProjectIndexFanoutFailureRecorder,
+    ProjectIndexMaintenanceRunner,
     ProjectIndexObservedFileSource,
-    ProjectIndexOrphanCleaner,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStarter,
-    OrphanSearchIndex,
+    StoreProjectIndexMaintenanceRunner,
     run_project_index_coordinator,
     run_index_file,
 )
-from basic_memory.models import Entity, Project
+from basic_memory.models import Project
 from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeJobId,
@@ -79,25 +78,6 @@ class LocalProjectIndexProjectRepository(Protocol):
     """Project lookup capability needed by local project-index runners."""
 
     async def get_by_id(self, session: AsyncSession, project_id: int) -> Project | None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class LocalProjectIndexOrphanCleaner(ProjectIndexOrphanCleaner):
-    """Clean stale local DB/search rows before local project-index fanout."""
-
-    session_maker: async_sessionmaker[AsyncSession]
-    entity_repository: LocalIndexEntityRepository
-    search_service: OrphanSearchIndex[Entity]
-    logger: OrphanCleanupLogger | None = None
-
-    async def cleanup_orphans(self, current_paths: set[str]) -> OrphanEntityCleanupResult:
-        return await cleanup_orphan_entities(
-            session_maker=self.session_maker,
-            entity_repository=self.entity_repository,
-            search_service=self.search_service,
-            current_paths=current_paths,
-            logger=self.logger,
-        )
 
 
 def local_project_index_file_paths(
@@ -186,7 +166,8 @@ class LocalProjectIndexRuntime:
     """Dependencies for running project-wide local indexing through core fanout."""
 
     observed_file_source: ProjectIndexObservedFileSource
-    orphan_cleaner: ProjectIndexOrphanCleaner
+    change_detector: ProjectIndexChangeDetector
+    maintenance_runner: ProjectIndexMaintenanceRunner
     batch_enqueuer: ProjectIndexBatchEnqueuer
     workflow_starter: ProjectIndexWorkflowStarter = NoopProjectIndexWorkflowStarter()
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder = (
@@ -355,14 +336,21 @@ class LocalProjectIndexRuntimeFactory:
             ),
             file_indexer=dependencies.file_indexer,
         )
+        maintenance_store = RepositoryProjectIndexMaintenanceStore(
+            session_maker=dependencies.session_maker,
+            project_id=dependencies.project_id,
+        )
         return LocalProjectIndexRuntime(
             observed_file_source=LocalProjectIndexObservedFileSource(
                 dependencies.file_service,
             ),
-            orphan_cleaner=LocalProjectIndexOrphanCleaner(
+            change_detector=ChangeDetector(
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
-                search_service=dependencies.search_service,
+            ),
+            maintenance_runner=StoreProjectIndexMaintenanceRunner(
+                move_store=maintenance_store,
+                delete_store=maintenance_store,
             ),
             batch_enqueuer=InlineProjectIndexBatchEnqueuer(file_runner),
             batch_size=self.batch_size,
@@ -436,7 +424,8 @@ async def run_local_project_index(
         request,
         coordinator_job_id=runtime.coordinator_job_id,
         observed_file_source=runtime.observed_file_source,
-        orphan_cleaner=runtime.orphan_cleaner,
+        change_detector=runtime.change_detector,
+        maintenance_runner=runtime.maintenance_runner,
         workflow_starter=runtime.workflow_starter,
         batch_enqueuer=runtime.batch_enqueuer,
         fanout_failure_recorder=runtime.fanout_failure_recorder,

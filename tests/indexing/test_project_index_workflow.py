@@ -51,6 +51,7 @@ from basic_memory.indexing import (
     plan_project_index_file_result_record,
     plan_project_index_stale_workflow,
     plan_project_index_workflow_start,
+    StoreProjectIndexMaintenanceRunner,
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
@@ -588,6 +589,48 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
         },
     ]
     assert run.records[1].progress is None
+
+
+@pytest.mark.asyncio
+async def test_store_project_index_maintenance_runner_delegates_to_batch_stores() -> None:
+    move_store = RecordingMoveBatchStore(results=[ProjectIndexMoveBatchResult(updated_files=1)])
+    delete_store = RecordingDeleteBatchStore(
+        results=[
+            ProjectIndexDeleteBatchResult(
+                deleted_entities=1,
+                relation_cleanup_entity_ids=frozenset({99}),
+            )
+        ]
+    )
+    runner = StoreProjectIndexMaintenanceRunner(
+        move_store=move_store,
+        delete_store=delete_store,
+    )
+
+    move_run = await runner.run_move_batches(
+        moved_files={"notes/a.md": "archive/a.md"},
+        batch_size=50,
+    )
+    delete_run = await runner.run_delete_batches(
+        deleted_paths=("notes/deleted.md",),
+        batch_size=50,
+    )
+
+    assert move_run.total_updated_files == 1
+    assert move_store.batches == [
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    ]
+    assert delete_run.total_deleted_entities == 1
+    assert delete_run.relation_cleanup_entity_ids == frozenset({99})
+    assert delete_store.batches == [
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/deleted.md",),
+        )
+    ]
 
 
 @pytest.mark.asyncio

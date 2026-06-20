@@ -1,13 +1,16 @@
 """Tests for portable project-index coordinator orchestration."""
 
+from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 import pytest
 
 from basic_memory.indexing import (
-    OrphanEntityCleanupResult,
+    ChangeReport,
     ProjectIndexCompletion,
     ProjectIndexCoordinatorResult,
+    ProjectIndexDeleteRun,
+    ProjectIndexMoveRun,
     ProjectIndexWorkflowRequest,
     run_project_index_coordinator,
 )
@@ -64,19 +67,60 @@ class FakeObservedFileSource:
         )
 
 
-class FakeOrphanCleaner:
+class FakeChangeDetector:
+    def __init__(self, events: list[str], report: ChangeReport) -> None:
+        self.events = events
+        self.report = report
+        self.storage_files: Mapping[str, RuntimeObservedIndexFile] | None = None
+
+    async def detect_all_changes(
+        self,
+        storage_files: Mapping[str, RuntimeObservedIndexFile],
+    ) -> ChangeReport:
+        self.events.append("detect")
+        self.storage_files = storage_files
+        return self.report
+
+
+class FakeProjectIndexMaintenanceRunner:
     def __init__(self, events: list[str]) -> None:
         self.events = events
-        self.current_paths: set[str] | None = None
+        self.moved_files: Mapping[str, str] | None = None
+        self.deleted_paths: Sequence[str] | None = None
+        self.move_batch_size: int | None = None
+        self.delete_batch_size: int | None = None
 
-    async def cleanup_orphans(self, current_paths: set[str]) -> OrphanEntityCleanupResult:
-        self.events.append("clean")
-        self.current_paths = current_paths
-        return OrphanEntityCleanupResult(
-            orphan_paths=("notes/deleted.md",),
-            deleted_paths=("notes/deleted.md",),
-            skipped_missing_paths=(),
-            skipped_changed_paths=(),
+    async def run_move_batches(
+        self,
+        *,
+        moved_files: Mapping[str, str],
+        batch_size: int,
+        progress_callback: object | None = None,
+    ) -> ProjectIndexMoveRun:
+        self.events.append("moves")
+        self.moved_files = moved_files
+        self.move_batch_size = batch_size
+        return ProjectIndexMoveRun(
+            total_moves=len(moved_files),
+            total_updated_files=len(moved_files),
+            records=(),
+        )
+
+    async def run_delete_batches(
+        self,
+        *,
+        deleted_paths: Sequence[str],
+        batch_size: int,
+        progress_callback: object | None = None,
+    ) -> ProjectIndexDeleteRun:
+        self.events.append("deletes")
+        self.deleted_paths = deleted_paths
+        self.delete_batch_size = batch_size
+        return ProjectIndexDeleteRun(
+            total_deletes=len(deleted_paths),
+            total_deleted_entities=len(deleted_paths),
+            relation_cleanup_entity_ids=frozenset({99}),
+            records=(),
         )
 
 
@@ -141,10 +185,19 @@ class FakeFanoutFailureRecorder:
 
 
 @pytest.mark.asyncio
-async def test_run_project_index_coordinator_lists_cleans_starts_and_enqueues_batches() -> None:
+async def test_run_project_index_coordinator_lists_detects_maintains_starts_and_enqueues_batches() -> (
+    None
+):
     events: list[str] = []
     request = project_index_request()
-    orphan_cleaner = FakeOrphanCleaner(events)
+    change_detector = FakeChangeDetector(
+        events,
+        ChangeReport(
+            new_files=["notes/a.md", "notes/b.md", "notes/c.md"],
+            deleted_files=["notes/deleted.md"],
+        ),
+    )
+    maintenance_runner = FakeProjectIndexMaintenanceRunner(events)
     workflow_starter = FakeWorkflowStarter(events)
     batch_enqueuer = FakeBatchEnqueuer(events)
 
@@ -152,7 +205,8 @@ async def test_run_project_index_coordinator_lists_cleans_starts_and_enqueues_ba
         request,
         coordinator_job_id=11,
         observed_file_source=FakeObservedFileSource(events),
-        orphan_cleaner=orphan_cleaner,
+        change_detector=change_detector,
+        maintenance_runner=maintenance_runner,
         workflow_starter=workflow_starter,
         batch_enqueuer=batch_enqueuer,
         fanout_failure_recorder=FakeFanoutFailureRecorder(events),
@@ -164,10 +218,16 @@ async def test_run_project_index_coordinator_lists_cleans_starts_and_enqueues_ba
         enqueued_files=3,
         enqueued_batches=2,
         deleted_files=1,
+        relation_cleanup_entity_ids=frozenset({99}),
         completion=project_index_completion(),
     )
-    assert events == ["list", "clean", "start", "enqueue:0", "enqueue:1"]
-    assert orphan_cleaner.current_paths == {"notes/a.md", "notes/b.md", "notes/c.md"}
+    assert events == ["list", "detect", "moves", "deletes", "start", "enqueue:0", "enqueue:1"]
+    assert set(change_detector.storage_files or {}) == {
+        "notes/a.md",
+        "notes/b.md",
+        "notes/c.md",
+    }
+    assert maintenance_runner.deleted_paths == ["notes/deleted.md"]
     assert workflow_starter.request == ProjectIndexWorkflowRequest(
         tenant_id=request.tenant_id,
         workflow_id=request.workflow_id,
@@ -188,6 +248,74 @@ async def test_run_project_index_coordinator_lists_cleans_starts_and_enqueues_ba
 
 
 @pytest.mark.asyncio
+async def test_run_project_index_coordinator_plans_maintenance_before_enqueueing_changed_files() -> (
+    None
+):
+    events: list[str] = []
+    request = project_index_request()
+    observed_files = (
+        RuntimeObservedIndexFile(path="archive/moved.md", checksum="moved", size=10),
+        RuntimeObservedIndexFile(path="notes/new.md", checksum="new", size=20),
+        RuntimeObservedIndexFile(path="notes/modified.md", checksum="modified", size=30),
+        RuntimeObservedIndexFile(path="notes/current.md", checksum="current", size=40),
+    )
+
+    class ObservedFileSource:
+        async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
+            events.append("list")
+            return observed_files
+
+    change_detector = FakeChangeDetector(
+        events,
+        ChangeReport(
+            new_files=["notes/new.md"],
+            modified_files=["notes/modified.md"],
+            deleted_files=["notes/deleted.md"],
+            moved_files={"notes/moved.md": "archive/moved.md"},
+            unchanged_files=["notes/current.md"],
+        ),
+    )
+    maintenance_runner = FakeProjectIndexMaintenanceRunner(events)
+    workflow_starter = FakeWorkflowStarter(events)
+    batch_enqueuer = FakeBatchEnqueuer(events)
+
+    result = await run_project_index_coordinator(
+        request,
+        coordinator_job_id=11,
+        observed_file_source=ObservedFileSource(),
+        change_detector=change_detector,
+        maintenance_runner=maintenance_runner,
+        workflow_starter=workflow_starter,
+        batch_enqueuer=batch_enqueuer,
+        fanout_failure_recorder=FakeFanoutFailureRecorder(events),
+        batch_size=2,
+    )
+
+    assert result == ProjectIndexCoordinatorResult(
+        total_files=4,
+        enqueued_files=2,
+        enqueued_batches=1,
+        moved_files=1,
+        deleted_files=1,
+        relation_cleanup_entity_ids=frozenset({99}),
+        completion=project_index_completion(),
+    )
+    assert events == ["list", "detect", "moves", "deletes", "start", "enqueue:0"]
+    assert change_detector.storage_files == {
+        observed_file.path: observed_file for observed_file in observed_files
+    }
+    assert maintenance_runner.moved_files == {"notes/moved.md": "archive/moved.md"}
+    assert maintenance_runner.deleted_paths == ["notes/deleted.md"]
+    assert maintenance_runner.move_batch_size == 2
+    assert maintenance_runner.delete_batch_size == 2
+    assert workflow_starter.total_files == 2
+    assert workflow_starter.batch_count == 1
+    assert [queued.file_paths for queued in batch_enqueuer.requests] == [
+        ("notes/new.md", "notes/modified.md"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_project_index_coordinator_records_fanout_failure_before_reraising() -> None:
     events: list[str] = []
     request = project_index_request()
@@ -198,14 +326,29 @@ async def test_run_project_index_coordinator_records_fanout_failure_before_rerai
             request,
             coordinator_job_id=11,
             observed_file_source=FakeObservedFileSource(events),
-            orphan_cleaner=FakeOrphanCleaner(events),
+            change_detector=FakeChangeDetector(
+                events,
+                ChangeReport(
+                    new_files=["notes/a.md", "notes/b.md", "notes/c.md"],
+                ),
+            ),
+            maintenance_runner=FakeProjectIndexMaintenanceRunner(events),
             workflow_starter=FakeWorkflowStarter(events),
             batch_enqueuer=FakeBatchEnqueuer(events, fail_on_batch=1),
             fanout_failure_recorder=failure_recorder,
             batch_size=2,
         )
 
-    assert events == ["list", "clean", "start", "enqueue:0", "enqueue_failed:1", "failure"]
+    assert events == [
+        "list",
+        "detect",
+        "moves",
+        "deletes",
+        "start",
+        "enqueue:0",
+        "enqueue_failed:1",
+        "failure",
+    ]
     assert failure_recorder.calls == [
         (
             request.workflow_id,

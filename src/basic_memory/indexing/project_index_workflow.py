@@ -15,6 +15,7 @@ from basic_memory.indexing.models import (
     apply_project_index_batch_job_results,
     project_index_file_outcome_from_job_result,
 )
+from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCompletion,
     ProjectIndexCounters,
@@ -27,7 +28,6 @@ from basic_memory.indexing.project_index_progress import (
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
 )
-from basic_memory.indexing.orphan_cleanup import OrphanEntityCleanupResult
 from basic_memory.models import Entity, Relation
 from basic_memory.runtime import (
     ProjectExternalId,
@@ -69,13 +69,33 @@ class ProjectIndexObservedFileSource(Protocol):
     async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]: ...
 
 
-class ProjectIndexOrphanCleaner(Protocol):
-    """Capability that removes indexed rows whose source files disappeared."""
+class ProjectIndexChangeDetector(Protocol):
+    """Capability that compares observed storage files with indexed project state."""
 
-    async def cleanup_orphans(
+    async def detect_all_changes(
         self,
-        current_paths: set[str],
-    ) -> OrphanEntityCleanupResult: ...
+        storage_files: Mapping[str, RuntimeObservedIndexFile],
+    ) -> ChangeReport: ...
+
+
+class ProjectIndexMaintenanceRunner(Protocol):
+    """Capability that applies project-wide move/delete maintenance."""
+
+    async def run_move_batches(
+        self,
+        *,
+        moved_files: Mapping[str, str],
+        batch_size: int,
+        progress_callback: ProjectIndexProgressCallback | None = None,
+    ) -> ProjectIndexMoveRun: ...
+
+    async def run_delete_batches(
+        self,
+        *,
+        deleted_paths: Sequence[str],
+        batch_size: int,
+        progress_callback: ProjectIndexProgressCallback | None = None,
+    ) -> ProjectIndexDeleteRun: ...
 
 
 class ProjectIndexWorkflowStarter(Protocol):
@@ -439,6 +459,8 @@ class ProjectIndexCoordinatorResult:
     enqueued_files: int
     enqueued_batches: int
     deleted_files: int
+    moved_files: int = 0
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
     completion: ProjectIndexCompletion | None = None
 
 
@@ -772,6 +794,42 @@ class RepositoryProjectIndexMaintenanceStore:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
+    """Run project-index maintenance through explicit move/delete batch stores."""
+
+    move_store: ProjectIndexMoveBatchStore
+    delete_store: ProjectIndexDeleteBatchStore
+
+    async def run_move_batches(
+        self,
+        *,
+        moved_files: Mapping[str, str],
+        batch_size: int,
+        progress_callback: ProjectIndexProgressCallback | None = None,
+    ) -> ProjectIndexMoveRun:
+        return await run_project_index_move_batches(
+            moved_files=moved_files,
+            batch_size=batch_size,
+            move_store=self.move_store,
+            progress_callback=progress_callback,
+        )
+
+    async def run_delete_batches(
+        self,
+        *,
+        deleted_paths: Sequence[str],
+        batch_size: int,
+        progress_callback: ProjectIndexProgressCallback | None = None,
+    ) -> ProjectIndexDeleteRun:
+        return await run_project_index_delete_batches(
+            deleted_paths=deleted_paths,
+            batch_size=batch_size,
+            delete_store=self.delete_store,
+            progress_callback=progress_callback,
+        )
+
+
 def project_index_workflow_logical_key(
     *,
     tenant_id: TenantId,
@@ -1016,12 +1074,36 @@ def build_project_index_batch_job_plan(
     )
 
 
+def project_index_storage_files_from_observed(
+    observed_files: Sequence[RuntimeObservedIndexFile],
+) -> dict[str, RuntimeObservedIndexFile]:
+    """Map observed files by project-relative path for change detection."""
+    return {observed_file.path: observed_file for observed_file in observed_files}
+
+
+def select_project_index_target_files(
+    *,
+    observed_files: Sequence[RuntimeObservedIndexFile],
+    change_report: ChangeReport,
+    force_full: bool,
+) -> tuple[RuntimeObservedIndexFile, ...]:
+    """Select observed files that should be submitted to file-index batches."""
+    if force_full:
+        return tuple(observed_files)
+
+    target_paths = set(change_report.new_files) | set(change_report.modified_files)
+    return tuple(
+        observed_file for observed_file in observed_files if observed_file.path in target_paths
+    )
+
+
 async def run_project_index_coordinator(
     request: RuntimeProjectIndexJobRequest,
     *,
     coordinator_job_id: RuntimeJobId | None,
     observed_file_source: ProjectIndexObservedFileSource,
-    orphan_cleaner: ProjectIndexOrphanCleaner,
+    change_detector: ProjectIndexChangeDetector,
+    maintenance_runner: ProjectIndexMaintenanceRunner,
     workflow_starter: ProjectIndexWorkflowStarter,
     batch_enqueuer: ProjectIndexBatchEnqueuer,
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder,
@@ -1032,8 +1114,16 @@ async def run_project_index_coordinator(
         raise ValueError("index_project currently requires search=True")
 
     observed_files = await observed_file_source.list_observed_index_files()
-    orphan_cleanup = await orphan_cleaner.cleanup_orphans(
-        {observed_file.path for observed_file in observed_files}
+    change_report = await change_detector.detect_all_changes(
+        project_index_storage_files_from_observed(observed_files)
+    )
+    move_run = await maintenance_runner.run_move_batches(
+        moved_files=change_report.moved_files,
+        batch_size=batch_size,
+    )
+    delete_run = await maintenance_runner.run_delete_batches(
+        deleted_paths=change_report.deleted_files,
+        batch_size=batch_size,
     )
     workflow_request = ProjectIndexWorkflowRequest(
         tenant_id=request.tenant_id,
@@ -1045,7 +1135,11 @@ async def run_project_index_coordinator(
     )
     batch_plan = build_project_index_batch_job_plan(
         request=workflow_request,
-        observed_files=observed_files,
+        observed_files=select_project_index_target_files(
+            observed_files=observed_files,
+            change_report=change_report,
+            force_full=request.force_full,
+        ),
         batch_size=batch_size,
     )
     completion = await workflow_starter.start_project_index_workflow(
@@ -1075,10 +1169,12 @@ async def run_project_index_coordinator(
         raise
 
     return ProjectIndexCoordinatorResult(
-        total_files=batch_plan.total_files,
+        total_files=len(observed_files),
         enqueued_files=enqueued_files,
         enqueued_batches=enqueued_batches,
-        deleted_files=orphan_cleanup.deleted_count,
+        deleted_files=delete_run.total_deleted_entities,
+        moved_files=move_run.total_updated_files,
+        relation_cleanup_entity_ids=delete_run.relation_cleanup_entity_ids,
         completion=completion,
     )
 

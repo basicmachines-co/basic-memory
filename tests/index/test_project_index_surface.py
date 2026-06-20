@@ -14,10 +14,12 @@ def test_index_package_exports_project_index_fanout_contracts() -> None:
         "ProjectIndexWorkflowRequest": index.ProjectIndexWorkflowRequest,
         "ProjectIndexCoordinatorResult": index.ProjectIndexCoordinatorResult,
         "ProjectIndexObservedFileSource": index.ProjectIndexObservedFileSource,
-        "ProjectIndexOrphanCleaner": index.ProjectIndexOrphanCleaner,
+        "ProjectIndexChangeDetector": index.ProjectIndexChangeDetector,
+        "ProjectIndexMaintenanceRunner": index.ProjectIndexMaintenanceRunner,
         "ProjectIndexWorkflowStarter": index.ProjectIndexWorkflowStarter,
         "ProjectIndexBatchEnqueuer": index.ProjectIndexBatchEnqueuer,
         "ProjectIndexFanoutFailureRecorder": index.ProjectIndexFanoutFailureRecorder,
+        "StoreProjectIndexMaintenanceRunner": index.StoreProjectIndexMaintenanceRunner,
     }
     for expected_name, contract in expected_contracts.items():
         assert contract.__name__ == expected_name

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -19,8 +19,8 @@ from basic_memory.indexing.change_planning import (
     plan_change_detection_snapshot,
     storage_checksums_from_sources,
 )
+from basic_memory.indexing.file_index_checking import IndexedFileChecksumRepository
 from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
-from basic_memory.repository import EntityRepository
 
 
 class ChangeDetectionLogger(Protocol):
@@ -47,11 +47,30 @@ class ChangeDetectionStore(Protocol):
     ) -> tuple[FileMoveCandidate, ...]: ...
 
 
+class ChangeDetectionMoveCandidate(Protocol):
+    """Indexed entity shape needed to prove a storage object was moved."""
+
+    file_path: FileIndexPath
+    checksum: FileIndexChecksum | None
+
+
+class ChangeDetectionEntityRepository(IndexedFileChecksumRepository, Protocol):
+    """Repository capabilities needed by project change detection."""
+
+    async def find_by_checksums(
+        self,
+        session: AsyncSession,
+        checksums: Sequence[FileIndexChecksum],
+    ) -> Sequence[ChangeDetectionMoveCandidate]: ...
+
+    async def get_all_file_paths(self, session: AsyncSession) -> Sequence[FileIndexPath]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ChangeDetector:
     """Repository-backed project file change detector."""
 
-    entity_repository: EntityRepository
+    entity_repository: ChangeDetectionEntityRepository
     session_maker: async_sessionmaker[AsyncSession]
 
     async def detect_all_changes(

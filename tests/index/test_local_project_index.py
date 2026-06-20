@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
@@ -26,14 +26,18 @@ from basic_memory.index import (
     run_local_project_index,
 )
 from basic_memory.indexing import (
+    ChangeDetector,
+    ChangeReport,
     IndexFileJobResult,
     IndexFileJobStatus,
     IndexFileObjectMetadata,
     IndexFileRuntimeRequest,
     FileIndexOperation,
     FileIndexResult,
-    OrphanEntityCleanupResult,
+    ProjectIndexDeleteRun,
+    ProjectIndexMoveRun,
     ProjectIndexWorkflowRequest,
+    StoreProjectIndexMaintenanceRunner,
 )
 from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
@@ -100,16 +104,50 @@ class RecordingObservedFileSource:
 
 
 @dataclass(slots=True)
-class RecordingOrphanCleaner:
-    current_paths: list[set[str]] = field(default_factory=list)
+class RecordingChangeDetector:
+    report: ChangeReport
+    observed_paths: list[tuple[str, ...]] = field(default_factory=list)
 
-    async def cleanup_orphans(self, current_paths: set[str]) -> OrphanEntityCleanupResult:
-        self.current_paths.append(current_paths)
-        return OrphanEntityCleanupResult(
-            orphan_paths=(),
-            deleted_paths=(),
-            skipped_missing_paths=(),
-            skipped_changed_paths=(),
+    async def detect_all_changes(
+        self,
+        storage_files: Mapping[str, RuntimeObservedIndexFile],
+    ) -> ChangeReport:
+        self.observed_paths.append(tuple(storage_files))
+        return self.report
+
+
+@dataclass(slots=True)
+class RecordingMaintenanceRunner:
+    moved_files: list[dict[str, str]] = field(default_factory=list)
+    deleted_paths: list[tuple[str, ...]] = field(default_factory=list)
+
+    async def run_move_batches(
+        self,
+        *,
+        moved_files: Mapping[str, str],
+        batch_size: int,
+        progress_callback: object | None = None,
+    ) -> ProjectIndexMoveRun:
+        self.moved_files.append(dict(moved_files))
+        return ProjectIndexMoveRun(
+            total_moves=len(moved_files),
+            total_updated_files=len(moved_files),
+            records=(),
+        )
+
+    async def run_delete_batches(
+        self,
+        *,
+        deleted_paths: Sequence[str],
+        batch_size: int,
+        progress_callback: object | None = None,
+    ) -> ProjectIndexDeleteRun:
+        self.deleted_paths.append(tuple(deleted_paths))
+        return ProjectIndexDeleteRun(
+            total_deletes=len(deleted_paths),
+            total_deleted_entities=len(deleted_paths),
+            relation_cleanup_entity_ids=frozenset(),
+            records=(),
         )
 
 
@@ -138,7 +176,12 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
         RuntimeObservedIndexFile(path="notes/c.md", checksum="c", size=3),
     )
     observed_source = RecordingObservedFileSource(observed)
-    orphan_cleaner = RecordingOrphanCleaner()
+    change_detector = RecordingChangeDetector(
+        ChangeReport(
+            new_files=["notes/a.md", "notes/b.md", "notes/c.md"],
+        )
+    )
+    maintenance_runner = RecordingMaintenanceRunner()
     batch_enqueuer = RecordingBatchEnqueuer()
 
     result = await run_local_project_index(
@@ -151,7 +194,8 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
         ),
         runtime=LocalProjectIndexRuntime(
             observed_file_source=observed_source,
-            orphan_cleaner=orphan_cleaner,
+            change_detector=change_detector,
+            maintenance_runner=maintenance_runner,
             batch_enqueuer=batch_enqueuer,
             workflow_starter=NoopProjectIndexWorkflowStarter(),
             fanout_failure_recorder=NoopProjectIndexFanoutFailureRecorder(),
@@ -162,7 +206,9 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
     assert result.total_files == 3
     assert result.enqueued_batches == 2
     assert result.enqueued_files == 3
-    assert orphan_cleaner.current_paths == [{"notes/a.md", "notes/b.md", "notes/c.md"}]
+    assert change_detector.observed_paths == [("notes/a.md", "notes/b.md", "notes/c.md")]
+    assert maintenance_runner.moved_files == [{}]
+    assert maintenance_runner.deleted_paths == [()]
     assert [request.target_paths() for request in batch_enqueuer.requests] == [
         ("notes/a.md", "notes/b.md"),
         ("notes/c.md",),
@@ -385,6 +431,13 @@ class RuntimeFactoryEntityRepository:
     ) -> Sequence[Entity]:
         return ()
 
+    async def find_by_checksums(
+        self,
+        session: AsyncSession,
+        checksums: Sequence[str],
+    ) -> Sequence[Entity]:
+        return ()
+
     async def update(
         self,
         session: AsyncSession,
@@ -414,6 +467,7 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
         file_service=FileService(tmp_path),
         file_indexer=RecordingMarkdownFileIndexer(),
         session_maker=async_sessionmaker(),
+        project_id=12,
         entity_repository=RuntimeFactoryEntityRepository(),
         search_service=RuntimeFactorySearchIndex(),
     )
@@ -439,6 +493,8 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
 
     assert seen_projects == [project]
     assert isinstance(runtime.observed_file_source, LocalProjectIndexObservedFileSource)
+    assert isinstance(runtime.change_detector, ChangeDetector)
+    assert isinstance(runtime.maintenance_runner, StoreProjectIndexMaintenanceRunner)
     assert isinstance(runtime.batch_enqueuer, InlineProjectIndexBatchEnqueuer)
     assert isinstance(runtime.batch_enqueuer.file_runner, LocalProjectIndexFileRunner)
     assert runtime.batch_size == 3

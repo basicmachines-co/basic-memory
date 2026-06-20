@@ -78,6 +78,12 @@ class LocalIndexEntityRepository(
         ids: list[Any],
     ) -> Sequence[Entity]: ...
 
+    async def find_by_checksums(
+        self,
+        session: AsyncSession,
+        checksums: Sequence[str],
+    ) -> Sequence[Entity]: ...
+
     async def update(
         self,
         session: AsyncSession,
@@ -99,6 +105,7 @@ class LocalIndexProjectDependencies:
     file_service: FileService
     file_indexer: IndexFileExecutor
     session_maker: async_sessionmaker[AsyncSession]
+    project_id: ProjectId
     entity_repository: LocalIndexEntityRepository
     search_service: OrphanSearchIndex[Entity]
 
@@ -425,6 +432,7 @@ async def build_local_index_project_dependencies(
         file_service=file_service,
         file_indexer=file_indexer,
         session_maker=session_maker,
+        project_id=project.id,
         entity_repository=entity_repository,
         search_service=search_service,
     )
