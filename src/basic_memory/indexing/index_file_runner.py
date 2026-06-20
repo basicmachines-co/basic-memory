@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -42,6 +42,22 @@ class IndexFileObjectMetadata:
     metadata: RuntimeNoteObjectMetadataMap = field(default_factory=dict)
 
 
+class IndexFileCurrentMetadata(Protocol):
+    """Storage metadata shape needed to build index-file object metadata."""
+
+    @property
+    def checksum(self) -> RuntimeFileChecksum: ...
+
+    @property
+    def metadata(self) -> RuntimeNoteObjectMetadataMap: ...
+
+
+type IndexFileCurrentMetadataLoader = Callable[
+    [RuntimeFilePath],
+    Awaitable[IndexFileCurrentMetadata | None],
+]
+
+
 class IndexFileRunnerChecker(Protocol):
     """Capability that decides whether an observed object needs indexing."""
 
@@ -55,6 +71,25 @@ class IndexFileMetadataSource(Protocol):
         self,
         file_path: RuntimeFilePath,
     ) -> IndexFileObjectMetadata | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StorageIndexFileMetadataSource:
+    """Adapt a storage metadata loader to the index-file runner protocol."""
+
+    load_metadata: IndexFileCurrentMetadataLoader
+
+    async def load_current_file_metadata(
+        self,
+        file_path: RuntimeFilePath,
+    ) -> IndexFileObjectMetadata | None:
+        current_metadata = await self.load_metadata(file_path)
+        if current_metadata is None:
+            return None
+        return IndexFileObjectMetadata(
+            checksum=current_metadata.checksum,
+            metadata=current_metadata.metadata,
+        )
 
 
 class IndexFileMaterializedNoteSource(Protocol):

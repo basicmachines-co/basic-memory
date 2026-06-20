@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from basic_memory.indexing.file_index_planning import (
 from basic_memory.indexing.index_file_runner import (
     IndexFileObjectMetadata,
     RepositoryCurrentMaterializedNoteSource,
+    StorageIndexFileMetadataSource,
     run_index_file,
 )
 from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
@@ -65,6 +67,12 @@ class FakeMetadataSource:
         if self.error is not None:
             raise self.error
         return self.metadata
+
+
+@dataclass(frozen=True, slots=True)
+class FakeStorageMetadata:
+    checksum: str
+    metadata: dict[str, str]
 
 
 class FakeMaterializedNoteSource:
@@ -176,6 +184,28 @@ def indexed_file() -> FileIndexResult:
         checksum="checksum-1",
         operation=FileIndexOperation.updated,
     )
+
+
+@pytest.mark.asyncio
+async def test_storage_index_file_metadata_source_maps_storage_metadata() -> None:
+    calls: list[str] = []
+
+    async def load_metadata(file_path: str) -> FakeStorageMetadata | None:
+        calls.append(file_path)
+        return FakeStorageMetadata(
+            checksum="etag-1",
+            metadata={NOTE_OBJECT_SOURCE_METADATA: "api"},
+        )
+
+    source = StorageIndexFileMetadataSource(load_metadata=load_metadata)
+
+    result = await source.load_current_file_metadata("notes/a.md")
+
+    assert result == IndexFileObjectMetadata(
+        checksum="etag-1",
+        metadata={NOTE_OBJECT_SOURCE_METADATA: "api"},
+    )
+    assert calls == ["notes/a.md"]
 
 
 @pytest.mark.asyncio
