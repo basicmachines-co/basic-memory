@@ -31,6 +31,10 @@ from basic_memory.runtime.note_object_metadata import (
 )
 
 
+DELETE_NOTE_FILE_ENTRYPOINT: JobEntrypoint = "delete_note_file"
+MATERIALIZE_NOTE_FILE_ENTRYPOINT: JobEntrypoint = "materialize_note_file"
+
+
 class RuntimeSerializedJobPayload(Protocol):
     """Validated payload that can cross a runtime worker boundary."""
 
@@ -148,6 +152,19 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
             file_checksum=self.file_checksum,
         )
 
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for note-file deletion."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=DELETE_NOTE_FILE_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
+        )
+
 
 class RuntimeNoteMaterializationJobPayload(BaseModel):
     """Serialized worker payload for accepted note materialization."""
@@ -229,4 +246,17 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
             source=self.source,
             cleanup_file_path=self.cleanup_file_path,
             cleanup_file_checksum=self.cleanup_file_checksum,
+        )
+
+    def runtime_job_request(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> RuntimeJobRequest:
+        """Build the concrete runtime queue request for note materialization."""
+        return runtime_job_request_from_source(
+            self.to_runtime_request(),
+            entrypoint=MATERIALIZE_NOTE_FILE_ENTRYPOINT,
+            payload=self.model_dump_json().encode("utf-8"),
+            headers=headers,
         )

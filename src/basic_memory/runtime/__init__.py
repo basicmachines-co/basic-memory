@@ -200,6 +200,8 @@ from basic_memory.runtime.contracts import (
 )
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 from basic_memory.runtime.job_payloads import (
+    DELETE_NOTE_FILE_ENTRYPOINT,
+    MATERIALIZE_NOTE_FILE_ENTRYPOINT,
     RuntimeJobPayloadFactory,
     RuntimeNoteFileDeleteJobPayload,
     RuntimeNoteMaterializationJobPayload,
@@ -287,6 +289,8 @@ from basic_memory.runtime.workflow_metadata import (
 __all__ = [
     "JobEntrypoint",
     "JobRuntime",
+    "DELETE_NOTE_FILE_ENTRYPOINT",
+    "MATERIALIZE_NOTE_FILE_ENTRYPOINT",
     "NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR",
     "NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT",
     "NOTE_OBJECT_ACTOR_KIND_METADATA",

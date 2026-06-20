@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel
 
+from basic_memory import runtime as runtime_module
 from basic_memory.runtime import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
     RuntimeJobRequest,
@@ -51,6 +52,35 @@ def test_runtime_note_file_delete_job_payload_round_trips_runtime_request() -> N
     payload = RuntimeNoteFileDeleteJobPayload.from_runtime_request(runtime_request)
 
     assert payload.to_runtime_request() == runtime_request
+
+
+def test_runtime_note_file_entrypoints_export_cloud_queue_names() -> None:
+    """The portable runtime contract owns note-file queue names."""
+    assert runtime_module.DELETE_NOTE_FILE_ENTRYPOINT == "delete_note_file"
+    assert runtime_module.MATERIALIZE_NOTE_FILE_ENTRYPOINT == "materialize_note_file"
+
+
+def test_runtime_note_file_delete_job_payload_builds_runtime_queue_request() -> None:
+    """Delete payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    payload = RuntimeNoteFileDeleteJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        entity_id=42,
+        file_path="notes/a.md",
+        file_checksum="file-sum",
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="delete_note_file",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=(
+            "delete-note-file:11111111-1111-1111-1111-111111111111:101:42:notes/a.md:file-sum"
+        ),
+        headers={"source": "test", "tenant_id": str(tenant_id), "project_id": "101"},
+    )
 
 
 @pytest.mark.asyncio
@@ -161,6 +191,34 @@ def test_runtime_note_materialization_job_payload_round_trips_runtime_request() 
     payload = RuntimeNoteMaterializationJobPayload.from_runtime_request(runtime_request)
 
     assert payload.to_runtime_request() == runtime_request
+
+
+def test_runtime_note_materialization_job_payload_builds_runtime_queue_request() -> None:
+    """Materialization payloads build the concrete runtime job request shape."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    actor_user_profile_id = UUID("33333333-3333-3333-3333-333333333333")
+    payload = RuntimeNoteMaterializationJobPayload(
+        tenant_id=tenant_id,
+        project_id=101,
+        entity_id=42,
+        db_version=4,
+        db_checksum="db-sum",
+        actor_user_profile_id=actor_user_profile_id,
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+        source="mcp",
+        cleanup_file_path="notes/old.md",
+        cleanup_file_checksum="old-file-sum",
+    )
+
+    request = payload.runtime_job_request(headers={"source": "test"})
+
+    assert request == RuntimeJobRequest(
+        entrypoint="materialize_note_file",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=("materialize-note-file:11111111-1111-1111-1111-111111111111:101:42:4:db-sum"),
+        headers={"source": "test", "tenant_id": str(tenant_id), "project_id": "101"},
+    )
 
 
 def test_runtime_note_materialization_job_payload_normalizes_origin_fields() -> None:
