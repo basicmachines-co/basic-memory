@@ -385,9 +385,7 @@ async def test_run_note_content_read_repair_applies_observed_markdown() -> None:
             target=target,
         ),
         session_maker=session_maker,
-        file_reader=_FileReader(
-            NoteContentReadRepairFile("# Repaired\n", observed_at=observed_at)
-        ),
+        file_reader=_FileReader(NoteContentReadRepairFile("# Repaired\n", observed_at=observed_at)),
         source="read_repair",
         reconciler_factory=lambda _project_id, _session_maker: FakeReconciler(),
     )

@@ -824,9 +824,7 @@ class TestRuntimeContracts:
         workflow_id = UUID("22222222-2222-2222-2222-222222222222")
 
         assert RUNTIME_ACTIVE_WORKFLOW_STATUSES == frozenset({"queued", "running"})
-        assert RUNTIME_TERMINAL_WORKFLOW_STATUSES == frozenset(
-            {"completed", "failed", "cancelled"}
-        )
+        assert RUNTIME_TERMINAL_WORKFLOW_STATUSES == frozenset({"completed", "failed", "cancelled"})
         assert runtime_job_status_from_workflow_status("queued") == "queued"
         assert runtime_job_status_from_workflow_status("running") == "in_progress"
         assert runtime_job_status_from_workflow_status("completed") == "complete"

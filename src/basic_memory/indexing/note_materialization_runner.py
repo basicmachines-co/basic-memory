@@ -2,23 +2,37 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, Self
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.indexing.note_content_reconciler import (
+    NoteContentStore,
+    apply_note_content_update_plan,
+    note_content_repository_for_project,
+    note_content_state_from_model,
+)
 from basic_memory.indexing.note_content_reconciliation import (
+    AcceptedNoteContentVersion,
     MaterializedNoteContentFile,
     NoteContentMaterializedCurrent,
     NoteContentMaterializedStale,
     NoteContentState,
     NoteContentWriteStatus,
     plan_note_content_materialization_publish,
+    plan_note_content_materialization_status,
 )
 from basic_memory.runtime import (
     RuntimeFileChecksum,
     RuntimeFileConflictError,
     RuntimeFilePath,
+    RuntimeEntityId,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteContentVersionSource,
     RuntimeNoteMaterializationJobRequest,
@@ -27,12 +41,14 @@ from basic_memory.runtime import (
     RuntimePendingNoteFileDelete,
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
+    ProjectId,
     TenantId,
     note_content_matches_materialization_request,
     plan_note_file_delete_job_request,
     plan_note_materialization_cleanup_file_delete,
     plan_prepared_note_write,
 )
+from basic_memory.models import Entity, NoteContent
 from basic_memory.services.exceptions import FileOperationError
 
 type NoteMaterializationPreflightOutcome = (
@@ -41,6 +57,12 @@ type NoteMaterializationPreflightOutcome = (
 type NoteMaterializationPublishUpdate = (
     NoteContentMaterializedCurrent | NoteContentMaterializedStale
 )
+type NoteMaterializationClock = Callable[[], datetime]
+type NoteMaterializationSessionScope = Callable[
+    [async_sessionmaker[AsyncSession]],
+    AbstractAsyncContextManager[AsyncSession],
+]
+type NoteMaterializationNoteContentRepositoryFactory = Callable[[ProjectId], NoteContentStore]
 
 
 class NoteMaterializationPublishAction(StrEnum):
@@ -182,6 +204,37 @@ class NoteFileDeleteEnqueuer(Protocol):
     async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None: ...
 
 
+class NoteMaterializationSessionLock(Protocol):
+    """Capability that serializes DB-mediated writes for one project note."""
+
+    async def lock_note_materialization(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: ProjectId,
+        entity_id: RuntimeEntityId,
+    ) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class NoopNoteMaterializationSessionLock:
+    """Session lock for runtimes that do not need an extra DB advisory lock."""
+
+    async def lock_note_materialization(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: ProjectId,
+        entity_id: RuntimeEntityId,
+    ) -> None:
+        return None
+
+
+def note_materialization_utc_now() -> datetime:
+    """Return the default UTC timestamp for note materialization persistence."""
+    return datetime.now(tz=UTC)
+
+
 def plan_note_materialization_preflight(
     request: RuntimeNoteMaterializationJobRequest,
     *,
@@ -294,6 +347,181 @@ def plan_written_note_materialization_publish(
         ),
         note_content_update=note_content_update,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryNoteMaterializationPreflight:
+    """Repository-backed preflight for one accepted note materialization attempt."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    session_lock: NoteMaterializationSessionLock = field(
+        default_factory=NoopNoteMaterializationSessionLock
+    )
+    session_scope: NoteMaterializationSessionScope = db.scoped_session
+    clock: NoteMaterializationClock = note_materialization_utc_now
+
+    async def prepare_note_materialization(
+        self,
+        request: RuntimeNoteMaterializationJobRequest,
+    ) -> NoteMaterializationPreflightResult:
+        async with self.session_scope(self.session_maker) as session:
+            await self.session_lock.lock_note_materialization(
+                session,
+                project_id=request.project_id,
+                entity_id=request.entity_id,
+            )
+
+            entity = await session.get(Entity, request.entity_id)
+            note_content = await session.get(NoteContent, request.entity_id)
+            attempted_at = self.clock()
+            preflight_result = plan_note_materialization_preflight(
+                request,
+                entity=entity,
+                note_content=note_content,
+                attempted_at=attempted_at,
+            )
+            if preflight_result.terminal_result is not None:
+                return preflight_result
+
+            if note_content is None:
+                raise RuntimeError("prepared note materialization requires note_content")
+
+            note_content.file_write_status = "writing"
+            note_content.last_materialization_attempt_at = attempted_at
+            await session.flush()
+            return preflight_result
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryNoteMaterializationPublisher:
+    """Repository-backed publisher for successful materialized file writes."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    session_lock: NoteMaterializationSessionLock = field(
+        default_factory=NoopNoteMaterializationSessionLock
+    )
+    session_scope: NoteMaterializationSessionScope = db.scoped_session
+    note_content_repository_factory: NoteMaterializationNoteContentRepositoryFactory = (
+        note_content_repository_for_project
+    )
+
+    async def publish_written_file_state(
+        self,
+        request: RuntimeNoteMaterializationJobRequest,
+        prepared_write: RuntimePreparedNoteWrite,
+        written_file: RuntimeWrittenFileState,
+    ) -> RuntimeNoteMaterializationResult:
+        async with self.session_scope(self.session_maker) as session:
+            await self.session_lock.lock_note_materialization(
+                session,
+                project_id=request.project_id,
+                entity_id=request.entity_id,
+            )
+
+            note_content = await session.get(NoteContent, request.entity_id)
+            publish_plan = plan_written_note_materialization_publish(
+                request=request,
+                prepared_write=prepared_write,
+                written_file=written_file,
+                current_note_content=(
+                    note_content_state_from_model(note_content)
+                    if note_content is not None
+                    else None
+                ),
+                current_file_path=note_content.file_path if note_content is not None else None,
+            )
+            if note_content is None:
+                return publish_plan.result
+
+            if publish_plan.action is NoteMaterializationPublishAction.stale_file_path:
+                return publish_plan.result
+
+            if publish_plan.action is NoteMaterializationPublishAction.stale_db_version:
+                await apply_note_content_update_plan(
+                    self.note_content_repository_factory(request.project_id),
+                    session,
+                    request.entity_id,
+                    publish_plan.require_note_content_update(),
+                )
+                return publish_plan.result
+
+            if publish_plan.action is not NoteMaterializationPublishAction.current:
+                raise RuntimeError(
+                    f"Unhandled note materialization publish action: {publish_plan.action}"
+                )
+
+            entity = await session.get(Entity, request.entity_id)
+            if entity is None:
+                return RuntimeNoteMaterializationResult(
+                    entity_id=request.entity_id,
+                    status=RuntimeNoteMaterializationStatus.missing,
+                    reason=f"entity disappeared after file write: {request.entity_id}",
+                    file_path=written_file.file_path,
+                    file_checksum=written_file.file_checksum,
+                )
+
+            await apply_note_content_update_plan(
+                self.note_content_repository_factory(request.project_id),
+                session,
+                request.entity_id,
+                publish_plan.require_note_content_update(),
+            )
+            entity.updated_at = written_file.file_updated_at
+            entity.mtime = written_file.file_updated_at.timestamp()
+            entity.size = len(prepared_write.markdown_content.encode("utf-8"))
+            await session.flush()
+            return publish_plan.result
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryNoteMaterializationStatusPublisher:
+    """Repository-backed publisher for materialization conflict or failure state."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    session_lock: NoteMaterializationSessionLock = field(
+        default_factory=NoopNoteMaterializationSessionLock
+    )
+    session_scope: NoteMaterializationSessionScope = db.scoped_session
+    note_content_repository_factory: NoteMaterializationNoteContentRepositoryFactory = (
+        note_content_repository_for_project
+    )
+
+    async def publish_note_materialization_status(
+        self,
+        request: RuntimeNoteMaterializationJobRequest,
+        publication: NoteMaterializationStatusPublication,
+    ) -> None:
+        async with self.session_scope(self.session_maker) as session:
+            await self.session_lock.lock_note_materialization(
+                session,
+                project_id=request.project_id,
+                entity_id=request.entity_id,
+            )
+
+            note_content = await session.get(NoteContent, request.entity_id)
+            if note_content is None:
+                return
+
+            plan = plan_note_content_materialization_status(
+                current=note_content_state_from_model(note_content),
+                accepted=AcceptedNoteContentVersion(
+                    db_version=request.db_version,
+                    db_checksum=request.db_checksum,
+                ),
+                file_write_status=publication.file_write_status,
+                actual_file_checksum=publication.actual_file_checksum,
+                error_message=publication.error_message,
+                attempted_at=publication.attempted_at,
+            )
+            if plan is None:
+                return
+
+            await apply_note_content_update_plan(
+                self.note_content_repository_factory(request.project_id),
+                session,
+                request.entity_id,
+                plan,
+            )
 
 
 async def run_note_materialization(

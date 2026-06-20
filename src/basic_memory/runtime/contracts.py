@@ -89,14 +89,19 @@ def runtime_job_status_from_workflow_status(
     workflow_status: RuntimeWorkflowStatus,
 ) -> RuntimeJobStatusType:
     """Translate durable workflow states to the portable job-status vocabulary."""
-    status_map: Mapping[RuntimeWorkflowStatus, RuntimeJobStatusType] = {
-        "queued": "queued",
-        "running": "in_progress",
-        "completed": "complete",
-        "failed": "failed",
-        "cancelled": "cancelled",
-    }
-    return status_map.get(workflow_status, "unknown")
+    match workflow_status:
+        case "queued":
+            return "queued"
+        case "running":
+            return "in_progress"
+        case "completed":
+            return "complete"
+        case "failed":
+            return "failed"
+        case "cancelled":
+            return "cancelled"
+        case _:
+            return "unknown"
 
 
 def parse_runtime_workflow_id(job_id: str) -> WorkflowId | None:

@@ -1,20 +1,26 @@
 """Tests for portable note materialization orchestration."""
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
+from types import SimpleNamespace, TracebackType
+from typing import cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.note_materialization_runner import (
     NoteMaterializationPreflightResult,
     NoteMaterializationPublishAction,
     NoteMaterializationStatusPublication,
+    RepositoryNoteMaterializationPreflight,
+    RepositoryNoteMaterializationPublisher,
+    RepositoryNoteMaterializationStatusPublisher,
     plan_note_materialization_preflight,
     plan_written_note_materialization_publish,
     run_note_materialization,
 )
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
+from basic_memory.models import Entity, NoteContent
 from basic_memory.runtime import (
     RuntimeFileConflict,
     RuntimeFileConflictError,
@@ -109,6 +115,82 @@ class FakeCleanupEnqueuer:
         self.requests.append(request)
 
 
+class FakeSessionLock:
+    def __init__(self) -> None:
+        self.calls: list[tuple[AsyncSession, int, int]] = []
+
+    async def lock_note_materialization(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: int,
+        entity_id: int,
+    ) -> None:
+        self.calls.append((session, project_id, entity_id))
+
+
+class FakeRepositorySession:
+    def __init__(self, *, entity: Entity | None, note_content: NoteContent | None) -> None:
+        self.entity = entity
+        self.note_content = note_content
+        self.flush_count = 0
+
+    async def get(self, model: type[object], identity: int) -> object | None:
+        assert identity == 42
+        if model is Entity:
+            return self.entity
+        if model is NoteContent:
+            return self.note_content
+        raise AssertionError(f"unexpected model: {model}")
+
+    async def flush(self) -> None:
+        self.flush_count += 1
+
+
+class FakeScopedSession:
+    def __init__(self, session: FakeRepositorySession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return cast(AsyncSession, self.session)
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        return None
+
+
+class RecordingNoteContentRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[AsyncSession, int, dict[str, object]]] = []
+
+    async def update_state_fields(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        **updates: object,
+    ) -> NoteContent | None:
+        self.calls.append((session, entity_id, updates))
+        return None
+
+    async def get_by_entity_id(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> NoteContent | None:
+        raise AssertionError("repository adapter tests should not load note_content")
+
+    async def create(
+        self,
+        session: AsyncSession,
+        data: NoteContent,
+    ) -> NoteContent:
+        raise AssertionError("repository adapter tests should not create note_content")
+
+
 def materialization_request() -> RuntimeNoteMaterializationJobRequest:
     return RuntimeNoteMaterializationJobRequest(
         tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -157,6 +239,39 @@ def note_content_state(
         db_checksum=db_checksum,
         file_version=file_version,
         file_checksum=file_checksum,
+    )
+
+
+def materialization_entity(*, file_path: str = "notes/a.md") -> Entity:
+    return Entity(
+        id=42,
+        project_id=7,
+        title="A note",
+        note_type="note",
+        content_type="text/markdown",
+        file_path=file_path,
+        checksum="old-file-sum",
+    )
+
+
+def materialization_note_content(
+    *,
+    file_path: str = "notes/a.md",
+    db_version: int = 4,
+    db_checksum: str = "db-checksum",
+    file_checksum: str | None = "old-file-sum",
+) -> NoteContent:
+    return NoteContent(
+        entity_id=42,
+        project_id=7,
+        external_id="note-42",
+        file_path=file_path,
+        markdown_content="# A note\n",
+        db_version=db_version,
+        db_checksum=db_checksum,
+        file_version=3,
+        file_checksum=file_checksum,
+        file_write_status="pending",
     )
 
 
@@ -235,6 +350,124 @@ def test_plan_note_materialization_preflight_returns_prepared_write() -> None:
             attempted_at=attempted_at,
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_preflight_marks_current_note_writing() -> None:
+    request = materialization_request()
+    attempted_at = datetime(2026, 6, 18, 15, 0, tzinfo=UTC)
+    entity = materialization_entity()
+    note_content = materialization_note_content()
+    session = FakeRepositorySession(entity=entity, note_content=note_content)
+    session_lock = FakeSessionLock()
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+
+    result = await RepositoryNoteMaterializationPreflight(
+        session_maker=session_maker,
+        session_lock=session_lock,
+        session_scope=lambda _session_maker: FakeScopedSession(session),
+        clock=lambda: attempted_at,
+    ).prepare_note_materialization(request)
+
+    assert result == NoteMaterializationPreflightResult.prepared(
+        plan_prepared_note_write(
+            request=request,
+            file_path="notes/a.md",
+            markdown_content="# A note\n",
+            previous_file_checksum="old-file-sum",
+            attempted_at=attempted_at,
+        )
+    )
+    assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
+    assert note_content.file_write_status == "writing"
+    assert note_content.last_materialization_attempt_at == attempted_at
+    assert session.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_publisher_updates_current_written_file() -> None:
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    entity = materialization_entity()
+    note_content = materialization_note_content()
+    session = FakeRepositorySession(entity=entity, note_content=note_content)
+    session_lock = FakeSessionLock()
+    repository = RecordingNoteContentRepository()
+
+    result = await RepositoryNoteMaterializationPublisher(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        session_lock=session_lock,
+        session_scope=lambda _session_maker: FakeScopedSession(session),
+        note_content_repository_factory=lambda _project_id: repository,
+    ).publish_written_file_state(request, prepared, written)
+
+    assert result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.written,
+        reason="note file written: notes/a.md",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+    assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
+    assert repository.calls == [
+        (
+            cast(AsyncSession, session),
+            42,
+            {
+                "file_version": 4,
+                "file_checksum": "new-file-sum",
+                "file_write_status": "synced",
+                "file_updated_at": written.file_updated_at,
+                "last_materialization_error": None,
+                "last_materialization_attempt_at": prepared.attempted_at,
+            },
+        )
+    ]
+    assert entity.updated_at == written.file_updated_at
+    assert entity.size == len(b"# A note\n")
+    assert session.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_status_publisher_records_conflict() -> None:
+    request = materialization_request()
+    attempted_at = datetime(2026, 6, 18, 15, 0, tzinfo=UTC)
+    session = FakeRepositorySession(
+        entity=materialization_entity(),
+        note_content=materialization_note_content(),
+    )
+    session_lock = FakeSessionLock()
+    repository = RecordingNoteContentRepository()
+
+    await RepositoryNoteMaterializationStatusPublisher(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        session_lock=session_lock,
+        session_scope=lambda _session_maker: FakeScopedSession(session),
+        note_content_repository_factory=lambda _project_id: repository,
+    ).publish_note_materialization_status(
+        request,
+        NoteMaterializationStatusPublication(
+            file_write_status="external_change_detected",
+            attempted_at=attempted_at,
+            actual_file_checksum="external-sum",
+            error_message="Refusing to overwrite unexpected file",
+        ),
+    )
+
+    assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
+    assert repository.calls == [
+        (
+            cast(AsyncSession, session),
+            42,
+            {
+                "file_write_status": "external_change_detected",
+                "last_materialization_error": "Refusing to overwrite unexpected file",
+                "last_materialization_attempt_at": attempted_at,
+                "file_checksum": "external-sum",
+            },
+        )
+    ]
 
 
 def test_plan_written_note_materialization_publish_handles_missing_note_content() -> None:

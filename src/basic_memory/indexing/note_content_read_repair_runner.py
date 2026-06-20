@@ -446,9 +446,7 @@ async def run_note_content_read_repair[
     target = preflight.require_target()
     repair_file = await file_reader.read_note_content_repair_file(target)
     if repair_file is None:
-        return NoteContentReadRepairRun(
-            status=RuntimeNoteContentReadRepairStatus.file_missing
-        )
+        return NoteContentReadRepairRun(status=RuntimeNoteContentReadRepairStatus.file_missing)
     if repair_file.markdown_content is None:
         return NoteContentReadRepairRun(status=RuntimeNoteContentReadRepairStatus.empty_file)
 
