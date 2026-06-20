@@ -21,13 +21,13 @@ from basic_memory.deps import (
     ProjectServiceDep,
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
-    SyncServiceV2ExternalDep,
+    ProjectIndexRunnerDep,
     TaskSchedulerDep,
     ProjectExternalIdPathDep,
     SessionDep,
     SessionMakerDep,
 )
-from basic_memory.schemas import SyncReportResponse
+from basic_memory.schemas import ProjectIndexRunResponse, ProjectIndexStatusResponse
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.project_info import (
@@ -232,16 +232,14 @@ async def synchronize_projects(
 
 @router.post("/{project_id}/sync")
 async def sync_project(
-    sync_service: SyncServiceV2ExternalDep,
+    project_index_runner: ProjectIndexRunnerDep,
     project_config: ProjectConfigV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
     project_internal_id: ProjectExternalIdPathDep,
-    force_full: bool = Query(
-        False, description="Force full scan, bypassing watermark optimization"
-    ),
+    force_full: bool = Query(False, description="Request a full project index run"),
     run_in_background: bool = Query(True, description="Run in background"),
 ):
-    """Force project filesystem sync to database."""
+    """Run project-wide indexing through the event-index coordinator."""
     if run_in_background:
         task_scheduler.schedule(
             "sync_project",
@@ -257,28 +255,30 @@ async def sync_project(
             "message": f"Filesystem sync initiated for project '{project_config.name}'",
         }
 
-    report = await sync_service.sync(
-        project_config.home, project_config.name, force_full=force_full
+    result = await project_index_runner.index_project(
+        project_internal_id,
+        force_full=force_full,
     )
     logger.info(
         f"Filesystem sync completed for project: {project_config.name} (force_full={force_full})"
     )
-    return SyncReportResponse.from_sync_report(report)
+    return ProjectIndexRunResponse.from_result(result)
 
 
-@router.post("/{project_id}/status", response_model=SyncReportResponse)
+@router.post("/{project_id}/status", response_model=ProjectIndexStatusResponse)
 async def get_project_status(
-    sync_service: SyncServiceV2ExternalDep,
-    project_config: ProjectConfigV2ExternalDep,
+    project_index_runner: ProjectIndexRunnerDep,
+    project_internal_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external ID (UUID)"),
-    force_full: bool = Query(
-        False, description="Force full scan, bypassing watermark optimization"
-    ),
-) -> SyncReportResponse:
-    """Get sync status of files vs database for a project."""
-    logger.info(f"API v2 request: get_project_status for project_id={project_id}")
-    report = await sync_service.scan(project_config.home, force_full=force_full)
-    return SyncReportResponse.from_sync_report(report)
+    force_full: bool = Query(False, description="Accepted for compatibility; ignored"),
+) -> ProjectIndexStatusResponse:
+    """Observe current project-index files for a project."""
+    logger.info(
+        f"API v2 request: get_project_status for project_id={project_id} "
+        f"(force_full ignored={force_full})"
+    )
+    observation = await project_index_runner.observe_project(project_internal_id)
+    return ProjectIndexStatusResponse.from_observation(observation)
 
 
 @router.post("/resolve", response_model=ProjectResolveResponse)

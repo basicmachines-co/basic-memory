@@ -18,7 +18,7 @@ from basic_memory.mcp.clients import KnowledgeClient, ProjectClient, SearchClien
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.project_info import ProjectInfoRequest
 from basic_memory.schemas.search import SearchQuery
-from basic_memory.schemas import SyncReportResponse
+from basic_memory.schemas import ProjectIndexRunResponse
 
 console = Console()
 
@@ -163,9 +163,9 @@ async def run_doctor() -> None:
                 sync_data = await project_client.sync(
                     project_id, force_full=False, run_in_background=False
                 )
-                sync_report = SyncReportResponse.model_validate(sync_data)
-                if sync_report.total == 0:
-                    raise ValueError("Sync did not detect any changes")
+                project_index_run = ProjectIndexRunResponse.model_validate(sync_data)
+                if project_index_run.enqueued_files == 0:
+                    raise ValueError("Project index did not enqueue any files")
 
                 console.print("[green]OK[/green] Sync indexed manual file")
 
@@ -180,10 +180,13 @@ async def run_doctor() -> None:
                 console.print("[green]OK[/green] Search confirmed manual file")
 
                 status_report = await project_client.get_status(project_id)
-                if status_report.total != 0:
-                    raise ValueError("Project status not clean after sync")
+                observed_paths = {
+                    observed_file.path for observed_file in status_report.observed_files
+                }
+                if "doctor/manual-note.md" not in observed_paths:
+                    raise ValueError("Project index status did not observe manual note")
 
-                console.print("[green]OK[/green] Status clean after sync")
+                console.print("[green]OK[/green] Status observed indexed file")
 
             finally:
                 if project_id:

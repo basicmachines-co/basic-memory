@@ -10,7 +10,7 @@ from httpx import AsyncClient
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
 # so each method defers the import to call time instead (#886).
-from basic_memory.schemas import ProjectInfoResponse, SyncReportResponse
+from basic_memory.schemas import ProjectIndexStatusResponse, ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
 
@@ -179,12 +179,12 @@ class ProjectClient:
 
         Args:
             project_external_id: Project external ID (UUID)
-            force_full: If True, force a full scan bypassing watermark optimization
+            force_full: If True, request a full project index run
             run_in_background: If True, return immediately; if False, wait for completion
 
         Returns:
             Raw response dict — background mode returns {"message": ...},
-            foreground mode returns a SyncReportResponse-shaped dict.
+            foreground mode returns a project-index run summary.
 
         Raises:
             ToolError: If the request fails
@@ -202,14 +202,14 @@ class ProjectClient:
         response = await call_post(self.http_client, url)
         return response.json()
 
-    async def get_status(self, project_external_id: str) -> SyncReportResponse:
-        """Get the sync status for a project.
+    async def get_status(self, project_external_id: str) -> ProjectIndexStatusResponse:
+        """Get the current project-index observation for a project.
 
         Args:
             project_external_id: Project external ID (UUID)
 
         Returns:
-            SyncReportResponse describing pending changes
+            ProjectIndexStatusResponse describing observed indexable files
 
         Raises:
             ToolError: If the request fails
@@ -220,7 +220,7 @@ class ProjectClient:
             self.http_client,
             f"/v2/projects/{project_external_id}/status",
         )
-        return SyncReportResponse.model_validate(response.json())
+        return ProjectIndexStatusResponse.model_validate(response.json())
 
     async def get_info(self, project_external_id: str) -> ProjectInfoResponse:
         """Get detailed project information and statistics.

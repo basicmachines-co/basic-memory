@@ -1,25 +1,20 @@
 """Task scheduler tests for derived async work."""
 
 import asyncio
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.deps.services import get_task_scheduler
 
 
-class StubSyncService:
+class StubProjectIndexRunner:
     def __init__(self) -> None:
-        self.resolved: list[int] = []
-        self.synced: list[tuple[str, str, bool]] = []
+        self.indexed: list[tuple[int, bool]] = []
 
-    async def resolve_relations(self, entity_id: int) -> None:
-        self.resolved.append(entity_id)
-
-    async def sync(self, home: Path, name: str, force_full: bool = False) -> None:
-        self.synced.append((str(home), name, force_full))
+    async def index_project(self, project_id: int, *, force_full: bool = False) -> None:
+        self.indexed.append((project_id, force_full))
 
 
 class StubSearchService:
@@ -37,7 +32,7 @@ class StubSearchService:
 @pytest.mark.asyncio
 async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
     """Explicit sync_entity_vectors task should call SearchService sync method."""
-    sync_service = StubSyncService()
+    project_index_runner = StubProjectIndexRunner()
     search_service = StubSearchService()
     app_config = BasicMemoryConfig(
         env="test",
@@ -45,12 +40,10 @@ async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
         default_project="test-project",
         semantic_search_enabled=True,
     )
-    project_config = ProjectConfig(name="test-project", home=tmp_path)
 
     scheduler = await get_task_scheduler(
-        sync_service=cast(Any, sync_service),
+        project_index_runner=cast(Any, project_index_runner),
         search_service=cast(Any, search_service),
-        project_config=project_config,
         app_config=app_config,
     )
     # Enable background tasks for this test — uses stubs, no real DB race risk
@@ -62,9 +55,9 @@ async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sync_project_task_maps_to_sync_service(tmp_path):
-    """Explicit sync_project task should call SyncService sync method."""
-    sync_service = StubSyncService()
+async def test_sync_project_task_maps_to_project_index_runner(tmp_path):
+    """Explicit sync_project task should call the event-index project runner."""
+    project_index_runner = StubProjectIndexRunner()
     search_service = StubSearchService()
     app_config = BasicMemoryConfig(
         env="test",
@@ -72,16 +65,14 @@ async def test_sync_project_task_maps_to_sync_service(tmp_path):
         default_project="test-project",
         semantic_search_enabled=True,
     )
-    project_config = ProjectConfig(name="test-project", home=tmp_path)
 
     scheduler = await get_task_scheduler(
-        sync_service=cast(Any, sync_service),
+        project_index_runner=cast(Any, project_index_runner),
         search_service=cast(Any, search_service),
-        project_config=project_config,
         app_config=app_config,
     )
     cast(Any, scheduler)._test_mode = False
-    scheduler.schedule("sync_project", force_full=True)
+    scheduler.schedule("sync_project", project_id=13, force_full=True)
     await asyncio.sleep(0.05)
 
-    assert sync_service.synced == [(str(tmp_path), "test-project", True)]
+    assert project_index_runner.indexed == [(13, True)]

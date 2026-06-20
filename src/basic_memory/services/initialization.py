@@ -9,7 +9,6 @@ import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
-from uuid import uuid4
 
 
 from loguru import logger
@@ -20,7 +19,7 @@ from basic_memory.models import Project
 from basic_memory.repository import (
     ProjectRepository,
 )
-from basic_memory.runtime import ProjectRuntimeReference, TenantId, RuntimeProjectIndexJobRequest
+from basic_memory.runtime import TenantId
 
 if TYPE_CHECKING:
     from basic_memory.index import LocalProjectIndexRuntime
@@ -40,15 +39,11 @@ async def run_initial_project_index(
     runtime_factory: InitialProjectIndexRuntimeFactory,
 ) -> None:
     """Run startup project indexing through the local project-index fanout runtime."""
-    from basic_memory.index import run_local_project_index
+    from basic_memory.index import run_local_project_index_for_project
 
-    result = await run_local_project_index(
-        RuntimeProjectIndexJobRequest(
-            tenant_id=runtime_factory.tenant_id,
-            project=ProjectRuntimeReference.from_project(project),
-            workflow_id=uuid4(),
-        ),
-        runtime=await runtime_factory.runtime_for_project(project),
+    result = await run_local_project_index_for_project(
+        project,
+        runtime_factory=runtime_factory,
     )
     logger.info(
         "Initial project-index fanout completed",

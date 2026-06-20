@@ -69,18 +69,17 @@ async def run_sync(
                 force_full=force_full,
                 run_in_background=run_in_background,
             )
-            # Background mode returns {"message": "..."}, foreground returns SyncReportResponse
+            # Background mode returns {"message": "..."}, foreground returns project-index counts.
             if "message" in data:
                 console.print(f"[green]{data['message']}[/green]")
             else:
-                # Foreground mode - show summary of sync results
-                total = data.get("total", 0)
-                new_count = len(data.get("new", []))
-                modified_count = len(data.get("modified", []))
-                deleted_count = len(data.get("deleted", []))
+                total_files = data.get("total_files", 0)
+                enqueued_files = data.get("enqueued_files", 0)
+                enqueued_batches = data.get("enqueued_batches", 0)
+                deleted_files = data.get("deleted_files", 0)
                 console.print(
-                    f"[green]Synced {total} files[/green] "
-                    f"(new: {new_count}, modified: {modified_count}, deleted: {deleted_count})"
+                    f"[green]Indexed {enqueued_files}/{total_files} files[/green] "
+                    f"(batches: {enqueued_batches}, deleted orphans: {deleted_files})"
                 )
     except (ToolError, ValueError) as e:
         console.print(f"[red]Sync failed: {e}[/red]")

@@ -45,6 +45,12 @@ from basic_memory.schemas.project_info import (
     ProjectInfoResponse,
 )
 
+from basic_memory.schemas.project_index import (
+    ProjectIndexObservedFileResponse,
+    ProjectIndexRunResponse,
+    ProjectIndexStatusResponse,
+)
+
 from basic_memory.schemas.directory import (
     DirectoryNode,
 )
@@ -81,6 +87,9 @@ __all__ = [
     "SystemStatus",
     "EmbeddingStatus",
     "ProjectInfoResponse",
+    "ProjectIndexObservedFileResponse",
+    "ProjectIndexRunResponse",
+    "ProjectIndexStatusResponse",
     # Directory
     "DirectoryNode",
     # Sync

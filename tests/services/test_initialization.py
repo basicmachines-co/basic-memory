@@ -285,10 +285,13 @@ async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_
             async def runtime_for_project(self, project):  # noqa: ANN001
                 return f"runtime:{project.name}"
 
-        project_index_calls = []
+        project_index_calls: list[tuple[str, str, bool]] = []
 
-        async def run_project_index(request, *, runtime):  # noqa: ANN001
-            project_index_calls.append((request, runtime))
+        async def run_project_index_for_project(  # noqa: ANN001
+            project, *, runtime_factory, force_full=False
+        ):
+            runtime = await runtime_factory.runtime_for_project(project)
+            project_index_calls.append((project.name, runtime, force_full))
             return ProjectIndexCoordinatorResult(
                 total_files=0,
                 enqueued_files=0,
@@ -304,19 +307,17 @@ async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_
             "basic_memory.index.LocalProjectIndexRuntimeFactory",
             RecordingProjectIndexRuntimeFactory,
         )
-        monkeypatch.setattr("basic_memory.index.run_local_project_index", run_project_index)
+        monkeypatch.setattr(
+            "basic_memory.index.run_local_project_index_for_project",
+            run_project_index_for_project,
+        )
 
         await initialize_file_sync(updated, quiet=True)
 
         assert len(created_coroutines) == 1
         await created_coroutines[0]
 
-        assert len(project_index_calls) == 1
-        request, runtime = project_index_calls[0]
-        assert request.project.project_name == "event-startup"
-        assert request.search is True
-        assert request.embeddings is True
-        assert runtime == "runtime:event-startup"
+        assert project_index_calls == [("event-startup", "runtime:event-startup", False)]
     finally:
         await db.shutdown_db()
 
@@ -363,14 +364,17 @@ async def test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled(
             assert project.name == "legacy-startup"
             return RecordingLegacySyncService()
 
-        async def run_project_index(request, *, runtime):  # noqa: ANN001
+        async def run_project_index_for_project(project, *, runtime_factory, force_full=False):  # noqa: ANN001
             raise AssertionError("legacy startup should not run project-index fanout")
 
         monkeypatch.setattr(
             "basic_memory.services.initialization.asyncio.create_task", capture_task
         )
         monkeypatch.setattr("basic_memory.sync.sync_service.get_sync_service", get_sync_service)
-        monkeypatch.setattr("basic_memory.index.run_local_project_index", run_project_index)
+        monkeypatch.setattr(
+            "basic_memory.index.run_local_project_index_for_project",
+            run_project_index_for_project,
+        )
 
         await initialize_file_sync(updated, quiet=True)
 

@@ -6,13 +6,16 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
     LocalIndexEntityRepository,
+    LocalIndexProjectDependencies,
     LocalIndexProjectDependencyProvider,
     build_local_index_project_dependencies,
 )
@@ -48,6 +51,7 @@ from basic_memory.indexing import (
 )
 from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
+    ProjectRuntimeReference,
     RuntimeJobId,
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
@@ -69,6 +73,12 @@ class ProjectIndexFileRequestRunner(Protocol):
         self,
         request: IndexFileRuntimeRequest,
     ) -> IndexFileJobResult: ...
+
+
+class LocalProjectIndexProjectRepository(Protocol):
+    """Project lookup capability needed by local project-index runners."""
+
+    async def get_by_id(self, session: AsyncSession, project_id: int) -> Project | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +196,25 @@ class LocalProjectIndexRuntime:
     coordinator_job_id: RuntimeJobId | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LocalProjectIndexObservation:
+    """Current local project files observed through the project-index adapter."""
+
+    observed_files: tuple[RuntimeObservedIndexFile, ...]
+
+    @property
+    def total_files(self) -> int:
+        return len(self.observed_files)
+
+
+class LocalProjectIndexRuntimeProvider(Protocol):
+    """Minimal factory shape needed to run a local project-index request."""
+
+    tenant_id: TenantId
+
+    async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime: ...
+
+
 def project_index_file_requests_from_batch_request(
     request: RuntimeIndexFileBatchJobRequest,
 ) -> tuple[IndexFileRuntimeRequest, ...]:
@@ -300,8 +329,13 @@ class LocalProjectIndexRuntimeFactory:
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     batch_size: int = 100
 
-    async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime:
-        dependencies = await self.dependency_provider(project)
+    async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
+        return await self.dependency_provider(project)
+
+    def runtime_from_dependencies(
+        self,
+        dependencies: LocalIndexProjectDependencies,
+    ) -> LocalProjectIndexRuntime:
         metadata_source = LocalStorageFileMetadataSource(dependencies.file_service)
         checker = FileIndexChecker(
             indexed_checksum_source=RepositoryIndexedFileChecksumSource(
@@ -332,6 +366,63 @@ class LocalProjectIndexRuntimeFactory:
             ),
             batch_enqueuer=InlineProjectIndexBatchEnqueuer(file_runner),
             batch_size=self.batch_size,
+        )
+
+    async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime:
+        return self.runtime_from_dependencies(await self.dependencies_for_project(project))
+
+
+async def run_local_project_index_for_project(
+    project: Project,
+    *,
+    runtime_factory: LocalProjectIndexRuntimeProvider,
+    force_full: bool = False,
+) -> ProjectIndexCoordinatorResult:
+    """Run local project indexing for one project through the core fanout runtime."""
+    return await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            tenant_id=runtime_factory.tenant_id,
+            project=ProjectRuntimeReference.from_project(project),
+            workflow_id=uuid4(),
+            force_full=force_full,
+        ),
+        runtime=await runtime_factory.runtime_for_project(project),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalProjectIndexRunner:
+    """API/task-facing runner for local project observation and project-wide indexing."""
+
+    project_repository: LocalProjectIndexProjectRepository
+    session_maker: async_sessionmaker[AsyncSession]
+    runtime_factory: LocalProjectIndexRuntimeFactory = LocalProjectIndexRuntimeFactory()
+
+    async def _get_project(self, project_id: int) -> Project:
+        async with db.scoped_session(self.session_maker) as session:
+            project = await self.project_repository.get_by_id(session, project_id)
+        if project is None:
+            raise ValueError(f"Project with ID {project_id} not found")
+        return project
+
+    async def observe_project(self, project_id: int) -> LocalProjectIndexObservation:
+        project = await self._get_project(project_id)
+        dependencies = await self.runtime_factory.dependencies_for_project(project)
+        runtime = self.runtime_factory.runtime_from_dependencies(dependencies)
+        observed_files = await runtime.observed_file_source.list_observed_index_files()
+        return LocalProjectIndexObservation(observed_files=observed_files)
+
+    async def index_project(
+        self,
+        project_id: int,
+        *,
+        force_full: bool = False,
+    ) -> ProjectIndexCoordinatorResult:
+        project = await self._get_project(project_id)
+        return await run_local_project_index_for_project(
+            project,
+            runtime_factory=self.runtime_factory,
+            force_full=force_full,
         )
 
 

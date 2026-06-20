@@ -38,6 +38,8 @@ from basic_memory.index.local_project import (
     InlineProjectIndexBatchEnqueuer,
     LocalProjectIndexFileRunner,
     LocalProjectIndexObservedFileSource,
+    LocalProjectIndexObservation,
+    LocalProjectIndexRunner,
     LocalProjectIndexRuntimeFactory,
     LocalProjectIndexRuntime,
     NoopProjectIndexFanoutFailureRecorder,
@@ -45,6 +47,7 @@ from basic_memory.index.local_project import (
     local_project_index_file_paths,
     project_index_file_requests_from_batch_request,
     run_local_project_index,
+    run_local_project_index_for_project,
 )
 from basic_memory.index.local_runtime import (
     LOCAL_EVENT_INDEX_TENANT_ID,
@@ -87,6 +90,8 @@ __all__ = [
     "LocalMarkdownFileIndexer",
     "LocalProjectIndexFileRunner",
     "LocalProjectIndexObservedFileSource",
+    "LocalProjectIndexObservation",
+    "LocalProjectIndexRunner",
     "LocalProjectIndexRuntimeFactory",
     "LocalProjectIndexRuntime",
     "LocalWatchEventIndexRequest",
@@ -128,6 +133,7 @@ __all__ = [
     "project_index_workflow_logical_key",
     "run_local_watch_event_indexing",
     "run_local_project_index",
+    "run_local_project_index_for_project",
     "run_project_index_coordinator",
     "run_storage_event_source_indexing",
     "run_storage_event_indexing",

@@ -37,7 +37,7 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
-from basic_memory.index import build_local_markdown_file_indexer
+from basic_memory.index import LocalProjectIndexRunner, build_local_markdown_file_indexer
 from basic_memory.indexing import BatchIndexer, IndexFileExecutor, StorageIndexFileWriter
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -435,6 +435,33 @@ IndexFileExecutorV2ExternalDep = Annotated[
 ]
 
 
+# --- Project Indexing ---
+
+
+class ScheduledProjectIndexRunner(Protocol):
+    """Capability needed by background scheduling to run a project index."""
+
+    async def index_project(self, project_id: int, *, force_full: bool = False) -> object: ...
+
+
+async def get_project_index_runner(
+    project_repository: ProjectRepositoryDep,
+    session_maker: SessionMakerDep,
+) -> LocalProjectIndexRunner:
+    """Create the local project-index runner used by API routes and tasks."""
+    return LocalProjectIndexRunner(
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+
+
+ProjectIndexRunnerDep = Annotated[LocalProjectIndexRunner, Depends(get_project_index_runner)]
+ScheduledProjectIndexRunnerDep = Annotated[
+    ScheduledProjectIndexRunner,
+    Depends(get_project_index_runner),
+]
+
+
 # --- Sync Service ---
 
 
@@ -579,9 +606,8 @@ class LocalTaskScheduler:
 
 
 async def get_task_scheduler(
-    sync_service: SyncServiceV2ExternalDep,
+    project_index_runner: ScheduledProjectIndexRunnerDep,
     search_service: SearchServiceV2ExternalDep,
-    project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
 ) -> TaskScheduler:
     """Create a scheduler that maps task specs to coroutines."""
@@ -589,12 +615,12 @@ async def get_task_scheduler(
     async def _sync_entity_vectors(entity_id: int, **_: Any) -> None:
         await search_service.sync_entity_vectors(entity_id)
 
-    async def _sync_project(force_full: bool = False, **_: Any) -> None:
-        await sync_service.sync(
-            project_config.home,
-            project_config.name,
-            force_full=force_full,
-        )
+    async def _sync_project(
+        project_id: int | None = None, force_full: bool = False, **_: Any
+    ) -> None:
+        if project_id is None:
+            raise ValueError("sync_project requires project_id")
+        await project_index_runner.index_project(project_id, force_full=force_full)
 
     async def _reindex_project(**_: Any) -> None:
         await search_service.reindex_all()

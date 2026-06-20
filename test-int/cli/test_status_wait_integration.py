@@ -1,11 +1,4 @@
-"""Integration test for `bm status --wait` against a real local project.
-
-Unlike the unit tests in tests/cli/test_json_output.py (which mock get_status
-to drive deterministic poll sequences), this exercises the full stack: the CLI
-runs a real disk-vs-DB scan via the API/repository layer. After write-note
-indexes a file, the project is already in sync, so --wait observes total == 0
-on the first poll and exits 0 immediately.
-"""
+"""Integration test for `bm status --wait` against a real local project."""
 
 import json
 
@@ -17,7 +10,7 @@ runner = CliRunner()
 
 
 def test_status_wait_returns_once_indexed(app, app_config, test_project, config_manager):
-    """status --wait exits 0 with total == 0 when the project is fully indexed."""
+    """status --wait exits 0 and returns the project-index observation."""
     # Write (and index) a note so the project has real content on disk + in DB.
     write_result = runner.invoke(
         cli_app,
@@ -34,10 +27,11 @@ def test_status_wait_returns_once_indexed(app, app_config, test_project, config_
     )
     assert write_result.exit_code == 0, write_result.output
 
-    # --wait should observe a synced project (total == 0) and exit immediately.
+    # --wait is a compatibility flag in the event-index flow and returns immediately.
     result = runner.invoke(cli_app, ["status", "--wait", "--json"])
 
     assert result.exit_code == 0, result.output
     start = result.output.index("{")
     data = json.loads(result.output[start:])
-    assert data["total"] == 0
+    assert data["total_files"] == 1
+    assert data["observed_files"][0]["path"] == "test-notes/Wait Test Note.md"
