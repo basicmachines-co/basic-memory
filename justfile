@@ -115,7 +115,8 @@ fast-check-no-openai:
 # Focused project-wide indexing orchestration surface tests.
 project-index-contract-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/index/test_project_index_surface.py
+        tests/index/test_project_index_surface.py \
+        tests/index/test_local_project_index.py
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:
