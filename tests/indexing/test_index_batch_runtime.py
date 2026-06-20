@@ -12,11 +12,25 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.note_content_batch_reconciliation as batch_reconciliation_module
+from basic_memory.config import BasicMemoryConfig
+from basic_memory.indexing.batch_indexer import BatchIndexer, MarkdownOnlyIndexEntitySearchWriter
 from basic_memory.indexing.index_batch_runtime import (
+    DefaultIndexBatchRuntime,
     IndexBatchRuntime,
+    build_default_index_batch_runtime,
     count_search_indexed_entities,
 )
-from basic_memory.indexing.models import IndexedEntity, IndexingBatchResult, IndexInputFile
+from basic_memory.indexing.models import (
+    IndexedEntity,
+    IndexFrontmatterWriteResult,
+    IndexingBatchResult,
+    IndexInputFile,
+    StorageIndexFileWriter,
+)
+from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
+from basic_memory.models import Entity
+from basic_memory.repository import EntityRepository, RelationRepository
+from basic_memory.services import EntityService
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +46,20 @@ class PathContentTypeProvider:
         if path.endswith(".md"):
             return "text/markdown"
         return "application/octet-stream"
+
+
+class RecordingSearchWriter:
+    async def index_entity_data(self, entity: Entity, content: str | None = None) -> None:
+        pass
+
+
+class RecordingFrontmatterStorage:
+    async def update_frontmatter_with_result(
+        self,
+        path: str,
+        updates: dict[str, object],
+    ) -> IndexFrontmatterWriteResult:
+        raise AssertionError("construction test should not write frontmatter")
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,3 +261,48 @@ def test_count_search_indexed_entities_uses_markdown_content_presence() -> None:
         )
         == 1
     )
+
+
+def test_build_default_index_batch_runtime_composes_repository_backed_stack() -> None:
+    app_config = cast(BasicMemoryConfig, object())
+    entity_service = cast(EntityService, object())
+    entity_repository = cast(EntityRepository, object())
+    relation_repository = cast(RelationRepository, object())
+    search_writer = RecordingSearchWriter()
+    storage = RecordingFrontmatterStorage()
+    content_type_provider = PathContentTypeProvider()
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+
+    runtime = build_default_index_batch_runtime(
+        project_id=42,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        search_writer=search_writer,
+        frontmatter_storage=storage,
+        content_type_provider=content_type_provider,
+        session_maker=session_maker,
+    )
+
+    assert isinstance(runtime, DefaultIndexBatchRuntime)
+    assert isinstance(runtime.note_content_reconciler, NoteContentReconciler)
+
+    batch_runtime = runtime.batch_runtime
+    assert isinstance(batch_runtime, IndexBatchRuntime)
+    assert batch_runtime.content_type_provider is content_type_provider
+    assert batch_runtime.entity_repository is entity_repository
+    assert batch_runtime.session_maker is session_maker
+    assert batch_runtime.note_content_reconciler is runtime.note_content_reconciler
+
+    batch_indexer = batch_runtime.batch_indexer
+    assert isinstance(batch_indexer, BatchIndexer)
+    assert batch_indexer.app_config is app_config
+    assert batch_indexer.entity_service is entity_service
+    assert batch_indexer.entity_repository is entity_repository
+    assert batch_indexer.relation_repository is relation_repository
+    assert batch_indexer.session_maker is session_maker
+    assert isinstance(batch_indexer.search_service, MarkdownOnlyIndexEntitySearchWriter)
+    assert batch_indexer.search_service.search_writer is search_writer
+    assert isinstance(batch_indexer.file_writer, StorageIndexFileWriter)
+    assert batch_indexer.file_writer.storage is storage

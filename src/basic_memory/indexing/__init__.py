@@ -179,8 +179,10 @@ from basic_memory.indexing.input_file_adaptation import (
     build_index_input_files,
 )
 from basic_memory.indexing.index_batch_runtime import (
+    DefaultIndexBatchRuntime,
     IndexBatchRuntime,
     IndexInputBatchExecutor,
+    build_default_index_batch_runtime,
     count_search_indexed_entities,
 )
 from basic_memory.indexing.index_file_runner import (
@@ -598,6 +600,7 @@ __all__ = [
     "DirectoryDeleteAcceptedResult",
     "DirectoryDeleteFileStatus",
     "DirectoryFileDeleteEnqueuer",
+    "DefaultIndexBatchRuntime",
     "EmbeddingBatchVectorSync",
     "EmbeddingIndexBatchResult",
     "EmbeddingIndexBatchJobContext",
@@ -902,6 +905,7 @@ __all__ = [
     "apply_vector_sync_batch_result",
     "build_file_index_plan",
     "build_accepted_note_search_row",
+    "build_default_index_batch_runtime",
     "build_index_file_batch_job_result",
     "build_index_input_files",
     "build_index_batches",
