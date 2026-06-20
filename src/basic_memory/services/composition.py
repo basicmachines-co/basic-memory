@@ -44,8 +44,8 @@ class ProjectEntityServiceFactory(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class BasicMemoryProjectServiceBundle:
-    """Repository and service graph for one Basic Memory project."""
+class BasicMemoryProjectRuntimeBundle:
+    """Repository and service graph for project indexing/runtime operations."""
 
     project_id: ProjectId
     entity_repository: EntityRepository
@@ -57,6 +57,12 @@ class BasicMemoryProjectServiceBundle:
     link_resolver: LinkResolver
     entity_service: EntityService
     relation_resolution: RepositoryRelationResolutionRuntime
+
+
+@dataclass(frozen=True, slots=True)
+class BasicMemoryProjectServiceBundle(BasicMemoryProjectRuntimeBundle):
+    """Repository and service graph for legacy sync-capable project operations."""
+
     sync_service: SyncService
 
 
@@ -100,7 +106,7 @@ def build_default_project_search_bundle(
     )
 
 
-def build_default_project_service_bundle(
+def build_default_project_runtime_bundle(
     *,
     project_id: ProjectId,
     session_maker: async_sessionmaker[AsyncSession],
@@ -111,8 +117,8 @@ def build_default_project_service_bundle(
     entity_service_factory: ProjectEntityServiceFactory | None = None,
     sync_relation_repository: RelationRepository | None = None,
     project_repository: ProjectRepository | None = None,
-) -> BasicMemoryProjectServiceBundle:
-    """Compose the default repository-backed Basic Memory project services."""
+) -> BasicMemoryProjectRuntimeBundle:
+    """Compose default repository-backed project services without SyncService."""
     entity_repository = EntityRepository(project_id=project_id)
     observation_repository = ObservationRepository(project_id=project_id)
     relation_repository = RelationRepository(project_id=project_id)
@@ -168,19 +174,8 @@ def build_default_project_service_bundle(
         link_resolver=link_resolver,
         entity_indexer=search_service,
     )
-    sync_service = SyncService(
-        app_config=app_config,
-        entity_service=entity_service,
-        entity_parser=entity_parser,
-        entity_repository=entity_repository,
-        relation_repository=sync_relation_repository,
-        project_repository=project_repository,
-        search_service=search_service,
-        file_service=file_service,
-        session_maker=session_maker,
-    )
 
-    return BasicMemoryProjectServiceBundle(
+    return BasicMemoryProjectRuntimeBundle(
         project_id=project_id,
         entity_repository=entity_repository,
         observation_repository=observation_repository,
@@ -191,5 +186,56 @@ def build_default_project_service_bundle(
         link_resolver=link_resolver,
         entity_service=entity_service,
         relation_resolution=relation_resolution,
+    )
+
+
+def build_default_project_service_bundle(
+    *,
+    project_id: ProjectId,
+    session_maker: async_sessionmaker[AsyncSession],
+    entity_parser: EntityParser,
+    file_service: FileService,
+    app_config: BasicMemoryConfig,
+    database_backend: DatabaseBackend | None = None,
+    entity_service_factory: ProjectEntityServiceFactory | None = None,
+    sync_relation_repository: RelationRepository | None = None,
+    project_repository: ProjectRepository | None = None,
+) -> BasicMemoryProjectServiceBundle:
+    """Compose the default repository-backed Basic Memory project services."""
+    runtime_bundle = build_default_project_runtime_bundle(
+        project_id=project_id,
+        session_maker=session_maker,
+        entity_parser=entity_parser,
+        file_service=file_service,
+        app_config=app_config,
+        database_backend=database_backend,
+        entity_service_factory=entity_service_factory,
+        sync_relation_repository=sync_relation_repository,
+        project_repository=project_repository,
+    )
+    sync_relation_repository = sync_relation_repository or runtime_bundle.relation_repository
+    sync_service = SyncService(
+        app_config=app_config,
+        entity_service=runtime_bundle.entity_service,
+        entity_parser=entity_parser,
+        entity_repository=runtime_bundle.entity_repository,
+        relation_repository=sync_relation_repository,
+        project_repository=runtime_bundle.project_repository,
+        search_service=runtime_bundle.search_service,
+        file_service=file_service,
+        session_maker=session_maker,
+    )
+
+    return BasicMemoryProjectServiceBundle(
+        project_id=runtime_bundle.project_id,
+        entity_repository=runtime_bundle.entity_repository,
+        observation_repository=runtime_bundle.observation_repository,
+        relation_repository=runtime_bundle.relation_repository,
+        project_repository=runtime_bundle.project_repository,
+        search_repository=runtime_bundle.search_repository,
+        search_service=runtime_bundle.search_service,
+        link_resolver=runtime_bundle.link_resolver,
+        entity_service=runtime_bundle.entity_service,
+        relation_resolution=runtime_bundle.relation_resolution,
         sync_service=sync_service,
     )
