@@ -4,7 +4,12 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from basic_memory.importers import ImportDataPayload, ImportDataResult, ImportKind
+from basic_memory.importers import (
+    ImportDataPayload,
+    ImportDataResult,
+    ImportDataResultPayload,
+    ImportKind,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,8 +105,9 @@ def test_import_kind_type_exports_current_values() -> None:
 
 
 def test_import_data_result_carries_import_and_index_summary() -> None:
+    payload = ImportDataResultPayload.from_mapping({"success": True, "files_imported": 3})
     result = ImportDataResult(
-        result={"success": True, "files_imported": 3},
+        result=payload,
         index_job_id="index-workflow-id",
     )
 
@@ -111,3 +117,29 @@ def test_import_data_result_carries_import_and_index_summary() -> None:
 
     with pytest.raises(FrozenInstanceError):
         setattr(result, "index_job_id", "other")
+
+
+def test_import_data_result_payload_validates_api_response_shape() -> None:
+    payload = ImportDataResultPayload.from_response_body({"success": True, "entities": 2})
+
+    assert payload.succeeded is True
+    assert payload.as_dict() == {"success": True, "entities": 2}
+    assert dict(payload.items()) == {"success": True, "entities": 2}
+
+    with pytest.raises(RuntimeError, match="non-object response"):
+        ImportDataResultPayload.from_response_body(["not", "an", "object"])
+
+    with pytest.raises(RuntimeError, match="non-string key"):
+        ImportDataResultPayload.from_response_body({1: "bad"})
+
+
+def test_import_data_result_payload_rejects_malformed_success_and_error_message() -> None:
+    with pytest.raises(RuntimeError, match="non-boolean success"):
+        ImportDataResultPayload.from_mapping({"success": "yes"}).succeeded
+
+    with pytest.raises(RuntimeError, match="non-string error_message"):
+        ImportDataResultPayload.from_mapping(
+            {"success": False, "error_message": {"detail": "bad"}}
+        ).error_message
+
+    assert ImportDataResultPayload.from_mapping({"success": False}).error_message == "Import failed"

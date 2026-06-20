@@ -1,7 +1,8 @@
-"""Pydantic worker payloads for portable import runtime boundaries."""
+"""Worker payloads and typed results for portable import runtime boundaries."""
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Literal, Self
 from uuid import UUID
 
@@ -22,7 +23,72 @@ from basic_memory.runtime import (
 
 IMPORT_DATA_ENTRYPOINT = "import_data"
 type ImportKind = Literal["claude", "chatgpt", "memory-json", "project-zip"]
-type ImportDataResultPayload = Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportDataResultPayload(Mapping[str, object]):
+    """Validated import result fields returned by importer/API boundaries."""
+
+    values: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        copied: dict[str, object] = {}
+        for key, value in self.values.items():
+            if not isinstance(key, str):
+                raise RuntimeError("Import API returned a response with a non-string key")
+            copied[key] = value
+        object.__setattr__(self, "values", MappingProxyType(copied))
+
+    @classmethod
+    def from_mapping(cls, values: Mapping[object, object]) -> Self:
+        """Validate known mapping-like result data before internal handoff."""
+        copied: dict[str, object] = {}
+        for key, value in values.items():
+            if not isinstance(key, str):
+                raise RuntimeError("Import API returned a response with a non-string key")
+            copied[key] = value
+        return cls(values=copied)
+
+    @classmethod
+    def from_response_body(cls, response_body: object) -> Self:
+        """Validate an untyped import API JSON response body."""
+        if not isinstance(response_body, Mapping):
+            raise RuntimeError("Import API returned a non-object response")
+        copied: dict[str, object] = {}
+        for key, value in response_body.items():
+            if not isinstance(key, str):
+                raise RuntimeError("Import API returned a response with a non-string key")
+            copied[key] = value
+        return cls(values=copied)
+
+    def __getitem__(self, key: str) -> object:
+        return self.values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    @property
+    def succeeded(self) -> bool:
+        """Return the import success flag with fail-fast shape checking."""
+        success = self.values.get("success", True)
+        if not isinstance(success, bool):
+            raise RuntimeError("Import API returned a non-boolean success value")
+        return success
+
+    @property
+    def error_message(self) -> str:
+        """Return the import error message with fail-fast shape checking."""
+        error_message = self.values.get("error_message", "Import failed")
+        if not isinstance(error_message, str):
+            raise RuntimeError("Import API returned a non-string error_message value")
+        return error_message
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a mutable workflow/admin payload copy."""
+        return dict(self.values)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +100,7 @@ class ImportDataResult:
 
     def result_payload(self) -> dict[str, object]:
         """Return a mutable workflow/admin payload copy."""
-        return dict(self.result)
+        return self.result.as_dict()
 
 
 class ImportDataPayload(BaseModel):
