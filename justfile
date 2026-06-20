@@ -117,7 +117,8 @@ event-index-contract-test:
         tests/index/test_storage_event_orchestration.py \
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
+        tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_when_opted_in
 
 # Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
 runtime-refactor-contract-test:

@@ -105,12 +105,22 @@ async def initialize_file_sync(
     # duplicate watchers fighting over the same files.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
 
+    event_index_runtime_factory = None
+    if app_config.watch_event_index:
+        from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+        from basic_memory.sync.sync_service import get_sync_service
+
+        event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
+            sync_service_factory=get_sync_service,
+        )
+
     # Initialize watch service
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
         session_maker=session_maker,
         quiet=quiet,
+        event_index_runtime_factory=event_index_runtime_factory,
         constrained_project=constrained_project,
     )
 

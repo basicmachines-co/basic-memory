@@ -375,6 +375,11 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    watch_event_index: bool = Field(
+        default=False,
+        description="Experimental: route filesystem watcher changes through the event-based indexing runtime. The legacy sync watcher remains the default.",
+    )
+
     # update permalinks on move
     update_permalinks_on_move: bool = Field(
         default=False,

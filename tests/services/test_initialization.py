@@ -12,6 +12,7 @@ import pytest
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
@@ -221,6 +222,25 @@ async def test_initialize_file_sync_no_constraint_when_env_unset(
     await initialize_file_sync(app_config, quiet=True)
 
     assert _FakeWatchService.last_kwargs.get("constrained_project") is None
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_sync_wires_event_index_runtime_when_opted_in(
+    app_config: BasicMemoryConfig, monkeypatch
+):
+    """Experimental watcher event indexing is reachable through real startup wiring."""
+    _disable_test_env_short_circuit(monkeypatch)
+    monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+    _FakeWatchService.last_kwargs = {}
+
+    updated = app_config.model_copy(update={"watch_event_index": True})
+
+    await initialize_file_sync(updated, quiet=True)
+
+    assert isinstance(
+        _FakeWatchService.last_kwargs.get("event_index_runtime_factory"),
+        LocalWatchEventIndexRuntimeFactory,
+    )
 
 
 @pytest.mark.asyncio
