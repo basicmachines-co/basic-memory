@@ -172,6 +172,11 @@ from basic_memory.indexing.input_file_adaptation import (
     LoadedIndexFile,
     build_index_input_files,
 )
+from basic_memory.indexing.index_batch_runtime import (
+    IndexBatchRuntime,
+    IndexInputBatchExecutor,
+    count_search_indexed_entities,
+)
 from basic_memory.indexing.index_file_runner import (
     CurrentMaterializedNoteEntityRepository,
     IndexFileCurrentMetadata,
@@ -650,6 +655,7 @@ __all__ = [
     "IndexingResult",
     "IndexingResultState",
     "IndexBatch",
+    "IndexBatchRuntime",
     "IndexFileMetadata",
     "IndexFileExecutor",
     "IndexFileMaterializedNoteSource",
@@ -665,6 +671,7 @@ __all__ = [
     "IndexFrontmatterUpdate",
     "IndexFrontmatterWriteResult",
     "IndexContentTypeProvider",
+    "IndexInputBatchExecutor",
     "IndexingBatchResult",
     "IndexedFileChecksumSource",
     "IndexInputFile",
@@ -891,6 +898,7 @@ __all__ = [
     "cleanup_file_from_prepared_write",
     "collect_forward_reference_link_texts",
     "create_accepted_pending_entity",
+    "count_search_indexed_entities",
     "current_file_index_decision",
     "detect_project_file_changes",
     "delete_accepted_note",
