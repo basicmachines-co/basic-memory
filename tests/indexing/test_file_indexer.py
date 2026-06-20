@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.indexing import (
     FileIndexer,
     FileIndexOperation,
-    IndexMarkdownSyncService,
+    IndexCurrentMarkdownFileIndexer,
     NoteContentReconciler,
     SyncedMarkdownFile,
     build_default_file_indexer,
@@ -53,7 +53,7 @@ def _entity(*, entity_id: int = 42, checksum: str = "old-checksum") -> Mock:
 
 
 def _synced_file(*, entity: Mock | None = None) -> SyncedMarkdownFile:
-    """Create the Basic Memory sync result consumed by FileIndexer."""
+    """Create the canonical markdown index result consumed by FileIndexer."""
     return SyncedMarkdownFile(
         entity=entity or _entity(),
         checksum=CHECKSUM,
@@ -71,41 +71,41 @@ def _file_indexer(
     synced_file: SyncedMarkdownFile | None = None,
 ):
     """Create FileIndexer with explicit async collaborators."""
-    sync_result = synced_file or _synced_file()
+    index_result = synced_file or _synced_file()
     entity_repository = Mock()
     entity_repository.get_by_file_path = AsyncMock(return_value=existing_entity)
 
-    sync_service = Mock()
-    sync_service.session_maker = _FakeSession
-    sync_service.entity_repository = entity_repository
-    sync_service.sync_one_markdown_file = AsyncMock(return_value=sync_result)
+    markdown_indexer = Mock()
+    markdown_indexer.session_maker = _FakeSession
+    markdown_indexer.entity_repository = entity_repository
+    markdown_indexer.index_current_markdown_file = AsyncMock(return_value=index_result)
 
     note_content_reconciler = Mock()
     note_content_reconciler.reconcile = AsyncMock()
 
     return (
         FileIndexer(
-            sync_service=sync_service,
+            markdown_indexer=markdown_indexer,
             note_content_reconciler=note_content_reconciler,
         ),
-        sync_service,
+        markdown_indexer,
         note_content_reconciler,
     )
 
 
 def test_build_default_file_indexer_composes_note_content_reconciler() -> None:
-    sync_service = Mock()
-    sync_service.session_maker = cast(async_sessionmaker[AsyncSession], _FakeSession)
-    sync_service.entity_repository = Mock()
-    sync_service.sync_one_markdown_file = AsyncMock()
+    markdown_indexer = Mock()
+    markdown_indexer.session_maker = cast(async_sessionmaker[AsyncSession], _FakeSession)
+    markdown_indexer.entity_repository = Mock()
+    markdown_indexer.index_current_markdown_file = AsyncMock()
 
     file_indexer = build_default_file_indexer(
         project_id=42,
-        sync_service=cast(IndexMarkdownSyncService, sync_service),
+        markdown_indexer=cast(IndexCurrentMarkdownFileIndexer, markdown_indexer),
     )
 
     assert isinstance(file_indexer, FileIndexer)
-    assert file_indexer.sync_service is sync_service
+    assert file_indexer.markdown_indexer is markdown_indexer
     assert isinstance(file_indexer.note_content_reconciler, NoteContentReconciler)
 
 
@@ -114,21 +114,21 @@ async def test_file_indexer_indexes_new_markdown_file() -> None:
     """
     Given a markdown file with no existing entity
     When the per-file indexer processes that file
-    Then it asks Basic Memory to sync it as new and caches the canonical markdown result.
+    Then it asks the markdown indexer to persist it as new and caches the canonical result.
     """
     synced_file = _synced_file()
-    file_indexer, sync_service, note_content_reconciler = _file_indexer(
+    file_indexer, markdown_indexer, note_content_reconciler = _file_indexer(
         synced_file=synced_file,
     )
 
     result = await file_indexer.index_markdown_file("notes/note.md", source="s3_webhook")
 
-    sync_service.entity_repository.get_by_file_path.assert_awaited_once_with(
+    markdown_indexer.entity_repository.get_by_file_path.assert_awaited_once_with(
         ANY,
         "notes/note.md",
         load_relations=False,
     )
-    sync_service.sync_one_markdown_file.assert_awaited_once_with(
+    markdown_indexer.index_current_markdown_file.assert_awaited_once_with(
         "notes/note.md",
         new=True,
         index_search=True,
@@ -152,15 +152,15 @@ async def test_file_indexer_indexes_existing_markdown_file() -> None:
     """
     Given a markdown file already has an entity
     When the per-file indexer processes that file
-    Then it asks Basic Memory to sync it as an update.
+    Then it asks the markdown indexer to persist it as an update.
     """
-    file_indexer, sync_service, _note_content_reconciler = _file_indexer(
+    file_indexer, markdown_indexer, _note_content_reconciler = _file_indexer(
         existing_entity=_entity(entity_id=7),
     )
 
     result = await file_indexer.index_markdown_file("notes/note.md")
 
-    sync_service.sync_one_markdown_file.assert_awaited_once_with(
+    markdown_indexer.index_current_markdown_file.assert_awaited_once_with(
         "notes/note.md",
         new=False,
         index_search=True,
@@ -171,33 +171,33 @@ async def test_file_indexer_indexes_existing_markdown_file() -> None:
 
 
 @pytest.mark.asyncio
-async def test_file_indexer_repairs_derived_rows_for_unchanged_markdown_sync_result() -> None:
+async def test_file_indexer_repairs_derived_rows_for_unchanged_markdown_result() -> None:
     """
     Given a cloud-written note already has the same checksum as its materialized file
-    When the per-file indexer delegates to Basic Memory
-    Then it asks core sync to refresh derived observations, relations, and search.
+    When the per-file indexer delegates to the markdown indexer
+    Then it asks the indexer to refresh derived observations, relations, and search.
     """
     existing_entity = _entity(checksum=CHECKSUM)
     synced_file = _synced_file(entity=existing_entity)
-    file_indexer, sync_service, _note_content_reconciler = _file_indexer(
+    file_indexer, markdown_indexer, _note_content_reconciler = _file_indexer(
         existing_entity=existing_entity,
         synced_file=synced_file,
     )
-    sync_service.batch_indexer = Mock()
-    sync_service.batch_indexer.index_markdown_file = AsyncMock(
-        side_effect=AssertionError("indexer should delegate unchanged repair to core sync")
+    markdown_indexer.batch_indexer = Mock()
+    markdown_indexer.batch_indexer.index_markdown_file = AsyncMock(
+        side_effect=AssertionError("FileIndexer should delegate unchanged repair")
     )
 
     result = await file_indexer.index_markdown_file("notes/note.md")
 
-    sync_service.sync_one_markdown_file.assert_awaited_once_with(
+    markdown_indexer.index_current_markdown_file.assert_awaited_once_with(
         "notes/note.md",
         new=False,
         index_search=True,
         resolve_relations=False,
         refresh_unchanged_derived_state=True,
     )
-    sync_service.batch_indexer.index_markdown_file.assert_not_awaited()
+    markdown_indexer.batch_indexer.index_markdown_file.assert_not_awaited()
     assert result.checksum == CHECKSUM
     assert result.operation == FileIndexOperation.updated
 
@@ -210,7 +210,7 @@ async def test_file_indexer_reports_refreshed_derived_counts_after_unchanged_rep
     refreshed_entity.observations = [Mock(), Mock()]
     refreshed_entity.relations = [Mock()]
     synced_file = _synced_file(entity=refreshed_entity)
-    file_indexer, sync_service, _note_content_reconciler = _file_indexer(
+    file_indexer, _markdown_indexer, _note_content_reconciler = _file_indexer(
         existing_entity=existing_entity,
         synced_file=synced_file,
     )
@@ -229,16 +229,16 @@ async def test_file_indexer_reports_refreshed_derived_counts_after_unchanged_rep
 
 
 @pytest.mark.asyncio
-async def test_file_indexer_propagates_sync_errors() -> None:
+async def test_file_indexer_propagates_markdown_index_errors() -> None:
     """
-    Given Basic Memory cannot sync the file
+    Given the markdown indexer cannot persist the file
     When the per-file indexer processes that file
     Then the error propagates and note_content is not reconciled.
     """
-    file_indexer, sync_service, note_content_reconciler = _file_indexer()
-    sync_service.sync_one_markdown_file.side_effect = RuntimeError("sync failed")
+    file_indexer, markdown_indexer, note_content_reconciler = _file_indexer()
+    markdown_indexer.index_current_markdown_file.side_effect = RuntimeError("index failed")
 
-    with pytest.raises(RuntimeError, match="sync failed"):
+    with pytest.raises(RuntimeError, match="index failed"):
         await file_indexer.index_markdown_file("notes/note.md")
 
     note_content_reconciler.reconcile.assert_not_awaited()
@@ -251,7 +251,7 @@ async def test_file_indexer_propagates_note_content_reconcile_errors() -> None:
     When the per-file indexer processes that file
     Then the error propagates so callers can retry the job.
     """
-    file_indexer, _sync_service, note_content_reconciler = _file_indexer()
+    file_indexer, _markdown_indexer, note_content_reconciler = _file_indexer()
     note_content_reconciler.reconcile.side_effect = RuntimeError("cache failed")
 
     with pytest.raises(RuntimeError, match="cache failed"):

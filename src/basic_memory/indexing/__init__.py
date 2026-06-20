@@ -155,10 +155,10 @@ from basic_memory.indexing.file_index_checking import (
 )
 from basic_memory.indexing.file_indexer import (
     FileIndexer,
+    IndexCurrentMarkdownFileIndexer,
     IndexMarkdownEntity,
     IndexMarkdownEntityRepository,
     IndexMarkdownNoteContentReconciler,
-    IndexMarkdownSyncService,
     build_default_file_indexer,
 )
 from basic_memory.indexing.file_batch_runner import (
@@ -782,10 +782,10 @@ __all__ = [
     "IndexedNoteContentObservedAt",
     "IndexedNoteContentReconciliationError",
     "IndexedNoteContentReconciler",
+    "IndexCurrentMarkdownFileIndexer",
     "IndexMarkdownEntity",
     "IndexMarkdownEntityRepository",
     "IndexMarkdownNoteContentReconciler",
-    "IndexMarkdownSyncService",
     "IndexingTaskFactory",
     "LoadedIndexFile",
     "LinkResolutionTarget",

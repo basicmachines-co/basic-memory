@@ -21,7 +21,7 @@ from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
     note_content_repository_for_project,
 )
-from basic_memory.runtime import ProjectId
+from basic_memory.runtime import ProjectId, RuntimeFilePath
 
 if TYPE_CHECKING:  # pragma: no cover
     from loguru._logger import Logger
@@ -65,8 +65,8 @@ class IndexMarkdownEntityRepository(Protocol):
     ) -> Sequence[Row[Any]]: ...
 
 
-class IndexMarkdownSyncService(Protocol):
-    """Sync capability needed for one markdown-file indexing pass."""
+class IndexCurrentMarkdownFileIndexer(Protocol):
+    """Capability needed to index one current markdown file from storage."""
 
     @property
     def session_maker(self) -> async_sessionmaker[AsyncSession]: ...
@@ -74,14 +74,14 @@ class IndexMarkdownSyncService(Protocol):
     @property
     def entity_repository(self) -> IndexMarkdownEntityRepository: ...
 
-    async def sync_one_markdown_file(
+    async def index_current_markdown_file(
         self,
-        path: str,
+        path: RuntimeFilePath,
         *,
-        new: bool = False,
-        index_search: bool = True,
-        resolve_relations: bool = True,
-        refresh_unchanged_derived_state: bool = False,
+        new: bool,
+        index_search: bool,
+        resolve_relations: bool,
+        refresh_unchanged_derived_state: bool,
     ) -> SyncedMarkdownFile: ...
 
 
@@ -104,11 +104,21 @@ class FileIndexer:
     def __init__(
         self,
         *,
-        sync_service: IndexMarkdownSyncService,
+        markdown_indexer: IndexCurrentMarkdownFileIndexer,
         note_content_reconciler: IndexMarkdownNoteContentReconciler,
     ) -> None:
-        self.sync_service = sync_service
+        self.markdown_indexer = markdown_indexer
         self.note_content_reconciler = note_content_reconciler
+
+    @property
+    def session_maker(self) -> async_sessionmaker[AsyncSession]:
+        """Expose the session owner needed by index-file preflight adapters."""
+        return self.markdown_indexer.session_maker
+
+    @property
+    def entity_repository(self) -> IndexMarkdownEntityRepository:
+        """Expose the entity repository needed by index-file preflight adapters."""
+        return self.markdown_indexer.entity_repository
 
     async def index_markdown_file(
         self,
@@ -121,15 +131,15 @@ class FileIndexer:
         log = bound_logger or logger
         log.info(f"Indexing markdown file: {file_path}")
 
-        async with db.scoped_session(self.sync_service.session_maker) as session:
-            existing = await self.sync_service.entity_repository.get_by_file_path(
+        async with db.scoped_session(self.markdown_indexer.session_maker) as session:
+            existing = await self.markdown_indexer.entity_repository.get_by_file_path(
                 session,
                 file_path,
                 load_relations=False,
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
 
-        synced = await self.sync_service.sync_one_markdown_file(
+        synced = await self.markdown_indexer.index_current_markdown_file(
             file_path,
             new=existing is None,
             index_search=True,
@@ -166,13 +176,13 @@ class FileIndexer:
 def build_default_file_indexer(
     *,
     project_id: ProjectId,
-    sync_service: IndexMarkdownSyncService,
+    markdown_indexer: IndexCurrentMarkdownFileIndexer,
 ) -> FileIndexer:
     """Compose the default repository-backed per-file markdown indexer."""
     return FileIndexer(
-        sync_service=sync_service,
+        markdown_indexer=markdown_indexer,
         note_content_reconciler=NoteContentReconciler(
             note_content_repository=note_content_repository_for_project(project_id),
-            session_maker=sync_service.session_maker,
+            session_maker=markdown_indexer.session_maker,
         ),
     )
