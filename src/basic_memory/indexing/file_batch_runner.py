@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self
 
 from basic_memory.indexing.file_index_planning import (
     FileIndexPath,
@@ -37,6 +38,45 @@ class IndexFileBatchReadResult[LoadedFileT]:
     terminal_results: Mapping[FileIndexPath, IndexFileJobResult]
 
 
+@dataclass(frozen=True, slots=True)
+class IndexFileBatchReadOutcome[LoadedFileT]:
+    """One current-file read outcome before batch result assembly."""
+
+    file: LoadedFileT | None = None
+    terminal_result: IndexFileJobResult | None = None
+
+    def __post_init__(self) -> None:
+        has_file = self.file is not None
+        has_terminal_result = self.terminal_result is not None
+        if has_file == has_terminal_result:
+            raise ValueError("index-file batch read outcome requires exactly one result")
+
+    @classmethod
+    def loaded(cls, file: LoadedFileT) -> Self:
+        """Return a successfully loaded file outcome."""
+        return cls(file=file)
+
+    @classmethod
+    def terminal(cls, result: IndexFileJobResult) -> Self:
+        """Return a terminal per-file result discovered during read."""
+        return cls(terminal_result=result)
+
+    def require_file(self) -> LoadedFileT:
+        """Return the loaded file, raising when this is a terminal outcome."""
+        if self.file is None:
+            raise RuntimeError("index-file batch read outcome does not contain a file")
+        return self.file
+
+
+class IndexFileBatchCurrentFileReader[LoadedFileT](Protocol):
+    """Capability that reads one current file and reports terminal misses."""
+
+    async def read_current_file(
+        self,
+        file_path: FileIndexPath,
+    ) -> IndexFileBatchReadOutcome[LoadedFileT]: ...
+
+
 class IndexFileBatchReader[LoadedFileT](Protocol):
     """Capability that loads current file content for planned index reads."""
 
@@ -66,6 +106,37 @@ class IndexFileBatchContentClassifier(Protocol):
     """Capability that classifies paths for follow-up embedding work."""
 
     def is_markdown(self, path: FileIndexPath) -> bool: ...
+
+
+async def read_current_index_files[LoadedFileT](
+    file_paths: Sequence[FileIndexPath],
+    *,
+    reader: IndexFileBatchCurrentFileReader[LoadedFileT],
+    max_concurrent: int,
+) -> IndexFileBatchReadResult[LoadedFileT]:
+    """Read current files concurrently while preserving per-file terminal results."""
+    if max_concurrent < 1:
+        raise ValueError("max_concurrent must be at least 1")
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def read_one(
+        file_path: FileIndexPath,
+    ) -> tuple[FileIndexPath, IndexFileBatchReadOutcome[LoadedFileT]]:
+        async with semaphore:
+            return file_path, await reader.read_current_file(file_path)
+
+    files: dict[FileIndexPath, LoadedFileT] = {}
+    terminal_results: dict[FileIndexPath, IndexFileJobResult] = {}
+    for file_path, outcome in await asyncio.gather(
+        *(read_one(file_path) for file_path in file_paths)
+    ):
+        if outcome.terminal_result is not None:
+            terminal_results[file_path] = outcome.terminal_result
+        else:
+            files[file_path] = outcome.require_file()
+
+    return IndexFileBatchReadResult(files=files, terminal_results=terminal_results)
 
 
 async def run_index_file_batch[LoadedFileT](

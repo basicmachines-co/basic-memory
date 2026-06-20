@@ -135,9 +135,12 @@ from basic_memory.indexing.file_indexer import (
 from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchChecker,
     IndexFileBatchContentClassifier,
+    IndexFileBatchCurrentFileReader,
     IndexFileBatchIndexer,
     IndexFileBatchReader,
+    IndexFileBatchReadOutcome,
     IndexFileBatchReadResult,
+    read_current_index_files,
     run_index_file_batch,
 )
 from basic_memory.indexing.file_index_planning import (
@@ -664,8 +667,10 @@ __all__ = [
     "IndexFileBatchJobPayload",
     "IndexFileBatchChecker",
     "IndexFileBatchContentClassifier",
+    "IndexFileBatchCurrentFileReader",
     "IndexFileBatchIndexer",
     "IndexFileBatchReader",
+    "IndexFileBatchReadOutcome",
     "IndexFileBatchReadResult",
     "IndexFileCurrentMetadata",
     "IndexFileCurrentMetadataLoader",
@@ -1029,6 +1034,7 @@ __all__ = [
     "reconcile_note_content_for_entity",
     "refresh_accepted_note_search_index",
     "require_observed_file_should_read",
+    "read_current_index_files",
     "enqueue_cleanup_file",
     "enqueue_accepted_note_file_delete",
     "enqueue_accepted_note_materialization",

@@ -1,5 +1,6 @@
 """Tests for portable index-file batch orchestration."""
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from uuid import UUID
 
@@ -7,6 +8,8 @@ import pytest
 
 from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchReadResult,
+    IndexFileBatchReadOutcome,
+    read_current_index_files,
     run_index_file_batch,
 )
 from basic_memory.indexing.file_index_planning import (
@@ -74,6 +77,33 @@ class FakeReader:
         )
 
 
+class FakeCurrentFileReader:
+    def __init__(self) -> None:
+        self.file_paths: list[str] = []
+        self.active_reads = 0
+        self.max_active_reads = 0
+
+    async def read_current_file(
+        self,
+        file_path: str,
+    ) -> IndexFileBatchReadOutcome[LoadedFile]:
+        self.file_paths.append(file_path)
+        self.active_reads += 1
+        self.max_active_reads = max(self.max_active_reads, self.active_reads)
+        await asyncio.sleep(0)
+        self.active_reads -= 1
+
+        if file_path == "notes/missing.md":
+            return IndexFileBatchReadOutcome.terminal(
+                IndexFileJobResult(
+                    status=IndexFileJobStatus.missing,
+                    reason="file not found: notes/missing.md",
+                )
+            )
+
+        return IndexFileBatchReadOutcome.loaded(LoadedFile(file_path))
+
+
 class FakeIndexer:
     def __init__(self) -> None:
         self.files: tuple[str, ...] | None = None
@@ -112,6 +142,33 @@ class FakeIndexer:
 class FakeClassifier:
     def is_markdown(self, path: str) -> bool:
         return path.endswith(".md")
+
+
+@pytest.mark.asyncio
+async def test_read_current_index_files_limits_concurrency_and_preserves_results() -> None:
+    reader = FakeCurrentFileReader()
+
+    result = await read_current_index_files(
+        ("notes/a.md", "notes/missing.md", "notes/b.md"),
+        reader=reader,
+        max_concurrent=2,
+    )
+
+    assert reader.file_paths == ["notes/a.md", "notes/missing.md", "notes/b.md"]
+    assert reader.max_active_reads == 2
+    assert [file.path for file in result.files.values()] == ["notes/a.md", "notes/b.md"]
+    assert list(result.terminal_results) == ["notes/missing.md"]
+    assert result.terminal_results["notes/missing.md"].status is IndexFileJobStatus.missing
+
+
+@pytest.mark.asyncio
+async def test_read_current_index_files_rejects_invalid_concurrency() -> None:
+    with pytest.raises(ValueError, match="max_concurrent must be at least 1"):
+        await read_current_index_files(
+            ("notes/a.md",),
+            reader=FakeCurrentFileReader(),
+            max_concurrent=0,
+        )
 
 
 @pytest.mark.asyncio
