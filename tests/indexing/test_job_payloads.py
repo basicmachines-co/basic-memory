@@ -96,6 +96,33 @@ def test_index_file_job_payload_from_runtime_request_restores_payload() -> None:
     )
 
 
+def test_index_file_runtime_request_exposes_queue_identity() -> None:
+    """Index-file requests provide the generic runtime job source contract."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    runtime_request = IndexFileRuntimeRequest(
+        tenant_id=tenant_id,
+        project_id=101,
+        project_external_id="project-main",
+        project_name="Main",
+        project_path="main",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_observation=RuntimeStorageObjectObservation(etag='"etag-1"', size=12),
+        workflow_id=workflow_id,
+    )
+
+    assert runtime_request.dedupe_key() == (
+        "index-file:11111111-1111-1111-1111-111111111111:101:notes/a.md:observed:etag-1:12"
+    )
+    assert runtime_request.routing_headers({"source": "test"}) == {
+        "source": "test",
+        "tenant_id": str(tenant_id),
+        "project_id": "101",
+        "workflow_id": str(workflow_id),
+    }
+
+
 def test_index_file_batch_job_payload_round_trips_runtime_request() -> None:
     """File-batch jobs validate observed storage metadata at the worker boundary."""
     tenant_id = UUID("11111111-1111-1111-1111-111111111111")

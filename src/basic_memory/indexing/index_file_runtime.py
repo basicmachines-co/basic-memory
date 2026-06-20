@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Self
 
@@ -94,6 +95,14 @@ class IndexFileRuntimeRequest:
             mode=self.mode,
             workflow_id=self.workflow_id,
         )
+
+    def dedupe_key(self) -> str:
+        """Return the logical queue identity for this file-index request."""
+        return self.storage_job_identity().dedupe_key()
+
+    def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
+        """Return queue routing headers for this file-index request."""
+        return self.storage_job_identity().routing_headers(headers)
 
     def storage_index_context(self) -> RuntimeStorageFileIndexContext:
         return RuntimeStorageFileIndexContext(
