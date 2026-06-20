@@ -58,6 +58,46 @@ class BasicMemoryProjectServiceBundle:
     sync_service: SyncService
 
 
+@dataclass(frozen=True, slots=True)
+class BasicMemoryProjectSearchBundle:
+    """Search repository and service graph for one Basic Memory project."""
+
+    project_id: ProjectId
+    entity_repository: EntityRepository
+    search_repository: SearchRepository
+    search_service: SearchService
+
+
+def build_default_project_search_bundle(
+    *,
+    project_id: ProjectId,
+    session_maker: async_sessionmaker[AsyncSession],
+    file_service: FileService,
+    app_config: BasicMemoryConfig | None = None,
+    database_backend: DatabaseBackend | None = None,
+) -> BasicMemoryProjectSearchBundle:
+    """Compose default project-scoped search services without entity/sync services."""
+    entity_repository = EntityRepository(project_id=project_id)
+    search_repository = create_search_repository(
+        session_maker,
+        project_id=project_id,
+        app_config=app_config,
+        database_backend=database_backend,
+    )
+    search_service = SearchService(
+        search_repository,
+        entity_repository,
+        file_service,
+        session_maker,
+    )
+    return BasicMemoryProjectSearchBundle(
+        project_id=project_id,
+        entity_repository=entity_repository,
+        search_repository=search_repository,
+        search_service=search_service,
+    )
+
+
 def build_default_project_service_bundle(
     *,
     project_id: ProjectId,
