@@ -2,6 +2,7 @@
 
 from basic_memory.runtime import (
     RuntimeWorkflowAttemptTransportMetadata,
+    RuntimeWorkflowEnqueueFailureMetadata,
     merge_runtime_workflow_metadata_patch,
 )
 
@@ -69,4 +70,24 @@ def test_runtime_workflow_attempt_transport_metadata_builds_running_patch() -> N
             "state": "running",
         },
         "image_tag": "registry.example/app:sha",
+    }
+
+
+def test_runtime_workflow_enqueue_failure_metadata_builds_failure_shapes() -> None:
+    failure = RuntimeWorkflowEnqueueFailureMetadata.from_error(
+        queue_name="PGQ",
+        workflow_type="tenant_provisioning",
+        error=RuntimeError("queue offline"),
+    )
+
+    assert failure.error_message == ("Failed to enqueue PGQ tenant_provisioning: queue offline")
+    assert failure.workflow_metadata_patch() == {
+        "phase": "failed",
+        "progress": "enqueue failed",
+        "error_message": "Failed to enqueue PGQ tenant_provisioning: queue offline",
+    }
+    assert failure.failed_event_data() == {
+        "phase": "failed",
+        "progress": "enqueue failed",
+        "error_message": "Failed to enqueue PGQ tenant_provisioning: queue offline",
     }

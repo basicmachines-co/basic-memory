@@ -7,10 +7,14 @@ from basic_memory.runtime.contracts import (
     JobEntrypoint,
     RuntimeJobId,
     RuntimeWorkflowBroker,
+    RuntimeWorkflowFailureMetadata,
     RuntimeWorkflowMetadataPatch,
+    RuntimeWorkflowProgress,
 )
 
 type RuntimeWorkflowTransportState = Literal["running"]
+type RuntimeWorkflowQueueName = str
+type RuntimeWorkflowType = str
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,3 +51,48 @@ class RuntimeWorkflowAttemptTransportMetadata:
             for key, value in extra.items():
                 patch[key] = value
         return patch
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowEnqueueFailureMetadata:
+    """Workflow failure metadata for queue adapter enqueue failures."""
+
+    queue_name: RuntimeWorkflowQueueName
+    workflow_type: RuntimeWorkflowType
+    raw_error_message: str
+    progress: RuntimeWorkflowProgress = "enqueue failed"
+
+    @classmethod
+    def from_error(
+        cls,
+        *,
+        queue_name: RuntimeWorkflowQueueName,
+        workflow_type: RuntimeWorkflowType,
+        error: BaseException | str,
+    ) -> Self:
+        """Build enqueue-failure metadata from a queue adapter exception."""
+        return cls(
+            queue_name=queue_name,
+            workflow_type=workflow_type,
+            raw_error_message=str(error),
+        )
+
+    @property
+    def error_message(self) -> str:
+        """Return the existing durable enqueue-failure message."""
+        return f"Failed to enqueue {self.queue_name} {self.workflow_type}: {self.raw_error_message}"
+
+    def failure_metadata(self) -> RuntimeWorkflowFailureMetadata:
+        """Return the shared runtime failure metadata wrapper."""
+        return RuntimeWorkflowFailureMetadata(
+            error_message=self.error_message,
+            progress=self.progress,
+        )
+
+    def workflow_metadata_patch(self) -> dict[str, object]:
+        """Serialize to the existing durable enqueue-failure metadata patch."""
+        return self.failure_metadata().workflow_metadata_patch()
+
+    def failed_event_data(self) -> dict[str, object]:
+        """Serialize to the existing enqueue-failure event payload."""
+        return self.failure_metadata().failed_event_data()

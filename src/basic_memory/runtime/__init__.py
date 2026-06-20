@@ -278,7 +278,10 @@ from basic_memory.runtime.storage_events import (
 )
 from basic_memory.runtime.workflow_metadata import (
     RuntimeWorkflowAttemptTransportMetadata,
+    RuntimeWorkflowEnqueueFailureMetadata,
+    RuntimeWorkflowQueueName,
     RuntimeWorkflowTransportState,
+    RuntimeWorkflowType,
 )
 
 __all__ = [
@@ -432,6 +435,7 @@ __all__ = [
     "RuntimeWorkflowAttemptTransportMetadata",
     "RuntimeWorkflowCheckpoint",
     "RuntimeWorkflowCompletionMetadata",
+    "RuntimeWorkflowEnqueueFailureMetadata",
     "RuntimeWorkflowFailureMetadata",
     "RuntimeWorkflowMetadata",
     "RuntimeWorkflowMetadataPatch",
@@ -439,11 +443,13 @@ __all__ = [
     "RuntimeWorkflowPhase",
     "RuntimeWorkflowProgressMetadata",
     "RuntimeWorkflowProgress",
+    "RuntimeWorkflowQueueName",
     "RuntimeWorkflowResult",
     "RuntimeWorkflowQueueEnvelope",
     "RuntimeWorkflowStatus",
     "RuntimeWorkflowTransport",
     "RuntimeWorkflowTransportState",
+    "RuntimeWorkflowType",
     "RuntimeWrittenFileState",
     "SnapshotArchivePlan",
     "SnapshotArchiveRequest",
