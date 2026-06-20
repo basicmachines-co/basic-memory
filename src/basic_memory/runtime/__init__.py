@@ -206,6 +206,11 @@ from basic_memory.runtime.job_payloads import (
     RuntimePayloadJobEnqueuer,
     RuntimeSerializedJobPayload,
 )
+from basic_memory.runtime.job_status import (
+    RuntimeJobStatusResponseDict,
+    RuntimeJobStatusResponsePayload,
+    runtime_job_status_response_payload,
+)
 from basic_memory.runtime.note_move import (
     RuntimeNoteMoveDestination,
     normalize_note_move_destination_path,
@@ -345,6 +350,8 @@ __all__ = [
     "RuntimeJobRequest",
     "RuntimeJobRequestSource",
     "RuntimeJobStatus",
+    "RuntimeJobStatusResponseDict",
+    "RuntimeJobStatusResponsePayload",
     "RuntimeJobStatusType",
     "RuntimeMaterializedNoteSource",
     "RuntimeQueuedWorkflowMetadata",
@@ -500,6 +507,7 @@ __all__ = [
     "resolve_storage_project_prefix",
     "runtime_content_type_is_markdown",
     "runtime_job_status_from_workflow_status",
+    "runtime_job_status_response_payload",
     "runtime_job_request_from_source",
     "runtime_note_content_payload_as_dict",
     "runtime_note_content_payload_as_json_bytes",
