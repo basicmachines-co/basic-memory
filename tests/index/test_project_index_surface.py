@@ -23,3 +23,12 @@ def test_index_package_exports_project_index_fanout_contracts() -> None:
     assert callable(index.build_project_index_workflow_queued)
     assert callable(index.project_index_workflow_logical_key)
     assert callable(index.run_project_index_coordinator)
+
+
+def test_index_package_exports_local_event_index_runtime_contracts() -> None:
+    """Local event-index adapters are available from the core index surface."""
+    assert index.LOCAL_EVENT_INDEX_TENANT_ID.hex == "00000000000000000000000000000000"
+    assert index.LocalWatchEventIndexRuntimeFactory.__name__ == (
+        "LocalWatchEventIndexRuntimeFactory"
+    )
+    assert callable(index.local_project_prefix)

@@ -107,7 +107,7 @@ async def initialize_file_sync(
 
     event_index_runtime_factory = None
     if app_config.watch_event_index:
-        from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+        from basic_memory.index import LocalWatchEventIndexRuntimeFactory
         from basic_memory.sync.sync_service import get_sync_service
 
         event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
