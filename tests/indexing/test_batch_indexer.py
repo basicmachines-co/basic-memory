@@ -14,27 +14,11 @@ from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.indexing import (
     BatchIndexer,
-    IndexFrontmatterUpdate,
-    IndexFrontmatterWriteResult,
     IndexInputFile,
+    StorageIndexFileWriter,
 )
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import SyncFatalError
-
-
-class _TestFileWriter:
-    """Adapt the real FileService for batch indexer tests."""
-
-    def __init__(self, file_service) -> None:
-        self.file_service = file_service
-
-    async def write_frontmatter(
-        self, update: IndexFrontmatterUpdate
-    ) -> IndexFrontmatterWriteResult:
-        result = await self.file_service.update_frontmatter_with_result(
-            update.path, update.metadata
-        )
-        return IndexFrontmatterWriteResult(checksum=result.checksum, content=result.content)
 
 
 async def _create_file(path: Path, content: str | bytes) -> None:
@@ -67,7 +51,7 @@ def _make_batch_indexer(
         entity_repository=entity_repository,
         relation_repository=relation_repository,
         search_service=search_service,
-        file_writer=_TestFileWriter(file_service),
+        file_writer=StorageIndexFileWriter(storage=file_service),
         session_maker=search_service.session_maker,
     )
 

@@ -752,6 +752,42 @@ class IndexFileWriter(Protocol):
     ) -> IndexFrontmatterWriteResult: ...
 
 
+class IndexFrontmatterStorageResult(Protocol):
+    """Storage write result shape needed by the indexing writer adapter."""
+
+    checksum: str
+    content: str
+
+
+class IndexFrontmatterStorage(Protocol):
+    """Storage capability that can rewrite markdown frontmatter."""
+
+    async def update_frontmatter_with_result(
+        self,
+        path: str,
+        updates: dict[str, Any],
+    ) -> IndexFrontmatterStorageResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StorageIndexFileWriter(IndexFileWriter):
+    """Adapt a storage service's frontmatter rewrite API to the indexing protocol."""
+
+    storage: IndexFrontmatterStorage
+
+    async def write_frontmatter(
+        self, update: IndexFrontmatterUpdate
+    ) -> IndexFrontmatterWriteResult:
+        result = await self.storage.update_frontmatter_with_result(
+            update.path,
+            update.metadata,
+        )
+        return IndexFrontmatterWriteResult(
+            checksum=result.checksum,
+            content=result.content,
+        )
+
+
 class IndexEntitySearchWriter(Protocol):
     """Narrow protocol for search writes during indexing."""
 

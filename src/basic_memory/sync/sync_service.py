@@ -23,18 +23,14 @@ from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import ParseError, compute_checksum, remove_frontmatter
 from basic_memory.indexing import (
     BatchIndexer,
+    IndexedEntity,
     IndexFileMetadata,
     IndexInputFile,
     IndexProgress,
+    StorageIndexFileWriter,
     SyncedMarkdownFile,
 )
 from basic_memory.indexing.batching import build_index_batches
-from basic_memory.indexing.models import (
-    IndexedEntity,
-    IndexFileWriter,
-    IndexFrontmatterUpdate,
-    IndexFrontmatterWriteResult,
-)
 from basic_memory.ignore_utils import load_bmignore_patterns, should_ignore_path
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.models import Entity, Project
@@ -152,23 +148,6 @@ class _ScanEntityState:
     checksum: str | None
 
 
-class _FileServiceIndexWriter(IndexFileWriter):
-    """Adapt FileService frontmatter updates to the indexing writer protocol."""
-
-    def __init__(self, file_service: FileService) -> None:
-        self.file_service = file_service
-
-    async def write_frontmatter(
-        self, update: IndexFrontmatterUpdate
-    ) -> IndexFrontmatterWriteResult:
-        # Why: IndexFrontmatterWriteResult lives in indexing/models.py so the indexing
-        # layer does not need to import FileService. This adapter keeps that boundary intact.
-        result = await self.file_service.update_frontmatter_with_result(
-            update.path, update.metadata
-        )
-        return IndexFrontmatterWriteResult(checksum=result.checksum, content=result.content)
-
-
 class SyncService:
     """Syncs documents and knowledge files with database."""
 
@@ -205,7 +184,7 @@ class SyncService:
             entity_repository=entity_repository,
             relation_repository=relation_repository,
             search_service=search_service,
-            file_writer=_FileServiceIndexWriter(file_service),
+            file_writer=StorageIndexFileWriter(storage=file_service),
             session_maker=session_maker,
         )
 
