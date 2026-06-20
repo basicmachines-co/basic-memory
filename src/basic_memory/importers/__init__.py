@@ -15,6 +15,7 @@ from basic_memory.importers.job_payloads import (
     ImportDataWorkflowStart,
     ImportDataWorkflowQueued,
     ImportKind,
+    build_import_data_job_request,
     build_import_data_workflow_start,
     build_import_data_workflow_queued,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "ImportDataWorkflowStart",
     "ImportDataWorkflowQueued",
     "ImportKind",
+    "build_import_data_job_request",
     "build_import_data_workflow_start",
     "build_import_data_workflow_queued",
     "ProjectZipEntry",

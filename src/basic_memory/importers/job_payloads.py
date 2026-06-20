@@ -19,6 +19,7 @@ from basic_memory.runtime import (
     ProjectRuntimeSource,
     RuntimeQueuedWorkflowMetadata,
     RuntimeJobId,
+    RuntimeJobRequest,
     RuntimeWorkflowAttemptTransportMetadata,
     RuntimeWorkflowBroker,
     RuntimeWorkflowMetadataPatch,
@@ -237,6 +238,20 @@ class ImportDataPayload(BaseModel):
             }
         )
         return routing_headers
+
+
+def build_import_data_job_request(
+    *,
+    payload: ImportDataPayload,
+    entrypoint: JobEntrypoint,
+    headers: Mapping[str, str] | None = None,
+) -> RuntimeJobRequest:
+    """Build the queue-neutral import job request from the validated payload."""
+    return RuntimeJobRequest(
+        entrypoint=entrypoint,
+        payload=payload.model_dump_json().encode("utf-8"),
+        headers=payload.routing_headers(headers),
+    )
 
 
 def build_import_data_workflow_queued(

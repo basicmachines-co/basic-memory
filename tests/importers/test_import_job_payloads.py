@@ -12,6 +12,7 @@ from basic_memory.importers import (
     ImportKind,
 )
 from basic_memory.importers import job_payloads as import_job_payloads
+from basic_memory.runtime import RuntimeJobRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +165,41 @@ def test_import_data_workflow_start_preserves_cloud_attempt_shapes() -> None:
     }
     assert importers_module.build_import_data_workflow_start is (
         import_job_payloads.build_import_data_workflow_start
+    )
+
+
+def test_import_data_job_request_preserves_runtime_queue_shape() -> None:
+    workflow_id = uuid4()
+    payload = ImportDataPayload(
+        tenant_id=uuid4(),
+        import_type="chatgpt",
+        s3_input_key="tenants/test/jobs/import/conversations.json",
+        destination_folder="imports",
+        project_id=101,
+        project_external_id="project-ext",
+        project_path="main",
+        workflow_id=workflow_id,
+    )
+
+    request = import_job_payloads.build_import_data_job_request(
+        payload=payload,
+        entrypoint="import_data",
+        headers={"source": "test"},
+    )
+
+    assert request == RuntimeJobRequest(
+        entrypoint="import_data",
+        payload=payload.model_dump_json().encode("utf-8"),
+        headers={
+            "source": "test",
+            "tenant_id": str(payload.tenant_id),
+            "project_id": "101",
+            "project_path": "main",
+            "workflow_id": str(workflow_id),
+        },
+    )
+    assert importers_module.build_import_data_job_request is (
+        import_job_payloads.build_import_data_job_request
     )
 
 
