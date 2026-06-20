@@ -275,6 +275,10 @@ from basic_memory.runtime.storage_events import (
     run_runtime_storage_event_operations,
     storage_event_payload_from_input,
 )
+from basic_memory.runtime.workflow_metadata import (
+    RuntimeWorkflowAttemptTransportMetadata,
+    RuntimeWorkflowTransportState,
+)
 
 __all__ = [
     "JobEntrypoint",
@@ -423,6 +427,7 @@ __all__ = [
     "RuntimeSerializedJobPayload",
     "RuntimeWorkflowBroker",
     "RuntimeWorkflowAttemptMetadata",
+    "RuntimeWorkflowAttemptTransportMetadata",
     "RuntimeWorkflowCheckpoint",
     "RuntimeWorkflowCompletionMetadata",
     "RuntimeWorkflowFailureMetadata",
@@ -436,6 +441,7 @@ __all__ = [
     "RuntimeWorkflowQueueEnvelope",
     "RuntimeWorkflowStatus",
     "RuntimeWorkflowTransport",
+    "RuntimeWorkflowTransportState",
     "RuntimeWrittenFileState",
     "SnapshotArchivePlan",
     "SnapshotArchiveRequest",
