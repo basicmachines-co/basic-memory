@@ -5,11 +5,16 @@ from dataclasses import dataclass, field
 import pytest
 
 from basic_memory.index import (
+    StorageEventBucketContextProcessor,
+    StorageEventBucketContextResolver,
+    StorageEventBucketIndexRuntime,
     StorageEventBucketProcessor,
+    StorageEventBucketResolution,
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
     StorageEventSourceIndexRuntime,
+    run_storage_event_bucket_indexing,
     run_storage_event_source_indexing,
     run_storage_event_indexing,
 )
@@ -139,6 +144,56 @@ class RecordingBucketProcessor(StorageEventBucketProcessor):
         self.failures.append((bucket_name, len(events), str(exc)))
 
 
+@dataclass(frozen=True, slots=True)
+class BucketRuntimeContext:
+    runtime_name: str
+
+
+@dataclass(slots=True)
+class RecordingBucketContextResolver(StorageEventBucketContextResolver[BucketRuntimeContext]):
+    contexts_by_bucket: dict[StorageBucketName, BucketRuntimeContext]
+    requested_buckets: list[tuple[StorageBucketName, int]] = field(default_factory=list)
+
+    async def resolve_bucket_context(
+        self,
+        bucket_name: StorageBucketName,
+        events: tuple[StorageEventPayload, ...],
+    ) -> StorageEventBucketResolution[BucketRuntimeContext]:
+        self.requested_buckets.append((bucket_name, len(events)))
+        context = self.contexts_by_bucket.get(bucket_name)
+        if context is None:
+            return StorageEventBucketResolution.skip()
+        return StorageEventBucketResolution.process(context)
+
+
+@dataclass(slots=True)
+class RecordingBucketContextProcessor(StorageEventBucketContextProcessor[BucketRuntimeContext]):
+    fail_bucket: StorageBucketName | None = None
+    calls: list[tuple[StorageBucketName, str, tuple[str, ...]]] = field(default_factory=list)
+    failures: list[tuple[StorageBucketName, int, str]] = field(default_factory=list)
+
+    async def process_bucket_context_events(
+        self,
+        bucket_name: StorageBucketName,
+        context: BucketRuntimeContext,
+        events: tuple[StorageEventPayload, ...],
+    ) -> RuntimeStorageEventProcessingResult:
+        self.calls.append(
+            (bucket_name, context.runtime_name, tuple(event.object_key for event in events))
+        )
+        if bucket_name == self.fail_bucket:
+            raise RuntimeError("bucket context failed")
+        return RuntimeStorageEventProcessingResult.from_counts(processed=len(events))
+
+    async def bucket_failed(
+        self,
+        bucket_name: StorageBucketName,
+        events: tuple[StorageEventPayload, ...],
+        exc: Exception,
+    ) -> None:
+        self.failures.append((bucket_name, len(events), str(exc)))
+
+
 @pytest.mark.asyncio
 async def test_run_storage_event_source_indexing_routes_bucket_batches_in_order() -> None:
     processor = RecordingBucketProcessor()
@@ -187,6 +242,80 @@ async def test_run_storage_event_source_indexing_counts_bucket_failures() -> Non
         ("beta-bucket", ("beta/notes/c.md",)),
     ]
     assert processor.failures == [("alpha-bucket", 2, "bucket failed")]
+
+
+@pytest.mark.asyncio
+async def test_run_storage_event_bucket_indexing_resolves_contexts_and_counts_skips() -> None:
+    resolver = RecordingBucketContextResolver(
+        contexts_by_bucket={
+            "alpha-bucket": BucketRuntimeContext("alpha-runtime"),
+            "beta-bucket": BucketRuntimeContext("beta-runtime"),
+        }
+    )
+    processor = RecordingBucketContextProcessor()
+
+    result = await run_storage_event_bucket_indexing(
+        StaticStorageEventSource(
+            {
+                "alpha-bucket": (
+                    storage_event(key="alpha/notes/a.md"),
+                    storage_event(key="alpha/notes/b.md"),
+                ),
+                "unknown-bucket": (storage_event(key="unknown/notes/c.md"),),
+                "beta-bucket": (storage_event(key="beta/notes/d.md"),),
+            }
+        ),
+        StorageEventBucketIndexRuntime(
+            bucket_resolver=resolver,
+            bucket_processor=processor,
+        ),
+    )
+
+    assert result.as_dict() == {"processed": 3, "failed": 0, "skipped": 1}
+    assert resolver.requested_buckets == [
+        ("alpha-bucket", 2),
+        ("unknown-bucket", 1),
+        ("beta-bucket", 1),
+    ]
+    assert processor.calls == [
+        ("alpha-bucket", "alpha-runtime", ("alpha/notes/a.md", "alpha/notes/b.md")),
+        ("beta-bucket", "beta-runtime", ("beta/notes/d.md",)),
+    ]
+    assert processor.failures == []
+
+
+@pytest.mark.asyncio
+async def test_run_storage_event_bucket_indexing_counts_bucket_context_failures() -> None:
+    resolver = RecordingBucketContextResolver(
+        contexts_by_bucket={
+            "alpha-bucket": BucketRuntimeContext("alpha-runtime"),
+            "beta-bucket": BucketRuntimeContext("beta-runtime"),
+        }
+    )
+    processor = RecordingBucketContextProcessor(fail_bucket="alpha-bucket")
+
+    result = await run_storage_event_bucket_indexing(
+        StaticStorageEventSource(
+            {
+                "alpha-bucket": (
+                    storage_event(key="alpha/notes/a.md"),
+                    storage_event(key="alpha/notes/b.md"),
+                ),
+                "beta-bucket": (storage_event(key="beta/notes/c.md"),),
+            }
+        ),
+        StorageEventBucketIndexRuntime(
+            bucket_resolver=resolver,
+            bucket_processor=processor,
+        ),
+    )
+
+    assert result.as_dict() == {"processed": 1, "failed": 2, "skipped": 0}
+    assert processor.calls == [
+        ("alpha-bucket", "alpha-runtime", ("alpha/notes/a.md", "alpha/notes/b.md")),
+        ("beta-bucket", "beta-runtime", ("beta/notes/c.md",)),
+    ]
+    assert processor.failures == [("alpha-bucket", 2, "bucket context failed")]
 
 
 @pytest.mark.asyncio
