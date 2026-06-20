@@ -20,14 +20,23 @@ from basic_memory.runtime import (
     ProjectExternalId,
     ProjectId,
     ProjectPath,
+    RuntimeAcceptedNoteEntitySource,
+    RuntimeAcceptedNoteResponse,
     RuntimeContentType,
     RuntimeEntityId,
     RuntimeFilePath,
     RuntimeNoteChangeSource,
+    RuntimeNoteContentReadAction,
     RuntimeNoteContentReadRepairStatus,
+    RuntimeNoteContentResource,
+    RuntimeNoteContentResponsePayload,
+    RuntimeNoteContentState,
+    RuntimeNoteContentStateSource,
     plan_runtime_note_content_read_repair,
+    plan_runtime_note_content_read,
     runtime_content_type_is_markdown,
 )
+from basic_memory.schemas.v2.entity import EntityResponseV2
 
 
 class NoteContentReadProjectSource(Protocol):
@@ -49,6 +58,14 @@ class NoteContentReadEntitySource(NoteContentReconcileEntitySource, Protocol):
 
     @property
     def content_type(self) -> RuntimeContentType: ...
+
+
+class NoteContentReadResponseEntitySource(
+    NoteContentReadEntitySource,
+    RuntimeAcceptedNoteEntitySource,
+    Protocol,
+):
+    """Entity shape needed for note-content response payloads."""
 
 
 class NoteContentReadRepairEntitySource(NoteContentReadEntitySource, Protocol):
@@ -293,6 +310,53 @@ async def load_note_content_read_view_with_default_repositories(
         project_repository_factory=note_content_read_project_repository,
         entity_repository_factory=note_content_read_entity_repository,
         note_content_repository_factory=note_content_read_note_content_repository,
+    )
+
+
+def note_content_response_payload_from_read_view[
+    EntityT: NoteContentReadResponseEntitySource,
+    NoteContentT: RuntimeNoteContentStateSource,
+](
+    view: NoteContentReadView[EntityT, NoteContentT] | None,
+) -> RuntimeNoteContentResponsePayload | None:
+    """Build the typed response payload for a loaded note-content read view."""
+    if view is None:
+        return None
+
+    read_plan = plan_runtime_note_content_read(view.entity, view.note_content)
+    if read_plan.action is RuntimeNoteContentReadAction.entity_metadata:
+        return EntityResponseV2.model_validate(read_plan.require_entity_metadata()).model_dump(
+            mode="json"
+        )
+
+    if read_plan.action is not RuntimeNoteContentReadAction.accepted_note:
+        return None
+
+    entity, note_content = read_plan.require_accepted_note()
+    return RuntimeAcceptedNoteResponse.from_entity_and_content_state(
+        entity=entity,
+        note_content=RuntimeNoteContentState.from_source(note_content),
+    )
+
+
+def note_content_resource_from_read_view[
+    EntityT: NoteContentReadEntitySource,
+    NoteContentT: RuntimeNoteContentStateSource,
+](
+    view: NoteContentReadView[EntityT, NoteContentT] | None,
+) -> RuntimeNoteContentResource | None:
+    """Build the accepted markdown resource for a loaded note-content read view."""
+    if view is None:
+        return None
+
+    read_plan = plan_runtime_note_content_read(view.entity, view.note_content)
+    if read_plan.action is not RuntimeNoteContentReadAction.accepted_note:
+        return None
+
+    entity, note_content = read_plan.require_accepted_note()
+    return RuntimeNoteContentResource.from_entity_and_content_state(
+        entity,
+        RuntimeNoteContentState.from_source(note_content),
     )
 
 

@@ -14,10 +14,16 @@ from basic_memory.indexing.note_content_read_repair_runner import (
     NoteContentReadRepairTarget,
     apply_note_content_read_repair,
     load_note_content_read_view,
+    note_content_resource_from_read_view,
+    note_content_response_payload_from_read_view,
     prepare_note_content_read_repair,
     run_note_content_read_repair,
 )
-from basic_memory.runtime import RuntimeNoteContentReadRepairStatus
+from basic_memory.runtime import (
+    RuntimeAcceptedNoteResponse,
+    RuntimeNoteContentReadRepairStatus,
+    RuntimeNoteContentResource,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,11 +37,31 @@ class _Entity:
     id: int
     content_type: str
     file_path: str
+    external_id: str = "note-456"
+    title: str = "Read note"
+    note_type: str = "note"
+    entity_metadata: dict[str, object] | None = None
+    permalink: str | None = "main/notes/read"
+    content: str | None = None
+    observations: tuple[object, ...] = ()
+    relations: tuple[object, ...] = ()
+    created_at: datetime = datetime(2026, 4, 13, 12, 0, tzinfo=UTC)
+    updated_at: datetime = datetime(2026, 4, 13, 12, 5, tzinfo=UTC)
+    created_by: str | None = "creator"
+    last_updated_by: str | None = "editor"
 
 
 @dataclass(frozen=True, slots=True)
 class _NoteContent:
     markdown_content: str
+    db_version: int = 4
+    db_checksum: str = "db-checksum"
+    file_version: int | None = 3
+    file_checksum: str | None = "file-checksum"
+    file_write_status: str = "synced"
+    last_source: str | None = "api"
+    file_updated_at: datetime | None = datetime(2026, 4, 13, 13, 0, tzinfo=UTC)
+    last_materialization_error: str | None = None
 
 
 class _ProjectRepository:
@@ -119,6 +145,74 @@ async def test_load_note_content_read_view_returns_markdown_entity_with_content(
     assert project_repository.external_ids == ["project-123"]
     assert entity_repository.external_ids == ["note-456"]
     assert note_content_repository.entity_ids == [42]
+
+
+def test_note_content_response_payload_from_read_view_returns_accepted_note_response() -> None:
+    entity = _Entity(id=42, content_type="text/markdown", file_path="notes/read.md")
+    note_content = _NoteContent(markdown_content="# Read\n")
+
+    payload = note_content_response_payload_from_read_view(
+        NoteContentReadView(entity=entity, note_content=note_content)
+    )
+
+    assert isinstance(payload, RuntimeAcceptedNoteResponse)
+    assert payload.external_id == "note-456"
+    assert payload.markdown_content == "# Read\n"
+    assert payload.db_version == 4
+    assert payload.db_checksum == "db-checksum"
+    assert payload.file_write_status == "synced"
+
+
+def test_note_content_response_payload_from_read_view_returns_entity_payload_for_non_markdown() -> (
+    None
+):
+    entity = _Entity(
+        id=42,
+        content_type="image/png",
+        file_path="images/diagram.png",
+        title="diagram.png",
+        note_type="file",
+        permalink="main/images/diagram",
+    )
+
+    payload = note_content_response_payload_from_read_view(
+        NoteContentReadView(entity=entity, note_content=None)
+    )
+
+    assert payload is not None
+    assert not isinstance(payload, RuntimeAcceptedNoteResponse)
+    payload_dict = dict(payload)
+    assert payload_dict["external_id"] == "note-456"
+    assert payload_dict["title"] == "diagram.png"
+    assert payload_dict["note_type"] == "file"
+    assert payload_dict["content_type"] == "image/png"
+    assert payload_dict["file_path"] == "images/diagram.png"
+    assert "db_version" not in payload_dict
+
+
+def test_note_content_resource_from_read_view_returns_accepted_markdown_resource() -> None:
+    entity = _Entity(id=42, content_type="text/markdown", file_path="notes/read.md")
+    note_content = _NoteContent(markdown_content="# Read\n")
+
+    resource = note_content_resource_from_read_view(
+        NoteContentReadView(entity=entity, note_content=note_content)
+    )
+
+    assert isinstance(resource, RuntimeNoteContentResource)
+    assert resource.content == "# Read\n"
+    assert resource.content_type == "text/markdown"
+
+
+def test_note_content_read_payload_helpers_return_none_for_missing_view_or_content() -> None:
+    markdown_without_content = NoteContentReadView(
+        entity=_Entity(id=42, content_type="text/markdown", file_path="notes/read.md"),
+        note_content=None,
+    )
+
+    assert note_content_response_payload_from_read_view(None) is None
+    assert note_content_response_payload_from_read_view(markdown_without_content) is None
+    assert note_content_resource_from_read_view(None) is None
+    assert note_content_resource_from_read_view(markdown_without_content) is None
 
 
 @pytest.mark.asyncio
