@@ -207,6 +207,7 @@ from basic_memory.runtime.job_payloads import (
     RuntimeSerializedJobPayload,
     RuntimeWorkflowQueueEnvelope,
 )
+from basic_memory.runtime.job_identity import RuntimeTenantWorkflowJobIdentity
 from basic_memory.runtime.job_status import (
     RuntimeJobStatusResponseDict,
     RuntimeJobStatusResponsePayload,
@@ -425,6 +426,7 @@ __all__ = [
     "RuntimeStorageEventSkipReason",
     "RuntimeStorageEventSource",
     "RuntimeSerializedJobPayload",
+    "RuntimeTenantWorkflowJobIdentity",
     "RuntimeWorkflowBroker",
     "RuntimeWorkflowAttemptMetadata",
     "RuntimeWorkflowAttemptTransportMetadata",

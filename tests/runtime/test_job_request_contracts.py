@@ -3,10 +3,12 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+from uuid import UUID
 
 from basic_memory.runtime import (
     RuntimeJobDedupeKey,
     RuntimeJobRequest,
+    RuntimeTenantWorkflowJobIdentity,
     runtime_job_request_from_source,
 )
 
@@ -49,5 +51,36 @@ def test_runtime_job_request_from_source_builds_queue_request() -> None:
             "source": "test",
             "tenant_id": "tenant-1",
             "project_id": "42",
+        },
+    )
+
+
+def test_runtime_tenant_workflow_job_identity_builds_request_contract() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    identity = RuntimeTenantWorkflowJobIdentity(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        dedupe_prefix="provision",
+    )
+
+    assert identity.dedupe_key() == f"provision:{tenant_id}"
+    assert identity.routing_headers(headers={"source": "repair"}) == {
+        "source": "repair",
+        "tenant_id": str(tenant_id),
+        "workflow_id": str(workflow_id),
+    }
+    assert identity.job_request(
+        entrypoint="provision_tenant",
+        payload=b'{"tenant_id":"demo"}',
+        headers={"source": "repair"},
+    ) == RuntimeJobRequest(
+        entrypoint="provision_tenant",
+        payload=b'{"tenant_id":"demo"}',
+        dedupe_key=f"provision:{tenant_id}",
+        headers={
+            "source": "repair",
+            "tenant_id": str(tenant_id),
+            "workflow_id": str(workflow_id),
         },
     )
