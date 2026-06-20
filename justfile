@@ -112,11 +112,18 @@ fast-check-no-openai:
 # Runtime / Event Indexing Refactor
 # ==============================================================================
 
-# Focused project-wide indexing orchestration surface tests.
-project-index-contract-test:
+# Focused provider-neutral project-index orchestration surface tests.
+project-index-surface-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/index/test_project_index_surface.py \
+        tests/index/test_project_index_surface.py
+
+# Focused local project-index adapter tests.
+local-project-index-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py
+
+# Focused project-wide indexing orchestration surface tests.
+project-index-contract-test: project-index-surface-test local-project-index-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:
