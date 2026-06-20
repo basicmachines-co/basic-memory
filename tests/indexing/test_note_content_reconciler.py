@@ -21,6 +21,7 @@ from basic_memory.indexing.note_content_reconciler import (
     RepositoryNoteMaterializationFailureMarker,
     apply_note_content_update_plan,
     mark_note_materialization_enqueue_failed,
+    reconcile_note_content_for_entity,
 )
 from basic_memory.models import Entity
 
@@ -264,3 +265,70 @@ async def test_repository_failure_marker_records_materialization_enqueue_failure
     assert repository_calls[0]["file_write_status"] == "failed"
     assert repository_calls[0]["last_materialization_error"] == "pgq unavailable"
     assert isinstance(repository_calls[0]["last_materialization_attempt_at"], datetime)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_note_content_for_entity_reads_canonical_file() -> None:
+    """Entity-id reconciliation should read canonical markdown and delegate to reconciler."""
+    observed_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
+    session = FakeRepositorySession()
+    entity = SimpleNamespace(id=42, file_path="notes/indexed.md", is_markdown=True)
+    repository = SimpleNamespace(find_by_id=AsyncMock(return_value=entity))
+    file_reader = SimpleNamespace(
+        get_file=AsyncMock(
+            return_value=SimpleNamespace(
+                content=b"# Indexed\n",
+                last_modified=observed_at,
+            )
+        )
+    )
+    reconciler = SimpleNamespace(reconcile=AsyncMock())
+
+    def session_maker() -> FakeRepositorySession:
+        return session
+
+    reconciled = await reconcile_note_content_for_entity(
+        session_maker=cast(Any, session_maker),
+        entity_repository=cast(Any, repository),
+        file_reader=cast(Any, file_reader),
+        reconciler=cast(Any, reconciler),
+        entity_id=42,
+        source="index",
+    )
+
+    assert reconciled is True
+    repository.find_by_id.assert_awaited_once_with(session, 42)
+    file_reader.get_file.assert_awaited_once_with("notes/indexed.md")
+    reconciler.reconcile.assert_awaited_once_with(
+        entity=entity,
+        markdown_content="# Indexed\n",
+        observed_at=observed_at,
+        source="index",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_note_content_for_entity_skips_non_markdown_entities() -> None:
+    """Non-markdown entities should not trigger a storage content read."""
+    session = FakeRepositorySession()
+    entity = SimpleNamespace(id=42, file_path="assets/image.png", is_markdown=False)
+    repository = SimpleNamespace(find_by_id=AsyncMock(return_value=entity))
+    file_reader = SimpleNamespace(get_file=AsyncMock())
+    reconciler = SimpleNamespace(reconcile=AsyncMock())
+
+    def session_maker() -> FakeRepositorySession:
+        return session
+
+    reconciled = await reconcile_note_content_for_entity(
+        session_maker=cast(Any, session_maker),
+        entity_repository=cast(Any, repository),
+        file_reader=cast(Any, file_reader),
+        reconciler=cast(Any, reconciler),
+        entity_id=42,
+        source="index",
+    )
+
+    assert reconciled is False
+    repository.find_by_id.assert_awaited_once_with(session, 42)
+    file_reader.get_file.assert_not_awaited()
+    reconciler.reconcile.assert_not_awaited()

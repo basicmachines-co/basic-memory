@@ -312,6 +312,10 @@ from basic_memory.indexing.note_materialization_runner import (
     run_note_materialization,
 )
 from basic_memory.indexing.note_content_reconciler import (
+    NoteContentReconcileEntityRepository,
+    NoteContentReconcileFile,
+    NoteContentReconcileFileEntitySource,
+    NoteContentReconcileFileReader,
     NoteContentReconcileEntitySource,
     NoteContentReconciler,
     NoteContentRepositoryFactory,
@@ -324,6 +328,7 @@ from basic_memory.indexing.note_content_reconciler import (
     note_content_from_bootstrap,
     note_content_repository_for_project,
     note_content_state_from_model,
+    reconcile_note_content_for_entity,
 )
 from basic_memory.indexing.note_content_read_repair_runner import (
     NoteContentReadEntityRepository,
@@ -713,7 +718,11 @@ __all__ = [
     "NoteContentMaterializedCurrent",
     "NoteContentMaterializedStale",
     "NoteContentPromoted",
+    "NoteContentReconcileEntityRepository",
     "NoteContentReconcileEntitySource",
+    "NoteContentReconcileFile",
+    "NoteContentReconcileFileEntitySource",
+    "NoteContentReconcileFileReader",
     "NoteContentReadEntityRepository",
     "NoteContentReadEntityRepositoryFactory",
     "NoteContentReadEntitySource",
@@ -993,6 +1002,7 @@ __all__ = [
     "resolve_link_texts",
     "resolve_project_link_texts",
     "reconcile_indexed_note_content_batch",
+    "reconcile_note_content_for_entity",
     "refresh_accepted_note_search_index",
     "require_observed_file_should_read",
     "enqueue_cleanup_file",

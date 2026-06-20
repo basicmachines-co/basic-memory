@@ -20,12 +20,13 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentMaterializedStale,
     NoteContentPromoted,
     NoteContentState,
+    NoteContentSource,
     ObservedNoteContent,
     plan_note_content_reconciliation,
 )
 from basic_memory.models import NoteContent
 from basic_memory.repository import NoteContentRepository
-from basic_memory.runtime import ProjectId, RuntimeEntityId
+from basic_memory.runtime import ProjectId, RuntimeEntityId, RuntimeFilePath
 
 type NoteContentUpdatePlan = (
     NoteContentFileSynced
@@ -73,6 +74,44 @@ class NoteContentReconcileEntitySource(Protocol):
 
     @property
     def id(self) -> RuntimeEntityId: ...
+
+
+class NoteContentReconcileFileEntitySource(NoteContentReconcileEntitySource, Protocol):
+    """Entity shape needed to reconcile from the canonical file."""
+
+    @property
+    def file_path(self) -> RuntimeFilePath: ...
+
+    @property
+    def is_markdown(self) -> bool: ...
+
+
+class NoteContentReconcileEntityRepository(Protocol):
+    """Repository capability for loading the entity to reconcile."""
+
+    async def find_by_id(
+        self,
+        session: AsyncSession,
+        entity_id: RuntimeEntityId,
+    ) -> NoteContentReconcileFileEntitySource | None:
+        """Load one entity by internal id."""
+
+
+class NoteContentReconcileFile(Protocol):
+    """Canonical storage file content used for note-content reconciliation."""
+
+    @property
+    def content(self) -> bytes | None: ...
+
+    @property
+    def last_modified(self) -> datetime | None: ...
+
+
+class NoteContentReconcileFileReader(Protocol):
+    """Storage capability for reading one canonical entity file."""
+
+    async def get_file(self, path: RuntimeFilePath) -> NoteContentReconcileFile:
+        """Return canonical file content for one relative path."""
 
 
 def note_content_repository_for_project(project_id: ProjectId) -> NoteContentStore:
@@ -245,7 +284,7 @@ class NoteContentReconciler:
         entity: NoteContentReconcileEntitySource,
         markdown_content: str,
         observed_at: datetime | None,
-        source: str,
+        source: NoteContentSource,
     ) -> None:
         """Apply the shared file-vs-DB rule for one markdown entity."""
         observed_checksum = await file_utils.compute_checksum(markdown_content)
@@ -298,3 +337,31 @@ class NoteContentReconciler:
                 entity.id,
                 plan,
             )
+
+
+async def reconcile_note_content_for_entity(
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    entity_repository: NoteContentReconcileEntityRepository,
+    file_reader: NoteContentReconcileFileReader,
+    reconciler: NoteContentReconciler,
+    entity_id: RuntimeEntityId,
+    source: NoteContentSource,
+) -> bool:
+    """Hydrate or refresh note_content from an entity's canonical markdown file."""
+    async with session_maker() as session:
+        entity = await entity_repository.find_by_id(session, entity_id)
+    if entity is None or not entity.is_markdown:
+        return False
+
+    file_info = await file_reader.get_file(entity.file_path)
+    if file_info.content is None:
+        raise ValueError(f"Missing markdown content for entity {entity_id}")
+
+    await reconciler.reconcile(
+        entity=entity,
+        markdown_content=file_info.content.decode("utf-8"),
+        observed_at=file_info.last_modified,
+        source=source,
+    )
+    return True
