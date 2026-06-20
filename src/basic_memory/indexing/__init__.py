@@ -289,6 +289,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     plan_note_content_reconciliation,
 )
 from basic_memory.indexing.note_materialization_runner import (
+    ContentStoreNoteMaterializationFileWriter,
     NoopNoteMaterializationSessionLock,
     NoteFileDeleteEnqueuer,
     NoteMaterializationClock,
@@ -598,6 +599,7 @@ __all__ = [
     "ChangeReport",
     "CheckpointPhase",
     "CheckpointModel",
+    "ContentStoreNoteMaterializationFileWriter",
     "CurrentFileChecksumSource",
     "CurrentFileMetadata",
     "CurrentFileMetadataLoader",

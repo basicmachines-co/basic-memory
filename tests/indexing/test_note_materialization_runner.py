@@ -1,5 +1,6 @@
 """Tests for portable note materialization orchestration."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace, TracebackType
 from typing import cast
@@ -9,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.note_materialization_runner import (
+    ContentStoreNoteMaterializationFileWriter,
     NoteMaterializationPreflightResult,
     NoteMaterializationPublishAction,
     NoteMaterializationStatusPublication,
@@ -192,6 +194,36 @@ class RecordingNoteContentRepository:
         raise AssertionError("repository adapter tests should not create note_content")
 
 
+@dataclass(frozen=True, slots=True)
+class FakeFileMetadata:
+    modified_at: datetime
+
+
+class FakeContentStore:
+    def __init__(self, *, modified_at: datetime) -> None:
+        self.modified_at = modified_at
+        self.write_calls: list[tuple[str, str, dict[str, str] | None]] = []
+
+    async def exists(self, path: str) -> bool:
+        return False
+
+    async def compute_checksum(self, path: str) -> str:
+        raise AssertionError("missing-file materialization should not compute checksum")
+
+    async def write_file(
+        self,
+        path: str,
+        content: str,
+        *,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        self.write_calls.append((path, content, metadata))
+        return "new-file-sum"
+
+    async def get_file_metadata(self, path: str) -> FakeFileMetadata:
+        return FakeFileMetadata(modified_at=self.modified_at)
+
+
 def materialization_request() -> RuntimeNoteMaterializationJobRequest:
     return RuntimeNoteMaterializationJobRequest(
         tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -274,6 +306,38 @@ def materialization_note_content(
         file_checksum=file_checksum,
         file_write_status="pending",
     )
+
+
+@pytest.mark.asyncio
+async def test_content_store_note_materialization_file_writer_writes_prepared_note() -> None:
+    """The portable writer adapter should not need a cloud-specific wrapper."""
+    request = materialization_request()
+    prepared = plan_prepared_note_write(
+        request=request,
+        file_path="notes/a.md",
+        markdown_content="# A note\n",
+        previous_file_checksum=None,
+        attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
+    )
+    modified_at = datetime(2026, 6, 18, 14, 18, tzinfo=UTC)
+    content_store = FakeContentStore(modified_at=modified_at)
+
+    written = await ContentStoreNoteMaterializationFileWriter(
+        content_store=content_store
+    ).write_prepared_note(prepared)
+
+    assert written == RuntimeWrittenFileState(
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+        file_updated_at=modified_at,
+    )
+    assert content_store.write_calls == [
+        (
+            "notes/a.md",
+            "# A note\n",
+            prepared.object_metadata.to_storage_metadata(),
+        )
+    ]
 
 
 def test_plan_note_materialization_preflight_returns_missing_terminal_result() -> None:

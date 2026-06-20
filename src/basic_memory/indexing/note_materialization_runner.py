@@ -29,6 +29,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     plan_note_content_materialization_status,
 )
 from basic_memory.runtime import (
+    RuntimeNoteContentStore,
     RuntimeFileChecksum,
     RuntimeFileConflictError,
     RuntimeFilePath,
@@ -47,6 +48,7 @@ from basic_memory.runtime import (
     plan_note_file_delete_job_request,
     plan_note_materialization_cleanup_file_delete,
     plan_prepared_note_write,
+    write_prepared_note_to_content_store,
 )
 from basic_memory.models import Entity, NoteContent
 from basic_memory.services.exceptions import FileOperationError
@@ -227,6 +229,19 @@ class NoopNoteMaterializationSessionLock:
         entity_id: RuntimeEntityId,
     ) -> None:
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class ContentStoreNoteMaterializationFileWriter:
+    """Content-store adapter for writing one prepared accepted note."""
+
+    content_store: RuntimeNoteContentStore
+
+    async def write_prepared_note(
+        self,
+        prepared_write: RuntimePreparedNoteWrite,
+    ) -> RuntimeWrittenFileState:
+        return await write_prepared_note_to_content_store(self.content_store, prepared_write)
 
 
 def note_materialization_utc_now() -> datetime:
