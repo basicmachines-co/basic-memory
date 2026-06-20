@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.note_content_reconciler import (
-    NoteContentStore,
+    NoteContentRepositoryFactories,
     apply_note_content_update_plan,
-    note_content_repository_for_project,
+    build_default_note_content_repository_factories,
     note_content_state_from_model,
 )
 from basic_memory.indexing.note_content_reconciliation import (
@@ -62,7 +62,6 @@ type NoteMaterializationSessionScope = Callable[
     [async_sessionmaker[AsyncSession]],
     AbstractAsyncContextManager[AsyncSession],
 ]
-type NoteMaterializationNoteContentRepositoryFactory = Callable[[ProjectId], NoteContentStore]
 
 
 class NoteMaterializationPublishAction(StrEnum):
@@ -401,8 +400,8 @@ class RepositoryNoteMaterializationPublisher:
         default_factory=NoopNoteMaterializationSessionLock
     )
     session_scope: NoteMaterializationSessionScope = db.scoped_session
-    note_content_repository_factory: NoteMaterializationNoteContentRepositoryFactory = (
-        note_content_repository_for_project
+    repositories: NoteContentRepositoryFactories = field(
+        default_factory=build_default_note_content_repository_factories
     )
 
     async def publish_written_file_state(
@@ -438,7 +437,7 @@ class RepositoryNoteMaterializationPublisher:
 
             if publish_plan.action is NoteMaterializationPublishAction.stale_db_version:
                 await apply_note_content_update_plan(
-                    self.note_content_repository_factory(request.project_id),
+                    self.repositories.note_content_repository_factory(request.project_id),
                     session,
                     request.entity_id,
                     publish_plan.require_note_content_update(),
@@ -461,7 +460,7 @@ class RepositoryNoteMaterializationPublisher:
                 )
 
             await apply_note_content_update_plan(
-                self.note_content_repository_factory(request.project_id),
+                self.repositories.note_content_repository_factory(request.project_id),
                 session,
                 request.entity_id,
                 publish_plan.require_note_content_update(),
@@ -482,8 +481,8 @@ class RepositoryNoteMaterializationStatusPublisher:
         default_factory=NoopNoteMaterializationSessionLock
     )
     session_scope: NoteMaterializationSessionScope = db.scoped_session
-    note_content_repository_factory: NoteMaterializationNoteContentRepositoryFactory = (
-        note_content_repository_for_project
+    repositories: NoteContentRepositoryFactories = field(
+        default_factory=build_default_note_content_repository_factories
     )
 
     async def publish_note_materialization_status(
@@ -517,7 +516,7 @@ class RepositoryNoteMaterializationStatusPublisher:
                 return
 
             await apply_note_content_update_plan(
-                self.note_content_repository_factory(request.project_id),
+                self.repositories.note_content_repository_factory(request.project_id),
                 session,
                 request.entity_id,
                 plan,

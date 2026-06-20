@@ -18,12 +18,15 @@ from basic_memory.indexing.note_content_reconciliation import (
 )
 from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
+    NoteContentRepositoryFactories,
     RepositoryNoteMaterializationFailureMarker,
     apply_note_content_update_plan,
+    build_default_note_content_repository_factories,
     mark_note_materialization_enqueue_failed,
     reconcile_note_content_for_entity,
 )
 from basic_memory.models import Entity
+from basic_memory.repository import NoteContentRepository
 
 
 class FakeSession:
@@ -209,7 +212,9 @@ async def test_mark_note_materialization_enqueue_failed_uses_repository_factory(
         project_id=7,
         entity_id=42,
         error_message="pgq unavailable",
-        note_content_repository_factory=FakeNoteContentRepository,
+        repositories=NoteContentRepositoryFactories(
+            note_content_repository_factory=cast(Any, FakeNoteContentRepository)
+        ),
         attempted_at=attempted_at,
     )
 
@@ -252,7 +257,9 @@ async def test_repository_failure_marker_records_materialization_enqueue_failure
 
     marker = RepositoryNoteMaterializationFailureMarker(
         session_maker=cast(Any, session_maker),
-        note_content_repository_factory=FakeNoteContentRepository,
+        repositories=NoteContentRepositoryFactories(
+            note_content_repository_factory=cast(Any, FakeNoteContentRepository)
+        ),
     )
 
     await marker.mark_note_materialization_failed(
@@ -265,6 +272,13 @@ async def test_repository_failure_marker_records_materialization_enqueue_failure
     assert repository_calls[0]["file_write_status"] == "failed"
     assert repository_calls[0]["last_materialization_error"] == "pgq unavailable"
     assert isinstance(repository_calls[0]["last_materialization_attempt_at"], datetime)
+
+
+def test_default_note_content_repository_factories_use_core_repository() -> None:
+    """The default materialization contract should stay backed by core repositories."""
+    factories = build_default_note_content_repository_factories()
+
+    assert isinstance(factories.note_content_repository_factory(7), NoteContentRepository)
 
 
 @pytest.mark.asyncio

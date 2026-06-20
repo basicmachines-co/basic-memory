@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, assert_never
 
 from sqlalchemy.exc import IntegrityError
@@ -120,12 +120,26 @@ def note_content_repository_for_project(project_id: ProjectId) -> NoteContentSto
 
 
 @dataclass(frozen=True, slots=True)
+class NoteContentRepositoryFactories:
+    """Repository factory set needed by note-content materialization bookkeeping."""
+
+    note_content_repository_factory: NoteContentRepositoryFactory
+
+
+def build_default_note_content_repository_factories() -> NoteContentRepositoryFactories:
+    """Compose the default repository adapters for note-content materialization."""
+    return NoteContentRepositoryFactories(
+        note_content_repository_factory=note_content_repository_for_project
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class RepositoryNoteMaterializationFailureMarker:
     """Repository-backed failure marker for accepted-note materialization enqueue failures."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    note_content_repository_factory: NoteContentRepositoryFactory = (
-        note_content_repository_for_project
+    repositories: NoteContentRepositoryFactories = field(
+        default_factory=build_default_note_content_repository_factories
     )
 
     async def mark_note_materialization_failed(
@@ -141,7 +155,7 @@ class RepositoryNoteMaterializationFailureMarker:
             project_id=project_id,
             entity_id=entity_id,
             error_message=error_message,
-            note_content_repository_factory=self.note_content_repository_factory,
+            repositories=self.repositories,
         )
 
 
@@ -151,13 +165,16 @@ async def mark_note_materialization_enqueue_failed(
     project_id: ProjectId,
     entity_id: RuntimeEntityId,
     error_message: str,
-    note_content_repository_factory: NoteContentRepositoryFactory = note_content_repository_for_project,
+    repositories: NoteContentRepositoryFactories | None = None,
     attempted_at: datetime | None = None,
 ) -> None:
     """Mark accepted note content as failed when queue submission cannot start."""
+    repository_factories = repositories or build_default_note_content_repository_factories()
     async with session_maker() as session:
         async with session.begin():
-            await note_content_repository_factory(project_id).update_state_fields(
+            await repository_factories.note_content_repository_factory(
+                project_id
+            ).update_state_fields(
                 session,
                 entity_id,
                 file_write_status="failed",
@@ -199,7 +216,7 @@ def note_content_from_bootstrap(entity_id: int, plan: NoteContentBootstrap) -> N
 
 
 async def apply_note_content_update_plan(
-    repository: NoteContentStore,
+    repository: NoteContentStateUpdateStore,
     session: AsyncSession,
     entity_id: int,
     plan: NoteContentUpdatePlan,

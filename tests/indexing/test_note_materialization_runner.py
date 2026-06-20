@@ -19,6 +19,7 @@ from basic_memory.indexing.note_materialization_runner import (
     plan_written_note_materialization_publish,
     run_note_materialization,
 )
+from basic_memory.indexing.note_content_reconciler import NoteContentRepositoryFactories
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.models import Entity, NoteContent
 from basic_memory.runtime import (
@@ -399,7 +400,9 @@ async def test_repository_note_materialization_publisher_updates_current_written
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         session_lock=session_lock,
         session_scope=lambda _session_maker: FakeScopedSession(session),
-        note_content_repository_factory=lambda _project_id: repository,
+        repositories=NoteContentRepositoryFactories(
+            note_content_repository_factory=lambda _project_id: repository
+        ),
     ).publish_written_file_state(request, prepared, written)
 
     assert result == RuntimeNoteMaterializationResult(
@@ -444,7 +447,9 @@ async def test_repository_note_materialization_status_publisher_records_conflict
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         session_lock=session_lock,
         session_scope=lambda _session_maker: FakeScopedSession(session),
-        note_content_repository_factory=lambda _project_id: repository,
+        repositories=NoteContentRepositoryFactories(
+            note_content_repository_factory=lambda _project_id: repository
+        ),
     ).publish_note_materialization_status(
         request,
         NoteMaterializationStatusPublication(
