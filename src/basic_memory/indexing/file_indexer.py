@@ -17,6 +17,11 @@ from basic_memory.indexing.models import (
     FileIndexResult,
     SyncedMarkdownFile,
 )
+from basic_memory.indexing.note_content_reconciler import (
+    NoteContentReconciler,
+    note_content_repository_for_project,
+)
+from basic_memory.runtime import ProjectId
 
 if TYPE_CHECKING:  # pragma: no cover
     from loguru._logger import Logger
@@ -156,3 +161,18 @@ class FileIndexer:
             checksum=synced.checksum,
             operation=operation,
         )
+
+
+def build_default_file_indexer(
+    *,
+    project_id: ProjectId,
+    sync_service: IndexMarkdownSyncService,
+) -> FileIndexer:
+    """Compose the default repository-backed per-file markdown indexer."""
+    return FileIndexer(
+        sync_service=sync_service,
+        note_content_reconciler=NoteContentReconciler(
+            note_content_repository=note_content_repository_for_project(project_id),
+            session_maker=sync_service.session_maker,
+        ),
+    )

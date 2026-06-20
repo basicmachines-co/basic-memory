@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing import FileIndexer, FileIndexOperation, SyncedMarkdownFile
+from basic_memory.indexing import (
+    FileIndexer,
+    FileIndexOperation,
+    IndexMarkdownSyncService,
+    NoteContentReconciler,
+    SyncedMarkdownFile,
+    build_default_file_indexer,
+)
 
 CHECKSUM = "abc123"
 CANONICAL_MARKDOWN = "---\ntitle: Note\npermalink: notes/note\n---\n\n# Note\n"
@@ -82,6 +91,22 @@ def _file_indexer(
         sync_service,
         note_content_reconciler,
     )
+
+
+def test_build_default_file_indexer_composes_note_content_reconciler() -> None:
+    sync_service = Mock()
+    sync_service.session_maker = cast(async_sessionmaker[AsyncSession], _FakeSession)
+    sync_service.entity_repository = Mock()
+    sync_service.sync_one_markdown_file = AsyncMock()
+
+    file_indexer = build_default_file_indexer(
+        project_id=42,
+        sync_service=cast(IndexMarkdownSyncService, sync_service),
+    )
+
+    assert isinstance(file_indexer, FileIndexer)
+    assert file_indexer.sync_service is sync_service
+    assert isinstance(file_indexer.note_content_reconciler, NoteContentReconciler)
 
 
 @pytest.mark.asyncio

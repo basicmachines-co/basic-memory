@@ -128,6 +128,7 @@ from basic_memory.indexing.file_indexer import (
     IndexMarkdownEntityRepository,
     IndexMarkdownNoteContentReconciler,
     IndexMarkdownSyncService,
+    build_default_file_indexer,
 )
 from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchChecker,
@@ -906,6 +907,7 @@ __all__ = [
     "build_file_index_plan",
     "build_accepted_note_search_row",
     "build_default_index_batch_runtime",
+    "build_default_file_indexer",
     "build_index_file_batch_job_result",
     "build_index_input_files",
     "build_index_batches",
