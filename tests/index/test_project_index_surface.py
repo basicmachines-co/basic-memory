@@ -32,3 +32,17 @@ def test_index_package_exports_local_event_index_runtime_contracts() -> None:
         "LocalWatchEventIndexRuntimeFactory"
     )
     assert callable(index.local_project_prefix)
+
+
+def test_index_package_exports_storage_event_source_contracts() -> None:
+    """Storage ingress adapters should depend on the index-owned event surface."""
+    assert index.StorageEventInput.__name__ == "StorageEventInput"
+    assert index.StorageEventPayload.__name__ == "StorageEventPayload"
+    assert index.StorageEventSource.__name__ == "StorageEventSource"
+    assert index.RuntimeStorageEventSource.__name__ == "RuntimeStorageEventSource"
+    assert index.StorageBucketName.__name__ == "StorageBucketName"
+    assert index.StorageKey.__name__ == "StorageKey"
+    assert index.StorageEtag.__name__ == "StorageEtag"
+    assert index.StorageEventName.__name__ == "StorageEventName"
+    assert callable(index.storage_event_payload_from_input)
+    assert callable(index.group_storage_events_by_bucket)

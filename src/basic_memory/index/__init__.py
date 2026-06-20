@@ -1,5 +1,17 @@
 """Event-based indexing orchestration contracts."""
 
+from basic_memory.runtime import (
+    RuntimeStorageEventSource,
+    StorageBucketName,
+    StorageEtag,
+    StorageEventName,
+    StorageEventInput,
+    StorageEventPayload,
+    StorageEventSource,
+    StorageKey,
+    group_storage_events_by_bucket,
+    storage_event_payload_from_input,
+)
 from basic_memory.index.filesystem import (
     LOCAL_FILESYSTEM_BUCKET_NAME,
     local_storage_event_input_from_watchfiles_change,
@@ -60,10 +72,19 @@ __all__ = [
     "ProjectIndexOrphanCleaner",
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowStarter",
+    "RuntimeStorageEventSource",
     "StorageEventIndexRuntime",
+    "StorageBucketName",
+    "StorageEtag",
+    "StorageEventName",
+    "StorageEventInput",
     "StorageEventOperationProcessorFactory",
+    "StorageEventPayload",
     "StorageEventProjectResolver",
+    "StorageEventSource",
+    "StorageKey",
     "build_project_index_workflow_queued",
+    "group_storage_events_by_bucket",
     "local_storage_event_input_from_watchfiles_change",
     "local_storage_event_inputs_from_watchfiles_changes",
     "local_storage_events_from_watchfiles_changes",
@@ -72,4 +93,5 @@ __all__ = [
     "run_local_watch_event_indexing",
     "run_project_index_coordinator",
     "run_storage_event_indexing",
+    "storage_event_payload_from_input",
 ]
