@@ -213,6 +213,46 @@ async def test_write_status(watch_service):
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_defaults_to_local_event_index_runtime(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """A default watcher routes file events through basic_memory.index, not SyncService."""
+
+    file_path = project_config.home / "default-event-index.md"
+    await create_test_file(file_path, "# Default Event Index\n\nIndexed by default.\n")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("default watcher should not build legacy SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.added, str(file_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "default-event-index.md")
+    assert entity is not None
+    assert entity.title == "default-event-index"
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_can_route_through_event_index_runtime(
     app_config: BasicMemoryConfig,
     project_repository,
@@ -220,7 +260,7 @@ async def test_handle_changes_can_route_through_event_index_runtime(
     test_project,
     project_config,
 ):
-    """The event-index watcher path is opt-in and leaves the legacy sync path alone."""
+    """An injected event-index runtime bypasses the legacy sync path."""
 
     file_path = project_config.home / "event-index.md"
     await create_test_file(file_path, "# Event Index\n")

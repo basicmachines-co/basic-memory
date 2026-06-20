@@ -124,6 +124,14 @@ class WatchService:
         self._sorted_watch_filter_roots: tuple[Path, ...] | None = None
         self._sync_service_factory = sync_service_factory
         self._event_index_runtime_factory = event_index_runtime_factory
+        if (
+            self._event_index_runtime_factory is None
+            and self._sync_service_factory is None
+            and app_config.watch_event_index
+        ):
+            from basic_memory.index import LocalWatchEventIndexRuntimeFactory
+
+            self._event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory()
         # When set (typically from BASIC_MEMORY_MCP_PROJECT), the watch cycle
         # only observes this project. Without it, each `basic-memory mcp --project X`
         # process spawns a watcher over every project and racing writers collide

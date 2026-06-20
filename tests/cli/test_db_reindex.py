@@ -163,38 +163,27 @@ def test_reindex_embeddings_only_preserves_incremental_default(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reindex_project_full_passes_force_full_to_sync_and_reports_mode(
+async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     monkeypatch,
     session_maker,
 ):
     app_config = _stub_app_config()
     project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
-    sync_service = SimpleNamespace(sync=AsyncMock())
+    project_index = AsyncMock(
+        return_value=SimpleNamespace(
+            total_files=3,
+            enqueued_files=2,
+            enqueued_batches=1,
+            deleted_files=1,
+        )
+    )
     printed_lines: list[str] = []
 
     class StubProjectRepository:
         async def get_active_projects(self, session):
             return [project]
 
-    class SilentProgress:
-        def __init__(self, *args, **kwargs):
-            self.tasks: dict[int, SimpleNamespace] = {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def add_task(self, description, total=1):
-            self.tasks[1] = SimpleNamespace(total=total, description=description)
-            return 1
-
-        def update(self, task_id, **kwargs):
-            if "total" in kwargs:
-                self.tasks[task_id].total = kwargs["total"]
-
-    # _reindex imports its database/sync dependencies at call time (#886),
+    # _reindex imports its database/index dependencies at call time (#886),
     # so stubs target the source modules instead of db_cmd attributes.
     monkeypatch.setattr(
         "basic_memory.services.initialization.reconcile_projects_with_config", AsyncMock()
@@ -207,9 +196,12 @@ async def test_reindex_project_full_passes_force_full_to_sync_and_reports_mode(
     monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
     monkeypatch.setattr(
         "basic_memory.sync.sync_service.get_sync_service",
-        AsyncMock(return_value=sync_service),
+        AsyncMock(side_effect=AssertionError("search reindex should not use SyncService")),
     )
-    monkeypatch.setattr(db_cmd, "Progress", SilentProgress)
+    monkeypatch.setattr(
+        "basic_memory.index.run_local_project_index_for_project",
+        project_index,
+    )
     monkeypatch.setattr(
         db_cmd.console,
         "print",
@@ -224,14 +216,13 @@ async def test_reindex_project_full_passes_force_full_to_sync_and_reports_mode(
         project="foo",
     )
 
-    sync_service.sync.assert_awaited_once()
-    sync_call = sync_service.sync.await_args
-    assert sync_call.args[0] == Path("/tmp/foo")
-    assert sync_call.kwargs["project_name"] == "foo"
-    assert sync_call.kwargs["force_full"] is True
-    assert sync_call.kwargs["sync_embeddings"] is False
-    assert callable(sync_call.kwargs["progress_callback"])
-    assert any("full scan" in line for line in printed_lines)
+    project_index.assert_awaited_once()
+    index_call = project_index.await_args
+    assert index_call is not None
+    assert index_call.args[0] == project
+    assert index_call.kwargs["force_full"] is True
+    assert any("project index" in line for line in printed_lines)
+    assert any("3 observed, 2 indexed, 1 deleted" in line for line in printed_lines)
 
 
 @pytest.mark.asyncio
