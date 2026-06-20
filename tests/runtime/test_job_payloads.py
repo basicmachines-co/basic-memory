@@ -5,6 +5,7 @@ from datetime import timedelta
 from uuid import UUID
 
 import pytest
+from pydantic import BaseModel
 
 from basic_memory.runtime import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
@@ -14,6 +15,7 @@ from basic_memory.runtime import (
     RuntimeNoteMaterializationJobPayload,
     RuntimeNoteMaterializationJobRequest,
     RuntimePayloadJobEnqueuer,
+    RuntimeWorkflowQueueEnvelope,
 )
 
 
@@ -27,6 +29,13 @@ class FakeJobRuntime:
     async def enqueue(self, request: RuntimeJobRequest) -> str:
         self.requests.append(request)
         return self.job_id
+
+
+class FakeWorkflowPayload(BaseModel):
+    """Validated payload shape used by the portable workflow queue envelope."""
+
+    workflow_id: UUID
+    tenant_id: UUID
 
 
 def test_runtime_note_file_delete_job_payload_round_trips_runtime_request() -> None:
@@ -85,6 +94,52 @@ async def test_runtime_payload_job_enqueuer_validates_serializes_and_queues() ->
             },
         )
     ]
+
+
+def test_runtime_workflow_queue_envelope_builds_metadata_and_job_request() -> None:
+    """Workflow queue envelopes preserve the existing durable and queue shapes."""
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    payload = FakeWorkflowPayload(workflow_id=workflow_id, tenant_id=tenant_id)
+    metadata = payload.model_dump(mode="json")
+    headers = {
+        "tenant_id": str(tenant_id),
+        "workflow_id": str(workflow_id),
+    }
+    envelope = RuntimeWorkflowQueueEnvelope(
+        workflow_id=workflow_id,
+        entrypoint="provision_tenant",
+        progress="waiting",
+        job_payload=payload,
+        workflow_payload_metadata=metadata,
+    )
+
+    assert envelope.workflow_metadata() == {
+        "job_id": str(workflow_id),
+        "phase": "queued",
+        "progress": "waiting",
+        "payload": metadata,
+        "transport": {
+            "broker": "pgq",
+            "entrypoint": "provision_tenant",
+        },
+    }
+    assert envelope.queued_event_data(logical_key="tenant:demo") == {
+        "logical_key": "tenant:demo",
+        "entrypoint": "provision_tenant",
+        "phase": "queued",
+        "progress": "waiting",
+        **metadata,
+    }
+    assert envelope.job_request(
+        headers=headers,
+        dedupe_key=f"tenant:{tenant_id}",
+    ) == RuntimeJobRequest(
+        entrypoint="provision_tenant",
+        payload=payload.model_dump_json().encode("utf-8"),
+        dedupe_key=f"tenant:{tenant_id}",
+        headers=headers,
+    )
 
 
 def test_runtime_note_materialization_job_payload_round_trips_runtime_request() -> None:

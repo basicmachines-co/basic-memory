@@ -205,6 +205,7 @@ from basic_memory.runtime.job_payloads import (
     RuntimeNoteMaterializationJobPayload,
     RuntimePayloadJobEnqueuer,
     RuntimeSerializedJobPayload,
+    RuntimeWorkflowQueueEnvelope,
 )
 from basic_memory.runtime.job_status import (
     RuntimeJobStatusResponseDict,
@@ -430,6 +431,7 @@ __all__ = [
     "RuntimeWorkflowProgressMetadata",
     "RuntimeWorkflowProgress",
     "RuntimeWorkflowResult",
+    "RuntimeWorkflowQueueEnvelope",
     "RuntimeWorkflowStatus",
     "RuntimeWorkflowTransport",
     "RuntimeWrittenFileState",

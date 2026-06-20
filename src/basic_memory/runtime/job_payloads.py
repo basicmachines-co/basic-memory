@@ -11,10 +11,17 @@ from pydantic import BaseModel, field_validator
 from basic_memory.runtime.contracts import (
     JobEntrypoint,
     JobRuntime,
+    RuntimeJobDedupeKey,
     RuntimeJobId,
+    RuntimeJobRequest,
     RuntimeJobRequestSource,
     RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
+    RuntimeQueuedWorkflowMetadata,
+    RuntimeWorkflowBroker,
+    RuntimeWorkflowProgress,
+    RuntimeWorkflowTransport,
+    WorkflowId,
     runtime_job_request_from_source,
 )
 from basic_memory.runtime.note_object_metadata import (
@@ -63,6 +70,51 @@ class RuntimePayloadJobEnqueuer[RequestT: RuntimeJobRequestSource]:
                 priority=priority,
                 execute_after=execute_after,
             )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWorkflowQueueEnvelope:
+    """Queue-neutral workflow job handoff with durable metadata shape helpers."""
+
+    workflow_id: WorkflowId
+    entrypoint: JobEntrypoint
+    progress: RuntimeWorkflowProgress
+    job_payload: RuntimeSerializedJobPayload
+    workflow_payload_metadata: Mapping[str, object] | None = None
+    broker: RuntimeWorkflowBroker = "pgq"
+
+    def queued_metadata(self) -> RuntimeQueuedWorkflowMetadata:
+        """Build the durable queued workflow metadata object."""
+        if self.workflow_payload_metadata is None:
+            raise ValueError("workflow_payload_metadata is required for queued workflow metadata")
+        return RuntimeQueuedWorkflowMetadata(
+            workflow_id=self.workflow_id,
+            progress=self.progress,
+            payload=self.workflow_payload_metadata,
+            transport=RuntimeWorkflowTransport(broker=self.broker, entrypoint=self.entrypoint),
+        )
+
+    def workflow_metadata(self) -> dict[str, object]:
+        """Serialize durable workflow metadata using the established shape."""
+        return self.queued_metadata().workflow_metadata()
+
+    def queued_event_data(self, *, logical_key: str) -> dict[str, object]:
+        """Serialize queued workflow event data using the established shape."""
+        return self.queued_metadata().queued_event_data(logical_key=logical_key)
+
+    def job_request(
+        self,
+        *,
+        headers: Mapping[str, str],
+        dedupe_key: RuntimeJobDedupeKey,
+    ) -> RuntimeJobRequest:
+        """Build the concrete queue request after payload validation."""
+        return RuntimeJobRequest(
+            entrypoint=self.entrypoint,
+            payload=self.job_payload.model_dump_json().encode("utf-8"),
+            dedupe_key=dedupe_key,
+            headers=dict(headers),
         )
 
 
