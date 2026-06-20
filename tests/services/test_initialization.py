@@ -13,7 +13,7 @@ import pytest
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.index import ProjectIndexCoordinatorResult
-from basic_memory.index.local_runtime import (
+from basic_memory.index import (
     LOCAL_EVENT_INDEX_TENANT_ID,
     LocalWatchEventIndexRuntimeFactory,
 )
@@ -279,18 +279,11 @@ async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_
             created_coroutines.append(coro)
             return object()
 
-        class LegacySyncService:
-            async def sync(self, *args, **kwargs):  # noqa: ANN002, ANN003
-                raise AssertionError("legacy startup sync should not run")
-
         async def get_sync_service(project):  # noqa: ANN001
-            return LegacySyncService()
+            raise AssertionError("event-index startup should not build a legacy SyncService")
 
         class RecordingProjectIndexRuntimeFactory:
             tenant_id = LOCAL_EVENT_INDEX_TENANT_ID
-
-            def __init__(self, sync_service_factory):  # noqa: ANN001
-                self.sync_service_factory = sync_service_factory
 
             async def runtime_for_project(self, project):  # noqa: ANN001
                 return f"runtime:{project.name}"

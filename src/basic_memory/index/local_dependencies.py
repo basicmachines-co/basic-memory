@@ -1,0 +1,430 @@
+"""Local dependency composition for event-based indexing runtimes."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
+
+from loguru import logger
+from sqlalchemy.engine import Row
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.config import ConfigManager
+from basic_memory.file_utils import FileMetadata, ParseError, compute_checksum, remove_frontmatter
+from basic_memory.indexing import (
+    BatchIndexer,
+    CurrentMaterializedNoteEntityRepository,
+    FileIndexOperation,
+    FileIndexResult,
+    IndexedFileChecksumRepository,
+    IndexEntitySearchWriter,
+    IndexFileExecutor,
+    IndexInputFile,
+    IndexMarkdownEntityRepository,
+    IndexMarkdownNoteContentReconciler,
+    OrphanEntityRepository,
+    OrphanSearchIndex,
+    StorageIndexFileWriter,
+    SyncedMarkdownFile,
+)
+from basic_memory.indexing.note_content_reconciler import (
+    NoteContentReconciler,
+    note_content_repository_for_project,
+)
+from basic_memory.markdown import EntityParser, MarkdownProcessor
+from basic_memory.models import Entity, Project
+from basic_memory.repository import (
+    EntityRepository,
+    ObservationRepository,
+    RelationRepository,
+)
+from basic_memory.repository.search_repository import create_search_repository
+from basic_memory.runtime import ProjectId, RuntimeFilePath
+from basic_memory.services import EntityService, FileService
+from basic_memory.services.exceptions import FileOperationError
+from basic_memory.services.link_resolver import LinkResolver
+from basic_memory.services.search_service import SearchService
+
+
+class LocalIndexEntityRepository(
+    IndexMarkdownEntityRepository,
+    IndexedFileChecksumRepository,
+    CurrentMaterializedNoteEntityRepository,
+    OrphanEntityRepository[Entity],
+    Protocol,
+):
+    """Entity repository capabilities needed by local event/project indexing."""
+
+    async def get_by_file_path(
+        self,
+        session: AsyncSession,
+        file_path: Path | str,
+        *,
+        load_relations: bool = True,
+    ) -> Entity | None: ...
+
+    async def get_by_file_paths(
+        self,
+        session: AsyncSession,
+        file_paths: Sequence[Path | str],
+    ) -> Sequence[Row[Any]]: ...
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[Any],
+    ) -> Sequence[Entity]: ...
+
+    async def update(
+        self,
+        session: AsyncSession,
+        entity_id: Any,
+        entity_data: dict[str, Any] | Entity,
+    ) -> Entity | None: ...
+
+    async def delete_by_fields(
+        self,
+        session: AsyncSession,
+        **filters: object,
+    ) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalIndexProjectDependencies:
+    """Adapter handoff values needed to build local index runtimes."""
+
+    file_service: FileService
+    file_indexer: IndexFileExecutor
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: LocalIndexEntityRepository
+    search_service: OrphanSearchIndex[Entity]
+
+
+type LocalIndexProjectDependencyProvider = Callable[
+    [Project],
+    Awaitable[LocalIndexProjectDependencies],
+]
+
+
+@dataclass(frozen=True, slots=True)
+class LocalMarkdownFileIndexer(IndexFileExecutor):
+    """Index one local markdown file without the legacy sync implementation."""
+
+    file_service: FileService
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: LocalIndexEntityRepository
+    batch_indexer: BatchIndexer
+    search_service: IndexEntitySearchWriter
+    note_content_reconciler: IndexMarkdownNoteContentReconciler
+
+    async def index_markdown_file(
+        self,
+        file_path: RuntimeFilePath,
+        *,
+        source: str,
+    ) -> FileIndexResult:
+        """Read, persist, search-index, and reconcile one markdown file."""
+        logger.info(f"Indexing markdown file: {file_path}")
+
+        async with db.scoped_session(self.session_maker) as session:
+            existing = await self.entity_repository.get_by_file_path(
+                session,
+                file_path,
+                load_relations=False,
+            )
+        operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+
+        synced = await self.index_current_markdown_file(
+            file_path,
+            new=existing is None,
+            index_search=True,
+            resolve_relations=False,
+            refresh_unchanged_derived_state=existing is not None,
+        )
+        await self.note_content_reconciler.reconcile(
+            entity=synced.entity,
+            markdown_content=synced.markdown_content,
+            observed_at=synced.updated_at,
+            source=source,
+        )
+
+        logger.info(
+            f"Indexed markdown file: {file_path}",
+            entity_id=synced.entity.id,
+            checksum=synced.checksum,
+            operation=operation,
+            observation_count=len(synced.entity.observations),
+            relation_count=len(synced.entity.relations),
+        )
+        return FileIndexResult.from_fields(
+            file_path=file_path,
+            entity_id=synced.entity.id,
+            external_id=synced.entity.external_id,
+            title=synced.entity.title,
+            permalink=synced.entity.permalink,
+            checksum=synced.checksum,
+            operation=operation,
+        )
+
+    async def index_current_markdown_file(
+        self,
+        path: RuntimeFilePath,
+        *,
+        new: bool,
+        index_search: bool,
+        resolve_relations: bool,
+        refresh_unchanged_derived_state: bool,
+    ) -> SyncedMarkdownFile:
+        """Index the current local markdown bytes and return canonical file state."""
+        logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
+
+        try:
+            initial_markdown_bytes = await self.file_service.read_file_bytes(path)
+        except FileOperationError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                raise exc.__cause__ from exc
+            raise
+
+        initial_markdown_content = initial_markdown_bytes.decode("utf-8")
+        file_metadata = await self.file_service.get_file_metadata(path)
+        initial_checksum = await compute_checksum(initial_markdown_bytes)
+
+        async with db.scoped_session(self.session_maker) as session:
+            existing_entity = await self.entity_repository.get_by_file_path(session, path)
+
+        input_file = IndexInputFile(
+            path=path,
+            size=file_metadata.size,
+            checksum=initial_checksum,
+            content_type=self.file_service.content_type(path),
+            last_modified=file_metadata.modified_at,
+            created_at=file_metadata.created_at,
+            content=initial_markdown_bytes,
+        )
+        if existing_entity is not None and existing_entity.checksum == initial_checksum:
+            if refresh_unchanged_derived_state:
+                return await self.refresh_unchanged_markdown_file(
+                    input_file,
+                    existing_entity=existing_entity,
+                    initial_markdown_content=initial_markdown_content,
+                    file_metadata=file_metadata,
+                    index_search=index_search,
+                    resolve_relations=resolve_relations,
+                )
+
+            logger.debug(
+                f"Markdown index skipped unchanged file: path={path}, "
+                f"entity_id={existing_entity.id}, checksum={initial_checksum[:8]}"
+            )
+            return SyncedMarkdownFile(
+                entity=existing_entity,
+                checksum=initial_checksum,
+                markdown_content=initial_markdown_content,
+                file_path=path,
+                content_type=self.file_service.content_type(path),
+                updated_at=file_metadata.modified_at,
+                size=file_metadata.size,
+            )
+
+        return await self.index_changed_markdown_file(
+            input_file,
+            initial_markdown_content=initial_markdown_content,
+            new=new,
+            index_search=index_search,
+            resolve_relations=resolve_relations,
+        )
+
+    async def refresh_unchanged_markdown_file(
+        self,
+        input_file: IndexInputFile,
+        *,
+        existing_entity: Entity,
+        initial_markdown_content: str,
+        file_metadata: FileMetadata,
+        index_search: bool,
+        resolve_relations: bool,
+    ) -> SyncedMarkdownFile:
+        """Refresh derived DB/search state for a markdown file with unchanged bytes."""
+        logger.debug(
+            f"Markdown index refreshing unchanged derived state: path={input_file.path}, "
+            f"entity_id={existing_entity.id}, checksum={input_file.checksum[:8] if input_file.checksum else None}"
+        )
+        indexed = await self.batch_indexer.index_markdown_file(
+            input_file,
+            new=False,
+            index_search=index_search,
+            resolve_relations=resolve_relations,
+        )
+        async with db.scoped_session(self.session_maker) as session:
+            refreshed_entities = await self.entity_repository.find_by_ids(
+                session,
+                [indexed.entity_id],
+            )
+        if len(refreshed_entities) != 1:  # pragma: no cover
+            raise ValueError(f"Failed to reload refreshed markdown entity for {input_file.path}")
+        return SyncedMarkdownFile(
+            entity=refreshed_entities[0],
+            checksum=indexed.checksum,
+            markdown_content=indexed.markdown_content or initial_markdown_content,
+            file_path=input_file.path,
+            content_type=self.file_service.content_type(input_file.path),
+            updated_at=file_metadata.modified_at,
+            size=file_metadata.size,
+        )
+
+    async def index_changed_markdown_file(
+        self,
+        input_file: IndexInputFile,
+        *,
+        initial_markdown_content: str,
+        new: bool,
+        index_search: bool,
+        resolve_relations: bool,
+    ) -> SyncedMarkdownFile:
+        """Persist changed markdown content and refresh derived index state."""
+        indexed = await self.batch_indexer.index_markdown_file(
+            input_file,
+            new=new,
+            index_search=False,
+            resolve_relations=resolve_relations,
+        )
+        final_markdown_content = indexed.markdown_content or initial_markdown_content
+        file_metadata = await self.file_service.get_file_metadata(input_file.path)
+        async with db.scoped_session(self.session_maker) as session:
+            refreshed_entities = await self.entity_repository.find_by_ids(
+                session,
+                [indexed.entity_id],
+            )
+            if len(refreshed_entities) != 1:  # pragma: no cover
+                raise ValueError(f"Failed to reload synced markdown entity for {input_file.path}")
+            updated_entity = await self.entity_repository.update(
+                session,
+                refreshed_entities[0].id,
+                {
+                    "checksum": indexed.checksum,
+                    "created_at": file_metadata.created_at,
+                    "updated_at": file_metadata.modified_at,
+                    "mtime": file_metadata.modified_at.timestamp(),
+                    "size": file_metadata.size,
+                },
+            )
+        if updated_entity is None:  # pragma: no cover
+            raise ValueError(f"Failed to update markdown entity metadata for {input_file.path}")
+
+        if index_search:
+            try:
+                search_content = remove_frontmatter(final_markdown_content)
+            except ParseError:
+                search_content = final_markdown_content
+            await self.search_service.index_entity_data(
+                updated_entity,
+                content=search_content,
+            )
+
+        logger.debug(
+            f"Markdown index completed: path={input_file.path}, entity_id={updated_entity.id}, "
+            f"observation_count={len(updated_entity.observations)}, "
+            f"relation_count={len(updated_entity.relations)}, checksum={indexed.checksum[:8]}"
+        )
+        return SyncedMarkdownFile(
+            entity=updated_entity,
+            checksum=indexed.checksum,
+            markdown_content=final_markdown_content,
+            file_path=input_file.path,
+            content_type=self.file_service.content_type(input_file.path),
+            updated_at=file_metadata.modified_at,
+            size=file_metadata.size,
+        )
+
+
+def build_local_markdown_file_indexer(
+    *,
+    project_id: ProjectId,
+    file_service: FileService,
+    session_maker: async_sessionmaker[AsyncSession],
+    entity_repository: LocalIndexEntityRepository,
+    batch_indexer: BatchIndexer,
+    search_service: IndexEntitySearchWriter,
+) -> LocalMarkdownFileIndexer:
+    """Compose the default local markdown file indexer without legacy sync."""
+    return LocalMarkdownFileIndexer(
+        file_service=file_service,
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        batch_indexer=batch_indexer,
+        search_service=search_service,
+        note_content_reconciler=NoteContentReconciler(
+            note_content_repository=note_content_repository_for_project(project_id),
+            session_maker=session_maker,
+        ),
+    )
+
+
+async def build_local_index_project_dependencies(
+    project: Project,
+) -> LocalIndexProjectDependencies:
+    """Build local project dependencies for event/project indexing."""
+    app_config = ConfigManager().config
+    _, session_maker = await db.get_or_create_db(
+        db_path=app_config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+    )
+
+    project_path = Path(project.path)
+    entity_parser = EntityParser(project_path)
+    markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
+    file_service = FileService(project_path, markdown_processor, app_config=app_config)
+
+    entity_repository = EntityRepository(project_id=project.id)
+    observation_repository = ObservationRepository(project_id=project.id)
+    relation_repository = RelationRepository(project_id=project.id)
+    search_repository = create_search_repository(
+        session_maker,
+        project_id=project.id,
+        app_config=app_config,
+    )
+    search_service = SearchService(
+        search_repository,
+        entity_repository,
+        file_service,
+        session_maker,
+    )
+    link_resolver = LinkResolver(entity_repository, search_service, session_maker)
+    entity_service = EntityService(
+        entity_parser,
+        entity_repository,
+        observation_repository,
+        relation_repository,
+        file_service,
+        link_resolver,
+        session_maker,
+        search_service=search_service,
+        app_config=app_config,
+    )
+    batch_indexer = BatchIndexer(
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=session_maker,
+    )
+    file_indexer = build_local_markdown_file_indexer(
+        project_id=project.id,
+        file_service=file_service,
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        batch_indexer=batch_indexer,
+        search_service=search_service,
+    )
+    return LocalIndexProjectDependencies(
+        file_service=file_service,
+        file_indexer=file_indexer,
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        search_service=search_service,
+    )

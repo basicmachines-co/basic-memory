@@ -152,14 +152,9 @@ async def initialize_file_sync(
             LocalProjectIndexRuntimeFactory,
             LocalWatchEventIndexRuntimeFactory,
         )
-        from basic_memory.sync.sync_service import get_sync_service
 
-        event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
-            sync_service_factory=get_sync_service,
-        )
-        project_index_runtime_factory = LocalProjectIndexRuntimeFactory(
-            sync_service_factory=get_sync_service,
-        )
+        event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory()
+        project_index_runtime_factory = LocalProjectIndexRuntimeFactory()
 
     # Initialize watch service
     watch_service = WatchService(
@@ -203,6 +198,9 @@ async def initialize_file_sync(
                 )
                 logger.info(f"Background project index completed for project: {project.name}")
                 return
+
+            # Legacy SyncService remains the default path until event indexing reaches parity.
+            from basic_memory.sync.sync_service import get_sync_service
 
             # Create sync service
             sync_service = await get_sync_service(project)

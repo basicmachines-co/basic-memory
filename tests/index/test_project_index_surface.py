@@ -1,5 +1,7 @@
 """Tests for the project-index orchestration surface."""
 
+from inspect import signature
+
 from basic_memory import index
 
 
@@ -32,6 +34,17 @@ def test_index_package_exports_local_event_index_runtime_contracts() -> None:
         "LocalWatchEventIndexRuntimeFactory"
     )
     assert callable(index.local_project_prefix)
+
+
+def test_index_package_local_factories_are_not_sync_service_adapters() -> None:
+    """The new index runtime must not depend on the legacy SyncService shape."""
+    factory_signatures = (
+        signature(index.LocalWatchEventIndexRuntimeFactory),
+        signature(index.LocalProjectIndexRuntimeFactory),
+    )
+
+    for factory_signature in factory_signatures:
+        assert "sync_service_factory" not in factory_signature.parameters
 
 
 def test_index_package_exports_storage_event_source_contracts() -> None:

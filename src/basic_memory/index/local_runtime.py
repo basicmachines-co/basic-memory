@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 from uuid import UUID
 
 from loguru import logger
@@ -16,24 +14,25 @@ from basic_memory.index.inline_operations import (
     InlineStorageEventIndexRuntime,
     InlineStorageEventOperationProcessor,
 )
+from basic_memory.index.local_dependencies import (
+    LocalIndexEntityRepository,
+    LocalIndexProjectDependencyProvider,
+    build_local_index_project_dependencies,
+)
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
 )
 from basic_memory.indexing import (
-    CurrentMaterializedNoteEntityRepository,
     ExternalFileDeleteResult,
     FileIndexChecker,
-    IndexedFileChecksumRepository,
     IndexFileJobResult,
     IndexFileObjectMetadata,
-    IndexMarkdownEntityRepository,
-    IndexMarkdownSyncService,
+    OrphanSearchIndex,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
     StorageCurrentFileChecksumSource,
-    build_default_file_indexer,
 )
 from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
@@ -46,51 +45,8 @@ from basic_memory.runtime import (
     TenantId,
 )
 from basic_memory.services import FileService
-from basic_memory.services.search_service import SearchService
 
 LOCAL_EVENT_INDEX_TENANT_ID: TenantId = UUID("00000000-0000-0000-0000-000000000000")
-
-
-class LocalEventIndexEntityRepository(
-    IndexMarkdownEntityRepository,
-    IndexedFileChecksumRepository,
-    CurrentMaterializedNoteEntityRepository,
-    Protocol,
-):
-    """Entity repository capabilities needed by local event indexing."""
-
-    async def get_by_file_path(
-        self,
-        session: AsyncSession,
-        file_path: Path | str,
-        *,
-        load_relations: bool = True,
-    ) -> Entity | None: ...
-
-    async def delete_by_fields(
-        self,
-        session: AsyncSession,
-        **filters: object,
-    ) -> bool: ...
-
-
-class LocalEventIndexSyncService(IndexMarkdownSyncService, Protocol):
-    """Sync service capabilities reused by the local event-index runtime."""
-
-    @property
-    def entity_repository(self) -> LocalEventIndexEntityRepository: ...
-
-    @property
-    def file_service(self) -> FileService: ...
-
-    @property
-    def search_service(self) -> SearchService: ...
-
-
-type LocalEventIndexSyncServiceFactory = Callable[
-    [Project],
-    Awaitable[LocalEventIndexSyncService],
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +92,7 @@ class LocalExternalFileDeleteEntities:
     """Adapt local entity storage to the external-delete runner contract."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    entity_repository: LocalEventIndexEntityRepository
+    entity_repository: LocalIndexEntityRepository
 
     async def find_entity_by_file_path(
         self,
@@ -173,7 +129,7 @@ class LocalExternalFileDeleteObjects:
 class LocalInlineStorageEventResultRecorder:
     """Log inline local event-index results and clean search state after deletes."""
 
-    search_service: SearchService
+    search_service: OrphanSearchIndex[Entity]
 
     async def index_file_completed(
         self,
@@ -246,27 +202,25 @@ class LocalStorageEventOperationProcessorFactory(StorageEventOperationProcessorF
 class LocalWatchEventIndexRuntimeFactory:
     """Build local event-index runtime dependencies for a watched project."""
 
-    sync_service_factory: LocalEventIndexSyncServiceFactory
+    dependency_provider: LocalIndexProjectDependencyProvider = (
+        build_local_index_project_dependencies
+    )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     index_embeddings: bool = True
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
-        sync_service = await self.sync_service_factory(project)
+        dependencies = await self.dependency_provider(project)
         project_ref = ProjectRuntimeReference.from_project(project)
         project_prefix = local_project_prefix(project)
-        metadata_source = LocalStorageFileMetadataSource(sync_service.file_service)
+        metadata_source = LocalStorageFileMetadataSource(dependencies.file_service)
         checker = FileIndexChecker(
             indexed_checksum_source=RepositoryIndexedFileChecksumSource(
-                session_maker=sync_service.session_maker,
-                entity_repository=sync_service.entity_repository,
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
             ),
             current_checksum_source=StorageCurrentFileChecksumSource(
                 load_metadata=metadata_source.load_current_file_metadata,
             ),
-        )
-        file_indexer = build_default_file_indexer(
-            project_id=project.id,
-            sync_service=sync_service,
         )
         inline_runtime = InlineStorageEventIndexRuntime(
             tenant_id=self.tenant_id,
@@ -274,16 +228,18 @@ class LocalWatchEventIndexRuntimeFactory:
             checker=checker,
             metadata_source=metadata_source,
             materialized_note_source=RepositoryCurrentMaterializedNoteSource(
-                session_maker=sync_service.session_maker,
-                entity_repository=sync_service.entity_repository,
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
             ),
-            file_indexer=file_indexer,
+            file_indexer=dependencies.file_indexer,
             delete_entities=LocalExternalFileDeleteEntities(
-                session_maker=sync_service.session_maker,
-                entity_repository=sync_service.entity_repository,
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
             ),
-            delete_objects=LocalExternalFileDeleteObjects(sync_service.file_service),
-            result_recorder=LocalInlineStorageEventResultRecorder(sync_service.search_service),
+            delete_objects=LocalExternalFileDeleteObjects(dependencies.file_service),
+            result_recorder=LocalInlineStorageEventResultRecorder(
+                dependencies.search_service,
+            ),
             index_embeddings=self.index_embeddings,
         )
         return StorageEventIndexRuntime(

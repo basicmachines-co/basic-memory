@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index import (
     InlineProjectIndexBatchEnqueuer,
+    LocalIndexProjectDependencies,
     LocalProjectIndexObservedFileSource,
     LocalProjectIndexFileRunner,
     LocalProjectIndexRuntimeFactory,
@@ -33,7 +34,6 @@ from basic_memory.indexing import (
     FileIndexResult,
     OrphanEntityCleanupResult,
     ProjectIndexWorkflowRequest,
-    SyncedMarkdownFile,
 )
 from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
@@ -378,6 +378,21 @@ class RuntimeFactoryEntityRepository:
     ) -> Sequence[Row[Any]]:
         return ()
 
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[Any],
+    ) -> Sequence[Entity]:
+        return ()
+
+    async def update(
+        self,
+        session: AsyncSession,
+        entity_id: Any,
+        entity_data: dict[str, Any] | Entity,
+    ) -> Entity | None:
+        return None
+
     async def delete_by_fields(
         self,
         session: AsyncSession,
@@ -391,40 +406,25 @@ class RuntimeFactorySearchIndex:
         return None
 
 
-@dataclass(slots=True)
-class RuntimeFactorySyncService:
-    file_service: FileService
-    session_maker: async_sessionmaker[AsyncSession] = field(default_factory=async_sessionmaker)
-    entity_repository: RuntimeFactoryEntityRepository = field(
-        default_factory=RuntimeFactoryEntityRepository
-    )
-    search_service: RuntimeFactorySearchIndex = field(default_factory=RuntimeFactorySearchIndex)
-
-    async def sync_one_markdown_file(
-        self,
-        path: str,
-        *,
-        new: bool = False,
-        index_search: bool = True,
-        resolve_relations: bool = True,
-        refresh_unchanged_derived_state: bool = False,
-    ) -> SyncedMarkdownFile:
-        raise AssertionError("runtime factory composition should not index files")
-
-
 async def test_local_project_index_runtime_factory_composes_inline_runtime(
     tmp_path: Path,
 ) -> None:
-    """Local project indexing can be wired from sync-service-like dependencies."""
-    sync_service = RuntimeFactorySyncService(file_service=FileService(tmp_path))
+    """Local project indexing can be wired from explicit index dependencies."""
+    dependencies = LocalIndexProjectDependencies(
+        file_service=FileService(tmp_path),
+        file_indexer=RecordingMarkdownFileIndexer(),
+        session_maker=async_sessionmaker(),
+        entity_repository=RuntimeFactoryEntityRepository(),
+        search_service=RuntimeFactorySearchIndex(),
+    )
     seen_projects: list[Project] = []
 
-    async def sync_service_factory(project: Project) -> RuntimeFactorySyncService:
+    async def dependency_provider(project: Project) -> LocalIndexProjectDependencies:
         seen_projects.append(project)
-        return sync_service
+        return dependencies
 
     factory = LocalProjectIndexRuntimeFactory(
-        sync_service_factory=sync_service_factory,
+        dependency_provider=dependency_provider,
         batch_size=3,
     )
     project = Project(

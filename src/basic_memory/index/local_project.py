@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -12,29 +11,28 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
+from basic_memory.index.local_dependencies import (
+    LocalIndexEntityRepository,
+    LocalIndexProjectDependencyProvider,
+    build_local_index_project_dependencies,
+)
 from basic_memory.index.local_runtime import (
     LOCAL_EVENT_INDEX_TENANT_ID,
-    LocalEventIndexEntityRepository,
     LocalStorageFileMetadataSource,
 )
 from basic_memory.indexing import (
-    CurrentMaterializedNoteEntityRepository,
     FileIndexChecker,
-    IndexedFileChecksumRepository,
     IndexFileExecutor,
     IndexFileJobResult,
     IndexFileMaterializedNoteSource,
     IndexFileMetadataSource,
     IndexFileRunnerChecker,
     IndexFileRuntimeRequest,
-    IndexMarkdownSyncService,
     OrphanCleanupLogger,
-    OrphanEntityRepository,
     OrphanEntityCleanupResult,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
     StorageCurrentFileChecksumSource,
-    build_default_file_indexer,
     cleanup_orphan_entities,
     ProjectIndexBatchEnqueuer,
     ProjectIndexCompletion,
@@ -73,41 +71,12 @@ class ProjectIndexFileRequestRunner(Protocol):
     ) -> IndexFileJobResult: ...
 
 
-class LocalProjectIndexEntityRepository(
-    LocalEventIndexEntityRepository,
-    IndexedFileChecksumRepository,
-    CurrentMaterializedNoteEntityRepository,
-    OrphanEntityRepository[Entity],
-    Protocol,
-):
-    """Entity repository capabilities needed by local project indexing."""
-
-
-class LocalProjectIndexSyncService(IndexMarkdownSyncService, Protocol):
-    """Sync-service capabilities needed to compose local project indexing."""
-
-    @property
-    def entity_repository(self) -> LocalProjectIndexEntityRepository: ...
-
-    @property
-    def file_service(self) -> FileService: ...
-
-    @property
-    def search_service(self) -> OrphanSearchIndex[Entity]: ...
-
-
-type LocalProjectIndexSyncServiceFactory = Callable[
-    [Project],
-    Awaitable[LocalProjectIndexSyncService],
-]
-
-
 @dataclass(frozen=True, slots=True)
 class LocalProjectIndexOrphanCleaner(ProjectIndexOrphanCleaner):
     """Clean stale local DB/search rows before local project-index fanout."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    entity_repository: LocalProjectIndexEntityRepository
+    entity_repository: LocalIndexEntityRepository
     search_service: OrphanSearchIndex[Entity]
     logger: OrphanCleanupLogger | None = None
 
@@ -325,17 +294,19 @@ class LocalProjectIndexFileRunner(ProjectIndexFileRequestRunner):
 class LocalProjectIndexRuntimeFactory:
     """Build project-wide local indexing runtime dependencies for one project."""
 
-    sync_service_factory: LocalProjectIndexSyncServiceFactory
+    dependency_provider: LocalIndexProjectDependencyProvider = (
+        build_local_index_project_dependencies
+    )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     batch_size: int = 100
 
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime:
-        sync_service = await self.sync_service_factory(project)
-        metadata_source = LocalStorageFileMetadataSource(sync_service.file_service)
+        dependencies = await self.dependency_provider(project)
+        metadata_source = LocalStorageFileMetadataSource(dependencies.file_service)
         checker = FileIndexChecker(
             indexed_checksum_source=RepositoryIndexedFileChecksumSource(
-                session_maker=sync_service.session_maker,
-                entity_repository=sync_service.entity_repository,
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
             ),
             current_checksum_source=StorageCurrentFileChecksumSource(
                 load_metadata=metadata_source.load_current_file_metadata,
@@ -345,20 +316,19 @@ class LocalProjectIndexRuntimeFactory:
             checker=checker,
             metadata_source=metadata_source,
             materialized_note_source=RepositoryCurrentMaterializedNoteSource(
-                session_maker=sync_service.session_maker,
-                entity_repository=sync_service.entity_repository,
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
             ),
-            file_indexer=build_default_file_indexer(
-                project_id=project.id,
-                sync_service=sync_service,
-            ),
+            file_indexer=dependencies.file_indexer,
         )
         return LocalProjectIndexRuntime(
-            observed_file_source=LocalProjectIndexObservedFileSource(sync_service.file_service),
+            observed_file_source=LocalProjectIndexObservedFileSource(
+                dependencies.file_service,
+            ),
             orphan_cleaner=LocalProjectIndexOrphanCleaner(
-                session_maker=sync_service.session_maker,
-                entity_repository=sync_service.entity_repository,
-                search_service=sync_service.search_service,
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
+                search_service=dependencies.search_service,
             ),
             batch_enqueuer=InlineProjectIndexBatchEnqueuer(file_runner),
             batch_size=self.batch_size,

@@ -11,7 +11,7 @@ from watchfiles import Change
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.index import StorageEventIndexRuntime
-from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index import LocalWatchEventIndexRuntimeFactory
 from basic_memory.models.project import Project
 from basic_memory.runtime import (
     ProjectRuntimeReference,
@@ -302,18 +302,11 @@ async def test_handle_changes_with_local_event_index_runtime_indexes_markdown_fi
     file_path = project_config.home / "local-event-index.md"
     await create_test_file(file_path, "# Local Event Index\n\nIndexed from watcher event.\n")
 
-    async def sync_service_factory(project: Project):
-        assert project == test_project
-        return sync_service
-
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
         session_maker=session_maker,
-        sync_service_factory=sync_service_factory,
-        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(
-            sync_service_factory=sync_service_factory,
-        ),
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
     )
 
     await watch_service.handle_changes(test_project, {(Change.added, str(file_path))})
@@ -349,18 +342,11 @@ async def test_handle_changes_with_local_event_index_runtime_deletes_missing_mar
 
     file_path.unlink()
 
-    async def sync_service_factory(project: Project):
-        assert project == test_project
-        return sync_service
-
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
         session_maker=session_maker,
-        sync_service_factory=sync_service_factory,
-        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(
-            sync_service_factory=sync_service_factory,
-        ),
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
     )
 
     await watch_service.handle_changes(test_project, {(Change.deleted, str(file_path))})

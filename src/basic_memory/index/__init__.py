@@ -28,6 +28,12 @@ from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
     run_local_watch_event_indexing,
 )
+from basic_memory.index.local_dependencies import (
+    LocalIndexProjectDependencies,
+    LocalMarkdownFileIndexer,
+    build_local_index_project_dependencies,
+    build_local_markdown_file_indexer,
+)
 from basic_memory.index.local_project import (
     InlineProjectIndexBatchEnqueuer,
     LocalProjectIndexFileRunner,
@@ -74,6 +80,8 @@ __all__ = [
     "InlineStorageEventResultRecorder",
     "InlineProjectIndexBatchEnqueuer",
     "NoopInlineStorageEventResultRecorder",
+    "LocalIndexProjectDependencies",
+    "LocalMarkdownFileIndexer",
     "LocalProjectIndexFileRunner",
     "LocalProjectIndexObservedFileSource",
     "LocalProjectIndexRuntimeFactory",
@@ -103,6 +111,8 @@ __all__ = [
     "StorageEventSource",
     "StorageKey",
     "build_project_index_workflow_queued",
+    "build_local_index_project_dependencies",
+    "build_local_markdown_file_indexer",
     "group_storage_events_by_bucket",
     "local_storage_event_input_from_watchfiles_change",
     "local_storage_event_inputs_from_watchfiles_changes",
