@@ -53,6 +53,10 @@ def test_build_default_project_service_bundle_wires_default_project_graph(tmp_pa
     assert bundle.entity_service.relation_repository is bundle.relation_repository
     assert bundle.entity_service.file_service is file_service
     assert bundle.entity_service.search_service is bundle.search_service
+    assert bundle.relation_resolution.relation_repository is sync_relation_repository
+    assert bundle.relation_resolution.entity_repository is bundle.entity_repository
+    assert bundle.relation_resolution.link_resolver is bundle.link_resolver
+    assert bundle.relation_resolution.entity_indexer is bundle.search_service
     assert bundle.sync_service.entity_service is bundle.entity_service
     assert bundle.sync_service.entity_repository is bundle.entity_repository
     assert bundle.sync_service.relation_repository is sync_relation_repository

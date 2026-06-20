@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol
 from uuid import UUID
 
+import logfire
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.models import IndexFileJobStatus
-from basic_memory.repository import RelationRepository
+from basic_memory.models import Entity
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
@@ -34,31 +36,179 @@ class UnresolvedRelationCounter(Protocol):
         """Return the current unresolved relation count."""
 
 
-class SyncServiceRelationResolver(Protocol):
-    """Minimal SyncService shape needed to resolve one project's relations."""
+class RelationResolutionRuntime(RelationResolutionPass, UnresolvedRelationCounter, Protocol):
+    """Capability that owns relation resolution for one project."""
 
-    relation_repository: RelationRepository
-    session_maker: async_sessionmaker[AsyncSession]
 
-    async def resolve_relations(self) -> AffectedEntityIds:
-        """Resolve currently visible relations and return affected source entity IDs."""
+class UnresolvedRelation(Protocol):
+    """Unresolved relation fields required by the resolver."""
+
+    id: int
+    from_id: int
+    to_name: str
+    relation_type: str
+
+
+class ResolvedRelationTarget(Protocol):
+    """Entity fields needed to complete an unresolved relation."""
+
+    id: int
+    title: str
+
+
+class RelationResolutionRelationRepository(Protocol):
+    """Repository capability for unresolved relation reads and updates."""
+
+    async def find_unresolved_relations(
+        self,
+        session: AsyncSession,
+    ) -> Sequence[UnresolvedRelation]:
+        """Return unresolved relations currently visible in the project."""
+
+    async def find_unresolved_relations_for_entity(
+        self,
+        session: AsyncSession,
+        entity_id: EntityId,
+    ) -> Sequence[UnresolvedRelation]:
+        """Return unresolved relations for one source entity."""
+
+    async def update(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        entity_data: dict[str, object],
+    ) -> object | None:
+        """Apply resolved target fields to one relation."""
+
+    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+        """Delete one redundant unresolved relation."""
+
+
+class RelationResolutionEntityRepository(Protocol):
+    """Repository capability for refreshing affected source entities."""
+
+    async def find_by_id(self, session: AsyncSession, entity_id: EntityId) -> Entity | None:
+        """Return one source entity by database id."""
+
+
+class RelationResolutionLinkResolver(Protocol):
+    """Capability for resolving a relation target by link text."""
+
+    async def resolve_link(
+        self,
+        link_text: str,
+        *,
+        strict: bool,
+        session: AsyncSession,
+    ) -> ResolvedRelationTarget | None:
+        """Resolve a link text to an entity target."""
+
+
+class RelationResolutionEntityIndexer(Protocol):
+    """Capability for refreshing derived search rows after relation updates."""
+
+    async def index_entity(self, entity: Entity) -> None:
+        """Refresh derived index rows for one entity."""
 
 
 @dataclass(frozen=True, slots=True)
-class SyncServiceRelationResolutionAdapter:
-    """Expose project-scoped sync relation operations as runtime capabilities."""
+class RepositoryRelationResolutionRuntime:
+    """Resolve forward references with project-scoped repositories and services."""
 
-    sync_service: SyncServiceRelationResolver
-
-    async def resolve_relations(self) -> AffectedEntityIds:
-        """Run one relation-resolution pass through the project-scoped sync service."""
-        return await self.sync_service.resolve_relations()
+    session_maker: async_sessionmaker[AsyncSession]
+    relation_repository: RelationResolutionRelationRepository
+    entity_repository: RelationResolutionEntityRepository
+    link_resolver: RelationResolutionLinkResolver
+    entity_indexer: RelationResolutionEntityIndexer
 
     async def count_unresolved_relations(self) -> int:
-        """Count unresolved relations through the same project-scoped repository."""
-        relation_repository = self.sync_service.relation_repository
-        async with db.scoped_session(self.sync_service.session_maker) as session:
-            return len(await relation_repository.find_unresolved_relations(session))
+        """Return the current unresolved relation count for this project."""
+        async with db.scoped_session(self.session_maker) as session:
+            return len(await self.relation_repository.find_unresolved_relations(session))
+
+    async def resolve_relations(
+        self,
+        entity_id: EntityId | None = None,
+    ) -> AffectedEntityIds:
+        """Resolve visible forward references and refresh affected entities."""
+        async with db.scoped_session(self.session_maker) as session:
+            if entity_id is None:
+                unresolved_relations = await self.relation_repository.find_unresolved_relations(
+                    session
+                )
+                logger.info("Resolving all forward references", count=len(unresolved_relations))
+            else:
+                unresolved_relations = (
+                    await self.relation_repository.find_unresolved_relations_for_entity(
+                        session,
+                        entity_id,
+                    )
+                )
+                logger.info(
+                    f"Resolving forward references for entity {entity_id}",
+                    count=len(unresolved_relations),
+                )
+
+        affected_entity_ids: AffectedEntityIds = set()
+
+        for relation in unresolved_relations:
+            logger.trace(
+                "Attempting to resolve relation "
+                f"relation_id={relation.id} "
+                f"from_id={relation.from_id} "
+                f"to_name={relation.to_name}"
+            )
+            async with db.scoped_session(self.session_maker) as session:
+                resolved_entity = await self.link_resolver.resolve_link(
+                    relation.to_name,
+                    strict=True,
+                    session=session,
+                )
+
+            if resolved_entity is None or resolved_entity.id == relation.from_id:
+                continue
+
+            logger.debug(
+                "Resolved forward reference "
+                f"relation_id={relation.id} "
+                f"from_id={relation.from_id} "
+                f"to_name={relation.to_name} "
+                f"resolved_id={resolved_entity.id} "
+                f"resolved_title={resolved_entity.title}",
+            )
+            try:
+                async with db.scoped_session(self.session_maker) as session:
+                    await self.relation_repository.update(
+                        session,
+                        relation.id,
+                        {
+                            "to_id": resolved_entity.id,
+                            "to_name": resolved_entity.title,
+                        },
+                    )
+            except IntegrityError:
+                with logfire.span(
+                    "indexing.relation.resolve_conflict",
+                    relation_id=relation.id,
+                    relation_type=relation.relation_type,
+                ):
+                    # Another resolved row already represents this edge. Remove
+                    # the redundant unresolved row so future passes do not keep
+                    # retrying the same conflict.
+                    async with db.scoped_session(self.session_maker) as session:
+                        await self.relation_repository.delete(session, relation.id)
+            affected_entity_ids.add(relation.from_id)
+
+        for affected_entity_id in sorted(affected_entity_ids):
+            async with db.scoped_session(self.session_maker) as session:
+                source_entity = await self.entity_repository.find_by_id(
+                    session,
+                    affected_entity_id,
+                )
+            if source_entity is not None:
+                await self.entity_indexer.index_entity(source_entity)
+
+        return affected_entity_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,22 +338,21 @@ async def resolve_relations_until_stable(
 
 
 async def resolve_project_relations(
-    sync_service: SyncServiceRelationResolver,
+    runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
 ) -> ResolveRelationsResult:
-    """Resolve all resolvable forward references for one project-scoped sync service.
+    """Resolve all resolvable forward references for one project runtime.
 
-    ``SyncService.resolve_relations`` resolves every relation that is unresolved
-    at the moment it reads the table. Queued runtimes can coalesce concurrent
-    writes onto an in-flight resolve job, so run until one pass changes nothing
-    or the pass cap is reached. Relations left after a stable pass are genuine
-    forward references and remain unresolved until their target note exists.
+    One pass resolves every relation that is unresolved at the moment it reads
+    the table. Queued runtimes can coalesce concurrent writes onto an in-flight
+    resolve job, so run until one pass changes nothing or the pass cap is
+    reached. Relations left after a stable pass are genuine forward references
+    and remain unresolved until their target note exists.
     """
-    adapter = SyncServiceRelationResolutionAdapter(sync_service)
     result = await resolve_relations_until_stable(
-        resolver=adapter,
-        unresolved_counter=adapter,
+        resolver=runtime,
+        unresolved_counter=runtime,
         max_passes=max_passes,
     )
     logger.info(

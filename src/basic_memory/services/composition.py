@@ -8,6 +8,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
 from basic_memory.markdown import EntityParser
 from basic_memory.repository import (
     EntityRepository,
@@ -55,6 +56,7 @@ class BasicMemoryProjectServiceBundle:
     search_service: SearchService
     link_resolver: LinkResolver
     entity_service: EntityService
+    relation_resolution: RepositoryRelationResolutionRuntime
     sync_service: SyncService
 
 
@@ -159,6 +161,13 @@ def build_default_project_service_bundle(
             app_config=app_config,
         )
 
+    relation_resolution = RepositoryRelationResolutionRuntime(
+        session_maker=session_maker,
+        relation_repository=sync_relation_repository,
+        entity_repository=entity_repository,
+        link_resolver=link_resolver,
+        entity_indexer=search_service,
+    )
     sync_service = SyncService(
         app_config=app_config,
         entity_service=entity_service,
@@ -181,5 +190,6 @@ def build_default_project_service_bundle(
         search_service=search_service,
         link_resolver=link_resolver,
         entity_service=entity_service,
+        relation_resolution=relation_resolution,
         sync_service=sync_service,
     )

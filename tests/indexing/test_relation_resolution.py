@@ -1,25 +1,28 @@
 """Tests for portable relation resolution orchestration."""
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
 from datetime import timedelta
 from typing import cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.relation_resolution import (
     IndexFileRelationResolutionContext,
     ProjectIndexRelationResolutionContext,
     RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
+    RepositoryRelationResolutionRuntime,
     ResolveRelationsJobRequest,
     ResolveRelationsResult,
-    SyncServiceRelationResolver,
     plan_index_file_relation_resolution,
     plan_project_index_completion_relation_resolution,
     resolve_project_relations,
     resolve_relations_until_stable,
 )
 from basic_memory.indexing.models import IndexFileJobStatus
+from basic_memory.models import Entity
 
 
 class StubUnresolvedRelationCounter:
@@ -62,37 +65,127 @@ class FakeSession:
         pass
 
 
+@dataclass(frozen=True, slots=True)
+class FakeRelation:
+    id: int
+    from_id: int
+    to_name: str
+    relation_type: str = "related_to"
+
+
+@dataclass(frozen=True, slots=True)
+class FakeResolvedEntity:
+    id: int
+    title: str
+
+
 class StubRelationRepository:
     """Returns scripted ``find_unresolved_relations`` results, in call order."""
 
-    def __init__(self, unresolved_per_call: list[list[object]]) -> None:
+    def __init__(
+        self,
+        unresolved_per_call: list[list[FakeRelation]],
+        *,
+        fail_update_ids: set[int] | None = None,
+    ) -> None:
         self._unresolved_per_call = unresolved_per_call
+        self._fail_update_ids = fail_update_ids or set()
         self.calls = 0
+        self.updates: list[tuple[int, dict[str, object]]] = []
+        self.deletes: list[int] = []
 
-    async def find_unresolved_relations(self, session: FakeSession) -> list[object]:
+    async def find_unresolved_relations(
+        self,
+        session: AsyncSession,
+    ) -> list[FakeRelation]:
         assert isinstance(session, FakeSession)
         index = min(self.calls, len(self._unresolved_per_call) - 1)
         self.calls += 1
         return self._unresolved_per_call[index]
 
-
-class StubSyncService:
-    """Returns scripted ``resolve_relations`` affected-entity sets, in call order."""
-
-    def __init__(
+    async def find_unresolved_relations_for_entity(
         self,
-        affected_per_pass: list[set[int]],
-        relation_repository: StubRelationRepository,
-    ) -> None:
-        self._affected_per_pass = affected_per_pass
-        self.relation_repository = relation_repository
-        self.session_maker = FakeSession
-        self.resolve_calls = 0
+        session: AsyncSession,
+        entity_id: int,
+    ) -> list[FakeRelation]:
+        assert isinstance(session, FakeSession)
+        return [
+            relation
+            for relation in await self.find_unresolved_relations(session)
+            if relation.from_id == entity_id
+        ]
 
-    async def resolve_relations(self) -> set[int]:
-        index = min(self.resolve_calls, len(self._affected_per_pass) - 1)
-        self.resolve_calls += 1
-        return self._affected_per_pass[index]
+    async def update(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        entity_data: dict[str, object],
+    ) -> object | None:
+        assert isinstance(session, FakeSession)
+        if entity_id in self._fail_update_ids:
+            raise IntegrityError("update relation", {}, Exception("duplicate relation"))
+        self.updates.append((entity_id, entity_data))
+        return object()
+
+    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+        assert isinstance(session, FakeSession)
+        self.deletes.append(entity_id)
+        return True
+
+
+class StubEntityRepository:
+    def __init__(self) -> None:
+        self.entities: dict[int, Entity] = {
+            10: cast(Entity, FakeResolvedEntity(id=10, title="Source A")),
+            11: cast(Entity, FakeResolvedEntity(id=11, title="Source B")),
+        }
+
+    async def find_by_id(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> Entity | None:
+        assert isinstance(session, FakeSession)
+        return self.entities.get(entity_id)
+
+
+class StubLinkResolver:
+    def __init__(self, targets: dict[str, FakeResolvedEntity]) -> None:
+        self.targets = targets
+        self.calls: list[tuple[str, bool]] = []
+
+    async def resolve_link(
+        self,
+        link_text: str,
+        *,
+        strict: bool,
+        session: AsyncSession,
+    ) -> FakeResolvedEntity | None:
+        assert isinstance(session, FakeSession)
+        self.calls.append((link_text, strict))
+        return self.targets.get(link_text)
+
+
+class StubEntityIndexer:
+    def __init__(self) -> None:
+        self.indexed_entities: list[Entity] = []
+
+    async def index_entity(self, entity: Entity) -> None:
+        self.indexed_entities.append(entity)
+
+
+def build_repository_runtime(
+    relation_repository: StubRelationRepository,
+    link_resolver: StubLinkResolver,
+    entity_indexer: StubEntityIndexer,
+) -> RepositoryRelationResolutionRuntime:
+    return RepositoryRelationResolutionRuntime(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeSession),
+        relation_repository=relation_repository,
+        entity_repository=StubEntityRepository(),
+        link_resolver=link_resolver,
+        entity_indexer=entity_indexer,
+    )
 
 
 def test_resolve_relations_job_request_matches_cloud_queue_identity() -> None:
@@ -256,11 +349,35 @@ async def test_resolution_loop_is_bounded_by_max_passes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_project_relation_resolution_uses_sync_service_and_counts_remaining() -> None:
-    repo = StubRelationRepository([["r1", "r2", "r3"], ["r3"]])
-    sync = StubSyncService([{10, 11}, set()], repo)
+async def test_project_relation_resolution_uses_repository_runtime_and_counts_remaining() -> None:
+    repo = StubRelationRepository(
+        [
+            [
+                FakeRelation(id=1, from_id=10, to_name="Target A"),
+                FakeRelation(id=2, from_id=11, to_name="Target B"),
+                FakeRelation(id=3, from_id=10, to_name="Still Missing"),
+            ],
+            [
+                FakeRelation(id=1, from_id=10, to_name="Target A"),
+                FakeRelation(id=2, from_id=11, to_name="Target B"),
+            ],
+            [],
+            [FakeRelation(id=3, from_id=10, to_name="Still Missing")],
+        ]
+    )
+    entity_indexer = StubEntityIndexer()
+    runtime = build_repository_runtime(
+        repo,
+        StubLinkResolver(
+            {
+                "Target A": FakeResolvedEntity(id=20, title="Target A"),
+                "Target B": FakeResolvedEntity(id=21, title="Target B"),
+            }
+        ),
+        entity_indexer,
+    )
 
-    result = await resolve_project_relations(cast(SyncServiceRelationResolver, sync))
+    result = await resolve_project_relations(runtime)
 
     assert result == ResolveRelationsResult(
         unresolved_before=3,
@@ -269,29 +386,78 @@ async def test_project_relation_resolution_uses_sync_service_and_counts_remainin
         affected_entities=2,
     )
     assert result.resolved == 2
-    assert sync.resolve_calls == 2
+    assert repo.updates == [
+        (1, {"to_id": 20, "to_name": "Target A"}),
+        (2, {"to_id": 21, "to_name": "Target B"}),
+    ]
+    assert entity_indexer.indexed_entities == [
+        FakeResolvedEntity(id=10, title="Source A"),
+        FakeResolvedEntity(id=11, title="Source B"),
+    ]
 
 
 @pytest.mark.asyncio
 async def test_project_relation_resolution_stops_when_nothing_resolves() -> None:
-    repo = StubRelationRepository([["r1"], ["r1"]])
-    sync = StubSyncService([set()], repo)
+    repo = StubRelationRepository(
+        [
+            [FakeRelation(id=1, from_id=10, to_name="Still Missing")],
+            [FakeRelation(id=1, from_id=10, to_name="Still Missing")],
+            [FakeRelation(id=1, from_id=10, to_name="Still Missing")],
+        ]
+    )
+    entity_indexer = StubEntityIndexer()
+    runtime = build_repository_runtime(repo, StubLinkResolver({}), entity_indexer)
 
-    result = await resolve_project_relations(cast(SyncServiceRelationResolver, sync))
+    result = await resolve_project_relations(runtime)
 
     assert result.passes == 1
     assert result.resolved == 0
     assert result.remaining == 1
-    assert sync.resolve_calls == 1
+    assert repo.updates == []
+    assert entity_indexer.indexed_entities == []
 
 
 @pytest.mark.asyncio
 async def test_project_relation_resolution_respects_pass_limit() -> None:
-    repo = StubRelationRepository([["r1", "r2"], []])
-    sync = StubSyncService([{1}], repo)
+    unresolved = [FakeRelation(id=1, from_id=10, to_name="Target A")]
+    repo = StubRelationRepository(
+        [
+            [
+                FakeRelation(id=1, from_id=10, to_name="Target A"),
+                FakeRelation(id=2, from_id=11, to_name="Target B"),
+            ],
+            unresolved,
+            unresolved,
+            unresolved,
+            [],
+        ]
+    )
+    runtime = build_repository_runtime(
+        repo,
+        StubLinkResolver({"Target A": FakeResolvedEntity(id=20, title="Target A")}),
+        StubEntityIndexer(),
+    )
 
-    result = await resolve_project_relations(cast(SyncServiceRelationResolver, sync), max_passes=3)
+    result = await resolve_project_relations(runtime, max_passes=3)
 
     assert result.passes == 3
-    assert sync.resolve_calls == 3
+    assert len(repo.updates) == 3
     assert result.remaining == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_runtime_deletes_duplicate_unresolved_relation() -> None:
+    relation = FakeRelation(id=1, from_id=10, to_name="Target A")
+    repo = StubRelationRepository([[relation]], fail_update_ids={1})
+    entity_indexer = StubEntityIndexer()
+    runtime = build_repository_runtime(
+        repo,
+        StubLinkResolver({"Target A": FakeResolvedEntity(id=20, title="Target A")}),
+        entity_indexer,
+    )
+
+    affected = await runtime.resolve_relations()
+
+    assert affected == {10}
+    assert repo.deletes == [1]
+    assert entity_indexer.indexed_entities == [FakeResolvedEntity(id=10, title="Source A")]
