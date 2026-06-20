@@ -1,9 +1,14 @@
 """Tests for portable project-index workflow request values."""
 
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import cast
 from uuid import UUID
 
+import basic_memory.indexing.project_index_workflow as project_index_workflow_module
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing import (
     IndexFileJobResult,
@@ -29,6 +34,7 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowQueued,
     ProjectIndexWorkflowRecordPlan,
     ProjectIndexWorkflowRequest,
+    RepositoryProjectIndexMaintenanceStore,
     ProjectIndexStaleWorkflowPlan,
     ProjectIndexWorkflowStart,
     ProjectIndexWorkflowStartPlan,
@@ -93,6 +99,65 @@ class RecordingDeleteBatchStore:
     ) -> ProjectIndexDeleteBatchResult:
         self.batches.append(delete_batch)
         return self.results.pop(0)
+
+
+class FakeProjectIndexScalarResult:
+    """Minimal scalar result stand-in for repository maintenance tests."""
+
+    def __init__(self, values: list[object]) -> None:
+        self.values = values
+
+    def __iter__(self) -> Iterator[object]:
+        return iter(self.values)
+
+
+class FakeProjectIndexMappingResult:
+    """Minimal mapping result stand-in for repository maintenance tests."""
+
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def all(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeProjectIndexResult:
+    """Minimal SQLAlchemy result stand-in for repository maintenance tests."""
+
+    def __init__(
+        self,
+        *,
+        scalar_values: list[object] | None = None,
+        mapping_rows: list[dict[str, object]] | None = None,
+    ) -> None:
+        self.scalar_values = scalar_values or []
+        self.mapping_rows = mapping_rows or []
+
+    def scalars(self) -> FakeProjectIndexScalarResult:
+        return FakeProjectIndexScalarResult(self.scalar_values)
+
+    def mappings(self) -> FakeProjectIndexMappingResult:
+        return FakeProjectIndexMappingResult(self.mapping_rows)
+
+
+@dataclass(slots=True)
+class FakeProjectIndexSession:
+    """Record repository maintenance statements without a real database."""
+
+    results: list[FakeProjectIndexResult]
+    statements: list[object] = field(default_factory=list)
+    params: list[object | None] = field(default_factory=list)
+
+    async def execute(
+        self,
+        statement: object,
+        params: object | None = None,
+    ) -> FakeProjectIndexResult:
+        self.statements.append(statement)
+        self.params.append(params)
+        if self.results:
+            return self.results.pop(0)
+        return FakeProjectIndexResult()
 
 
 def project_index_record_metadata(
@@ -523,6 +588,107 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
         },
     ]
     assert run.records[1].progress is None
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_applies_move_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[FakeProjectIndexResult(scalar_values=["notes/a.md"])]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_workflow_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(
+                ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),
+                ProjectIndexMoveTarget("notes/b.md", "archive/b.md"),
+            ),
+        )
+    )
+
+    assert result == ProjectIndexMoveBatchResult(
+        updated_files=1,
+        missing_paths=("notes/b.md",),
+    )
+    assert len(session.statements) == 2
+    assert "SELECT entity.file_path" in str(session.statements[0])
+    assert "UPDATE entity" in str(session.statements[1])
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_applies_delete_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md"},
+                    {"id": 20, "file_path": "notes/b.md"},
+                ]
+            ),
+            FakeProjectIndexResult(scalar_values=[99]),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_workflow_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    result = await store.apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/a.md", "notes/b.md", "notes/missing.md"),
+        )
+    )
+
+    assert result == ProjectIndexDeleteBatchResult(
+        deleted_entities=2,
+        relation_cleanup_entity_ids=frozenset({99}),
+        missing_paths=("notes/missing.md",),
+    )
+    assert len(session.statements) == 5
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[1])
+    assert "DELETE FROM search_index" in str(session.statements[2])
+    assert "DELETE FROM search_vector_chunks" in str(session.statements[3])
+    assert "DELETE FROM entity" in str(session.statements[4])
 
 
 def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event() -> None:

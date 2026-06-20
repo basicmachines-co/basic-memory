@@ -6,6 +6,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol, Self
 
+from sqlalchemy import bindparam, case, delete, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 from basic_memory.indexing.models import (
     IndexFileJobResult,
     apply_project_index_batch_job_results,
@@ -24,6 +28,7 @@ from basic_memory.indexing.project_index_progress import (
     should_emit_project_index_progress_event,
 )
 from basic_memory.indexing.orphan_cleanup import OrphanEntityCleanupResult
+from basic_memory.models import Entity, Relation
 from basic_memory.runtime import (
     ProjectExternalId,
     ProjectId,
@@ -626,6 +631,144 @@ class ProjectIndexDeleteRun:
         """Return every deleted path that the runtime could not find."""
         return tuple(
             missing_path for record in self.records for missing_path in record.result.missing_paths
+        )
+
+
+DELETE_PROJECT_INDEX_SEARCH_ROWS_SQL = text("""
+    DELETE FROM search_index
+    WHERE project_id = :project_id
+      AND (
+            entity_id IN :deleted_entity_ids
+            OR (
+                type = :relation_row_type
+                AND (
+                    from_id IN :deleted_entity_ids
+                    OR to_id IN :deleted_entity_ids
+                )
+            )
+      )
+""").bindparams(bindparam("deleted_entity_ids", expanding=True))
+
+DELETE_PROJECT_INDEX_VECTOR_CHUNKS_SQL = text("""
+    DELETE FROM search_vector_chunks
+    WHERE project_id = :project_id
+      AND entity_id IN :deleted_entity_ids
+""").bindparams(bindparam("deleted_entity_ids", expanding=True))
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryProjectIndexMaintenanceStore:
+    """Apply project-index move/delete maintenance with explicit sessions."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    project_id: ProjectId
+
+    async def apply_project_index_move_batch(
+        self,
+        move_batch: ProjectIndexMoveBatch,
+    ) -> ProjectIndexMoveBatchResult:
+        if not move_batch.targets:
+            return ProjectIndexMoveBatchResult(updated_files=0)
+
+        target_paths_by_old_path = {
+            move_target.old_path: move_target.new_path for move_target in move_batch.targets
+        }
+        old_paths = tuple(target_paths_by_old_path)
+
+        async with db.scoped_session(self.session_maker) as session:
+            existing_paths_result = await session.execute(
+                select(Entity.file_path).where(
+                    Entity.project_id == self.project_id,
+                    Entity.file_path.in_(old_paths),
+                )
+            )
+            updated_old_paths = frozenset(str(path) for path in existing_paths_result.scalars())
+
+            if updated_old_paths:
+                await session.execute(
+                    update(Entity)
+                    .where(
+                        Entity.project_id == self.project_id,
+                        Entity.file_path.in_(updated_old_paths),
+                    )
+                    .values(
+                        file_path=case(
+                            target_paths_by_old_path,
+                            value=Entity.file_path,
+                        )
+                    )
+                )
+
+        missing_paths = tuple(
+            move_target.old_path
+            for move_target in move_batch.targets
+            if move_target.old_path not in updated_old_paths
+        )
+        return ProjectIndexMoveBatchResult(
+            updated_files=len(updated_old_paths),
+            missing_paths=missing_paths,
+        )
+
+    async def apply_project_index_delete_batch(
+        self,
+        delete_batch: ProjectIndexDeleteBatch,
+    ) -> ProjectIndexDeleteBatchResult:
+        if not delete_batch.paths:
+            return ProjectIndexDeleteBatchResult(deleted_entities=0)
+
+        async with db.scoped_session(self.session_maker) as session:
+            target_result = await session.execute(
+                select(Entity.id, Entity.file_path).where(
+                    Entity.project_id == self.project_id,
+                    Entity.file_path.in_(tuple(delete_batch.paths)),
+                )
+            )
+            target_rows = target_result.mappings().all()
+
+            if not target_rows:
+                return ProjectIndexDeleteBatchResult(
+                    deleted_entities=0,
+                    missing_paths=tuple(delete_batch.paths),
+                )
+
+            deleted_entity_ids = tuple(int(row["id"]) for row in target_rows)
+            deleted_found_paths = frozenset(str(row["file_path"]) for row in target_rows)
+
+            surviving_relation_sources = await session.execute(
+                select(Relation.from_id)
+                .where(
+                    Relation.project_id == self.project_id,
+                    Relation.to_id.in_(deleted_entity_ids),
+                    Relation.from_id.not_in(deleted_entity_ids),
+                )
+                .distinct()
+            )
+            relation_cleanup_entity_ids = frozenset(
+                int(entity_id) for entity_id in surviving_relation_sources.scalars()
+            )
+
+            delete_params = {
+                "project_id": self.project_id,
+                "deleted_entity_ids": deleted_entity_ids,
+                "relation_row_type": "relation",
+            }
+            await session.execute(DELETE_PROJECT_INDEX_SEARCH_ROWS_SQL, delete_params)
+            await session.execute(DELETE_PROJECT_INDEX_VECTOR_CHUNKS_SQL, delete_params)
+            await session.execute(
+                delete(Entity).where(
+                    Entity.project_id == self.project_id,
+                    Entity.id.in_(deleted_entity_ids),
+                )
+            )
+
+        return ProjectIndexDeleteBatchResult(
+            deleted_entities=len(deleted_entity_ids),
+            relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+            missing_paths=tuple(
+                deleted_path
+                for deleted_path in delete_batch.paths
+                if deleted_path not in deleted_found_paths
+            ),
         )
 
 
