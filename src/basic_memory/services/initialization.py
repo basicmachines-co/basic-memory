@@ -8,6 +8,8 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+from uuid import uuid4
 
 
 from loguru import logger
@@ -18,6 +20,44 @@ from basic_memory.models import Project
 from basic_memory.repository import (
     ProjectRepository,
 )
+from basic_memory.runtime import ProjectRuntimeReference, TenantId, RuntimeProjectIndexJobRequest
+
+if TYPE_CHECKING:
+    from basic_memory.index import LocalProjectIndexRuntime
+
+
+class InitialProjectIndexRuntimeFactory(Protocol):
+    """Build local project-index runtime dependencies for startup indexing."""
+
+    tenant_id: TenantId
+
+    async def runtime_for_project(self, project: Project) -> "LocalProjectIndexRuntime": ...
+
+
+async def run_initial_project_index(
+    project: Project,
+    *,
+    runtime_factory: InitialProjectIndexRuntimeFactory,
+) -> None:
+    """Run startup project indexing through the local project-index fanout runtime."""
+    from basic_memory.index import run_local_project_index
+
+    result = await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            tenant_id=runtime_factory.tenant_id,
+            project=ProjectRuntimeReference.from_project(project),
+            workflow_id=uuid4(),
+        ),
+        runtime=await runtime_factory.runtime_for_project(project),
+    )
+    logger.info(
+        "Initial project-index fanout completed",
+        f"project={project.name}",
+        f"total_files={result.total_files}",
+        f"enqueued_files={result.enqueued_files}",
+        f"enqueued_batches={result.enqueued_batches}",
+        f"deleted_files={result.deleted_files}",
+    )
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
@@ -106,11 +146,18 @@ async def initialize_file_sync(
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
 
     event_index_runtime_factory = None
+    project_index_runtime_factory = None
     if app_config.watch_event_index:
-        from basic_memory.index import LocalWatchEventIndexRuntimeFactory
+        from basic_memory.index import (
+            LocalProjectIndexRuntimeFactory,
+            LocalWatchEventIndexRuntimeFactory,
+        )
         from basic_memory.sync.sync_service import get_sync_service
 
         event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
+            sync_service_factory=get_sync_service,
+        )
+        project_index_runtime_factory = LocalProjectIndexRuntimeFactory(
             sync_service_factory=get_sync_service,
         )
 
@@ -149,6 +196,14 @@ async def initialize_file_sync(
 
         logger.info(f"Starting background sync for project: {project.name}")
         try:
+            if project_index_runtime_factory is not None:
+                await run_initial_project_index(
+                    project,
+                    runtime_factory=project_index_runtime_factory,
+                )
+                logger.info(f"Background project index completed for project: {project.name}")
+                return
+
             # Create sync service
             sync_service = await get_sync_service(project)
 

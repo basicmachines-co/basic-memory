@@ -122,8 +122,13 @@ local-project-index-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py
 
+# Focused startup wiring for local project-index fanout.
+local-project-index-startup-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/services/test_initialization.py::test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_when_opted_in
+
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test local-project-index-test
+project-index-contract-test: project-index-surface-test local-project-index-test local-project-index-startup-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:

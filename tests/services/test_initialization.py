@@ -12,7 +12,11 @@ import pytest
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
-from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index import ProjectIndexCoordinatorResult
+from basic_memory.index.local_runtime import (
+    LOCAL_EVENT_INDEX_TENANT_ID,
+    LocalWatchEventIndexRuntimeFactory,
+)
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
@@ -241,6 +245,90 @@ async def test_initialize_file_sync_wires_event_index_runtime_when_opted_in(
         _FakeWatchService.last_kwargs.get("event_index_runtime_factory"),
         LocalWatchEventIndexRuntimeFactory,
     )
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_when_opted_in(
+    app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
+):
+    """Event-index startup uses project fanout instead of the legacy sync scan."""
+    await db.shutdown_db()
+    try:
+        from basic_memory.config import ProjectEntry
+
+        project_dir = config_home / "event-startup"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        updated = app_config.model_copy(
+            update={
+                "projects": {"event-startup": ProjectEntry(path=str(project_dir))},
+                "default_project": "event-startup",
+                "watch_event_index": True,
+            }
+        )
+        config_manager.save_config(updated)
+
+        await initialize_database(updated)
+        await reconcile_projects_with_config(updated)
+
+        _disable_test_env_short_circuit(monkeypatch)
+        monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+
+        created_coroutines = []
+
+        def capture_task(coro):
+            created_coroutines.append(coro)
+            return object()
+
+        class LegacySyncService:
+            async def sync(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                raise AssertionError("legacy startup sync should not run")
+
+        async def get_sync_service(project):  # noqa: ANN001
+            return LegacySyncService()
+
+        class RecordingProjectIndexRuntimeFactory:
+            tenant_id = LOCAL_EVENT_INDEX_TENANT_ID
+
+            def __init__(self, sync_service_factory):  # noqa: ANN001
+                self.sync_service_factory = sync_service_factory
+
+            async def runtime_for_project(self, project):  # noqa: ANN001
+                return f"runtime:{project.name}"
+
+        project_index_calls = []
+
+        async def run_project_index(request, *, runtime):  # noqa: ANN001
+            project_index_calls.append((request, runtime))
+            return ProjectIndexCoordinatorResult(
+                total_files=0,
+                enqueued_files=0,
+                enqueued_batches=0,
+                deleted_files=0,
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.services.initialization.asyncio.create_task", capture_task
+        )
+        monkeypatch.setattr("basic_memory.sync.sync_service.get_sync_service", get_sync_service)
+        monkeypatch.setattr(
+            "basic_memory.index.LocalProjectIndexRuntimeFactory",
+            RecordingProjectIndexRuntimeFactory,
+        )
+        monkeypatch.setattr("basic_memory.index.run_local_project_index", run_project_index)
+
+        await initialize_file_sync(updated, quiet=True)
+
+        assert len(created_coroutines) == 1
+        await created_coroutines[0]
+
+        assert len(project_index_calls) == 1
+        request, runtime = project_index_calls[0]
+        assert request.project.project_name == "event-startup"
+        assert request.search is True
+        assert request.embeddings is True
+        assert runtime == "runtime:event-startup"
+    finally:
+        await db.shutdown_db()
 
 
 @pytest.mark.asyncio
