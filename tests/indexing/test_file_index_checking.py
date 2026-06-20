@@ -1,11 +1,56 @@
 """Tests for portable file-index metadata checking."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing.file_index_checking import FileIndexChecker
+from basic_memory.indexing.file_index_checking import (
+    FileIndexChecker,
+    RepositoryIndexedFileChecksumSource,
+    StorageCurrentFileChecksumSource,
+)
 from basic_memory.indexing.file_index_planning import FileIndexDecisionStatus, FileIndexTarget
+
+
+@dataclass(frozen=True, slots=True)
+class StubCurrentMetadata:
+    checksum: str
+
+
+@dataclass(slots=True)
+class FakeSessionContext:
+    session: object
+
+    async def __aenter__(self) -> object:
+        return self.session
+
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        return None
+
+
+@dataclass(slots=True)
+class FakeSessionMaker:
+    session: object
+
+    def __call__(self) -> FakeSessionContext:
+        return FakeSessionContext(session=self.session)
+
+
+@dataclass(slots=True)
+class RecordingChecksumRepository:
+    rows: list[tuple[object, object | None]]
+    calls: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
+
+    async def get_by_file_paths(
+        self,
+        session: AsyncSession,
+        file_paths: Sequence[str],
+    ) -> list[tuple[object, object | None]]:
+        self.calls.append((session, tuple(file_paths)))
+        return self.rows
 
 
 class StubIndexedChecksumSource:
@@ -120,3 +165,43 @@ async def test_checker_returns_empty_plan_without_sources_for_empty_targets() ->
     assert plan.decisions == ()
     assert indexed_source.requested_paths == []
     assert current_source.requested_paths == []
+
+
+@pytest.mark.asyncio
+async def test_repository_indexed_file_checksum_source_maps_repository_rows() -> None:
+    session = object()
+    repository = RecordingChecksumRepository(
+        rows=[
+            ("notes/a.md", "etag-a"),
+            ("notes/b.md", None),
+        ]
+    )
+    source = RepositoryIndexedFileChecksumSource(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker(session)),
+        entity_repository=repository,
+    )
+
+    checksums = await source.load_indexed_file_checksums(["notes/a.md", "notes/b.md"])
+
+    assert checksums == {
+        "notes/a.md": "etag-a",
+        "notes/b.md": None,
+    }
+    assert repository.calls == [(session, ("notes/a.md", "notes/b.md"))]
+
+
+@pytest.mark.asyncio
+async def test_storage_current_file_checksum_source_loads_metadata_checksum() -> None:
+    calls: list[str] = []
+
+    async def load_metadata(file_path: str) -> StubCurrentMetadata | None:
+        calls.append(file_path)
+        if file_path == "missing.md":
+            return None
+        return StubCurrentMetadata(checksum="etag-current")
+
+    source = StorageCurrentFileChecksumSource(load_metadata=load_metadata)
+
+    assert await source.load_current_file_checksum("note.md") == "etag-current"
+    assert await source.load_current_file_checksum("missing.md") is None
+    assert calls == ["note.md", "missing.md"]

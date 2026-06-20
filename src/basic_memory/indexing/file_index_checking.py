@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.file_index_planning import (
     FileIndexChecksum,
@@ -37,6 +39,70 @@ class CurrentFileChecksumSource(Protocol):
         file_path: FileIndexPath,
     ) -> FileIndexChecksum | None:
         """Return the current checksum for one file, or None when it is missing."""
+
+
+class IndexedFileChecksumRow(Protocol):
+    """Tuple-like row containing file path and indexed checksum."""
+
+    def __getitem__(self, index: int, /) -> object:
+        """Return a row field by positional index."""
+
+
+class IndexedFileChecksumRepository(Protocol):
+    """Repository capability that loads accepted checksums for file paths."""
+
+    async def get_by_file_paths(
+        self,
+        session: AsyncSession,
+        file_paths: Sequence[FileIndexPath],
+    ) -> Sequence[IndexedFileChecksumRow]:
+        """Return rows whose first two fields are file path and checksum."""
+
+
+class CurrentFileMetadata(Protocol):
+    """Storage metadata shape needed for file-index current checksum checks."""
+
+    @property
+    def checksum(self) -> FileIndexChecksum:
+        """Return the current storage checksum."""
+
+
+type CurrentFileMetadataLoader = Callable[
+    [FileIndexPath],
+    Awaitable[CurrentFileMetadata | None],
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryIndexedFileChecksumSource:
+    """Load indexed file checksums from the entity repository."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: IndexedFileChecksumRepository
+
+    async def load_indexed_file_checksums(
+        self,
+        file_paths: Sequence[FileIndexPath],
+    ) -> Mapping[FileIndexPath, FileIndexChecksum | None]:
+        """Load accepted entity checksums for target paths."""
+        async with self.session_maker() as session:
+            rows = await self.entity_repository.get_by_file_paths(session, file_paths)
+        return {str(row[0]): None if row[1] is None else str(row[1]) for row in rows}
+
+
+@dataclass(frozen=True, slots=True)
+class StorageCurrentFileChecksumSource:
+    """Load current file checksums from storage metadata."""
+
+    load_metadata: CurrentFileMetadataLoader
+
+    async def load_current_file_checksum(
+        self,
+        file_path: FileIndexPath,
+    ) -> FileIndexChecksum | None:
+        """Return the current storage checksum for one file."""
+        current_metadata = await self.load_metadata(file_path)
+        return current_metadata.checksum if current_metadata is not None else None
 
 
 @dataclass(frozen=True, slots=True)

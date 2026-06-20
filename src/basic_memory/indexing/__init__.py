@@ -113,8 +113,14 @@ from basic_memory.indexing.external_file_delete_runner import (
 )
 from basic_memory.indexing.file_index_checking import (
     CurrentFileChecksumSource,
+    CurrentFileMetadata,
+    CurrentFileMetadataLoader,
     FileIndexChecker,
+    IndexedFileChecksumRepository,
+    IndexedFileChecksumRow,
     IndexedFileChecksumSource,
+    RepositoryIndexedFileChecksumSource,
+    StorageCurrentFileChecksumSource,
 )
 from basic_memory.indexing.file_indexer import (
     FileIndexer,
@@ -579,6 +585,8 @@ __all__ = [
     "CheckpointPhase",
     "CheckpointModel",
     "CurrentFileChecksumSource",
+    "CurrentFileMetadata",
+    "CurrentFileMetadataLoader",
     "CurrentMaterializedNoteEntity",
     "CurrentMaterializedNoteEntityRepository",
     "CurrentMaterializedNotePlan",
@@ -629,6 +637,7 @@ __all__ = [
     "RepositoryForwardReferenceEntityRefreshRuntime",
     "RepositoryForwardReferenceRelationSource",
     "RepositoryForwardReferenceResolutionRuntime",
+    "RepositoryIndexedFileChecksumSource",
     "IndexedFileLiveUpdatePlan",
     "IndexedEntity",
     "IndexFileBatchJobResult",
@@ -673,6 +682,8 @@ __all__ = [
     "IndexContentTypeProvider",
     "IndexInputBatchExecutor",
     "IndexingBatchResult",
+    "IndexedFileChecksumRepository",
+    "IndexedFileChecksumRow",
     "IndexedFileChecksumSource",
     "IndexInputFile",
     "IndexProgress",
@@ -845,6 +856,7 @@ __all__ = [
     "ResolveRelationsJobRequest",
     "ResolveRelationsResult",
     "StorageChecksumSource",
+    "StorageCurrentFileChecksumSource",
     "SyncedMarkdownFile",
     "SyncServiceRelationResolutionAdapter",
     "SyncServiceRelationResolver",
