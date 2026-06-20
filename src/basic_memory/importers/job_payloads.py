@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from basic_memory.runtime import (
+    JobEntrypoint,
     ProjectExternalId,
     ProjectId,
     ProjectName,
@@ -16,6 +17,9 @@ from basic_memory.runtime import (
     ProjectPermalink,
     ProjectRuntimeReference,
     ProjectRuntimeSource,
+    RuntimeQueuedWorkflowMetadata,
+    RuntimeWorkflowBroker,
+    RuntimeWorkflowTransport,
     StorageKey,
     TenantId,
     WorkflowId,
@@ -23,6 +27,14 @@ from basic_memory.runtime import (
 
 IMPORT_DATA_ENTRYPOINT = "import_data"
 type ImportKind = Literal["claude", "chatgpt", "memory-json", "project-zip"]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportDataWorkflowQueued:
+    """Portable queued metadata for an import workflow handoff."""
+
+    metadata: dict[str, object]
+    queued_event_data: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,3 +223,32 @@ class ImportDataPayload(BaseModel):
             }
         )
         return routing_headers
+
+
+def build_import_data_workflow_queued(
+    *,
+    payload: ImportDataPayload,
+    transport_broker: RuntimeWorkflowBroker,
+    transport_entrypoint: JobEntrypoint,
+) -> ImportDataWorkflowQueued:
+    """Build queued workflow metadata before the import worker starts."""
+    queued_metadata = RuntimeQueuedWorkflowMetadata(
+        workflow_id=payload.workflow_id,
+        progress="queued for import",
+        payload=payload.workflow_payload_metadata(),
+        transport=RuntimeWorkflowTransport(
+            broker=transport_broker,
+            entrypoint=transport_entrypoint,
+        ),
+    )
+
+    return ImportDataWorkflowQueued(
+        metadata=queued_metadata.workflow_metadata(),
+        queued_event_data={
+            "entrypoint": transport_entrypoint,
+            "phase": "queued",
+            "progress": "queued for import",
+            "import_type": payload.import_type,
+            **payload.project_reference().workflow_metadata(),
+        },
+    )

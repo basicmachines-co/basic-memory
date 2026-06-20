@@ -4,12 +4,14 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from basic_memory import importers as importers_module
 from basic_memory.importers import (
     ImportDataPayload,
     ImportDataResult,
     ImportDataResultPayload,
     ImportKind,
 )
+from basic_memory.importers import job_payloads as import_job_payloads
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +82,54 @@ def test_import_data_payload_routing_headers_preserve_existing_queue_shape() -> 
         "project_path": "main",
         "workflow_id": str(workflow_id),
     }
+
+
+def test_import_data_workflow_queued_preserves_cloud_workflow_shapes() -> None:
+    tenant_id = uuid4()
+    workflow_id = uuid4()
+    payload = ImportDataPayload(
+        tenant_id=tenant_id,
+        import_type="project-zip",
+        s3_input_key="tenants/test/jobs/import/input.zip",
+        destination_folder="docs",
+        project_id=101,
+        project_name="Main",
+        project_permalink="main",
+        project_external_id="project-ext",
+        project_path="main",
+        workflow_id=workflow_id,
+    )
+
+    queued_workflow = import_job_payloads.build_import_data_workflow_queued(
+        payload=payload,
+        transport_broker="pgq",
+        transport_entrypoint="import_data",
+    )
+
+    assert queued_workflow.metadata == {
+        "job_id": str(workflow_id),
+        "phase": "queued",
+        "progress": "queued for import",
+        "payload": payload.workflow_payload_metadata(),
+        "transport": {
+            "broker": "pgq",
+            "entrypoint": "import_data",
+        },
+    }
+    assert queued_workflow.queued_event_data == {
+        "entrypoint": "import_data",
+        "phase": "queued",
+        "progress": "queued for import",
+        "import_type": "project-zip",
+        "project_id": 101,
+        "project_external_id": "project-ext",
+        "project_name": "Main",
+        "project_permalink": "main",
+        "project_path": "main",
+    }
+    assert importers_module.build_import_data_workflow_queued is (
+        import_job_payloads.build_import_data_workflow_queued
+    )
 
 
 def test_import_data_payload_rejects_unknown_import_kind() -> None:
