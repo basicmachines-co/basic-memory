@@ -4,9 +4,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from posixpath import join as posix_join
 from typing import Protocol
 
-from basic_memory.runtime.contracts import ProjectId, ProjectPath
+from basic_memory.runtime.contracts import ProjectId, ProjectPath, StorageKey
 
 
 class StorageProjectSource(Protocol):
@@ -56,6 +57,31 @@ def storage_project_prefix_from_project_path(project_path: ProjectPath) -> Proje
     if normalized_path.startswith("/app/data/"):
         normalized_path = normalized_path.removeprefix("/app/data/")
     return normalized_path.lstrip("/")
+
+
+def storage_object_key_from_project_prefix(
+    project_prefix: ProjectPath,
+    relative_path: str,
+) -> StorageKey:
+    """Join a normalized project prefix and project-relative path into a storage key."""
+    normalized_prefix = project_prefix.strip("/")
+    normalized_relative_path = relative_path.lstrip("/")
+    if not normalized_relative_path:
+        return f"{normalized_prefix}/" if normalized_prefix else ""
+    if not normalized_prefix:
+        return normalized_relative_path
+    return posix_join(normalized_prefix, normalized_relative_path)
+
+
+def storage_object_key_from_project_path(
+    project_path: ProjectPath,
+    relative_path: str,
+) -> StorageKey:
+    """Build a storage key from a Basic Memory project path and relative file path."""
+    return storage_object_key_from_project_prefix(
+        storage_project_prefix_from_project_path(project_path),
+        relative_path,
+    )
 
 
 def resolve_storage_project_prefix[ProjectT: StorageProjectSource](
