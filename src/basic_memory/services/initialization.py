@@ -199,7 +199,7 @@ async def initialize_file_sync(
                 logger.info(f"Background project index completed for project: {project.name}")
                 return
 
-            # Legacy SyncService remains the default path until event indexing reaches parity.
+            # Legacy SyncService remains available when event indexing is explicitly disabled.
             from basic_memory.sync.sync_service import get_sync_service
 
             # Create sync service

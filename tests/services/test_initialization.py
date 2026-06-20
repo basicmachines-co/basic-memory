@@ -229,17 +229,15 @@ async def test_initialize_file_sync_no_constraint_when_env_unset(
 
 
 @pytest.mark.asyncio
-async def test_initialize_file_sync_wires_event_index_runtime_when_opted_in(
+async def test_initialize_file_sync_wires_event_index_runtime_by_default(
     app_config: BasicMemoryConfig, monkeypatch
 ):
-    """Experimental watcher event indexing is reachable through real startup wiring."""
+    """Watcher event indexing is the default startup path."""
     _disable_test_env_short_circuit(monkeypatch)
     monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
     _FakeWatchService.last_kwargs = {}
 
-    updated = app_config.model_copy(update={"watch_event_index": True})
-
-    await initialize_file_sync(updated, quiet=True)
+    await initialize_file_sync(app_config, quiet=True)
 
     assert isinstance(
         _FakeWatchService.last_kwargs.get("event_index_runtime_factory"),
@@ -248,10 +246,10 @@ async def test_initialize_file_sync_wires_event_index_runtime_when_opted_in(
 
 
 @pytest.mark.asyncio
-async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_when_opted_in(
+async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_by_default(
     app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
 ):
-    """Event-index startup uses project fanout instead of the legacy sync scan."""
+    """Default startup indexing uses project fanout instead of the legacy sync scan."""
     await db.shutdown_db()
     try:
         from basic_memory.config import ProjectEntry
@@ -262,7 +260,6 @@ async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_
             update={
                 "projects": {"event-startup": ProjectEntry(path=str(project_dir))},
                 "default_project": "event-startup",
-                "watch_event_index": True,
             }
         )
         config_manager.save_config(updated)
@@ -320,6 +317,67 @@ async def test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_
         assert request.search is True
         assert request.embeddings is True
         assert runtime == "runtime:event-startup"
+    finally:
+        await db.shutdown_db()
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled(
+    app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
+):
+    """The old SyncService path remains callable as the regression oracle."""
+    await db.shutdown_db()
+    try:
+        from basic_memory.config import ProjectEntry
+
+        project_dir = config_home / "legacy-startup"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        updated = app_config.model_copy(
+            update={
+                "projects": {"legacy-startup": ProjectEntry(path=str(project_dir))},
+                "default_project": "legacy-startup",
+                "watch_event_index": False,
+            }
+        )
+        config_manager.save_config(updated)
+
+        await initialize_database(updated)
+        await reconcile_projects_with_config(updated)
+
+        _disable_test_env_short_circuit(monkeypatch)
+        monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+
+        created_coroutines = []
+
+        def capture_task(coro):
+            created_coroutines.append(coro)
+            return object()
+
+        sync_calls = []
+
+        class RecordingLegacySyncService:
+            async def sync(self, sync_dir, project_name=None):  # noqa: ANN001
+                sync_calls.append((sync_dir, project_name))
+
+        async def get_sync_service(project):  # noqa: ANN001
+            assert project.name == "legacy-startup"
+            return RecordingLegacySyncService()
+
+        async def run_project_index(request, *, runtime):  # noqa: ANN001
+            raise AssertionError("legacy startup should not run project-index fanout")
+
+        monkeypatch.setattr(
+            "basic_memory.services.initialization.asyncio.create_task", capture_task
+        )
+        monkeypatch.setattr("basic_memory.sync.sync_service.get_sync_service", get_sync_service)
+        monkeypatch.setattr("basic_memory.index.run_local_project_index", run_project_index)
+
+        await initialize_file_sync(updated, quiet=True)
+
+        assert len(created_coroutines) == 1
+        await created_coroutines[0]
+
+        assert sync_calls == [(project_dir, "legacy-startup")]
     finally:
         await db.shutdown_db()
 

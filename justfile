@@ -125,7 +125,8 @@ local-project-index-test:
 # Focused startup wiring for local project-index fanout.
 local-project-index-startup-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/services/test_initialization.py::test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_when_opted_in
+        tests/services/test_initialization.py::test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_by_default \
+        tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
 
 # Focused project-wide indexing orchestration surface tests.
 project-index-contract-test: project-index-surface-test local-project-index-test local-project-index-startup-test
@@ -141,7 +142,7 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
-        tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_when_opted_in
+        tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_by_default
 
 # Focused indexing contract suite for the cloud/core extraction loop.
 index-contract-test: project-index-contract-test event-index-contract-test
