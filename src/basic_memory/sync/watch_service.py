@@ -27,9 +27,9 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index import (
+    LocalWatchEventIndexRequest,
     StorageEventIndexRuntime,
-    local_storage_events_from_watchfiles_changes,
-    run_storage_event_indexing,
+    run_local_watch_event_indexing,
 )
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
@@ -664,14 +664,13 @@ class WatchService:
         start_time = time.time()
         directory = Path(project.path).resolve()
         project_prefix = directory.name
-        events = local_storage_events_from_watchfiles_changes(
-            project_root=directory,
-            project_prefix=project_prefix,
-            changes=changes,
-        )
-        result = await run_storage_event_indexing(
-            events,
-            await self._event_index_runtime_factory.runtime_for_project(project),
+        result = await run_local_watch_event_indexing(
+            LocalWatchEventIndexRequest.from_changes(
+                project_root=directory,
+                project_prefix=project_prefix,
+                changes=changes,
+            ),
+            runtime=await self._event_index_runtime_factory.runtime_for_project(project),
         )
 
         self.state.last_scan = datetime.now()
