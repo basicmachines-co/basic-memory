@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -19,7 +18,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     AcceptedNoteMovePreparer,
     AcceptedPreparedNoteWrite,
     AcceptedNoteReplacePreparer,
-    AcceptedNoteRepositoryFactories,
+    AcceptedNoteWriteRepositories,
     create_accepted_pending_entity,
     delete_accepted_note,
     persist_accepted_note_write,
@@ -235,12 +234,18 @@ class AcceptedNoteMutationPreparerFactory(Protocol):
     def create_note_preparer(self, project: Project) -> AcceptedNoteMutationPreparer: ...
 
 
-type AcceptedNoteMutationEntityRepositoryFactory = Callable[
-    [ProjectId], AcceptedNoteMutationEntityRepository
-]
-type AcceptedNoteMutationNoteContentRepositoryFactory = Callable[
-    [ProjectId], AcceptedNoteMutationNoteContentRepository
-]
+class AcceptedNoteMutationRepositories(Protocol):
+    """Repository lookup capability set for accepted-note mutation orchestration."""
+
+    def entity_repository(
+        self,
+        project_id: ProjectId,
+    ) -> AcceptedNoteMutationEntityRepository: ...
+
+    def note_content_repository(
+        self,
+        project_id: ProjectId,
+    ) -> AcceptedNoteMutationNoteContentRepository: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,10 +253,9 @@ class AcceptedNoteMutationDependencies:
     """Dependencies required by accepted-note mutation orchestration."""
 
     project_repository: AcceptedNoteMutationProjectRepository
-    entity_repository_factory: AcceptedNoteMutationEntityRepositoryFactory
-    note_content_repository_factory: AcceptedNoteMutationNoteContentRepositoryFactory
+    lookup_repositories: AcceptedNoteMutationRepositories
     preparer_factory: AcceptedNoteMutationPreparerFactory
-    accepted_note_repositories: AcceptedNoteRepositoryFactories
+    write_repositories: AcceptedNoteWriteRepositories
     clock: AcceptedNoteMutationClock
     move_policy: AcceptedNoteMutationMovePolicy
 
@@ -348,7 +352,7 @@ async def run_accepted_note_delete(
         project_external_id=request.project_external_id,
         dependencies=dependencies,
     )
-    entity_repository = dependencies.entity_repository_factory(project.id)
+    entity_repository = dependencies.lookup_repositories.entity_repository(project.id)
     entity = await entity_repository.get_by_external_id(
         session,
         request.entity_external_id,
@@ -398,7 +402,7 @@ async def _run_accepted_note_create(
         dependencies=dependencies,
     )
 
-    entity_repository = dependencies.entity_repository_factory(project.id)
+    entity_repository = dependencies.lookup_repositories.entity_repository(project.id)
     conflicting_entity = await entity_repository.get_by_file_path(
         session,
         request.data.file_path,
@@ -427,7 +431,7 @@ async def _run_accepted_note_create(
         project_id=project.id,
         now=now,
         user_profile_value=user_profile_value,
-        repositories=dependencies.accepted_note_repositories,
+        repositories=dependencies.write_repositories,
     )
     persisted = await persist_accepted_note_write(
         session,
@@ -437,7 +441,7 @@ async def _run_accepted_note_create(
         search_content=prepared.search_content,
         last_source=request.source,
         updated_at=now,
-        repositories=dependencies.accepted_note_repositories,
+        repositories=dependencies.write_repositories,
     )
     accepted = plan_accepted_note_write_change(
         status_code=201,
@@ -468,7 +472,7 @@ async def _run_accepted_note_update(
         project_external_id=request.project_external_id,
         dependencies=dependencies,
     )
-    entity_repository = dependencies.entity_repository_factory(project.id)
+    entity_repository = dependencies.lookup_repositories.entity_repository(project.id)
     entity = await entity_repository.get_by_external_id(
         session,
         request.entity_external_id,
@@ -499,7 +503,7 @@ async def _run_accepted_note_update(
             now=now,
             user_profile_value=user_profile_value,
             external_id=request.entity_external_id,
-            repositories=dependencies.accepted_note_repositories,
+            repositories=dependencies.write_repositories,
         )
         current_note_content = None
     else:
@@ -535,7 +539,7 @@ async def _run_accepted_note_update(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         accepted_file_path=entity.file_path,
-        repositories=dependencies.accepted_note_repositories,
+        repositories=dependencies.write_repositories,
     )
     accepted = plan_accepted_note_write_change(
         status_code=201 if created else 200,
@@ -595,7 +599,7 @@ async def _run_accepted_note_edit(
         updated_at=now,
         current_note_content=current_note_content,
         accepted_file_path=entity.file_path,
-        repositories=dependencies.accepted_note_repositories,
+        repositories=dependencies.write_repositories,
     )
     accepted = plan_accepted_note_write_change(
         status_code=200,
@@ -682,7 +686,7 @@ async def _run_accepted_note_move(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         accepted_file_path=prepared_move.file_path,
-        repositories=dependencies.accepted_note_repositories,
+        repositories=dependencies.write_repositories,
     )
     accepted = plan_accepted_note_write_change(
         status_code=200,
@@ -729,7 +733,7 @@ async def load_existing_markdown_note_content(
         project_external_id=project_external_id,
         dependencies=dependencies,
     )
-    entity_repository = dependencies.entity_repository_factory(project.id)
+    entity_repository = dependencies.lookup_repositories.entity_repository(project.id)
     entity = await entity_repository.get_by_external_id(
         session,
         entity_external_id,
@@ -788,7 +792,7 @@ async def load_accepted_note_content(
     missing_kind: AcceptedNoteMutationRejectKind | None,
 ) -> NoteContent | None:
     """Load accepted DB note content or reject if required."""
-    repository = dependencies.note_content_repository_factory(project_id)
+    repository = dependencies.lookup_repositories.note_content_repository(project_id)
     note_content = await repository.get_by_entity_id(session, entity_id)
     if note_content is None and missing_kind is not None:
         reject_accepted_note_mutation(
@@ -807,7 +811,7 @@ async def reject_conflicting_accepted_note_file_path(
     dependencies: AcceptedNoteMutationDependencies,
 ) -> None:
     """Reject target file paths that already belong to another entity."""
-    entity_repository = dependencies.entity_repository_factory(project_id)
+    entity_repository = dependencies.lookup_repositories.entity_repository(project_id)
     conflicting_entity = await entity_repository.get_by_file_path(
         session,
         file_path,

@@ -28,7 +28,6 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     run_accepted_note_update,
 )
 from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
-from basic_memory.indexing.accepted_note_write_runner import AcceptedNoteRepositoryFactories
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import AcceptedNoteContentWrite
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
@@ -292,6 +291,39 @@ class _SearchRepository:
         self.calls.append((session, row))
 
 
+@dataclass(frozen=True, slots=True)
+class _MutationLookupRepositories:
+    entity_lookup_repository: _EntityLookupRepository
+    note_content_lookup_repository: _NoteContentLookupRepository
+
+    def entity_repository(self, project_id: int) -> _EntityLookupRepository:
+        _ = project_id
+        return self.entity_lookup_repository
+
+    def note_content_repository(self, project_id: int) -> _NoteContentLookupRepository:
+        _ = project_id
+        return self.note_content_lookup_repository
+
+
+@dataclass(frozen=True, slots=True)
+class _MutationWriteRepositories:
+    pending_entity_repository_result: _PendingEntityRepository
+    note_content_accept_repository_result: _NoteContentAcceptRepository
+    search_repository_result: _SearchRepository
+
+    def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
+        _ = project_id
+        return self.pending_entity_repository_result
+
+    def note_content_repository(self, project_id: int) -> _NoteContentAcceptRepository:
+        _ = project_id
+        return self.note_content_accept_repository_result
+
+    def search_repository(self, project_id: int) -> _SearchRepository:
+        _ = project_id
+        return self.search_repository_result
+
+
 def _project() -> Project:
     return cast(
         Project,
@@ -394,13 +426,15 @@ def _dependencies(
 ) -> AcceptedNoteMutationDependencies:
     return AcceptedNoteMutationDependencies(
         project_repository=project_repository,
-        entity_repository_factory=lambda _project_id: entity_lookup_repository,
-        note_content_repository_factory=lambda _project_id: note_content_lookup_repository,
+        lookup_repositories=_MutationLookupRepositories(
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+        ),
         preparer_factory=preparer_factory,
-        accepted_note_repositories=AcceptedNoteRepositoryFactories(
-            pending_entity_repository_factory=lambda _project_id: pending_entity_repository,
-            note_content_repository_factory=lambda _project_id: note_content_accept_repository,
-            search_repository_factory=lambda _project_id: search_repository,
+        write_repositories=_MutationWriteRepositories(
+            pending_entity_repository_result=pending_entity_repository,
+            note_content_accept_repository_result=note_content_accept_repository,
+            search_repository_result=search_repository,
         ),
         clock=_FixedClock(_NOW),
         move_policy=move_policy
