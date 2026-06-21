@@ -567,6 +567,16 @@ class RuntimeFactoryLinkResolver:
         return None
 
 
+@dataclass(slots=True)
+class RecordingLocalIndexProjectDependencyProvider:
+    dependencies: LocalIndexProjectDependencies
+    seen_projects: list[Project] = field(default_factory=list)
+
+    async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
+        self.seen_projects.append(project)
+        return self.dependencies
+
+
 async def test_local_project_index_runtime_factory_composes_inline_runtime(
     tmp_path: Path,
 ) -> None:
@@ -581,11 +591,7 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
         link_resolver=RuntimeFactoryLinkResolver(),
         search_service=RuntimeFactorySearchIndex(),
     )
-    seen_projects: list[Project] = []
-
-    async def dependency_provider(project: Project) -> LocalIndexProjectDependencies:
-        seen_projects.append(project)
-        return dependencies
+    dependency_provider = RecordingLocalIndexProjectDependencyProvider(dependencies)
 
     factory = LocalProjectIndexRuntimeFactory(
         dependency_provider=dependency_provider,
@@ -601,7 +607,7 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
 
     runtime = await factory.runtime_for_project(project)
 
-    assert seen_projects == [project]
+    assert dependency_provider.seen_projects == [project]
     assert isinstance(runtime.observed_file_source, LocalProjectIndexObservedFileSource)
     assert isinstance(runtime.change_detector, ChangeDetector)
     assert isinstance(runtime.maintenance_runner, StoreProjectIndexMaintenanceRunner)

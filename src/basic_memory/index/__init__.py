@@ -37,6 +37,7 @@ from basic_memory.index.local_watch import (
     run_local_watch_event_indexing,
 )
 from basic_memory.index.local_dependencies import (
+    DefaultLocalIndexProjectDependencyProvider,
     LocalIndexProjectDependencies,
     LocalMarkdownFileIndexer,
     build_local_index_project_dependencies,
@@ -106,6 +107,7 @@ __all__ = [
     "InlineStorageEventResultRecorder",
     "InlineProjectIndexBatchEnqueuer",
     "NoopInlineStorageEventResultRecorder",
+    "DefaultLocalIndexProjectDependencyProvider",
     "LocalIndexProjectDependencies",
     "LocalMarkdownFileIndexer",
     "LocalProjectIndexFileRunner",

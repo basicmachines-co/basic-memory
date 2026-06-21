@@ -14,9 +14,9 @@ from basic_memory import db
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
+    DefaultLocalIndexProjectDependencyProvider,
     LocalIndexProjectDependencies,
     LocalIndexProjectDependencyProvider,
-    build_local_index_project_dependencies,
 )
 from basic_memory.index.local_runtime import (
     LOCAL_EVENT_INDEX_TENANT_ID,
@@ -310,13 +310,13 @@ class LocalProjectIndexRuntimeFactory:
     """Build project-wide local indexing runtime dependencies for one project."""
 
     dependency_provider: LocalIndexProjectDependencyProvider = (
-        build_local_index_project_dependencies
+        DefaultLocalIndexProjectDependencyProvider()
     )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     batch_size: int = 100
 
     async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
-        return await self.dependency_provider(project)
+        return await self.dependency_provider.dependencies_for_project(project)
 
     def runtime_from_dependencies(
         self,

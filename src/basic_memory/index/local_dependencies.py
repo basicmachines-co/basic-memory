@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -125,10 +125,19 @@ class LocalIndexProjectDependencies:
     search_service: LocalIndexSearchService
 
 
-type LocalIndexProjectDependencyProvider = Callable[
-    [Project],
-    Awaitable[LocalIndexProjectDependencies],
-]
+class LocalIndexProjectDependencyProvider(Protocol):
+    """Provide local indexing dependencies for a project."""
+
+    async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
+        """Build local indexing dependencies for one project."""
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultLocalIndexProjectDependencyProvider:
+    """Default provider that composes local filesystem index dependencies."""
+
+    async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
+        return await build_local_index_project_dependencies(project)
 
 
 @dataclass(frozen=True, slots=True)

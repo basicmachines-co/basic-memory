@@ -13,8 +13,8 @@ from basic_memory.index.inline_operations import (
     InlineStorageEventOperationProcessor,
 )
 from basic_memory.index.local_dependencies import (
+    DefaultLocalIndexProjectDependencyProvider,
     LocalIndexProjectDependencyProvider,
-    build_local_index_project_dependencies,
 )
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
@@ -174,13 +174,13 @@ class LocalWatchEventIndexRuntimeFactory:
     """Build local event-index runtime dependencies for a watched project."""
 
     dependency_provider: LocalIndexProjectDependencyProvider = (
-        build_local_index_project_dependencies
+        DefaultLocalIndexProjectDependencyProvider()
     )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     index_embeddings: bool = True
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
-        dependencies = await self.dependency_provider(project)
+        dependencies = await self.dependency_provider.dependencies_for_project(project)
         project_ref = ProjectRuntimeReference.from_project(project)
         project_prefix = local_project_prefix(project)
         metadata_source = LocalStorageFileMetadataSource(dependencies.file_service)
