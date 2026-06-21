@@ -25,11 +25,16 @@ from basic_memory.indexing import (
     ExternalFileDeleteResult,
     FileIndexChecker,
     IndexFileJobResult,
+    IndexFileRelationResolutionContext,
     IndexFileObjectMetadata,
     OrphanSearchIndex,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
+    RepositoryRelationResolutionRuntime,
+    RelationResolutionRuntime,
     StorageCurrentFileChecksumSource,
+    plan_index_file_relation_resolution,
+    resolve_project_relations,
 )
 from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
@@ -100,7 +105,10 @@ class LocalExternalFileDeleteObjects:
 class LocalInlineStorageEventResultRecorder:
     """Log inline local event-index results and clean search state after deletes."""
 
+    tenant_id: TenantId
+    project: ProjectRuntimeReference
     search_service: OrphanSearchIndex[Entity]
+    relation_runtime: RelationResolutionRuntime
 
     async def index_file_completed(
         self,
@@ -113,6 +121,26 @@ class LocalInlineStorageEventResultRecorder:
             status=result.status,
             reason=result.reason,
             entity_id=result.entity_id,
+        )
+        relation_request = plan_index_file_relation_resolution(
+            IndexFileRelationResolutionContext(
+                tenant_id=self.tenant_id,
+                project_id=self.project.project_id,
+                project_path=self.project.project_path,
+                workflow_id=None,
+                status=result.status,
+            )
+        )
+        if relation_request is None:
+            return
+        relation_result = await resolve_project_relations(self.relation_runtime)
+        logger.info(
+            "Local event-index relation repair completed",
+            project_id=relation_request.project_id,
+            project_path=relation_request.project_path,
+            resolved=relation_result.resolved,
+            remaining=relation_result.remaining,
+            passes=relation_result.passes,
         )
 
     async def delete_file_completed(
@@ -209,7 +237,16 @@ class LocalWatchEventIndexRuntimeFactory:
             ),
             delete_objects=LocalExternalFileDeleteObjects(dependencies.file_service),
             result_recorder=LocalInlineStorageEventResultRecorder(
-                dependencies.search_service,
+                tenant_id=self.tenant_id,
+                project=project_ref,
+                search_service=dependencies.search_service,
+                relation_runtime=RepositoryRelationResolutionRuntime(
+                    session_maker=dependencies.session_maker,
+                    relation_repository=dependencies.relation_repository,
+                    entity_repository=dependencies.entity_repository,
+                    link_resolver=dependencies.link_resolver,
+                    entity_indexer=dependencies.search_service,
+                ),
             ),
             index_embeddings=self.index_embeddings,
         )

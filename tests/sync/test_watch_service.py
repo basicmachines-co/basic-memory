@@ -534,6 +534,63 @@ async def test_handle_changes_with_local_event_index_runtime_processes_move_as_d
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    sync_service,
+    relation_repository,
+):
+    """Local event-index updates run the same post-index relation repair as cloud jobs."""
+
+    source_path = project_config.home / "source.md"
+    await create_test_file(
+        source_path,
+        """---
+type: note
+title: Source
+---
+# Source
+
+- relates_to [[Target Note]]
+""",
+    )
+    await sync_service.sync(project_config.home)
+
+    async with db.scoped_session(session_maker) as session:
+        unresolved_before = await relation_repository.find_unresolved_relations(session)
+    assert len(unresolved_before) == 1
+
+    target_path = project_config.home / "target-note.md"
+    await create_test_file(
+        target_path,
+        """---
+type: note
+title: Target Note
+---
+# Target Note
+""",
+    )
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.added, str(target_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        unresolved_after = await relation_repository.find_unresolved_relations(session)
+    assert unresolved_after == []
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_handle_file_add(watch_service, project_config, test_project, entity_repository):
     """Test handling new file creation."""
     project_dir = project_config.home
