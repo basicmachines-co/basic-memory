@@ -1,6 +1,7 @@
 """Tests for portable project-delete cleanup orchestration."""
 
 from collections.abc import AsyncGenerator
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -104,6 +105,18 @@ class FakeProjectDeleteRepositories:
         return self.repository
 
 
+@dataclass(slots=True)
+class RecordingProjectDeleteSessionProvider:
+    opened_session_makers: list[async_sessionmaker[AsyncSession]]
+
+    def open_session(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AbstractAsyncContextManager[AsyncSession]:
+        self.opened_session_makers.append(session_maker)
+        return session_maker()
+
+
 def project_delete_request(
     *,
     project_id: int = 101,
@@ -201,6 +214,23 @@ async def test_repository_project_delete_preflight_snapshots_inactive_project_fi
             )
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_repository_project_delete_preflight_uses_session_provider(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    request = project_delete_request(project_id=project.id)
+    session_provider = RecordingProjectDeleteSessionProvider(opened_session_makers=[])
+
+    result = await RepositoryProjectDeletePreflight(
+        session_maker=project_delete_session_maker,
+        session_provider=session_provider,
+    ).prepare_project_delete(request)
+
+    assert result.file_snapshots
+    assert session_provider.opened_session_makers == [project_delete_session_maker]
 
 
 @pytest.mark.asyncio

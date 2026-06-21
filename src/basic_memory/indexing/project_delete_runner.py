@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Protocol, Self
@@ -23,10 +23,25 @@ from basic_memory.runtime import (
     plan_note_file_delete_job_request,
 )
 
-type ProjectDeleteSessionScope = Callable[
-    [async_sessionmaker[AsyncSession]],
-    AbstractAsyncContextManager[AsyncSession],
-]
+
+class ProjectDeleteSessionProvider(Protocol):
+    """Session provider for project delete cleanup."""
+
+    def open_session(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AbstractAsyncContextManager[AsyncSession]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultProjectDeleteSessionProvider:
+    """Default session provider for local project delete cleanup."""
+
+    def open_session(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AbstractAsyncContextManager[AsyncSession]:
+        return db.scoped_session(session_maker)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,13 +141,13 @@ class RepositoryProjectDeletePreflight:
     """Repository-backed preflight for one project hard-delete job."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    session_scope: ProjectDeleteSessionScope = db.scoped_session
+    session_provider: ProjectDeleteSessionProvider = DefaultProjectDeleteSessionProvider()
 
     async def prepare_project_delete(
         self,
         request: RuntimeProjectDeleteJobRequest,
     ) -> ProjectDeletePreflightResult:
-        async with self.session_scope(self.session_maker) as session:
+        async with self.session_provider.open_session(self.session_maker) as session:
             project = await session.get(Project, request.project_id)
             if project is None:
                 return ProjectDeletePreflightResult.terminal(
@@ -175,13 +190,13 @@ class RepositoryProjectHardDeleter:
     """Repository-backed hard deleter for one inactive project."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    session_scope: ProjectDeleteSessionScope = db.scoped_session
+    session_provider: ProjectDeleteSessionProvider = DefaultProjectDeleteSessionProvider()
     repositories: ProjectDeleteRepositories = field(
         default_factory=DefaultProjectDeleteRepositories
     )
 
     async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool:
-        async with self.session_scope(self.session_maker) as session:
+        async with self.session_provider.open_session(self.session_maker) as session:
             return await self.repositories.project_repository().delete(
                 session,
                 request.project_id,
