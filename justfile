@@ -168,6 +168,7 @@ event-index-contract-test:
         tests/indexing/test_external_file_delete_runner.py \
         tests/index/test_filesystem_events.py \
         tests/index/test_inline_storage_event_processor.py \
+        tests/index/test_local_watch_ignore_parity.py \
         tests/index/test_local_watch_regular_file_parity.py \
         tests/index/test_local_watch_orchestration.py \
         tests/index/test_repository_storage_event_project_resolution.py \

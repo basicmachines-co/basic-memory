@@ -677,6 +677,7 @@ class WatchService:
                 project_root=directory,
                 project_prefix=project_prefix,
                 changes=changes,
+                ignore_patterns=self._get_ignore_patterns(directory),
             ),
             runtime=await self._event_index_runtime_factory.runtime_for_project(project),
         )

@@ -9,6 +9,7 @@ from pathlib import Path
 from watchfiles import Change
 from watchfiles.main import FileChange
 
+from basic_memory.ignore_utils import should_ignore_path
 from basic_memory.runtime import (
     StorageBucketName,
     StorageEventInput,
@@ -21,6 +22,7 @@ from basic_memory.runtime.storage_project_resolution import storage_object_key_f
 
 LOCAL_FILESYSTEM_BUCKET_NAME: StorageBucketName = "local-filesystem"
 LOCAL_FILESYSTEM_CREATED_EVENT = "OBJECT_CREATED_PUT"
+type LocalFilesystemIgnorePatterns = set[str]
 
 
 def local_storage_events_from_watchfiles_changes(
@@ -30,6 +32,7 @@ def local_storage_events_from_watchfiles_changes(
     changes: Iterable[FileChange],
     event_time: str | None = None,
     bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME,
+    ignore_patterns: LocalFilesystemIgnorePatterns | None = None,
 ) -> tuple[StorageEventPayload, ...]:
     """Convert watchfiles changes into normalized storage-event payloads."""
     observed_at = event_time or datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -42,6 +45,7 @@ def local_storage_events_from_watchfiles_changes(
             changes=changes,
             event_time=observed_at,
             bucket_name=bucket_name,
+            ignore_patterns=ignore_patterns,
         )
     )
 
@@ -53,6 +57,7 @@ def local_storage_event_inputs_from_watchfiles_changes(
     changes: Iterable[FileChange],
     event_time: str,
     bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME,
+    ignore_patterns: LocalFilesystemIgnorePatterns | None = None,
 ) -> tuple[StorageEventInput, ...]:
     """Convert watchfiles changes into runtime storage-event inputs."""
     project_root = project_root.expanduser().resolve()
@@ -66,6 +71,7 @@ def local_storage_event_inputs_from_watchfiles_changes(
             path=Path(path),
             event_time=event_time,
             bucket_name=bucket_name,
+            ignore_patterns=ignore_patterns,
         )
         if event_input is not None:
             event_inputs.append(event_input)
@@ -82,11 +88,14 @@ def local_storage_event_input_from_watchfiles_change(
     path: Path,
     event_time: str,
     bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME,
+    ignore_patterns: LocalFilesystemIgnorePatterns | None = None,
 ) -> StorageEventInput | None:
     """Normalize one watchfiles change into a storage-event input."""
     path = path.expanduser().resolve()
     relative_path = path.relative_to(project_root).as_posix()
     if local_relative_path_is_filtered(relative_path):
+        return None
+    if ignore_patterns is not None and should_ignore_path(path, project_root, ignore_patterns):
         return None
 
     if path.exists() and path.is_dir():

@@ -10,6 +10,7 @@ from watchfiles.main import FileChange
 
 from basic_memory.index.filesystem import (
     LOCAL_FILESYSTEM_BUCKET_NAME,
+    LocalFilesystemIgnorePatterns,
     local_storage_events_from_watchfiles_changes,
 )
 from basic_memory.index.local_moves import LocalWatchMoveProcessor
@@ -33,6 +34,7 @@ class LocalWatchEventIndexRequest:
     changes: tuple[FileChange, ...]
     event_time: str | None = None
     bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME
+    ignore_patterns: LocalFilesystemIgnorePatterns | None = None
 
     @classmethod
     def from_changes(
@@ -43,6 +45,7 @@ class LocalWatchEventIndexRequest:
         changes: Iterable[FileChange],
         event_time: str | None = None,
         bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME,
+        ignore_patterns: LocalFilesystemIgnorePatterns | None = None,
     ) -> "LocalWatchEventIndexRequest":
         """Build a stable request from a watchfiles change iterable."""
         return cls(
@@ -51,6 +54,7 @@ class LocalWatchEventIndexRequest:
             changes=tuple(changes),
             event_time=event_time,
             bucket_name=bucket_name,
+            ignore_patterns=ignore_patterns,
         )
 
 
@@ -73,6 +77,7 @@ async def run_local_watch_event_indexing(
         changes=request.changes,
         event_time=request.event_time,
         bucket_name=request.bucket_name,
+        ignore_patterns=request.ignore_patterns,
     )
     result = RuntimeStorageEventProcessingResult.empty()
     if isinstance(runtime, LocalWatchStorageEventIndexRuntime):
