@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -17,7 +17,6 @@ from basic_memory.indexing import (
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
-    AcceptedNoteMutationRejectKind,
     AcceptedNoteUpdateMutation,
     run_accepted_note_create,
     run_accepted_note_delete,
@@ -32,19 +31,7 @@ from basic_memory.runtime import (
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 
-type NoteContentMutationRejectionMapper = Callable[
-    [AcceptedNoteMutationRejection],
-    Exception,
-]
-
 AcceptedNoteChange = RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]
-
-_REJECTION_STATUS_CODES: dict[AcceptedNoteMutationRejectKind, int] = {
-    AcceptedNoteMutationRejectKind.bad_request: 400,
-    AcceptedNoteMutationRejectKind.conflict: 409,
-    AcceptedNoteMutationRejectKind.not_found: 404,
-    AcceptedNoteMutationRejectKind.unsupported_media_type: 415,
-}
 
 
 class NoteContentMutationServiceError(Exception):
@@ -61,7 +48,7 @@ def note_content_mutation_error_from_rejection(
 ) -> NoteContentMutationServiceError:
     """Map core accepted-note mutation rejections into route-facing errors."""
     return NoteContentMutationServiceError(
-        _REJECTION_STATUS_CODES[rejection.kind],
+        rejection.kind.http_status_code,
         rejection.detail,
     )
 
@@ -98,11 +85,9 @@ class NoteContentMutationService:
         *,
         session_maker: async_sessionmaker[AsyncSession],
         mutation_dependencies: AcceptedNoteMutationDependencies,
-        rejection_mapper: NoteContentMutationRejectionMapper,
     ) -> None:
         self.session_maker = session_maker
         self.mutation_dependencies = mutation_dependencies
-        self.rejection_mapper = rejection_mapper
 
     async def create_note(
         self,
@@ -132,7 +117,7 @@ class NoteContentMutationService:
                     dependencies=self.mutation_dependencies,
                 )
         except AcceptedNoteMutationRejected as error:
-            raise self.rejection_mapper(error.rejection) from error
+            raise note_content_mutation_error_from_rejection(error.rejection) from error
 
     async def update_note(
         self,
@@ -164,7 +149,7 @@ class NoteContentMutationService:
                     dependencies=self.mutation_dependencies,
                 )
         except AcceptedNoteMutationRejected as error:
-            raise self.rejection_mapper(error.rejection) from error
+            raise note_content_mutation_error_from_rejection(error.rejection) from error
 
     async def edit_note(
         self,
@@ -196,7 +181,7 @@ class NoteContentMutationService:
                     dependencies=self.mutation_dependencies,
                 )
         except AcceptedNoteMutationRejected as error:
-            raise self.rejection_mapper(error.rejection) from error
+            raise note_content_mutation_error_from_rejection(error.rejection) from error
 
     async def move_note(
         self,
@@ -228,7 +213,7 @@ class NoteContentMutationService:
                     dependencies=self.mutation_dependencies,
                 )
         except AcceptedNoteMutationRejected as error:
-            raise self.rejection_mapper(error.rejection) from error
+            raise note_content_mutation_error_from_rejection(error.rejection) from error
 
     async def delete_note(
         self,
@@ -248,4 +233,4 @@ class NoteContentMutationService:
                     dependencies=self.mutation_dependencies,
                 )
         except AcceptedNoteMutationRejected as error:
-            raise self.rejection_mapper(error.rejection) from error
+            raise note_content_mutation_error_from_rejection(error.rejection) from error

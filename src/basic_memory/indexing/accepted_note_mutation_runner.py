@@ -62,6 +62,19 @@ class AcceptedNoteMutationRejectKind(StrEnum):
     not_found = "not_found"
     unsupported_media_type = "unsupported_media_type"
 
+    @property
+    def http_status_code(self) -> int:
+        """Return the route status that matches this rejection behavior."""
+        match self:
+            case AcceptedNoteMutationRejectKind.bad_request:
+                return 400
+            case AcceptedNoteMutationRejectKind.conflict:
+                return 409
+            case AcceptedNoteMutationRejectKind.not_found:
+                return 404
+            case AcceptedNoteMutationRejectKind.unsupported_media_type:
+                return 415
+
 
 @dataclass(frozen=True, slots=True)
 class AcceptedNoteMutationRejection:

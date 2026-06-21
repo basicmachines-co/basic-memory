@@ -16,17 +16,11 @@ from basic_memory.indexing import (
     DirectoryDeleteAcceptanceRequest,
     DirectoryDeleteRejected,
     DirectoryDeleteRejection,
-    DirectoryDeleteRejectKind,
     DirectoryDeleteRuntime,
     accept_directory_delete,
     finish_directory_delete_acceptance,
     normalize_directory_delete_path,
 )
-
-_REJECTION_STATUS_CODES: dict[DirectoryDeleteRejectKind, int] = {
-    DirectoryDeleteRejectKind.bad_request: 400,
-    DirectoryDeleteRejectKind.not_found: 404,
-}
 
 
 class DirectoryDeleteSessionMaker(Protocol):
@@ -49,7 +43,7 @@ def directory_delete_service_error_from_rejection(
 ) -> DirectoryDeleteServiceError:
     """Map core directory-delete rejections into route-facing errors."""
     return DirectoryDeleteServiceError(
-        _REJECTION_STATUS_CODES[rejection.kind],
+        rejection.kind.http_status_code,
         rejection.detail,
     )
 

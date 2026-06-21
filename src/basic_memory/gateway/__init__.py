@@ -14,10 +14,8 @@ from basic_memory.gateway.directory_deletes import (
 )
 from basic_memory.gateway.note_content_reads import (
     NoteContentQueryService,
-    NoteContentReadRepairFileReaderFactory,
 )
 from basic_memory.gateway.note_content_writes import (
-    NoteContentMutationRejectionMapper,
     NoteContentMutationService,
     NoteContentMutationServiceError,
     note_content_mutation_error_from_rejection,
@@ -27,11 +25,9 @@ __all__ = [
     "DirectoryDeleteService",
     "DirectoryDeleteServiceError",
     "DirectoryDeleteSessionMaker",
-    "NoteContentMutationRejectionMapper",
     "NoteContentMutationService",
     "NoteContentMutationServiceError",
     "NoteContentQueryService",
-    "NoteContentReadRepairFileReaderFactory",
     "directory_delete_service_error_from_rejection",
     "note_content_mutation_error_from_rejection",
 ]

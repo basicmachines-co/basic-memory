@@ -14,6 +14,8 @@ from basic_memory.indexing import (
     AcceptedNoteMutationRejection,
     AcceptedNoteMutationRejectKind,
     DirectoryDeleteRuntime,
+    DirectoryDeleteRejectKind,
+    NoteContentReadRepairFile,
     NoteContentReadRepairPreflight,
     NoteContentReadRepairTarget,
     NoteContentReadView,
@@ -111,6 +113,22 @@ class FakeDirectoryFileDeleteEnqueuer:
         request: RuntimeNoteFileDeleteJobRequest,
     ) -> None:
         self.requests.append(request)
+
+
+class FakeReadRepairFileReader:
+    def __init__(self, markdown_content: str) -> None:
+        self.markdown_content = markdown_content
+        self.targets: list[NoteContentReadRepairTarget] = []
+
+    async def read_note_content_repair_file(
+        self,
+        target: NoteContentReadRepairTarget,
+    ) -> NoteContentReadRepairFile:
+        self.targets.append(target)
+        return NoteContentReadRepairFile(
+            markdown_content=self.markdown_content,
+            observed_at=datetime(2026, 4, 13, 13, 0, tzinfo=UTC),
+        )
 
 
 def _entity(**overrides: object) -> SimpleNamespace:
@@ -238,12 +256,95 @@ async def test_note_content_read_repair_requires_real_file_reader(monkeypatch) -
 
     service = NoteContentQueryService(session_maker=tenant_session_maker)
 
-    with pytest.raises(RuntimeError, match="requires a file reader factory"):
+    with pytest.raises(RuntimeError, match="requires a file reader"):
         await service.reconcile_note_content_from_file(
             project_external_id="project-123",
             entity_external_id="note-456",
             source="api",
         )
+
+
+@pytest.mark.asyncio
+async def test_note_content_read_repair_uses_reader_behavior(monkeypatch) -> None:
+    tenant_session_maker = _session_maker()
+    session = object()
+    target = NoteContentReadRepairTarget(
+        project=SimpleNamespace(id=7, path="/tmp/main"),
+        entity=_entity(),
+    )
+    reader = FakeReadRepairFileReader("# Repaired\n")
+    reconciled: list[dict[str, object]] = []
+
+    @asynccontextmanager
+    async def fake_scoped_session(received_session_maker):
+        assert received_session_maker is tenant_session_maker
+        yield session
+
+    async def fake_prepare_note_content_read_repair(
+        received_session,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+    ):
+        assert received_session is session
+        assert project_external_id == "project-123"
+        assert entity_external_id == "note-456"
+        return NoteContentReadRepairPreflight(
+            status=RuntimeNoteContentReadRepairStatus.read_file,
+            target=target,
+        )
+
+    async def fake_run_note_content_read_repair(
+        repair_preflight,
+        *,
+        session_maker,
+        file_reader,
+        source: str,
+    ):
+        assert repair_preflight.require_target() is target
+        assert session_maker is tenant_session_maker
+        repair_file = await file_reader.read_note_content_repair_file(target)
+        reconciled.append(
+            {
+                "markdown_content": repair_file.markdown_content,
+                "observed_at": repair_file.observed_at,
+                "source": source,
+            }
+        )
+        return SimpleNamespace(repaired=True)
+
+    monkeypatch.setattr(note_content_reads.db, "scoped_session", fake_scoped_session)
+    monkeypatch.setattr(
+        note_content_reads,
+        "prepare_note_content_read_repair_with_default_repositories",
+        fake_prepare_note_content_read_repair,
+    )
+    monkeypatch.setattr(
+        note_content_reads,
+        "run_note_content_read_repair_with_default_reconciler",
+        fake_run_note_content_read_repair,
+    )
+
+    service = NoteContentQueryService(
+        session_maker=tenant_session_maker,
+        read_repair_file_reader=reader,
+    )
+
+    repaired = await service.reconcile_note_content_from_file(
+        project_external_id="project-123",
+        entity_external_id="note-456",
+        source="read_repair",
+    )
+
+    assert repaired is True
+    assert reader.targets == [target]
+    assert reconciled == [
+        {
+            "markdown_content": "# Repaired\n",
+            "observed_at": datetime(2026, 4, 13, 13, 0, tzinfo=UTC),
+            "source": "read_repair",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -269,7 +370,6 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
     service = NoteContentMutationService(
         session_maker=tenant_session_maker,
         mutation_dependencies=dependencies,
-        rejection_mapper=lambda rejection: NoteContentMutationServiceError(499, rejection.detail),
     )
 
     accepted = await service.create_note(
@@ -315,7 +415,6 @@ async def test_note_content_mutation_service_maps_core_rejections(monkeypatch) -
     service = NoteContentMutationService(
         session_maker=tenant_session_maker,
         mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
-        rejection_mapper=lambda rejection: NoteContentMutationServiceError(409, rejection.detail),
     )
 
     with pytest.raises(NoteContentMutationServiceError) as exc_info:
@@ -328,6 +427,15 @@ async def test_note_content_mutation_service_maps_core_rejections(monkeypatch) -
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "A note with this external_id already exists."
+
+
+def test_rejection_kinds_own_route_status_behavior() -> None:
+    assert AcceptedNoteMutationRejectKind.bad_request.http_status_code == 400
+    assert AcceptedNoteMutationRejectKind.conflict.http_status_code == 409
+    assert AcceptedNoteMutationRejectKind.not_found.http_status_code == 404
+    assert AcceptedNoteMutationRejectKind.unsupported_media_type.http_status_code == 415
+    assert DirectoryDeleteRejectKind.bad_request.http_status_code == 400
+    assert DirectoryDeleteRejectKind.not_found.http_status_code == 404
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,15 @@ class DirectoryDeleteRejectKind(StrEnum):
     bad_request = "bad_request"
     not_found = "not_found"
 
+    @property
+    def http_status_code(self) -> int:
+        """Return the route status that matches this rejection behavior."""
+        match self:
+            case DirectoryDeleteRejectKind.bad_request:
+                return 400
+            case DirectoryDeleteRejectKind.not_found:
+                return 404
+
 
 @dataclass(frozen=True, slots=True)
 class DirectoryDeleteRejection:

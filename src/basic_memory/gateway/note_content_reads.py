@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing import (
     NoteContentReadRepairFileReader,
-    NoteContentReadRepairTarget,
     NoteContentReadView,
     load_note_content_read_view_with_default_repositories,
     note_content_resource_from_read_view,
@@ -22,11 +19,6 @@ from basic_memory.runtime import (
     RuntimeNoteContentResource,
     RuntimeNoteContentResponsePayload,
 )
-
-type NoteContentReadRepairFileReaderFactory = Callable[
-    [NoteContentReadRepairTarget[Project, Entity]],
-    NoteContentReadRepairFileReader[Project, Entity],
-]
 
 
 async def load_note_content_query_view(
@@ -51,10 +43,10 @@ class NoteContentQueryService:
         self,
         *,
         session_maker: async_sessionmaker[AsyncSession],
-        read_repair_file_reader_factory: NoteContentReadRepairFileReaderFactory | None = None,
+        read_repair_file_reader: NoteContentReadRepairFileReader[Project, Entity] | None = None,
     ) -> None:
         self.session_maker = session_maker
-        self.read_repair_file_reader_factory = read_repair_file_reader_factory
+        self.read_repair_file_reader = read_repair_file_reader
 
     async def get_note_entity_payload(
         self,
@@ -104,15 +96,15 @@ class NoteContentQueryService:
             if not repair_preflight.should_read_file:
                 return repair_preflight.repaired
 
-            repair_target = repair_preflight.require_target()
+            repair_preflight.require_target()
 
-        if self.read_repair_file_reader_factory is None:
-            raise RuntimeError("note-content read repair requires a file reader factory")
+        if self.read_repair_file_reader is None:
+            raise RuntimeError("note-content read repair requires a file reader")
 
         repair_run = await run_note_content_read_repair_with_default_reconciler(
             repair_preflight,
             session_maker=self.session_maker,
-            file_reader=self.read_repair_file_reader_factory(repair_target),
+            file_reader=self.read_repair_file_reader,
             source=source,
         )
         return repair_run.repaired
