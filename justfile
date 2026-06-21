@@ -175,6 +175,7 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_updates_existing_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_coalesces_add_and_modify \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_multiple_files_once \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_treats_delete_add_same_path_as_update \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_handles_atomic_and_true_deletes \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
