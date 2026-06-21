@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing.forward_reference_resolution import ForwardReferenceUpdate
+from basic_memory.indexing.forward_reference_resolution import (
+    ForwardReferenceLinkResolver,
+    ForwardReferenceUpdate,
+)
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.project_index_runtime import (
     ProjectIndexRuntime,
@@ -144,6 +147,12 @@ class NoopEntityIndexer:
         raise AssertionError(msg)
 
 
+@dataclass(slots=True)
+class NoopForwardReferenceLinkResolver:
+    async def resolve_link_texts(self, link_texts: Sequence[str]) -> dict[str, int | None]:
+        return {}
+
+
 def make_runtime(
     *,
     vector_entity_source: RecordingVectorEntitySource | None = None,
@@ -168,15 +177,12 @@ def make_runtime(
     )
 
 
-async def resolve_no_links(_link_texts: Sequence[str]) -> dict[str, int | None]:
-    return {}
-
-
 def test_build_default_project_index_runtime_composes_repository_backed_runtime() -> None:
     session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker()
     vector_sync = NoopVectorSync()
     entity_repository = NoopEntityRepository()
     entity_indexer = NoopEntityIndexer()
+    link_resolver: ForwardReferenceLinkResolver = NoopForwardReferenceLinkResolver()
 
     runtime = build_default_project_index_runtime(
         project_id=7,
@@ -184,7 +190,7 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
         vector_sync=vector_sync,
         entity_repository=entity_repository,
         entity_indexer=entity_indexer,
-        resolve_link_texts=resolve_no_links,
+        link_resolver=link_resolver,
     )
 
     assert isinstance(runtime, ProjectIndexRuntime)
@@ -203,7 +209,7 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
         runtime.forward_reference_resolution_runtime,
         RepositoryForwardReferenceResolutionRuntime,
     )
-    assert runtime.forward_reference_resolution_runtime.resolve_link_texts is resolve_no_links
+    assert runtime.forward_reference_resolution_runtime.link_resolver is link_resolver
     assert isinstance(
         runtime.forward_reference_entity_refresher,
         RepositoryForwardReferenceEntityRefreshRuntime,

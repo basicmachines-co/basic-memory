@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.forward_reference_resolution as forward_resolution_module
 from basic_memory.indexing.forward_reference_resolution import (
+    ForwardReferenceLinkResolver,
     ForwardReferenceResolutionPlan,
     ForwardReferenceResolutionRun,
     ForwardReferenceUpdate,
@@ -50,6 +51,19 @@ class RecordingForwardReferenceRuntime:
         updates: Sequence[ForwardReferenceUpdate],
     ) -> None:
         self.applied_updates = tuple(updates)
+
+
+@dataclass(slots=True)
+class RecordingForwardReferenceLinkResolver:
+    resolved_targets: dict[str, int | None]
+    calls: list[tuple[str, ...]]
+
+    async def resolve_link_texts(
+        self,
+        link_texts: Sequence[str],
+    ) -> dict[str, int | None]:
+        self.calls.append(tuple(link_texts))
+        return self.resolved_targets
 
 
 class RecordingForwardReferenceEntityRefreshRuntime:
@@ -238,14 +252,14 @@ async def test_run_forward_reference_resolution_skips_apply_without_updates() ->
 @pytest.mark.asyncio
 async def test_repository_forward_reference_runtime_uses_link_resolver() -> None:
     calls: list[tuple[str, ...]] = []
-
-    async def resolve_link_texts(link_texts: Sequence[str]) -> dict[str, int | None]:
-        calls.append(tuple(link_texts))
-        return {"Target": 20, "Missing": None}
+    link_resolver: ForwardReferenceLinkResolver = RecordingForwardReferenceLinkResolver(
+        resolved_targets={"Target": 20, "Missing": None},
+        calls=calls,
+    )
 
     runtime = RepositoryForwardReferenceResolutionRuntime(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        resolve_link_texts=resolve_link_texts,
+        link_resolver=link_resolver,
     )
 
     result = await runtime.resolve_forward_reference_link_texts(("Target", "Missing"))
@@ -295,9 +309,10 @@ async def test_repository_forward_reference_runtime_applies_updates(
 ) -> None:
     session_maker = cast(async_sessionmaker[AsyncSession], object())
     session = FakeForwardReferenceSession()
-
-    async def resolve_link_texts(_link_texts: Sequence[str]) -> dict[str, int | None]:
-        return {}
+    link_resolver: ForwardReferenceLinkResolver = RecordingForwardReferenceLinkResolver(
+        resolved_targets={},
+        calls=[],
+    )
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -310,7 +325,7 @@ async def test_repository_forward_reference_runtime_applies_updates(
 
     runtime = RepositoryForwardReferenceResolutionRuntime(
         session_maker=session_maker,
-        resolve_link_texts=resolve_link_texts,
+        link_resolver=link_resolver,
     )
 
     await runtime.apply_forward_reference_updates(
@@ -340,8 +355,10 @@ async def test_repository_forward_reference_runtime_applies_updates(
 async def test_repository_forward_reference_runtime_skips_empty_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def resolve_link_texts(_link_texts: Sequence[str]) -> dict[str, int | None]:
-        return {}
+    link_resolver: ForwardReferenceLinkResolver = RecordingForwardReferenceLinkResolver(
+        resolved_targets={},
+        calls=[],
+    )
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -354,7 +371,7 @@ async def test_repository_forward_reference_runtime_skips_empty_updates(
 
     runtime = RepositoryForwardReferenceResolutionRuntime(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        resolve_link_texts=resolve_link_texts,
+        link_resolver=link_resolver,
     )
 
     await runtime.apply_forward_reference_updates(())

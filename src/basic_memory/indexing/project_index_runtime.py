@@ -18,7 +18,7 @@ from basic_memory.indexing.forward_reference_resolution import (
     ForwardReferenceEntityRefreshFailure,
     ForwardReferenceEntityRefreshRun,
     ForwardReferenceEntityRefreshRuntime,
-    ForwardReferenceLinkTextResolver,
+    ForwardReferenceLinkResolver,
     ForwardReferenceRelationSource,
     ForwardReferenceResolutionRun,
     ForwardReferenceResolutionRuntime,
@@ -223,7 +223,7 @@ def build_default_project_index_runtime(
     vector_sync: VectorSyncExecutor,
     entity_repository: ForwardReferenceEntityRepository,
     entity_indexer: ForwardReferenceEntityIndexer,
-    resolve_link_texts: ForwardReferenceLinkTextResolver,
+    link_resolver: ForwardReferenceLinkResolver,
 ) -> ProjectIndexRuntime:
     """Compose the default repository-backed project-index runtime."""
     vector_entity_source = RepositoryVectorSyncEntitySource(
@@ -246,7 +246,7 @@ def build_default_project_index_runtime(
         ),
         forward_reference_resolution_runtime=RepositoryForwardReferenceResolutionRuntime(
             session_maker=session_maker,
-            resolve_link_texts=resolve_link_texts,
+            link_resolver=link_resolver,
         ),
         forward_reference_entity_refresher=RepositoryForwardReferenceEntityRefreshRuntime(
             session_maker=session_maker,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -15,10 +15,16 @@ from basic_memory.models import Entity, Relation
 
 type ForwardReferenceEntityId = int
 type ForwardReferenceRelationId = int
-type ForwardReferenceLinkTextResolver = Callable[
-    [Sequence[LinkText]],
-    Awaitable[Mapping[LinkText, ForwardReferenceEntityId | None]],
-]
+
+
+class ForwardReferenceLinkResolver(Protocol):
+    """Capability that resolves link text to exact entity ids."""
+
+    async def resolve_link_texts(
+        self,
+        link_texts: Sequence[LinkText],
+    ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
+        """Return exact target ids keyed by input link text."""
 
 
 class UnresolvedForwardReference(Protocol):
@@ -150,13 +156,13 @@ class RepositoryForwardReferenceResolutionRuntime:
     """Resolve link text and persist exact relation targets with explicit sessions."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    resolve_link_texts: ForwardReferenceLinkTextResolver
+    link_resolver: ForwardReferenceLinkResolver
 
     async def resolve_forward_reference_link_texts(
         self,
         link_texts: Sequence[LinkText],
     ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
-        return await self.resolve_link_texts(link_texts)
+        return await self.link_resolver.resolve_link_texts(link_texts)
 
     async def apply_forward_reference_updates(
         self,
