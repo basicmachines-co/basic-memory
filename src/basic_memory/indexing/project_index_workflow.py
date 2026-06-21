@@ -153,6 +153,35 @@ class ProjectIndexDeleteBatchStore(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectIndexMovedFile:
+    """One indexed file move that may need storage-backed metadata repair."""
+
+    entity_id: int
+    old_path: str
+    new_path: str
+    old_permalink: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexMovedFileContentUpdate:
+    """Storage result after rewriting a moved file's markdown metadata."""
+
+    permalink: str
+    checksum: str
+    markdown_content: str
+
+
+class ProjectIndexMoveContentUpdater(Protocol):
+    """Capability that applies provider-specific moved-file content repair."""
+
+    async def update_moved_file_content(
+        self,
+        session: AsyncSession,
+        moved_file: ProjectIndexMovedFile,
+    ) -> ProjectIndexMovedFileContentUpdate | None: ...
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectIndexWorkflowRequest:
     """Project-index workflow identity and mode flags."""
 
@@ -683,7 +712,9 @@ PROJECT_INDEX_SEARCH_INDEX_TABLE = table(
     "search_index",
     column("project_id"),
     column("entity_id"),
+    column("type"),
     column("file_path"),
+    column("permalink"),
 )
 
 
@@ -693,6 +724,7 @@ class RepositoryProjectIndexMaintenanceStore:
 
     session_maker: async_sessionmaker[AsyncSession]
     project_id: ProjectId
+    move_content_updater: ProjectIndexMoveContentUpdater | None = None
 
     async def apply_project_index_move_batch(
         self,
@@ -708,7 +740,7 @@ class RepositoryProjectIndexMaintenanceStore:
 
         async with db.scoped_session(self.session_maker) as session:
             existing_paths_result = await session.execute(
-                select(Entity.id, Entity.file_path).where(
+                select(Entity.id, Entity.file_path, Entity.permalink).where(
                     Entity.project_id == self.project_id,
                     Entity.file_path.in_(old_paths),
                 )
@@ -719,20 +751,90 @@ class RepositoryProjectIndexMaintenanceStore:
                 int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
                 for row in target_rows
             }
+            content_updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate] = {}
+            if self.move_content_updater is not None:
+                for row in target_rows:
+                    entity_id = int(row["id"])
+                    old_path = str(row["file_path"])
+                    content_update = await self.move_content_updater.update_moved_file_content(
+                        session,
+                        ProjectIndexMovedFile(
+                            entity_id=entity_id,
+                            old_path=old_path,
+                            new_path=target_paths_by_old_path[old_path],
+                            old_permalink=(
+                                str(row["permalink"]) if row["permalink"] is not None else None
+                            ),
+                        ),
+                    )
+                    if content_update is not None:
+                        content_updates_by_entity_id[entity_id] = content_update
 
             if updated_old_paths:
+                entity_update_values = {
+                    "file_path": case(
+                        target_paths_by_old_path,
+                        value=Entity.file_path,
+                    )
+                }
+                note_content_update_values = {
+                    "file_path": case(
+                        target_paths_by_entity_id,
+                        value=NoteContent.entity_id,
+                    )
+                }
+                search_index_update_values = {
+                    "file_path": case(
+                        target_paths_by_entity_id,
+                        value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
+                    )
+                }
+                if content_updates_by_entity_id:
+                    checksums_by_entity_id = {
+                        entity_id: content_update.checksum
+                        for entity_id, content_update in content_updates_by_entity_id.items()
+                    }
+                    markdown_by_entity_id = {
+                        entity_id: content_update.markdown_content
+                        for entity_id, content_update in content_updates_by_entity_id.items()
+                    }
+                    permalinks_by_entity_id = {
+                        entity_id: content_update.permalink
+                        for entity_id, content_update in content_updates_by_entity_id.items()
+                    }
+                    entity_update_values["checksum"] = case(
+                        checksums_by_entity_id,
+                        value=Entity.id,
+                        else_=Entity.checksum,
+                    )
+                    entity_update_values["permalink"] = case(
+                        permalinks_by_entity_id,
+                        value=Entity.id,
+                        else_=Entity.permalink,
+                    )
+                    note_content_update_values["db_checksum"] = case(
+                        checksums_by_entity_id,
+                        value=NoteContent.entity_id,
+                        else_=NoteContent.db_checksum,
+                    )
+                    note_content_update_values["file_checksum"] = case(
+                        checksums_by_entity_id,
+                        value=NoteContent.entity_id,
+                        else_=NoteContent.file_checksum,
+                    )
+                    note_content_update_values["markdown_content"] = case(
+                        markdown_by_entity_id,
+                        value=NoteContent.entity_id,
+                        else_=NoteContent.markdown_content,
+                    )
+
                 await session.execute(
                     update(Entity)
                     .where(
                         Entity.project_id == self.project_id,
                         Entity.file_path.in_(updated_old_paths),
                     )
-                    .values(
-                        file_path=case(
-                            target_paths_by_old_path,
-                            value=Entity.file_path,
-                        )
-                    )
+                    .values(**entity_update_values)
                 )
                 await session.execute(
                     update(NoteContent)
@@ -740,12 +842,7 @@ class RepositoryProjectIndexMaintenanceStore:
                         NoteContent.project_id == self.project_id,
                         NoteContent.entity_id.in_(tuple(target_paths_by_entity_id)),
                     )
-                    .values(
-                        file_path=case(
-                            target_paths_by_entity_id,
-                            value=NoteContent.entity_id,
-                        )
-                    )
+                    .values(**note_content_update_values)
                 )
                 await session.execute(
                     update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
@@ -755,13 +852,25 @@ class RepositoryProjectIndexMaintenanceStore:
                             tuple(target_paths_by_entity_id)
                         ),
                     )
-                    .values(
-                        file_path=case(
-                            target_paths_by_entity_id,
-                            value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
+                    .values(**search_index_update_values)
+                )
+                if content_updates_by_entity_id:
+                    await session.execute(
+                        update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
+                        .where(
+                            PROJECT_INDEX_SEARCH_INDEX_TABLE.c.project_id == self.project_id,
+                            PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id.in_(
+                                tuple(content_updates_by_entity_id)
+                            ),
+                            PROJECT_INDEX_SEARCH_INDEX_TABLE.c.type == "entity",
+                        )
+                        .values(
+                            permalink=case(
+                                permalinks_by_entity_id,
+                                value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
+                            )
                         )
                     )
-                )
 
         missing_paths = tuple(
             move_target.old_path

@@ -12,7 +12,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.config import ConfigManager
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import FileMetadata, ParseError, compute_checksum, remove_frontmatter
 from basic_memory.indexing import (
     BatchIndexer,
@@ -115,6 +115,20 @@ class LocalIndexSearchService(
     """Search capabilities needed by local event/project indexing."""
 
 
+class LocalIndexEntityService(Protocol):
+    """Entity service capabilities needed by local index maintenance adapters."""
+
+    app_config: BasicMemoryConfig | None
+
+    async def resolve_permalink(
+        self,
+        file_path: Path | str,
+        markdown: Any = None,
+        skip_conflict_check: bool = False,
+        session: AsyncSession | None = None,
+    ) -> str: ...
+
+
 @dataclass(frozen=True, slots=True)
 class LocalIndexProjectDependencies:
     """Adapter handoff values needed to build local index runtimes."""
@@ -128,6 +142,7 @@ class LocalIndexProjectDependencies:
     relation_repository: RelationResolutionRelationRepository
     link_resolver: RelationResolutionLinkResolver
     search_service: LocalIndexSearchService
+    entity_service: LocalIndexEntityService
 
 
 class LocalIndexProjectDependencyProvider(Protocol):
@@ -580,4 +595,5 @@ async def build_local_index_project_dependencies(
         relation_repository=relation_repository,
         link_resolver=link_resolver,
         search_service=search_service,
+        entity_service=entity_service,
     )

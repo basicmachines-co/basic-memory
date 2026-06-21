@@ -169,6 +169,25 @@ class FakeProjectIndexSession:
         return FakeProjectIndexResult()
 
 
+@dataclass(slots=True)
+class RecordingMoveContentUpdater:
+    """Record moved-file repair requests and return configured content updates."""
+
+    updates: dict[int, project_index_workflow_module.ProjectIndexMovedFileContentUpdate]
+    seen_files: list[project_index_workflow_module.ProjectIndexMovedFile] = field(
+        default_factory=list
+    )
+
+    async def update_moved_file_content(
+        self,
+        session: AsyncSession,
+        moved_file: project_index_workflow_module.ProjectIndexMovedFile,
+    ) -> project_index_workflow_module.ProjectIndexMovedFileContentUpdate | None:
+        del session
+        self.seen_files.append(moved_file)
+        return self.updates.get(moved_file.entity_id)
+
+
 def project_index_record_metadata(
     *,
     total: int,
@@ -644,7 +663,7 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
         results=[
             FakeProjectIndexResult(
                 mapping_rows=[
-                    {"id": 10, "file_path": "notes/a.md"},
+                    {"id": 10, "file_path": "notes/a.md", "permalink": "main/notes/a"},
                 ]
             )
         ]
@@ -687,6 +706,76 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
     assert "UPDATE entity" in str(session.statements[1])
     assert "UPDATE note_content" in str(session.statements[2])
     assert "UPDATE search_index" in str(session.statements[3])
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_applies_move_content_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md", "permalink": "main/notes/a"},
+                ]
+            )
+        ]
+    )
+    content_updater = RecordingMoveContentUpdater(
+        updates={
+            10: project_index_workflow_module.ProjectIndexMovedFileContentUpdate(
+                permalink="main/archive/a",
+                checksum="updated-checksum",
+                markdown_content="---\npermalink: main/archive/a\n---\n\n# A\n",
+            )
+        }
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_workflow_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        move_content_updater=content_updater,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    )
+
+    assert result == ProjectIndexMoveBatchResult(updated_files=1)
+    assert content_updater.seen_files == [
+        project_index_workflow_module.ProjectIndexMovedFile(
+            entity_id=10,
+            old_path="notes/a.md",
+            new_path="archive/a.md",
+            old_permalink="main/notes/a",
+        )
+    ]
+    assert len(session.statements) == 5
+    assert "checksum" in str(session.statements[1])
+    assert "permalink" in str(session.statements[1])
+    assert "markdown_content" in str(session.statements[2])
+    assert "db_checksum" in str(session.statements[2])
+    assert "file_checksum" in str(session.statements[2])
+    assert "UPDATE search_index" in str(session.statements[3])
+    assert "search_index.type" in str(session.statements[4])
+    assert "permalink" in str(session.statements[4])
 
 
 @pytest.mark.asyncio

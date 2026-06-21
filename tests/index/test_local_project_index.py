@@ -631,6 +631,79 @@ async def test_local_project_index_move_updates_note_content_identity(
     assert results[0].file_path == "archive/move-me.md"
 
 
+async def test_local_project_index_move_updates_permalink_when_configured(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    app_config,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Move maintenance mirrors sync permalink policy without using SyncService."""
+    app_config.update_permalinks_on_move = True
+    config_manager.save_config(app_config)
+
+    original_path = project_config.home / "notes" / "rename-me.md"
+    moved_path = project_config.home / "archive" / "renamed-note.md"
+    original_path.parent.mkdir(parents=True, exist_ok=True)
+    moved_path.parent.mkdir(parents=True, exist_ok=True)
+    original_path.write_text("# Rename Me\n\nThis note moves with a permalink.\n", encoding="utf-8")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local project index parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    async with db.scoped_session(session_maker) as session:
+        original_entity = await entity_repository.get_by_file_path(session, "notes/rename-me.md")
+        assert original_entity is not None
+        original_permalink = original_entity.permalink
+
+    assert original_permalink == f"{test_project.permalink}/notes/rename-me"
+    assert f"permalink: {original_permalink}" in original_path.read_text(encoding="utf-8")
+
+    original_path.rename(moved_path)
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    expected_permalink = f"{test_project.permalink}/archive/renamed-note"
+    assert second.moved_files == 1
+    assert second.enqueued_files == 0
+    assert f"permalink: {expected_permalink}" in moved_path.read_text(encoding="utf-8")
+
+    async with db.scoped_session(session_maker) as session:
+        moved_entity = await entity_repository.get_by_file_path(session, "archive/renamed-note.md")
+        assert moved_entity is not None
+        moved_note_content = await NoteContentRepository(test_project.id).get_by_entity_id(
+            session,
+            moved_entity.id,
+        )
+
+    assert moved_entity.permalink == expected_permalink
+    assert moved_note_content is not None
+    assert f"permalink: {expected_permalink}" in moved_note_content.markdown_content
+
+    results = await search_service.search(SearchQuery(permalink=expected_permalink))
+    assert len(results) == 1
+    assert results[0].permalink == expected_permalink
+    assert results[0].file_path == "archive/renamed-note.md"
+
+
 @dataclass(slots=True)
 class RecordingMarkdownFileIndexer:
     indexed_paths: list[str] = field(default_factory=list)
@@ -745,6 +818,13 @@ class RuntimeFactoryLinkResolver:
         return None
 
 
+class RuntimeFactoryEntityService:
+    app_config = None
+
+    async def resolve_permalink(self, *args: object, **kwargs: object) -> str:
+        return "local"
+
+
 @dataclass(slots=True)
 class RecordingLocalIndexProjectDependencyProvider:
     dependencies: LocalIndexProjectDependencies
@@ -769,6 +849,7 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
         relation_repository=RuntimeFactoryRelationRepository(),
         link_resolver=RuntimeFactoryLinkResolver(),
         search_service=RuntimeFactorySearchIndex(),
+        entity_service=RuntimeFactoryEntityService(),
     )
     dependency_provider = RecordingLocalIndexProjectDependencyProvider(dependencies)
 
