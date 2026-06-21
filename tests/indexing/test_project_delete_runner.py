@@ -1,6 +1,7 @@
 """Tests for portable project-delete cleanup orchestration."""
 
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -10,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from basic_memory.indexing.project_delete_runner import (
+    DefaultProjectDeleteRepositories,
     ProjectDeletePreflightResult,
+    ProjectDeleteRepositories,
     RepositoryProjectDeletePreflight,
     RepositoryProjectHardDeleter,
     run_project_delete,
@@ -81,6 +84,24 @@ class FakeProjectHardDeleter:
     async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool:
         self.requests.append(request)
         return self.deleted
+
+
+class FakeProjectDeleteRepository:
+    def __init__(self, *, deleted: bool) -> None:
+        self.deleted = deleted
+        self.entity_ids: list[int] = []
+
+    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+        self.entity_ids.append(entity_id)
+        return self.deleted
+
+
+@dataclass(frozen=True, slots=True)
+class FakeProjectDeleteRepositories:
+    repository: FakeProjectDeleteRepository
+
+    def project_repository(self) -> FakeProjectDeleteRepository:
+        return self.repository
 
 
 def project_delete_request(
@@ -223,6 +244,29 @@ async def test_repository_project_hard_deleter_deletes_project(
 
     assert deleted is True
     assert stored_project is None
+
+
+@pytest.mark.asyncio
+async def test_repository_project_hard_deleter_uses_repository_provider(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    request = project_delete_request(project_id=42)
+    repository = FakeProjectDeleteRepository(deleted=False)
+    repositories: ProjectDeleteRepositories = FakeProjectDeleteRepositories(repository)
+
+    deleted = await RepositoryProjectHardDeleter(
+        session_maker=project_delete_session_maker,
+        repositories=repositories,
+    ).hard_delete_project(request)
+
+    assert deleted is False
+    assert repository.entity_ids == [42]
+
+
+def test_default_project_delete_repositories_builds_project_repository() -> None:
+    repositories: ProjectDeleteRepositories = DefaultProjectDeleteRepositories()
+
+    assert repositories.project_repository().__class__.__name__ == "ProjectRepository"
 
 
 @pytest.mark.asyncio

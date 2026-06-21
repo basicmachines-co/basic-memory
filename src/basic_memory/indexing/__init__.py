@@ -469,17 +469,17 @@ from basic_memory.indexing.project_delete_acceptance import (
     ProjectDeleteAcceptedStatus,
 )
 from basic_memory.indexing.project_delete_runner import (
+    DefaultProjectDeleteRepositories,
     ProjectDeleteFileDeleter,
     ProjectDeletePreflightProvider,
     ProjectDeletePreflightResult,
+    ProjectDeleteRepositories,
     ProjectDeleteRepository,
-    ProjectDeleteRepositoryFactory,
     ProjectDeleteSessionScope,
     ProjectHardDeleter,
     RepositoryProjectDeletePreflight,
     RepositoryProjectHardDeleter,
     load_project_file_snapshots,
-    project_delete_repository,
     run_project_delete,
 )
 from basic_memory.indexing.project_index_progress import (
@@ -910,8 +910,8 @@ __all__ = [
     "ProjectDeleteFileDeleter",
     "ProjectDeletePreflightProvider",
     "ProjectDeletePreflightResult",
+    "ProjectDeleteRepositories",
     "ProjectDeleteRepository",
-    "ProjectDeleteRepositoryFactory",
     "ProjectDeleteSessionScope",
     "ProjectHardDeleter",
     "ProjectIndexCoordinatorResult",
@@ -1124,7 +1124,7 @@ __all__ = [
     "project_index_recorded_batches_from_metadata",
     "project_index_storage_files_from_observed",
     "project_index_workflow_logical_key",
-    "project_delete_repository",
+    "DefaultProjectDeleteRepositories",
     "resolve_project_index_completion_relations",
     "resolve_project_relations",
     "resolve_relations_until_stable",

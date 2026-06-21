@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, Self
 
 from sqlalchemy import select
@@ -81,12 +81,18 @@ class ProjectDeleteRepository(Protocol):
     async def delete(self, session: AsyncSession, entity_id: int) -> bool: ...
 
 
-type ProjectDeleteRepositoryFactory = Callable[[], ProjectDeleteRepository]
+class ProjectDeleteRepositories(Protocol):
+    """Repository provider for project delete cleanup."""
+
+    def project_repository(self) -> ProjectDeleteRepository: ...
 
 
-def project_delete_repository() -> ProjectDeleteRepository:
-    """Build the default repository used for project hard-delete cleanup."""
-    return ProjectRepository()
+@dataclass(frozen=True, slots=True)
+class DefaultProjectDeleteRepositories:
+    """Default repository provider for local project delete cleanup."""
+
+    def project_repository(self) -> ProjectDeleteRepository:
+        return ProjectRepository()
 
 
 async def load_project_file_snapshots(
@@ -170,11 +176,16 @@ class RepositoryProjectHardDeleter:
 
     session_maker: async_sessionmaker[AsyncSession]
     session_scope: ProjectDeleteSessionScope = db.scoped_session
-    project_repository_factory: ProjectDeleteRepositoryFactory = project_delete_repository
+    repositories: ProjectDeleteRepositories = field(
+        default_factory=DefaultProjectDeleteRepositories
+    )
 
     async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool:
         async with self.session_scope(self.session_maker) as session:
-            return await self.project_repository_factory().delete(session, request.project_id)
+            return await self.repositories.project_repository().delete(
+                session,
+                request.project_id,
+            )
 
 
 async def run_project_delete(
