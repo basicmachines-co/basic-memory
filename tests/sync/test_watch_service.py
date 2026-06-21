@@ -587,6 +587,78 @@ async def test_handle_changes_with_local_event_index_runtime_preserves_move_iden
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_collapses_rapid_move(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """Local event-index collapses transient watcher move events into one accepted move."""
+
+    original_path = project_config.home / "original.md"
+    await create_test_file(original_path, "# Rapid Move\n\nKeep the same entity.\n")
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index rapid move parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(session, "original.md")
+    assert before is not None
+
+    temp_path = project_config.home / "temp.md"
+    final_path = project_config.home / "final.md"
+    original_path.rename(temp_path)
+    temp_path.rename(final_path)
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.deleted, str(original_path)),
+            (Change.added, str(temp_path)),
+            (Change.deleted, str(temp_path)),
+            (Change.added, str(final_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        original_entity = await entity_repository.get_by_file_path(session, "original.md")
+        temp_entity = await entity_repository.get_by_file_path(session, "temp.md")
+        final_entity = await entity_repository.get_by_file_path(session, "final.md")
+
+    assert original_entity is None
+    assert temp_entity is None
+    assert final_entity is not None
+    assert final_entity.id == before.id
+    assert final_entity.external_id == before.external_id
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+    assert watch_service.state.recent_events[0].error is None
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index(
     app_config: BasicMemoryConfig,
     project_repository,
