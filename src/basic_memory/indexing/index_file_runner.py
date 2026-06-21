@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -52,10 +52,13 @@ class IndexFileCurrentMetadata(Protocol):
     def metadata(self) -> RuntimeNoteObjectMetadataMap: ...
 
 
-type IndexFileCurrentMetadataLoader = Callable[
-    [RuntimeFilePath],
-    Awaitable[IndexFileCurrentMetadata | None],
-]
+class IndexFileCurrentMetadataSource(Protocol):
+    """Capability that loads current storage metadata for one file path."""
+
+    async def load_current_file_metadata(
+        self,
+        file_path: RuntimeFilePath,
+    ) -> IndexFileCurrentMetadata | None: ...
 
 
 class IndexFileRunnerChecker(Protocol):
@@ -77,13 +80,13 @@ class IndexFileMetadataSource(Protocol):
 class StorageIndexFileMetadataSource:
     """Adapt a storage metadata loader to the index-file runner protocol."""
 
-    load_metadata: IndexFileCurrentMetadataLoader
+    metadata_source: IndexFileCurrentMetadataSource
 
     async def load_current_file_metadata(
         self,
         file_path: RuntimeFilePath,
     ) -> IndexFileObjectMetadata | None:
-        current_metadata = await self.load_metadata(file_path)
+        current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
         if current_metadata is None:
             return None
         return IndexFileObjectMetadata(

@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.file_index_checking import (
+    CurrentFileMetadataSource,
     FileIndexChecker,
     RepositoryIndexedFileChecksumSource,
     StorageCurrentFileChecksumSource,
@@ -18,6 +19,20 @@ from basic_memory.indexing.file_index_planning import FileIndexDecisionStatus, F
 @dataclass(frozen=True, slots=True)
 class StubCurrentMetadata:
     checksum: str
+
+
+@dataclass(slots=True)
+class StubCurrentMetadataSource:
+    calls: list[str] = field(default_factory=list)
+
+    async def load_current_file_metadata(
+        self,
+        file_path: str,
+    ) -> StubCurrentMetadata | None:
+        self.calls.append(file_path)
+        if file_path == "missing.md":
+            return None
+        return StubCurrentMetadata(checksum="etag-current")
 
 
 @dataclass(slots=True)
@@ -192,16 +207,10 @@ async def test_repository_indexed_file_checksum_source_maps_repository_rows() ->
 
 @pytest.mark.asyncio
 async def test_storage_current_file_checksum_source_loads_metadata_checksum() -> None:
-    calls: list[str] = []
-
-    async def load_metadata(file_path: str) -> StubCurrentMetadata | None:
-        calls.append(file_path)
-        if file_path == "missing.md":
-            return None
-        return StubCurrentMetadata(checksum="etag-current")
-
-    source = StorageCurrentFileChecksumSource(load_metadata=load_metadata)
+    stub_source = StubCurrentMetadataSource()
+    metadata_source: CurrentFileMetadataSource = stub_source
+    source = StorageCurrentFileChecksumSource(metadata_source=metadata_source)
 
     assert await source.load_current_file_checksum("note.md") == "etag-current"
     assert await source.load_current_file_checksum("missing.md") is None
-    assert calls == ["note.md", "missing.md"]
+    assert stub_source.calls == ["note.md", "missing.md"]

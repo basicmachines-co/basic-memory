@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -67,10 +67,14 @@ class CurrentFileMetadata(Protocol):
         """Return the current storage checksum."""
 
 
-type CurrentFileMetadataLoader = Callable[
-    [FileIndexPath],
-    Awaitable[CurrentFileMetadata | None],
-]
+class CurrentFileMetadataSource(Protocol):
+    """Capability that loads current storage metadata for one file path."""
+
+    async def load_current_file_metadata(
+        self,
+        file_path: FileIndexPath,
+    ) -> CurrentFileMetadata | None:
+        """Return current storage metadata for one file, or None when missing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,14 +98,14 @@ class RepositoryIndexedFileChecksumSource:
 class StorageCurrentFileChecksumSource:
     """Load current file checksums from storage metadata."""
 
-    load_metadata: CurrentFileMetadataLoader
+    metadata_source: CurrentFileMetadataSource
 
     async def load_current_file_checksum(
         self,
         file_path: FileIndexPath,
     ) -> FileIndexChecksum | None:
         """Return the current storage checksum for one file."""
-        current_metadata = await self.load_metadata(file_path)
+        current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
         return current_metadata.checksum if current_metadata is not None else None
 
 

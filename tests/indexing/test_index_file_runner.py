@@ -17,6 +17,7 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexTarget,
 )
 from basic_memory.indexing.index_file_runner import (
+    IndexFileCurrentMetadataSource,
     IndexFileObjectMetadata,
     RepositoryCurrentMaterializedNoteSource,
     StorageIndexFileMetadataSource,
@@ -73,6 +74,21 @@ class FakeMetadataSource:
 class FakeStorageMetadata:
     checksum: str
     metadata: dict[str, str]
+
+
+@dataclass(slots=True)
+class FakeStorageMetadataSource:
+    calls: list[str]
+
+    async def load_current_file_metadata(
+        self,
+        file_path: str,
+    ) -> FakeStorageMetadata | None:
+        self.calls.append(file_path)
+        return FakeStorageMetadata(
+            checksum="etag-1",
+            metadata={NOTE_OBJECT_SOURCE_METADATA: "api"},
+        )
 
 
 class FakeMaterializedNoteSource:
@@ -189,15 +205,8 @@ def indexed_file() -> FileIndexResult:
 @pytest.mark.asyncio
 async def test_storage_index_file_metadata_source_maps_storage_metadata() -> None:
     calls: list[str] = []
-
-    async def load_metadata(file_path: str) -> FakeStorageMetadata | None:
-        calls.append(file_path)
-        return FakeStorageMetadata(
-            checksum="etag-1",
-            metadata={NOTE_OBJECT_SOURCE_METADATA: "api"},
-        )
-
-    source = StorageIndexFileMetadataSource(load_metadata=load_metadata)
+    metadata_source: IndexFileCurrentMetadataSource = FakeStorageMetadataSource(calls)
+    source = StorageIndexFileMetadataSource(metadata_source=metadata_source)
 
     result = await source.load_current_file_metadata("notes/a.md")
 

@@ -329,7 +329,7 @@ class LocalProjectIndexRuntimeFactory:
                 entity_repository=dependencies.entity_repository,
             ),
             current_checksum_source=StorageCurrentFileChecksumSource(
-                load_metadata=metadata_source.load_current_file_metadata,
+                metadata_source=metadata_source,
             ),
         )
         file_runner = LocalProjectIndexFileRunner(
