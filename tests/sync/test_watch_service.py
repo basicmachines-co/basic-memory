@@ -328,6 +328,89 @@ async def test_handle_changes_can_route_through_event_index_runtime(
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_event_index_runtime_records_failed_counts(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+):
+    """Event-index watcher failures should surface in watch status."""
+
+    file_path = project_config.home / "event-index-fails.md"
+    await create_test_file(file_path, "# Event Index Failure\n")
+    project_prefix = Path(test_project.path).resolve().name
+
+    async def sync_service_factory(_project):
+        raise AssertionError("legacy sync factory should not be used")
+
+    class ProjectResolver:
+        async def resolve_project(self, project_path: str) -> ProjectRuntimeReference | None:
+            if project_path != project_prefix:
+                return None
+            return ProjectRuntimeReference(
+                project_id=test_project.id,
+                project_external_id=str(test_project.external_id),
+                project_path=project_prefix,
+                project_name=test_project.name,
+                project_permalink=test_project.permalink,
+            )
+
+    class FailingOperationProcessor:
+        async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:
+            raise AssertionError(f"unexpected skip: {operation}")
+
+        async def index_file(self, operation: RuntimeStorageEventOperation) -> None:
+            raise RuntimeError(f"index failed: {operation.require_relative_path()}")
+
+        async def delete_file(self, operation: RuntimeStorageEventOperation) -> None:
+            raise AssertionError(f"unexpected delete: {operation}")
+
+        async def event_failed(
+            self,
+            operation: RuntimeStorageEventOperation,
+            exc: Exception,
+        ) -> None:
+            assert operation.require_relative_path() == "event-index-fails.md"
+            assert "index failed" in str(exc)
+
+    class OperationProcessorFactory:
+        def processor_for_project(
+            self,
+            project: ProjectRuntimeReference,
+        ) -> FailingOperationProcessor:
+            return FailingOperationProcessor()
+
+    class EventIndexRuntimeFactory:
+        async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
+            assert project == test_project
+            return StorageEventIndexRuntime(
+                project_resolver=ProjectResolver(),
+                operation_processor_factory=OperationProcessorFactory(),
+            )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        sync_service_factory=sync_service_factory,
+        event_index_runtime_factory=EventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.added, str(file_path))})
+
+    assert watch_service.state.synced_files == 0
+    assert watch_service.state.error_count == 1
+    assert watch_service.state.last_error is not None
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "error"
+    assert watch_service.state.recent_events[0].path == project_prefix
+    assert watch_service.state.recent_events[0].error == (
+        "event-index processed=0 failed=1 skipped=0"
+    )
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_indexes_markdown_file(
     app_config: BasicMemoryConfig,
     project_repository,

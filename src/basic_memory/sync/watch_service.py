@@ -683,10 +683,21 @@ class WatchService:
 
         self.state.last_scan = datetime.now()
         self.state.synced_files += result.counts.processed
+        status = "success"
+        error = None
+        if result.counts.failed:
+            self.state.error_count += result.counts.failed
+            self.state.last_error = datetime.now()
+            status = "error"
+            error = (
+                f"event-index processed={result.counts.processed} "
+                f"failed={result.counts.failed} skipped={result.counts.skipped}"
+            )
         self.state.add_event(
             path=project_prefix,
             action="index",
-            status="success",
+            status=status,
+            error=error,
         )
         duration_ms = int((time.time() - start_time) * 1000)
         logger.info(
