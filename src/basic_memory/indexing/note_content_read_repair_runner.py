@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -150,27 +149,54 @@ class NoteContentReadRepairFileReader[
     ) -> NoteContentReadRepairFile | None: ...
 
 
-type NoteContentReadProjectRepositoryFactory[ProjectT: NoteContentReadProjectSource] = Callable[
-    [], NoteContentReadProjectRepository[ProjectT]
-]
-type NoteContentReadEntityRepositoryFactory[EntityT: NoteContentReadEntitySource] = Callable[
-    [ProjectId], NoteContentReadEntityRepository[EntityT]
-]
-type NoteContentReadNoteContentRepositoryFactory[NoteContentT] = Callable[
-    [ProjectId], NoteContentReadNoteContentRepository[NoteContentT]
-]
-type NoteContentReadRepairProjectRepositoryFactory[ProjectT: NoteContentReadRepairProjectSource] = (
-    Callable[[], NoteContentReadRepairProjectRepository[ProjectT]]
-)
-type NoteContentReadRepairEntityRepositoryFactory[EntityT: NoteContentReadRepairEntitySource] = (
-    Callable[[ProjectId], NoteContentReadRepairEntityRepository[EntityT]]
-)
-type NoteContentReadRepairNoteContentRepositoryFactory[NoteContentT] = Callable[
-    [ProjectId], NoteContentReadRepairNoteContentRepository[NoteContentT]
-]
-type NoteContentReadRepairReconcilerFactory[EntityT: NoteContentReadRepairEntitySource] = Callable[
-    [ProjectId, async_sessionmaker[AsyncSession]], NoteContentReadRepairReconciler[EntityT]
-]
+class NoteContentReadRepositories[
+    ProjectT: NoteContentReadProjectSource,
+    EntityT: NoteContentReadEntitySource,
+    NoteContentT,
+](Protocol):
+    """Repository capability set for hot note-content reads."""
+
+    def project_repository(self) -> NoteContentReadProjectRepository[ProjectT]: ...
+
+    def entity_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadEntityRepository[EntityT]: ...
+
+    def note_content_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadNoteContentRepository[NoteContentT]: ...
+
+
+class NoteContentReadRepairRepositories[
+    ProjectT: NoteContentReadRepairProjectSource,
+    EntityT: NoteContentReadRepairEntitySource,
+    NoteContentT,
+](Protocol):
+    """Repository capability set for note-content read repair preflight."""
+
+    def project_repository(self) -> NoteContentReadRepairProjectRepository[ProjectT]: ...
+
+    def entity_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadRepairEntityRepository[EntityT]: ...
+
+    def note_content_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadRepairNoteContentRepository[NoteContentT]: ...
+
+
+class NoteContentReadRepairReconcilerProvider[EntityT: NoteContentReadRepairEntitySource](Protocol):
+    """Capability that supplies the reconciler for one read-repair project."""
+
+    def reconciler(
+        self,
+        project_id: ProjectId,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> NoteContentReadRepairReconciler[EntityT]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +290,23 @@ def note_content_read_note_content_repository(
     return NoteContentRepository(project_id=project_id)
 
 
+@dataclass(frozen=True, slots=True)
+class DefaultNoteContentReadRepositories:
+    """Default repository capability set for hot note-content reads."""
+
+    def project_repository(self) -> NoteContentReadProjectRepository[Project]:
+        return note_content_read_project_repository()
+
+    def entity_repository(self, project_id: ProjectId) -> NoteContentReadEntityRepository[Entity]:
+        return note_content_read_entity_repository(project_id)
+
+    def note_content_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadNoteContentRepository[NoteContent]:
+        return note_content_read_note_content_repository(project_id)
+
+
 async def load_note_content_read_view[
     ProjectT: NoteContentReadProjectSource,
     EntityT: NoteContentReadEntitySource,
@@ -273,24 +316,22 @@ async def load_note_content_read_view[
     *,
     project_external_id: ProjectExternalId,
     entity_external_id: NoteExternalId,
-    project_repository_factory: NoteContentReadProjectRepositoryFactory[ProjectT],
-    entity_repository_factory: NoteContentReadEntityRepositoryFactory[EntityT],
-    note_content_repository_factory: NoteContentReadNoteContentRepositoryFactory[NoteContentT],
+    repositories: NoteContentReadRepositories[ProjectT, EntityT, NoteContentT],
 ) -> NoteContentReadView[EntityT, NoteContentT] | None:
     """Load the DB view needed by hot note-content reads."""
-    project_repository = project_repository_factory()
+    project_repository = repositories.project_repository()
     project = await project_repository.get_by_external_id(session, project_external_id)
     if project is None:
         return None
 
-    entity_repository = entity_repository_factory(project.id)
+    entity_repository = repositories.entity_repository(project.id)
     entity = await entity_repository.get_by_external_id(session, entity_external_id)
     if entity is None:
         return None
 
     note_content = None
     if runtime_content_type_is_markdown(entity):
-        note_content_repository = note_content_repository_factory(project.id)
+        note_content_repository = repositories.note_content_repository(project.id)
         note_content = await note_content_repository.get_by_entity_id(session, entity.id)
 
     return NoteContentReadView(entity=entity, note_content=note_content)
@@ -307,9 +348,7 @@ async def load_note_content_read_view_with_default_repositories(
         session,
         project_external_id=project_external_id,
         entity_external_id=entity_external_id,
-        project_repository_factory=note_content_read_project_repository,
-        entity_repository_factory=note_content_read_entity_repository,
-        note_content_repository_factory=note_content_read_note_content_repository,
+        repositories=DefaultNoteContentReadRepositories(),
     )
 
 
@@ -392,6 +431,38 @@ def note_content_read_repair_reconciler(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class DefaultNoteContentReadRepairRepositories:
+    """Default repository capability set for note-content read repair preflight."""
+
+    def project_repository(self) -> NoteContentReadRepairProjectRepository[Project]:
+        return note_content_read_repair_project_repository()
+
+    def entity_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadRepairEntityRepository[Entity]:
+        return note_content_read_repair_entity_repository(project_id)
+
+    def note_content_repository(
+        self,
+        project_id: ProjectId,
+    ) -> NoteContentReadRepairNoteContentRepository[NoteContent]:
+        return note_content_read_repair_note_content_repository(project_id)
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultNoteContentReadRepairReconcilerProvider:
+    """Default reconciler provider for note-content read repair."""
+
+    def reconciler(
+        self,
+        project_id: ProjectId,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> NoteContentReadRepairReconciler[Entity]:
+        return note_content_read_repair_reconciler(project_id, session_maker)
+
+
 async def prepare_note_content_read_repair[
     ProjectT: NoteContentReadRepairProjectSource,
     EntityT: NoteContentReadRepairEntitySource,
@@ -401,23 +472,19 @@ async def prepare_note_content_read_repair[
     *,
     project_external_id: ProjectExternalId,
     entity_external_id: NoteExternalId,
-    project_repository_factory: NoteContentReadRepairProjectRepositoryFactory[ProjectT],
-    entity_repository_factory: NoteContentReadRepairEntityRepositoryFactory[EntityT],
-    note_content_repository_factory: NoteContentReadRepairNoteContentRepositoryFactory[
-        NoteContentT
-    ],
+    repositories: NoteContentReadRepairRepositories[ProjectT, EntityT, NoteContentT],
 ) -> NoteContentReadRepairPreflight[ProjectT, EntityT]:
     """Load DB state and decide whether storage must be read for note_content repair."""
-    project_repository = project_repository_factory()
+    project_repository = repositories.project_repository()
     project = await project_repository.get_by_external_id(session, project_external_id)
 
     entity: EntityT | None = None
     note_content: NoteContentT | None = None
     if project is not None:
-        entity_repository = entity_repository_factory(project.id)
+        entity_repository = repositories.entity_repository(project.id)
         entity = await entity_repository.get_by_external_id(session, entity_external_id)
         if entity is not None and runtime_content_type_is_markdown(entity):
-            note_content_repository = note_content_repository_factory(project.id)
+            note_content_repository = repositories.note_content_repository(project.id)
             note_content = await note_content_repository.get_by_entity_id(session, entity.id)
 
     repair_plan = plan_runtime_note_content_read_repair(project, entity, note_content)
@@ -442,9 +509,7 @@ async def prepare_note_content_read_repair_with_default_repositories(
         session,
         project_external_id=project_external_id,
         entity_external_id=entity_external_id,
-        project_repository_factory=note_content_read_repair_project_repository,
-        entity_repository_factory=note_content_read_repair_entity_repository,
-        note_content_repository_factory=note_content_read_repair_note_content_repository,
+        repositories=DefaultNoteContentReadRepairRepositories(),
     )
 
 
@@ -458,10 +523,10 @@ async def apply_note_content_read_repair[
     markdown_content: str,
     observed_at: datetime | None,
     source: RuntimeNoteChangeSource,
-    reconciler_factory: NoteContentReadRepairReconcilerFactory[EntityT],
+    reconciler_provider: NoteContentReadRepairReconcilerProvider[EntityT],
 ) -> None:
     """Apply observed storage markdown to note_content through the selected reconciler."""
-    reconciler = reconciler_factory(target.project.id, session_maker)
+    reconciler = reconciler_provider.reconciler(target.project.id, session_maker)
     await reconciler.reconcile(
         entity=target.entity,
         markdown_content=markdown_content,
@@ -485,7 +550,7 @@ async def apply_note_content_read_repair_with_default_reconciler(
         markdown_content=markdown_content,
         observed_at=observed_at,
         source=source,
-        reconciler_factory=note_content_read_repair_reconciler,
+        reconciler_provider=DefaultNoteContentReadRepairReconcilerProvider(),
     )
 
 
@@ -498,7 +563,7 @@ async def run_note_content_read_repair[
     session_maker: async_sessionmaker[AsyncSession],
     file_reader: NoteContentReadRepairFileReader[ProjectT, EntityT] | None,
     source: RuntimeNoteChangeSource,
-    reconciler_factory: NoteContentReadRepairReconcilerFactory[EntityT],
+    reconciler_provider: NoteContentReadRepairReconcilerProvider[EntityT],
 ) -> NoteContentReadRepairRun:
     """Run storage-neutral read repair after the database preflight decision."""
     if not preflight.should_read_file:
@@ -520,7 +585,7 @@ async def run_note_content_read_repair[
         markdown_content=repair_file.markdown_content,
         observed_at=repair_file.observed_at,
         source=source,
-        reconciler_factory=reconciler_factory,
+        reconciler_provider=reconciler_provider,
     )
     return NoteContentReadRepairRun(status=RuntimeNoteContentReadRepairStatus.repaired)
 
@@ -538,5 +603,5 @@ async def run_note_content_read_repair_with_default_reconciler(
         session_maker=session_maker,
         file_reader=file_reader,
         source=source,
-        reconciler_factory=note_content_read_repair_reconciler,
+        reconciler_provider=DefaultNoteContentReadRepairReconcilerProvider(),
     )

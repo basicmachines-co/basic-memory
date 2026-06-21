@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.indexing.note_content_read_repair_runner import (
     NoteContentReadRepairFile,
     NoteContentReadRepairPreflight,
+    NoteContentReadRepairReconcilerProvider,
+    NoteContentReadRepairRepositories,
     NoteContentReadView,
+    NoteContentReadRepositories,
     NoteContentReadRepairTarget,
     apply_note_content_read_repair,
     load_note_content_read_view,
@@ -109,6 +112,24 @@ class _NoteContentRepository:
         return self.note_content
 
 
+@dataclass(frozen=True, slots=True)
+class _ReadRepositories:
+    project_repository_result: _ProjectRepository
+    entity_repository_result: _EntityRepository
+    note_content_repository_result: _NoteContentRepository
+
+    def project_repository(self) -> _ProjectRepository:
+        return self.project_repository_result
+
+    def entity_repository(self, project_id: int) -> _EntityRepository:
+        _ = project_id
+        return self.entity_repository_result
+
+    def note_content_repository(self, project_id: int) -> _NoteContentRepository:
+        _ = project_id
+        return self.note_content_repository_result
+
+
 class _FileReader:
     def __init__(self, repair_file: NoteContentReadRepairFile | None) -> None:
         self.repair_file = repair_file
@@ -120,6 +141,89 @@ class _FileReader:
     ) -> NoteContentReadRepairFile | None:
         self.targets.append(target)
         return self.repair_file
+
+
+class _NeverReconciler:
+    async def reconcile(
+        self,
+        *,
+        entity: _Entity,
+        markdown_content: str,
+        observed_at: datetime | None,
+        source: str,
+    ) -> None:
+        raise AssertionError("unexpected read repair reconciliation")
+
+
+@dataclass(frozen=True, slots=True)
+class _FailingReconcilerProvider:
+    message: str
+
+    def reconciler(
+        self,
+        project_id: int,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> _NeverReconciler:
+        _ = project_id
+        _ = session_maker
+        pytest.fail(self.message)
+
+
+def test_note_content_read_providers_name_repository_and_repair_behavior() -> None:
+    """Read repair should use behavior providers, not Callable factory aliases."""
+
+    project_repository = _ProjectRepository(_Project(id=7, path="/app/data/main"))
+    entity_repository = _EntityRepository(
+        _Entity(id=42, content_type="text/markdown", file_path="notes/read.md")
+    )
+    note_content_repository = _NoteContentRepository(_NoteContent(markdown_content="# Read\n"))
+    test_session_maker = cast(async_sessionmaker[AsyncSession], object())
+
+    class FakeReconciler:
+        async def reconcile(
+            self,
+            *,
+            entity: _Entity,
+            markdown_content: str,
+            observed_at: datetime | None,
+            source: str,
+        ) -> None:
+            return None
+
+    class ReadRepositories:
+        def project_repository(self) -> _ProjectRepository:
+            return project_repository
+
+        def entity_repository(self, project_id: int) -> _EntityRepository:
+            assert project_id == 7
+            return entity_repository
+
+        def note_content_repository(self, project_id: int) -> _NoteContentRepository:
+            assert project_id == 7
+            return note_content_repository
+
+    class ReconcilerProvider:
+        def reconciler(
+            self,
+            project_id: int,
+            session_maker: async_sessionmaker[AsyncSession],
+        ) -> FakeReconciler:
+            assert project_id == 7
+            assert session_maker is test_session_maker
+            return FakeReconciler()
+
+    read_repositories: NoteContentReadRepositories[_Project, _Entity, _NoteContent] = (
+        ReadRepositories()
+    )
+    repair_repositories: NoteContentReadRepairRepositories[_Project, _Entity, _NoteContent] = (
+        ReadRepositories()
+    )
+    reconciler_provider: NoteContentReadRepairReconcilerProvider[_Entity] = ReconcilerProvider()
+
+    assert read_repositories.project_repository() is project_repository
+    assert read_repositories.entity_repository(7) is entity_repository
+    assert repair_repositories.note_content_repository(7) is note_content_repository
+    assert reconciler_provider.reconciler(7, test_session_maker) is not None
 
 
 @pytest.mark.asyncio
@@ -136,9 +240,11 @@ async def test_load_note_content_read_view_returns_markdown_entity_with_content(
         session,
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: project_repository,
-        entity_repository_factory=lambda project_id: entity_repository,
-        note_content_repository_factory=lambda project_id: note_content_repository,
+        repositories=_ReadRepositories(
+            project_repository_result=project_repository,
+            entity_repository_result=entity_repository,
+            note_content_repository_result=note_content_repository,
+        ),
     )
 
     assert view == NoteContentReadView(entity=entity, note_content=note_content)
@@ -220,19 +326,15 @@ async def test_load_note_content_read_view_returns_none_when_project_is_missing(
     session = cast(AsyncSession, object())
     project_repository = _ProjectRepository(None)
 
-    def fail_entity_repository(_project_id: int) -> _EntityRepository:
-        raise AssertionError("missing project should not load an entity")
-
-    def fail_note_content_repository(_project_id: int) -> _NoteContentRepository:
-        raise AssertionError("missing project should not load note_content")
-
     view = await load_note_content_read_view(
         session,
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: project_repository,
-        entity_repository_factory=fail_entity_repository,
-        note_content_repository_factory=fail_note_content_repository,
+        repositories=_ReadRepositories(
+            project_repository_result=project_repository,
+            entity_repository_result=_EntityRepository(None),
+            note_content_repository_result=_NoteContentRepository(None),
+        ),
     )
 
     assert view is None
@@ -245,16 +347,15 @@ async def test_load_note_content_read_view_skips_note_lookup_for_non_markdown() 
     project = _Project(id=7, path="/app/data/main")
     entity = _Entity(id=42, content_type="image/png", file_path="images/diagram.png")
 
-    def fail_note_content_repository(_project_id: int) -> _NoteContentRepository:
-        raise AssertionError("non-markdown reads should not check note_content")
-
     view = await load_note_content_read_view(
         session,
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: _ProjectRepository(project),
-        entity_repository_factory=lambda project_id: _EntityRepository(entity),
-        note_content_repository_factory=fail_note_content_repository,
+        repositories=_ReadRepositories(
+            project_repository_result=_ProjectRepository(project),
+            entity_repository_result=_EntityRepository(entity),
+            note_content_repository_result=_NoteContentRepository(None),
+        ),
     )
 
     assert view == NoteContentReadView(entity=entity, note_content=None)
@@ -273,9 +374,11 @@ async def test_prepare_note_content_read_repair_returns_storage_target_for_missi
         session,
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: project_repository,
-        entity_repository_factory=lambda project_id: entity_repository,
-        note_content_repository_factory=lambda project_id: note_content_repository,
+        repositories=_ReadRepositories(
+            project_repository_result=project_repository,
+            entity_repository_result=entity_repository,
+            note_content_repository_result=note_content_repository,
+        ),
     )
 
     assert preflight.status is RuntimeNoteContentReadRepairStatus.read_file
@@ -300,9 +403,11 @@ async def test_prepare_note_content_read_repair_reports_existing_row_as_repaired
         session,
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: _ProjectRepository(project),
-        entity_repository_factory=lambda project_id: _EntityRepository(entity),
-        note_content_repository_factory=lambda project_id: note_content_repository,
+        repositories=_ReadRepositories(
+            project_repository_result=_ProjectRepository(project),
+            entity_repository_result=_EntityRepository(entity),
+            note_content_repository_result=note_content_repository,
+        ),
     )
 
     assert preflight.status is RuntimeNoteContentReadRepairStatus.already_present
@@ -318,16 +423,15 @@ async def test_prepare_note_content_read_repair_skips_note_lookup_for_non_markdo
     project = _Project(id=7, path="/app/data/main")
     entity = _Entity(id=42, content_type="image/png", file_path="images/diagram.png")
 
-    def fail_note_content_repository(_project_id: int) -> _NoteContentRepository:
-        raise AssertionError("non-markdown read repair should not check note_content")
-
     preflight = await prepare_note_content_read_repair(
         session,
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: _ProjectRepository(project),
-        entity_repository_factory=lambda project_id: _EntityRepository(entity),
-        note_content_repository_factory=fail_note_content_repository,
+        repositories=_ReadRepositories(
+            project_repository_result=_ProjectRepository(project),
+            entity_repository_result=_EntityRepository(entity),
+            note_content_repository_result=_NoteContentRepository(None),
+        ),
     )
 
     assert preflight.status is RuntimeNoteContentReadRepairStatus.entity_missing
@@ -340,7 +444,7 @@ async def test_apply_note_content_read_repair_uses_project_reconciler() -> None:
     project = _Project(id=7, path="/app/data/main")
     entity = _Entity(id=42, content_type="text/markdown", file_path="notes/repair.md")
     target = NoteContentReadRepairTarget(project=project, entity=entity)
-    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    test_session_maker = cast(async_sessionmaker[AsyncSession], object())
     observed_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
     calls: list[tuple[_Entity, str, datetime | None, str]] = []
     factory_calls: list[tuple[int, async_sessionmaker[AsyncSession]]] = []
@@ -356,23 +460,25 @@ async def test_apply_note_content_read_repair_uses_project_reconciler() -> None:
         ) -> None:
             calls.append((entity, markdown_content, observed_at, source))
 
-    def fake_reconciler_factory(
-        project_id: int,
-        received_session_maker: async_sessionmaker[AsyncSession],
-    ) -> FakeReconciler:
-        factory_calls.append((project_id, received_session_maker))
-        return FakeReconciler()
+    class FakeReconcilerProvider:
+        def reconciler(
+            self,
+            project_id: int,
+            session_maker: async_sessionmaker[AsyncSession],
+        ) -> FakeReconciler:
+            factory_calls.append((project_id, session_maker))
+            return FakeReconciler()
 
     await apply_note_content_read_repair(
         target,
-        session_maker=session_maker,
+        session_maker=test_session_maker,
         markdown_content="# Repaired\n",
         observed_at=observed_at,
         source="read_repair",
-        reconciler_factory=fake_reconciler_factory,
+        reconciler_provider=FakeReconcilerProvider(),
     )
 
-    assert factory_calls == [(7, session_maker)]
+    assert factory_calls == [(7, test_session_maker)]
     assert calls == [(entity, "# Repaired\n", observed_at, "read_repair")]
 
 
@@ -384,10 +490,12 @@ async def test_run_note_content_read_repair_returns_preflight_status_without_fil
         cast(AsyncSession, object()),
         project_external_id="project-123",
         entity_external_id="note-456",
-        project_repository_factory=lambda: _ProjectRepository(project),
-        entity_repository_factory=lambda project_id: _EntityRepository(entity),
-        note_content_repository_factory=lambda project_id: _NoteContentRepository(
-            _NoteContent(markdown_content="# Present\n")
+        repositories=_ReadRepositories(
+            project_repository_result=_ProjectRepository(project),
+            entity_repository_result=_EntityRepository(entity),
+            note_content_repository_result=_NoteContentRepository(
+                _NoteContent(markdown_content="# Present\n")
+            ),
         ),
     )
 
@@ -396,7 +504,7 @@ async def test_run_note_content_read_repair_returns_preflight_status_without_fil
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_reader=None,
         source="read_repair",
-        reconciler_factory=lambda _project_id, _session_maker: pytest.fail(
+        reconciler_provider=_FailingReconcilerProvider(
             "already-present repair should not reconcile"
         ),
     )
@@ -420,9 +528,7 @@ async def test_run_note_content_read_repair_reports_missing_file() -> None:
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_reader=file_reader,
         source="read_repair",
-        reconciler_factory=lambda _project_id, _session_maker: pytest.fail(
-            "missing files should not reconcile"
-        ),
+        reconciler_provider=_FailingReconcilerProvider("missing files should not reconcile"),
     )
 
     assert run.status is RuntimeNoteContentReadRepairStatus.file_missing
@@ -444,9 +550,7 @@ async def test_run_note_content_read_repair_reports_empty_file() -> None:
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_reader=_FileReader(NoteContentReadRepairFile(None, observed_at=None)),
         source="read_repair",
-        reconciler_factory=lambda _project_id, _session_maker: pytest.fail(
-            "empty files should not reconcile"
-        ),
+        reconciler_provider=_FailingReconcilerProvider("empty files should not reconcile"),
     )
 
     assert run.status is RuntimeNoteContentReadRepairStatus.empty_file
@@ -458,7 +562,7 @@ async def test_run_note_content_read_repair_applies_observed_markdown() -> None:
     project = _Project(id=7, path="/app/data/main")
     entity = _Entity(id=42, content_type="text/markdown", file_path="notes/repair.md")
     target = NoteContentReadRepairTarget(project=project, entity=entity)
-    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    test_session_maker = cast(async_sessionmaker[AsyncSession], object())
     observed_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
     calls: list[tuple[_Entity, str, datetime | None, str]] = []
 
@@ -473,15 +577,25 @@ async def test_run_note_content_read_repair_applies_observed_markdown() -> None:
         ) -> None:
             calls.append((entity, markdown_content, observed_at, source))
 
+    class FakeReconcilerProvider:
+        def reconciler(
+            self,
+            project_id: int,
+            session_maker: async_sessionmaker[AsyncSession],
+        ) -> FakeReconciler:
+            assert project_id == 7
+            assert session_maker is test_session_maker
+            return FakeReconciler()
+
     run = await run_note_content_read_repair(
         preflight=NoteContentReadRepairPreflight(
             status=RuntimeNoteContentReadRepairStatus.read_file,
             target=target,
         ),
-        session_maker=session_maker,
+        session_maker=test_session_maker,
         file_reader=_FileReader(NoteContentReadRepairFile("# Repaired\n", observed_at=observed_at)),
         source="read_repair",
-        reconciler_factory=lambda _project_id, _session_maker: FakeReconciler(),
+        reconciler_provider=FakeReconcilerProvider(),
     )
 
     assert run.status is RuntimeNoteContentReadRepairStatus.repaired
