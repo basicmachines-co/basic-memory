@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 from basic_memory.runtime import (
     RuntimeDeletedNoteEntityDeleteSource,
     RuntimeDeletedNoteReference,
@@ -28,6 +31,52 @@ class ExternalFileDeleteEntities(Protocol):
         entity_id: RuntimeEntityId,
         file_path: RuntimeFilePath,
     ) -> bool: ...
+
+
+class ExternalFileDeleteEntityRepository(Protocol):
+    """Repository capability used by storage-event external delete adapters."""
+
+    async def get_by_file_path(
+        self,
+        session: AsyncSession,
+        file_path: RuntimeFilePath,
+        *,
+        load_relations: bool = True,
+    ) -> RuntimeDeletedNoteEntityDeleteSource | None: ...
+
+    async def delete_by_fields(
+        self,
+        session: AsyncSession,
+        **filters: object,
+    ) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryExternalFileDeleteEntities(ExternalFileDeleteEntities):
+    """Adapt repository-backed entity storage to the external-delete runner."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: ExternalFileDeleteEntityRepository
+
+    async def find_entity_by_file_path(
+        self,
+        file_path: RuntimeFilePath,
+    ) -> RuntimeDeletedNoteEntityDeleteSource | None:
+        async with db.scoped_session(self.session_maker) as session:
+            return await self.entity_repository.get_by_file_path(session, file_path)
+
+    async def delete_entity_if_file_path_matches(
+        self,
+        *,
+        entity_id: RuntimeEntityId,
+        file_path: RuntimeFilePath,
+    ) -> bool:
+        async with db.scoped_session(self.session_maker) as session:
+            return await self.entity_repository.delete_by_fields(
+                session,
+                id=entity_id,
+                file_path=file_path,
+            )
 
 
 class ExternalFileDeleteObjects(Protocol):

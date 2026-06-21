@@ -7,15 +7,12 @@ from pathlib import Path
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory import db
 from basic_memory.index.inline_operations import (
     InlineStorageEventIndexRuntime,
     InlineStorageEventOperationProcessor,
 )
 from basic_memory.index.local_dependencies import (
-    LocalIndexEntityRepository,
     LocalIndexProjectDependencyProvider,
     build_local_index_project_dependencies,
 )
@@ -34,11 +31,13 @@ from basic_memory.indexing import (
     RepositoryIndexedFileChecksumSource,
     StorageCurrentFileChecksumSource,
 )
+from basic_memory.indexing.external_file_delete_runner import (
+    RepositoryExternalFileDeleteEntities,
+)
 from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
     ProjectPath,
     ProjectRuntimeReference,
-    RuntimeEntityId,
     RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeStorageEventOperation,
@@ -85,34 +84,6 @@ class LocalStorageFileMetadataSource:
     ) -> RuntimeFileChecksum | None:
         current_metadata = await self.load_current_file_metadata(file_path)
         return current_metadata.checksum if current_metadata is not None else None
-
-
-@dataclass(frozen=True, slots=True)
-class LocalExternalFileDeleteEntities:
-    """Adapt local entity storage to the external-delete runner contract."""
-
-    session_maker: async_sessionmaker[AsyncSession]
-    entity_repository: LocalIndexEntityRepository
-
-    async def find_entity_by_file_path(
-        self,
-        file_path: RuntimeFilePath,
-    ) -> Entity | None:
-        async with db.scoped_session(self.session_maker) as session:
-            return await self.entity_repository.get_by_file_path(session, file_path)
-
-    async def delete_entity_if_file_path_matches(
-        self,
-        *,
-        entity_id: RuntimeEntityId,
-        file_path: RuntimeFilePath,
-    ) -> bool:
-        async with db.scoped_session(self.session_maker) as session:
-            return await self.entity_repository.delete_by_fields(
-                session,
-                id=entity_id,
-                file_path=file_path,
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +203,7 @@ class LocalWatchEventIndexRuntimeFactory:
                 entity_repository=dependencies.entity_repository,
             ),
             file_indexer=dependencies.file_indexer,
-            delete_entities=LocalExternalFileDeleteEntities(
+            delete_entities=RepositoryExternalFileDeleteEntities(
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
             ),

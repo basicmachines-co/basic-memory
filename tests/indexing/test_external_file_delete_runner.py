@@ -1,11 +1,15 @@
 """Tests for portable external file-delete reconciliation."""
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import basic_memory.indexing.external_file_delete_runner as external_file_delete_runner
 from basic_memory.indexing.external_file_delete_runner import (
     ExternalFileDeleteResult,
+    RepositoryExternalFileDeleteEntities,
     run_external_file_delete,
 )
 from basic_memory.runtime import RuntimeExternalFileDeleteAction
@@ -53,6 +57,87 @@ class FakeExternalFileObjects:
     async def file_exists(self, file_path: str) -> bool:
         self.exists_calls.append(file_path)
         return self.exists
+
+
+class FakeEntityRepository:
+    def __init__(self, entity: FakeDeletedEntity | None) -> None:
+        self.entity = entity
+        self.get_calls: list[tuple[object, str]] = []
+        self.delete_calls: list[tuple[object, dict[str, object]]] = []
+
+    async def get_by_file_path(
+        self,
+        session: AsyncSession,
+        file_path: str,
+        *,
+        load_relations: bool = True,
+    ) -> FakeDeletedEntity | None:
+        self.get_calls.append((session, file_path))
+        return self.entity
+
+    async def delete_by_fields(
+        self,
+        session: AsyncSession,
+        **filters: object,
+    ) -> bool:
+        self.delete_calls.append((session, filters))
+        return True
+
+
+class FakeScopedSession:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return self.session
+
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_repository_external_file_delete_entities_use_scoped_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = cast(AsyncSession, object())
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    scoped_session_calls: list[async_sessionmaker[AsyncSession]] = []
+
+    def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> FakeScopedSession:
+        scoped_session_calls.append(scoped_session_maker)
+        return FakeScopedSession(session)
+
+    monkeypatch.setattr(
+        external_file_delete_runner.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    entity = FakeDeletedEntity(
+        id=42,
+        external_id="note-42",
+        title="Deleted note",
+        permalink="deleted-note",
+    )
+    repository = FakeEntityRepository(entity)
+    adapter = RepositoryExternalFileDeleteEntities(
+        session_maker=session_maker,
+        entity_repository=repository,
+    )
+
+    found = await adapter.find_entity_by_file_path("notes/deleted.md")
+    deleted = await adapter.delete_entity_if_file_path_matches(
+        entity_id=42,
+        file_path="notes/deleted.md",
+    )
+
+    assert found == entity
+    assert deleted is True
+    assert scoped_session_calls == [session_maker, session_maker]
+    assert repository.get_calls == [(session, "notes/deleted.md")]
+    assert repository.delete_calls == [(session, {"id": 42, "file_path": "notes/deleted.md"})]
 
 
 @pytest.mark.asyncio
