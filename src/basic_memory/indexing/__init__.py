@@ -593,6 +593,7 @@ from basic_memory.indexing.relation_resolution import (
     UnresolvedRelationCounter,
     plan_index_file_relation_resolution,
     plan_project_index_completion_relation_resolution,
+    resolve_project_index_completion_relations,
     resolve_project_relations,
     resolve_relations_until_stable,
 )
@@ -1109,6 +1110,7 @@ __all__ = [
     "project_index_storage_files_from_observed",
     "project_index_workflow_logical_key",
     "project_delete_repository",
+    "resolve_project_index_completion_relations",
     "resolve_project_relations",
     "resolve_relations_until_stable",
     "resolve_link_texts",

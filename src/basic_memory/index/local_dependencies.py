@@ -27,6 +27,10 @@ from basic_memory.indexing import (
     IndexMarkdownNoteContentReconciler,
     OrphanEntityRepository,
     OrphanSearchIndex,
+    RelationResolutionEntityIndexer,
+    RelationResolutionEntityRepository,
+    RelationResolutionLinkResolver,
+    RelationResolutionRelationRepository,
     StorageIndexFileWriter,
     SyncedMarkdownFile,
 )
@@ -54,6 +58,7 @@ class LocalIndexEntityRepository(
     IndexedFileChecksumRepository,
     CurrentMaterializedNoteEntityRepository,
     OrphanEntityRepository[Entity],
+    RelationResolutionEntityRepository,
     Protocol,
 ):
     """Entity repository capabilities needed by local event/project indexing."""
@@ -98,6 +103,14 @@ class LocalIndexEntityRepository(
     ) -> bool: ...
 
 
+class LocalIndexSearchService(
+    OrphanSearchIndex[Entity],
+    RelationResolutionEntityIndexer,
+    Protocol,
+):
+    """Search capabilities needed by local event/project indexing."""
+
+
 @dataclass(frozen=True, slots=True)
 class LocalIndexProjectDependencies:
     """Adapter handoff values needed to build local index runtimes."""
@@ -107,7 +120,9 @@ class LocalIndexProjectDependencies:
     session_maker: async_sessionmaker[AsyncSession]
     project_id: ProjectId
     entity_repository: LocalIndexEntityRepository
-    search_service: OrphanSearchIndex[Entity]
+    relation_repository: RelationResolutionRelationRepository
+    link_resolver: RelationResolutionLinkResolver
+    search_service: LocalIndexSearchService
 
 
 type LocalIndexProjectDependencyProvider = Callable[
@@ -434,5 +449,7 @@ async def build_local_index_project_dependencies(
         session_maker=session_maker,
         project_id=project.id,
         entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        link_resolver=link_resolver,
         search_service=search_service,
     )

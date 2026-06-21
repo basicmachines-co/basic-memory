@@ -37,7 +37,10 @@ from basic_memory.indexing import (
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
     ProjectIndexWorkflowRequest,
+    RepositoryRelationResolutionRuntime,
+    ResolvedRelationTarget,
     StoreProjectIndexMaintenanceRunner,
+    UnresolvedRelation,
 )
 from basic_memory.models import Entity, Project
 from basic_memory.runtime import (
@@ -159,6 +162,23 @@ class RecordingBatchEnqueuer:
         self.requests.append(request)
 
 
+@dataclass(slots=True)
+class RecordingCompletionRelationRuntime:
+    events: list[str]
+    resolve_calls: int = 0
+    count_calls: int = 0
+
+    async def count_unresolved_relations(self) -> int:
+        self.events.append("relations:count")
+        self.count_calls += 1
+        return 2 if self.count_calls == 1 else 0
+
+    async def resolve_relations(self) -> set[int]:
+        self.events.append("relations:resolve")
+        self.resolve_calls += 1
+        return {10} if self.resolve_calls == 1 else set()
+
+
 def project_ref() -> ProjectRuntimeReference:
     return ProjectRuntimeReference(
         project_id=12,
@@ -215,6 +235,52 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
     ]
     assert batch_enqueuer.requests[0].observed_files == observed[:2]
     assert batch_enqueuer.requests[0].index_embeddings is False
+
+
+async def test_run_local_project_index_resolves_relations_after_inline_fanout() -> None:
+    """Local project indexing runs completion relation resolution after child batches."""
+    events: list[str] = []
+    observed = (RuntimeObservedIndexFile(path="notes/a.md", checksum="a", size=1),)
+    observed_source = RecordingObservedFileSource(observed)
+    change_detector = RecordingChangeDetector(ChangeReport(new_files=["notes/a.md"]))
+    maintenance_runner = RecordingMaintenanceRunner()
+
+    class EventBatchEnqueuer(RecordingBatchEnqueuer):
+        async def enqueue_index_file_batch(self, request: RuntimeIndexFileBatchJobRequest) -> None:
+            events.append("batch")
+            await super().enqueue_index_file_batch(request)
+
+    relation_runtime = RecordingCompletionRelationRuntime(events)
+    batch_enqueuer = EventBatchEnqueuer()
+
+    await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            tenant_id=TENANT_ID,
+            workflow_id=WORKFLOW_ID,
+            project=project_ref(),
+            search=True,
+            embeddings=False,
+        ),
+        runtime=LocalProjectIndexRuntime(
+            observed_file_source=observed_source,
+            change_detector=change_detector,
+            maintenance_runner=maintenance_runner,
+            batch_enqueuer=batch_enqueuer,
+            workflow_starter=NoopProjectIndexWorkflowStarter(),
+            fanout_failure_recorder=NoopProjectIndexFanoutFailureRecorder(),
+            batch_size=10,
+            completion_relation_runtime=relation_runtime,
+        ),
+    )
+
+    assert events == [
+        "batch",
+        "relations:count",
+        "relations:resolve",
+        "relations:resolve",
+        "relations:count",
+    ]
+    assert relation_runtime.resolve_calls == 2
 
 
 async def test_noop_local_project_index_workflow_starter_returns_no_completion() -> None:
@@ -405,6 +471,9 @@ async def test_local_project_index_file_runner_runs_core_index_file() -> None:
 
 
 class RuntimeFactoryEntityRepository:
+    async def find_by_id(self, session: AsyncSession, entity_id: int) -> Entity | None:
+        return None
+
     async def get_all_file_paths(self, session: AsyncSession) -> Sequence[str]:
         return ()
 
@@ -458,6 +527,45 @@ class RuntimeFactorySearchIndex:
     async def handle_delete(self, entity: Entity) -> None:
         return None
 
+    async def index_entity(self, entity: Entity) -> None:
+        return None
+
+
+class RuntimeFactoryRelationRepository:
+    async def find_unresolved_relations(
+        self, session: AsyncSession
+    ) -> Sequence[UnresolvedRelation]:
+        return ()
+
+    async def find_unresolved_relations_for_entity(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> Sequence[UnresolvedRelation]:
+        return ()
+
+    async def update(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        entity_data: dict[str, object],
+    ) -> object | None:
+        return None
+
+    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+        return False
+
+
+class RuntimeFactoryLinkResolver:
+    async def resolve_link(
+        self,
+        link_text: str,
+        *,
+        strict: bool,
+        session: AsyncSession,
+    ) -> ResolvedRelationTarget | None:
+        return None
+
 
 async def test_local_project_index_runtime_factory_composes_inline_runtime(
     tmp_path: Path,
@@ -469,6 +577,8 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
         session_maker=async_sessionmaker(),
         project_id=12,
         entity_repository=RuntimeFactoryEntityRepository(),
+        relation_repository=RuntimeFactoryRelationRepository(),
+        link_resolver=RuntimeFactoryLinkResolver(),
         search_service=RuntimeFactorySearchIndex(),
     )
     seen_projects: list[Project] = []
@@ -495,6 +605,7 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
     assert isinstance(runtime.observed_file_source, LocalProjectIndexObservedFileSource)
     assert isinstance(runtime.change_detector, ChangeDetector)
     assert isinstance(runtime.maintenance_runner, StoreProjectIndexMaintenanceRunner)
+    assert isinstance(runtime.completion_relation_runtime, RepositoryRelationResolutionRuntime)
     assert isinstance(runtime.batch_enqueuer, InlineProjectIndexBatchEnqueuer)
     assert isinstance(runtime.batch_enqueuer.file_runner, LocalProjectIndexFileRunner)
     assert runtime.batch_size == 3

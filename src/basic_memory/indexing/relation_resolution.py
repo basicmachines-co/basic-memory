@@ -274,6 +274,19 @@ def plan_project_index_completion_relation_resolution(
     )
 
 
+async def resolve_project_index_completion_relations(
+    context: ProjectIndexRelationResolutionContext,
+    runtime: RelationResolutionRuntime,
+    *,
+    max_passes: int = 3,
+) -> ResolveRelationsResult | None:
+    """Run the final relation-resolution pass for a completed project index."""
+    request = plan_project_index_completion_relation_resolution(context)
+    if request is None:
+        return None
+    return await resolve_project_relations(runtime, max_passes=max_passes)
+
+
 def plan_index_file_relation_resolution(
     context: IndexFileRelationResolutionContext,
 ) -> ResolveRelationsJobRequest | None:

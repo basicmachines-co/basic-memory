@@ -18,6 +18,7 @@ from basic_memory.indexing.relation_resolution import (
     ResolveRelationsResult,
     plan_index_file_relation_resolution,
     plan_project_index_completion_relation_resolution,
+    resolve_project_index_completion_relations,
     resolve_project_relations,
     resolve_relations_until_stable,
 )
@@ -49,6 +50,20 @@ class StubRelationResolutionPass:
         index = min(self.calls, len(self._affected_per_pass) - 1)
         self.calls += 1
         return self._affected_per_pass[index]
+
+
+class StubRelationResolutionRuntime:
+    """Relation-resolution runtime with scripted counters and pass results."""
+
+    def __init__(self, counts: list[int], affected_per_pass: list[set[int]]) -> None:
+        self.counter = StubUnresolvedRelationCounter(counts)
+        self.resolver = StubRelationResolutionPass(affected_per_pass)
+
+    async def count_unresolved_relations(self) -> int:
+        return await self.counter.count_unresolved_relations()
+
+    async def resolve_relations(self) -> set[int]:
+        return await self.resolver.resolve_relations()
 
 
 class FakeSession:
@@ -251,6 +266,45 @@ def test_project_index_completion_relation_resolution_plan_requires_project_iden
                 project_path="main",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_project_index_completion_relation_resolution_runs_shared_pass() -> None:
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    runtime = StubRelationResolutionRuntime([2, 0], [{10}, set()])
+
+    result = await resolve_project_index_completion_relations(
+        ProjectIndexRelationResolutionContext(
+            tenant_id=tenant_id,
+            project_id=7,
+            project_path="main",
+        ),
+        runtime,
+    )
+
+    assert result == ResolveRelationsResult(
+        unresolved_before=2,
+        remaining=0,
+        passes=2,
+        affected_entities=1,
+    )
+    assert runtime.counter.calls == 2
+    assert runtime.resolver.calls == 2
+
+    skipped_runtime = StubRelationResolutionRuntime([2, 0], [{10}])
+    assert (
+        await resolve_project_index_completion_relations(
+            ProjectIndexRelationResolutionContext(
+                tenant_id=tenant_id,
+                project_id=None,
+                project_path="main",
+            ),
+            skipped_runtime,
+        )
+        is None
+    )
+    assert skipped_runtime.counter.calls == 0
+    assert skipped_runtime.resolver.calls == 0
 
 
 def test_index_file_relation_resolution_plan_requires_incremental_processed_file() -> None:

@@ -34,6 +34,7 @@ from basic_memory.indexing import (
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
     RepositoryProjectIndexMaintenanceStore,
+    RepositoryRelationResolutionRuntime,
     StorageCurrentFileChecksumSource,
     ProjectIndexBatchEnqueuer,
     ProjectIndexChangeDetector,
@@ -44,7 +45,10 @@ from basic_memory.indexing import (
     ProjectIndexObservedFileSource,
     ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStarter,
+    ProjectIndexRelationResolutionContext,
+    RelationResolutionRuntime,
     StoreProjectIndexMaintenanceRunner,
+    resolve_project_index_completion_relations,
     run_project_index_coordinator,
     run_index_file,
 )
@@ -173,6 +177,7 @@ class LocalProjectIndexRuntime:
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder = (
         NoopProjectIndexFanoutFailureRecorder()
     )
+    completion_relation_runtime: RelationResolutionRuntime | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
 
@@ -353,6 +358,13 @@ class LocalProjectIndexRuntimeFactory:
                 delete_store=maintenance_store,
             ),
             batch_enqueuer=InlineProjectIndexBatchEnqueuer(file_runner),
+            completion_relation_runtime=RepositoryRelationResolutionRuntime(
+                session_maker=dependencies.session_maker,
+                relation_repository=dependencies.relation_repository,
+                entity_repository=dependencies.entity_repository,
+                link_resolver=dependencies.link_resolver,
+                entity_indexer=dependencies.search_service,
+            ),
             batch_size=self.batch_size,
         )
 
@@ -420,7 +432,7 @@ async def run_local_project_index(
     runtime: LocalProjectIndexRuntime,
 ) -> ProjectIndexCoordinatorResult:
     """Run project-wide local indexing through the storage-neutral coordinator."""
-    return await run_project_index_coordinator(
+    result = await run_project_index_coordinator(
         request,
         coordinator_job_id=runtime.coordinator_job_id,
         observed_file_source=runtime.observed_file_source,
@@ -431,3 +443,13 @@ async def run_local_project_index(
         fanout_failure_recorder=runtime.fanout_failure_recorder,
         batch_size=runtime.batch_size,
     )
+    if runtime.completion_relation_runtime is not None:
+        await resolve_project_index_completion_relations(
+            ProjectIndexRelationResolutionContext(
+                tenant_id=request.tenant_id,
+                project_id=request.project.project_id,
+                project_path=request.project.project_path,
+            ),
+            runtime.completion_relation_runtime,
+        )
+    return result
