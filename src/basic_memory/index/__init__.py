@@ -70,6 +70,11 @@ from basic_memory.index.project_index import (
     project_index_workflow_logical_key,
     run_project_index_coordinator,
 )
+from basic_memory.index.repository_project_resolution import (
+    NoopStorageEventProjectResolutionLogger,
+    RepositoryStorageEventProjectResolver,
+    StorageEventProjectResolutionLogger,
+)
 from basic_memory.index.storage_events import (
     StorageEventBucketProcessor,
     StorageEventBucketContextProcessor,
@@ -115,6 +120,8 @@ __all__ = [
     "ProjectIndexObservedFileSource",
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowStarter",
+    "NoopStorageEventProjectResolutionLogger",
+    "RepositoryStorageEventProjectResolver",
     "StoreProjectIndexMaintenanceRunner",
     "RuntimeStorageEventSource",
     "StorageEventBucketProcessor",
@@ -131,6 +138,7 @@ __all__ = [
     "StorageEventOperationProcessorFactory",
     "StorageEventPayload",
     "StorageEventProjectResolver",
+    "StorageEventProjectResolutionLogger",
     "StorageEventSource",
     "StorageKey",
     "build_project_index_workflow_queued",
