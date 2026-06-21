@@ -157,6 +157,7 @@ project-index-contract-test: project-index-surface-test project-index-workflow-t
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_watch_regular_file_parity.py \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file
 
@@ -167,6 +168,7 @@ event-index-contract-test:
         tests/indexing/test_external_file_delete_runner.py \
         tests/index/test_filesystem_events.py \
         tests/index/test_inline_storage_event_processor.py \
+        tests/index/test_local_watch_regular_file_parity.py \
         tests/index/test_local_watch_orchestration.py \
         tests/index/test_repository_storage_event_project_resolution.py \
         tests/index/test_storage_event_operation_processor.py \

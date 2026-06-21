@@ -133,9 +133,10 @@ class LocalWatchMoveProcessor:
                 moved_files=moved_files,
                 batch_size=self.batch_size,
             )
-            if move_run.moved_entity_ids:
+            refresh_entity_ids = move_run.moved_entity_ids | move_run.relation_cleanup_entity_ids
+            if refresh_entity_ids:
                 await self.moved_entity_search_refresher.refresh_moved_entities(
-                    sorted(move_run.moved_entity_ids)
+                    sorted(refresh_entity_ids)
                 )
 
             moved_old_paths = set(moved_files) - set(move_run.missing_paths)

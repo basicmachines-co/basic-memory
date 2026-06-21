@@ -508,6 +508,8 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
             ProjectIndexMoveBatchResult(
                 updated_files=1,
                 moved_entity_ids=frozenset({10}),
+                replaced_entity_ids=frozenset({30}),
+                relation_cleanup_entity_ids=frozenset({99}),
                 missing_paths=("notes/b.md",),
             ),
             ProjectIndexMoveBatchResult(
@@ -547,6 +549,8 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
         total_updated_files=2,
         records=run.records,
         moved_entity_ids=frozenset({10, 11}),
+        replaced_entity_ids=frozenset({30}),
+        relation_cleanup_entity_ids=frozenset({99}),
     )
     assert run.missing_paths == ("notes/b.md",)
     assert metadata_reporter.progress_updates == [
@@ -707,11 +711,76 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
         moved_entity_ids=frozenset({10}),
         missing_paths=("notes/b.md",),
     )
-    assert len(session.statements) == 4
+    assert len(session.statements) == 5
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
-    assert "UPDATE entity" in str(session.statements[1])
-    assert "UPDATE note_content" in str(session.statements[2])
-    assert "UPDATE search_index" in str(session.statements[3])
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
+    assert "UPDATE entity" in str(session.statements[2])
+    assert "UPDATE note_content" in str(session.statements[3])
+    assert "UPDATE search_index" in str(session.statements[4])
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_deletes_replaced_move_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "other/doc-1.pdf", "permalink": None},
+                ]
+            ),
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 20, "file_path": "doc.pdf"},
+                ]
+            ),
+            FakeProjectIndexResult(scalar_values=[99]),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_workflow_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("other/doc-1.pdf", "doc.pdf"),),
+        )
+    )
+
+    assert result == ProjectIndexMoveBatchResult(
+        updated_files=1,
+        moved_entity_ids=frozenset({10}),
+        replaced_entity_ids=frozenset({20}),
+        relation_cleanup_entity_ids=frozenset({99}),
+    )
+    assert len(session.statements) == 9
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[2])
+    assert "DELETE FROM search_index" in str(session.statements[3])
+    assert "DELETE FROM search_vector_chunks" in str(session.statements[4])
+    assert "DELETE FROM entity" in str(session.statements[5])
+    assert "UPDATE entity" in str(session.statements[6])
+    assert "UPDATE note_content" in str(session.statements[7])
+    assert "UPDATE search_index" in str(session.statements[8])
 
 
 @pytest.mark.asyncio
@@ -776,15 +845,15 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
             old_permalink="main/notes/a",
         )
     ]
-    assert len(session.statements) == 5
-    assert "checksum" in str(session.statements[1])
-    assert "permalink" in str(session.statements[1])
-    assert "markdown_content" in str(session.statements[2])
-    assert "db_checksum" in str(session.statements[2])
-    assert "file_checksum" in str(session.statements[2])
-    assert "UPDATE search_index" in str(session.statements[3])
-    assert "search_index.type" in str(session.statements[4])
-    assert "permalink" in str(session.statements[4])
+    assert len(session.statements) == 6
+    assert "checksum" in str(session.statements[2])
+    assert "permalink" in str(session.statements[2])
+    assert "markdown_content" in str(session.statements[3])
+    assert "db_checksum" in str(session.statements[3])
+    assert "file_checksum" in str(session.statements[3])
+    assert "UPDATE search_index" in str(session.statements[4])
+    assert "search_index.type" in str(session.statements[5])
+    assert "permalink" in str(session.statements[5])
 
 
 @pytest.mark.asyncio

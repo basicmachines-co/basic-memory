@@ -614,6 +614,8 @@ class ProjectIndexMoveBatchResult:
 
     updated_files: int
     moved_entity_ids: frozenset[int] = frozenset()
+    replaced_entity_ids: frozenset[int] = frozenset()
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
     missing_paths: tuple[str, ...] = ()
 
 
@@ -634,6 +636,8 @@ class ProjectIndexMoveRun:
     total_updated_files: int
     records: tuple[ProjectIndexMoveBatchRecord, ...]
     moved_entity_ids: frozenset[int] = frozenset()
+    replaced_entity_ids: frozenset[int] = frozenset()
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
 
     @property
     def missing_paths(self) -> tuple[str, ...]:
@@ -745,6 +749,46 @@ PROJECT_INDEX_SEARCH_INDEX_TABLE = table(
 )
 
 
+async def delete_project_index_entities(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    entity_ids: Sequence[int],
+) -> frozenset[int]:
+    """Delete indexed entities and return surviving relation sources needing repair."""
+    deleted_entity_ids = tuple(entity_ids)
+    if not deleted_entity_ids:
+        return frozenset()
+
+    surviving_relation_sources = await session.execute(
+        select(Relation.from_id)
+        .where(
+            Relation.project_id == project_id,
+            Relation.to_id.in_(deleted_entity_ids),
+            Relation.from_id.not_in(deleted_entity_ids),
+        )
+        .distinct()
+    )
+    relation_cleanup_entity_ids = frozenset(
+        int(entity_id) for entity_id in surviving_relation_sources.scalars()
+    )
+
+    delete_params = {
+        "project_id": project_id,
+        "deleted_entity_ids": deleted_entity_ids,
+        "relation_row_type": "relation",
+    }
+    await session.execute(DELETE_PROJECT_INDEX_SEARCH_ROWS_SQL, delete_params)
+    await session.execute(DELETE_PROJECT_INDEX_VECTOR_CHUNKS_SQL, delete_params)
+    await session.execute(
+        delete(Entity).where(
+            Entity.project_id == project_id,
+            Entity.id.in_(deleted_entity_ids),
+        )
+    )
+    return relation_cleanup_entity_ids
+
+
 @dataclass(frozen=True, slots=True)
 class RepositoryProjectIndexMaintenanceStore:
     """Apply project-index move/delete maintenance with explicit sessions."""
@@ -778,6 +822,8 @@ class RepositoryProjectIndexMaintenanceStore:
                 int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
                 for row in target_rows
             }
+            replaced_entity_ids: frozenset[int] = frozenset()
+            relation_cleanup_entity_ids: frozenset[int] = frozenset()
             content_updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate] = {}
             if self.move_content_updater is not None:
                 for row in target_rows:
@@ -798,6 +844,22 @@ class RepositoryProjectIndexMaintenanceStore:
                         content_updates_by_entity_id[entity_id] = content_update
 
             if updated_old_paths:
+                new_paths = tuple(sorted(set(target_paths_by_entity_id.values())))
+                replacement_result = await session.execute(
+                    select(Entity.id, Entity.file_path).where(
+                        Entity.project_id == self.project_id,
+                        Entity.file_path.in_(new_paths),
+                        Entity.id.not_in(tuple(target_paths_by_entity_id)),
+                    )
+                )
+                replacement_rows = replacement_result.mappings().all()
+                replaced_entity_ids = frozenset(int(row["id"]) for row in replacement_rows)
+                relation_cleanup_entity_ids = await delete_project_index_entities(
+                    session,
+                    project_id=self.project_id,
+                    entity_ids=tuple(replaced_entity_ids),
+                )
+
                 entity_update_values = {
                     "file_path": case(
                         target_paths_by_old_path,
@@ -907,6 +969,8 @@ class RepositoryProjectIndexMaintenanceStore:
         return ProjectIndexMoveBatchResult(
             updated_files=len(updated_old_paths),
             moved_entity_ids=frozenset(target_paths_by_entity_id),
+            replaced_entity_ids=replaced_entity_ids,
+            relation_cleanup_entity_ids=relation_cleanup_entity_ids,
             missing_paths=missing_paths,
         )
 
@@ -935,31 +999,10 @@ class RepositoryProjectIndexMaintenanceStore:
             deleted_entity_ids = tuple(int(row["id"]) for row in target_rows)
             deleted_found_paths = frozenset(str(row["file_path"]) for row in target_rows)
 
-            surviving_relation_sources = await session.execute(
-                select(Relation.from_id)
-                .where(
-                    Relation.project_id == self.project_id,
-                    Relation.to_id.in_(deleted_entity_ids),
-                    Relation.from_id.not_in(deleted_entity_ids),
-                )
-                .distinct()
-            )
-            relation_cleanup_entity_ids = frozenset(
-                int(entity_id) for entity_id in surviving_relation_sources.scalars()
-            )
-
-            delete_params = {
-                "project_id": self.project_id,
-                "deleted_entity_ids": deleted_entity_ids,
-                "relation_row_type": "relation",
-            }
-            await session.execute(DELETE_PROJECT_INDEX_SEARCH_ROWS_SQL, delete_params)
-            await session.execute(DELETE_PROJECT_INDEX_VECTOR_CHUNKS_SQL, delete_params)
-            await session.execute(
-                delete(Entity).where(
-                    Entity.project_id == self.project_id,
-                    Entity.id.in_(deleted_entity_ids),
-                )
+            relation_cleanup_entity_ids = await delete_project_index_entities(
+                session,
+                project_id=self.project_id,
+                entity_ids=deleted_entity_ids,
             )
 
         return ProjectIndexDeleteBatchResult(
@@ -1130,11 +1173,15 @@ async def run_project_index_move_batches(
 
     total_updated = 0
     moved_entity_ids: set[int] = set()
+    replaced_entity_ids: set[int] = set()
+    relation_cleanup_entity_ids: set[int] = set()
     records: list[ProjectIndexMoveBatchRecord] = []
     for move_batch in move_plan.batches:
         batch_result = await move_store.apply_project_index_move_batch(move_batch)
         total_updated += batch_result.updated_files
         moved_entity_ids.update(batch_result.moved_entity_ids)
+        replaced_entity_ids.update(batch_result.replaced_entity_ids)
+        relation_cleanup_entity_ids.update(batch_result.relation_cleanup_entity_ids)
         progress = ProjectIndexMoveBatchProgress(
             moved_files=move_plan.total_moves,
             completed_batches=move_batch.completed_batches,
@@ -1156,6 +1203,8 @@ async def run_project_index_move_batches(
         total_updated_files=total_updated,
         records=tuple(records),
         moved_entity_ids=frozenset(moved_entity_ids),
+        replaced_entity_ids=frozenset(replaced_entity_ids),
+        relation_cleanup_entity_ids=frozenset(relation_cleanup_entity_ids),
     )
 
 
@@ -1335,9 +1384,10 @@ async def run_project_index_coordinator(
         moved_files=change_report.moved_files,
         batch_size=batch_size,
     )
-    if move_run.moved_entity_ids:
+    moved_entity_ids_to_refresh = move_run.moved_entity_ids | move_run.relation_cleanup_entity_ids
+    if moved_entity_ids_to_refresh:
         await moved_entity_search_refresher.refresh_moved_entities(
-            sorted(move_run.moved_entity_ids)
+            sorted(moved_entity_ids_to_refresh)
         )
     delete_run = await maintenance_runner.run_delete_batches(
         deleted_paths=change_report.deleted_files,
@@ -1398,7 +1448,9 @@ async def run_project_index_coordinator(
         enqueued_batches=enqueued_batches,
         deleted_files=delete_run.total_deleted_entities,
         moved_files=move_run.total_updated_files,
-        relation_cleanup_entity_ids=delete_run.relation_cleanup_entity_ids,
+        relation_cleanup_entity_ids=(
+            move_run.relation_cleanup_entity_ids | delete_run.relation_cleanup_entity_ids
+        ),
         batch_results=tuple(batch_results),
         completion=completion,
     )

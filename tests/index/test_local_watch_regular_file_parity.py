@@ -1,0 +1,95 @@
+"""Local event-index watcher parity for regular file edge cases."""
+
+from pathlib import Path
+
+import pytest
+from watchfiles import Change
+
+from basic_memory import db
+from basic_memory.config import BasicMemoryConfig
+from basic_memory.index import (
+    LocalProjectIndexRuntimeFactory,
+    LocalWatchEventIndexRuntimeFactory,
+    run_local_project_index_for_project,
+)
+from basic_memory.models.knowledge import Entity
+from basic_memory.sync.watch_service import WatchService
+
+
+async def create_test_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_local_event_index_moves_regular_file_over_deleted_path(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+) -> None:
+    """Regular file move-with-delete parity should not keep the replaced target entity."""
+    target_path = project_config.home / "doc.pdf"
+    source_path = project_config.home / "other" / "doc-1.pdf"
+    await create_test_file(target_path, "target content")
+    await create_test_file(source_path, "source content")
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index regular file move test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        target_before = await entity_repository.get_by_file_path(session, "doc.pdf")
+        source_before = await entity_repository.get_by_file_path(session, "other/doc-1.pdf")
+    assert target_before is not None
+    assert source_before is not None
+    assert target_before.content_type == "application/pdf"
+    assert source_before.content_type == "application/pdf"
+
+    target_path.unlink()
+    source_path.rename(target_path)
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.deleted, str(target_path)),
+            (Change.deleted, str(source_path)),
+            (Change.added, str(target_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        replaced_target = await session.get(Entity, target_before.id)
+        old_source = await entity_repository.get_by_file_path(session, "other/doc-1.pdf")
+        moved_source = await entity_repository.get_by_file_path(session, "doc.pdf")
+
+    assert replaced_target is None
+    assert old_source is None
+    assert moved_source is not None
+    assert moved_source.id == source_before.id
+    assert moved_source.permalink is None
+    assert moved_source.content_type == "application/pdf"
+    assert target_path.read_text(encoding="utf-8") == "source content"
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
