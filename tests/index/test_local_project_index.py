@@ -13,27 +13,29 @@ from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index import (
-    InlineProjectIndexBatchEnqueuer,
     LocalIndexProjectDependencies,
+    LocalProjectIndexBatchEnqueuer,
     LocalProjectIndexObservedFileSource,
-    LocalProjectIndexFileRunner,
     LocalProjectIndexRuntimeFactory,
     LocalProjectIndexRuntime,
     local_project_index_file_paths,
-    project_index_file_requests_from_batch_request,
     run_local_project_index,
 )
 from basic_memory.indexing import (
     ChangeDetector,
     ChangeReport,
+    FileIndexPlan,
+    FileIndexTarget,
     IndexFileBatchJobResult,
+    IndexFileBatchReadResult,
     IndexFileJobResult,
     IndexFileJobStatus,
-    IndexFileObjectMetadata,
-    IndexFileRuntimeRequest,
     FileIndexOperation,
     FileIndexResult,
     EmbeddingIndexTarget,
+    IndexedEntity,
+    IndexingBatchResult,
+    IndexInputFile,
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
     RepositoryRelationResolutionRuntime,
@@ -47,8 +49,6 @@ from basic_memory.runtime import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
-    RuntimeStorageFileIndexMode,
-    RuntimeStorageObjectObservation,
 )
 from basic_memory.services import FileService
 
@@ -354,139 +354,108 @@ def test_local_project_index_runtime_uses_optional_workflow_hooks() -> None:
     assert runtime.fanout_failure_recorder is None
 
 
-def test_project_index_file_requests_from_batch_request_preserve_observed_metadata() -> None:
-    """Project batch requests become typed per-file index requests for inline runtimes."""
-    batch_request = RuntimeIndexFileBatchJobRequest(
-        tenant_id=TENANT_ID,
-        project=project_ref(),
-        workflow_id=WORKFLOW_ID,
-        batch_index=0,
-        batch_count=1,
-        observed_files=(
-            RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=11),
-            RuntimeObservedIndexFile(path="notes/b.md", checksum="etag-b", size=12),
-        ),
-        index_embeddings=False,
-    )
+@dataclass(slots=True)
+class RecordingBatchChecker:
+    seen_targets: list[tuple[FileIndexTarget, ...]] = field(default_factory=list)
 
-    requests = project_index_file_requests_from_batch_request(batch_request)
-
-    assert requests == (
-        IndexFileRuntimeRequest(
-            tenant_id=TENANT_ID,
-            project_id=12,
-            project_external_id="project-12",
-            project_name="Local",
-            project_path="local-project",
-            file_path="notes/a.md",
-            mode=RuntimeStorageFileIndexMode.observed_object,
-            object_observation=RuntimeStorageObjectObservation(etag="etag-a", size=11),
-            index_embeddings=False,
-            workflow_id=WORKFLOW_ID,
-        ),
-        IndexFileRuntimeRequest(
-            tenant_id=TENANT_ID,
-            project_id=12,
-            project_external_id="project-12",
-            project_name="Local",
-            project_path="local-project",
-            file_path="notes/b.md",
-            mode=RuntimeStorageFileIndexMode.observed_object,
-            object_observation=RuntimeStorageObjectObservation(etag="etag-b", size=12),
-            index_embeddings=False,
-            workflow_id=WORKFLOW_ID,
-        ),
-    )
-
-
-def test_project_index_file_requests_from_batch_request_support_current_file_paths() -> None:
-    """Inline local fanout can still run when only paths are present."""
-    batch_request = RuntimeIndexFileBatchJobRequest(
-        tenant_id=TENANT_ID,
-        project=project_ref(),
-        workflow_id=WORKFLOW_ID,
-        batch_index=0,
-        batch_count=1,
-        file_paths=("notes/a.md",),
-    )
-
-    request = project_index_file_requests_from_batch_request(batch_request)[0]
-
-    assert request.file_path == "notes/a.md"
-    assert request.mode == RuntimeStorageFileIndexMode.current_file
-    assert request.object_observation is None
+    async def detect(self, targets: Sequence[FileIndexTarget]) -> FileIndexPlan:
+        self.seen_targets.append(tuple(targets))
+        return FileIndexPlan(
+            paths_to_read=tuple(target.path for target in targets),
+            decisions=(),
+        )
 
 
 @dataclass(slots=True)
-class RecordingIndexFileRequestRunner:
-    requests: list[IndexFileRuntimeRequest] = field(default_factory=list)
-    results: list[IndexFileJobResult] = field(default_factory=list)
+class RecordingBatchReader:
+    files: Mapping[str, IndexInputFile]
+    seen_reads: list[tuple[tuple[str, ...], int]] = field(default_factory=list)
 
-    async def run_index_file_request(
+    async def read_current_files(
         self,
-        request: IndexFileRuntimeRequest,
-    ) -> IndexFileJobResult:
-        self.requests.append(request)
-        if self.results:
-            return self.results.pop(0)
-        return IndexFileJobResult(status=IndexFileJobStatus.processed, reason="indexed")
-
-
-async def test_inline_project_index_batch_enqueuer_runs_each_file_request() -> None:
-    """Inline project fanout executes child batch requests in-process."""
-    runner = RecordingIndexFileRequestRunner()
-    enqueuer = InlineProjectIndexBatchEnqueuer(runner)
-
-    result = await enqueuer.enqueue_index_file_batch(
-        RuntimeIndexFileBatchJobRequest(
-            tenant_id=TENANT_ID,
-            project=project_ref(),
-            workflow_id=WORKFLOW_ID,
-            batch_index=0,
-            batch_count=1,
-            observed_files=(
-                RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=11),
-                RuntimeObservedIndexFile(path="notes/b.md", checksum="etag-b", size=12),
-            ),
-            index_embeddings=False,
+        file_paths: Sequence[str],
+        *,
+        max_concurrent: int,
+    ) -> IndexFileBatchReadResult[IndexInputFile]:
+        self.seen_reads.append((tuple(file_paths), max_concurrent))
+        return IndexFileBatchReadResult(
+            files={file_path: self.files[file_path] for file_path in file_paths},
+            terminal_results={},
         )
+
+
+@dataclass(slots=True)
+class RecordingBatchIndexer:
+    seen_batches: list[tuple[tuple[str, ...], int, int | None, int | None]] = field(
+        default_factory=list
     )
 
-    assert [request.file_path for request in runner.requests] == ["notes/a.md", "notes/b.md"]
-    assert [request.object_observation for request in runner.requests] == [
-        RuntimeStorageObjectObservation(etag="etag-a", size=11),
-        RuntimeStorageObjectObservation(etag="etag-b", size=12),
-    ]
-    assert result.total_files == 2
-    assert result.processed_files == 2
+    async def index_files(
+        self,
+        files: Mapping[str, IndexInputFile],
+        *,
+        max_concurrent: int,
+        parse_max_concurrent: int | None = None,
+        metadata_update_max_concurrent: int | None = None,
+        bound_logger: object | None = None,
+    ) -> IndexingBatchResult:
+        del bound_logger
+        self.seen_batches.append(
+            (
+                tuple(files),
+                max_concurrent,
+                parse_max_concurrent,
+                metadata_update_max_concurrent,
+            )
+        )
+        return IndexingBatchResult(
+            indexed=[
+                IndexedEntity(
+                    path=file_path,
+                    entity_id=index + 1,
+                    permalink=None,
+                    checksum=file_info.checksum or f"checksum-{index}",
+                    content_type=file_info.content_type,
+                )
+                for index, (file_path, file_info) in enumerate(files.items())
+            ]
+        )
 
 
-async def test_inline_project_index_batch_enqueuer_returns_cloud_shaped_batch_result() -> None:
-    """Inline project fanout reports ordered batch outcomes like cloud batch jobs."""
-    file_results = [
-        IndexFileJobResult(
-            status=IndexFileJobStatus.processed,
-            reason="file indexed: notes/a.md",
-            entity_id=42,
-            entity_checksum="checksum-a",
+class RuntimePathClassifier:
+    def is_markdown(self, path: str) -> bool:
+        return path.endswith((".md", ".markdown"))
+
+
+async def test_local_project_index_batch_enqueuer_runs_shared_batch_contract() -> None:
+    """Local project fanout uses the same batch runner contract as cloud."""
+    files = {
+        "notes/a.md": IndexInputFile(
+            path="notes/a.md",
+            size=11,
+            checksum="checksum-a",
+            content_type="text/markdown",
+            content=b"# A\n",
         ),
-        IndexFileJobResult(
-            status=IndexFileJobStatus.missing,
-            reason="file not found: notes/missing.md",
+        "assets/file.pdf": IndexInputFile(
+            path="assets/file.pdf",
+            size=14,
+            checksum="checksum-pdf",
+            content_type="application/pdf",
+            content=b"pdf-ish",
         ),
-        IndexFileJobResult(
-            status=IndexFileJobStatus.failed,
-            reason="file indexing failed: notes/fail.md: parse failed",
-        ),
-        IndexFileJobResult(
-            status=IndexFileJobStatus.processed,
-            reason="file indexed: assets/file.pdf",
-            entity_id=99,
-            entity_checksum="checksum-pdf",
-        ),
-    ]
-    runner = RecordingIndexFileRequestRunner(results=list(file_results))
-    enqueuer = InlineProjectIndexBatchEnqueuer(runner)
+    }
+    checker = RecordingBatchChecker()
+    reader = RecordingBatchReader(files=files)
+    indexer = RecordingBatchIndexer()
+    enqueuer = LocalProjectIndexBatchEnqueuer(
+        checker=checker,
+        reader=reader,
+        indexer=indexer,
+        content_classifier=RuntimePathClassifier(),
+        read_max_concurrent=3,
+        index_max_concurrent=5,
+    )
 
     result = await enqueuer.enqueue_index_file_batch(
         RuntimeIndexFileBatchJobRequest(
@@ -497,40 +466,41 @@ async def test_inline_project_index_batch_enqueuer_returns_cloud_shaped_batch_re
             batch_count=2,
             observed_files=(
                 RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=11),
-                RuntimeObservedIndexFile(path="notes/missing.md", checksum="etag-b", size=12),
-                RuntimeObservedIndexFile(path="notes/fail.md", checksum="etag-c", size=13),
                 RuntimeObservedIndexFile(path="assets/file.pdf", checksum="etag-d", size=14),
             ),
             index_embeddings=True,
         )
     )
 
+    assert checker.seen_targets == [
+        (
+            FileIndexTarget(path="notes/a.md", observed_checksum="etag-a", observed_size=11),
+            FileIndexTarget(path="assets/file.pdf", observed_checksum="etag-d", observed_size=14),
+        )
+    ]
+    assert reader.seen_reads == [(("notes/a.md", "assets/file.pdf"), 3)]
+    assert indexer.seen_batches == [(("notes/a.md", "assets/file.pdf"), 5, 5, 5)]
     assert result == IndexFileBatchJobResult(
-        total_files=4,
+        total_files=2,
         processed_files=2,
-        missing_files=1,
-        failed_files=1,
-        file_results=tuple(file_results),
-        vector_targets=(EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-a"),),
+        missing_files=0,
+        failed_files=0,
+        file_results=(
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/a.md",
+                entity_id=1,
+                entity_checksum="checksum-a",
+            ),
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: assets/file.pdf",
+                entity_id=2,
+                entity_checksum="checksum-pdf",
+            ),
+        ),
+        vector_targets=(EmbeddingIndexTarget(entity_id=1, entity_checksum="checksum-a"),),
     )
-
-
-class NeverCalledChecker:
-    async def detect(self, targets):
-        raise AssertionError("current-file request should not call observed metadata checker")
-
-
-class EmptyMaterializedNoteSource:
-    async def load_current_materialized_note_entity(self, file_path: str):
-        return None
-
-
-@dataclass(slots=True)
-class StaticMetadataSource:
-    checksum: str
-
-    async def load_current_file_metadata(self, file_path: str) -> IndexFileObjectMetadata | None:
-        return IndexFileObjectMetadata(checksum=self.checksum)
 
 
 @dataclass(slots=True)
@@ -548,36 +518,6 @@ class RecordingMarkdownFileIndexer:
             checksum="indexed-checksum",
             operation=FileIndexOperation.updated,
         )
-
-
-async def test_local_project_index_file_runner_runs_core_index_file() -> None:
-    """Concrete local file runner uses the core per-file index runner."""
-    file_indexer = RecordingMarkdownFileIndexer()
-    runner = LocalProjectIndexFileRunner(
-        checker=NeverCalledChecker(),
-        metadata_source=StaticMetadataSource("current-checksum"),
-        materialized_note_source=EmptyMaterializedNoteSource(),
-        file_indexer=file_indexer,
-    )
-
-    result = await runner.run_index_file_request(
-        IndexFileRuntimeRequest(
-            tenant_id=TENANT_ID,
-            project_id=12,
-            project_external_id="project-12",
-            project_name="Local",
-            project_path="local-project",
-            file_path="notes/a.md",
-            mode=RuntimeStorageFileIndexMode.current_file,
-            object_observation=None,
-            index_embeddings=False,
-            workflow_id=WORKFLOW_ID,
-        )
-    )
-
-    assert result.status == IndexFileJobStatus.processed
-    assert result.entity_id == 99
-    assert file_indexer.indexed_paths == ["notes/a.md"]
 
 
 class RuntimeFactoryEntityRepository:
@@ -694,6 +634,7 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
     dependencies = LocalIndexProjectDependencies(
         file_service=FileService(tmp_path),
         file_indexer=RecordingMarkdownFileIndexer(),
+        file_batch_indexer=RecordingBatchIndexer(),
         session_maker=async_sessionmaker(),
         project_id=12,
         entity_repository=RuntimeFactoryEntityRepository(),
@@ -722,6 +663,5 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
     assert isinstance(runtime.change_detector, ChangeDetector)
     assert isinstance(runtime.maintenance_runner, StoreProjectIndexMaintenanceRunner)
     assert isinstance(runtime.completion_relation_runtime, RepositoryRelationResolutionRuntime)
-    assert isinstance(runtime.batch_enqueuer, InlineProjectIndexBatchEnqueuer)
-    assert isinstance(runtime.batch_enqueuer.file_runner, LocalProjectIndexFileRunner)
+    assert isinstance(runtime.batch_enqueuer, LocalProjectIndexBatchEnqueuer)
     assert runtime.batch_size == 3

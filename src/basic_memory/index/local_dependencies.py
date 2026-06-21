@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -17,12 +17,15 @@ from basic_memory.file_utils import FileMetadata, ParseError, compute_checksum, 
 from basic_memory.indexing import (
     BatchIndexer,
     CurrentMaterializedNoteEntityRepository,
+    DefaultIndexBatchRuntime,
     FileIndexOperation,
     FileIndexResult,
+    IndexFileBatchIndexer,
     IndexedFileChecksumRepository,
     IndexEntitySearchWriter,
     IndexFileExecutor,
     IndexInputFile,
+    IndexingBatchResult,
     IndexMarkdownEntityRepository,
     IndexMarkdownNoteContentReconciler,
     OrphanEntityRepository,
@@ -33,6 +36,7 @@ from basic_memory.indexing import (
     RelationResolutionRelationRepository,
     StorageIndexFileWriter,
     SyncedMarkdownFile,
+    build_default_index_batch_runtime,
 )
 from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
@@ -117,6 +121,7 @@ class LocalIndexProjectDependencies:
 
     file_service: FileService
     file_indexer: IndexFileExecutor
+    file_batch_indexer: IndexFileBatchIndexer[IndexInputFile]
     session_maker: async_sessionmaker[AsyncSession]
     project_id: ProjectId
     entity_repository: LocalIndexEntityRepository
@@ -138,6 +143,30 @@ class DefaultLocalIndexProjectDependencyProvider:
 
     async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
         return await build_local_index_project_dependencies(project)
+
+
+@dataclass(frozen=True, slots=True)
+class LocalIndexFileBatchIndexer(IndexFileBatchIndexer[IndexInputFile]):
+    """Adapt the default loaded-file batch runtime to the file-batch job contract."""
+
+    batch_runtime: DefaultIndexBatchRuntime[IndexInputFile]
+
+    async def index_files(
+        self,
+        files: Mapping[str, IndexInputFile],
+        *,
+        max_concurrent: int,
+        parse_max_concurrent: int | None = None,
+        metadata_update_max_concurrent: int | None = None,
+        bound_logger: object | None = None,
+    ) -> IndexingBatchResult:
+        del bound_logger
+        return await self.batch_runtime.index_loaded_files(
+            files,
+            max_concurrent=max_concurrent,
+            parse_max_concurrent=parse_max_concurrent,
+            metadata_update_max_concurrent=metadata_update_max_concurrent,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,6 +551,17 @@ async def build_local_index_project_dependencies(
         file_writer=StorageIndexFileWriter(storage=file_service),
         session_maker=session_maker,
     )
+    batch_runtime = build_default_index_batch_runtime(
+        project_id=project.id,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        search_writer=search_service,
+        frontmatter_storage=file_service,
+        content_type_provider=file_service,
+        session_maker=session_maker,
+    )
     file_indexer = build_local_markdown_file_indexer(
         project_id=project.id,
         file_service=file_service,
@@ -533,6 +573,7 @@ async def build_local_index_project_dependencies(
     return LocalIndexProjectDependencies(
         file_service=file_service,
         file_indexer=file_indexer,
+        file_batch_indexer=LocalIndexFileBatchIndexer(batch_runtime),
         session_maker=session_maker,
         project_id=project.id,
         entity_repository=entity_repository,

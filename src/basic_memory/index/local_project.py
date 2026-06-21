@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.file_utils import compute_checksum
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
@@ -24,17 +26,17 @@ from basic_memory.index.local_runtime import (
 )
 from basic_memory.indexing import (
     ChangeDetector,
-    EmbeddingIndexTarget,
     FileIndexChecker,
     IndexFileBatchJobResult,
-    IndexFileExecutor,
+    IndexFileBatchChecker,
+    IndexFileBatchContentClassifier,
+    IndexFileBatchIndexer,
+    IndexFileBatchReader,
+    IndexFileBatchReadOutcome,
+    IndexFileBatchReadResult,
     IndexFileJobResult,
     IndexFileJobStatus,
-    IndexFileMaterializedNoteSource,
-    IndexFileMetadataSource,
-    IndexFileRunnerChecker,
-    IndexFileRuntimeRequest,
-    RepositoryCurrentMaterializedNoteSource,
+    IndexInputFile,
     RepositoryIndexedFileChecksumSource,
     RepositoryProjectIndexMaintenanceStore,
     RepositoryRelationResolutionRuntime,
@@ -49,11 +51,10 @@ from basic_memory.indexing import (
     ProjectIndexRelationResolutionContext,
     RelationResolutionRuntime,
     StoreProjectIndexMaintenanceRunner,
-    project_index_file_outcomes_from_job_results,
     resolve_project_index_completion_relations,
+    read_current_index_files,
     run_project_index_coordinator,
-    run_index_file,
-    summarize_project_index_file_outcomes,
+    run_index_file_batch,
 )
 from basic_memory.models import Project
 from basic_memory.runtime import (
@@ -62,23 +63,12 @@ from basic_memory.runtime import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
-    RuntimeStorageFileIndexMode,
-    RuntimeStorageObjectObservation,
     TenantId,
-    runtime_file_path_is_markdown_note,
 )
 from basic_memory.services import FileService
+from basic_memory.services.exceptions import FileOperationError
 
 type LocalProjectIndexIgnorePatterns = set[str]
-
-
-class ProjectIndexFileRequestRunner(Protocol):
-    """Capability that runs one typed file-index request inline."""
-
-    async def run_index_file_request(
-        self,
-        request: IndexFileRuntimeRequest,
-    ) -> IndexFileJobResult: ...
 
 
 class LocalProjectIndexProjectRepository(Protocol):
@@ -172,149 +162,84 @@ class LocalProjectIndexRuntimeProvider(Protocol):
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime: ...
 
 
-def project_index_file_requests_from_batch_request(
-    request: RuntimeIndexFileBatchJobRequest,
-) -> tuple[IndexFileRuntimeRequest, ...]:
-    """Return per-file index requests represented by one project-index batch."""
-    if request.observed_files:
-        return tuple(
-            index_file_request_from_observed_file(
-                request,
-                observed_file=observed_file,
+@dataclass(frozen=True, slots=True)
+class LocalIndexFileBatchReader(IndexFileBatchReader[IndexInputFile]):
+    """Load current local files for the shared index-file batch runner."""
+
+    file_service: FileService
+
+    async def read_current_files(
+        self,
+        file_paths: Sequence[str],
+        *,
+        max_concurrent: int,
+    ) -> IndexFileBatchReadResult[IndexInputFile]:
+        return await read_current_index_files(
+            file_paths,
+            reader=self,
+            max_concurrent=max_concurrent,
+        )
+
+    async def read_current_file(
+        self,
+        file_path: str,
+    ) -> IndexFileBatchReadOutcome[IndexInputFile]:
+        try:
+            file_bytes = await self.file_service.read_file_bytes(file_path)
+            file_metadata = await self.file_service.get_file_metadata(file_path)
+        except FileOperationError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return IndexFileBatchReadOutcome.terminal(
+                    IndexFileJobResult(
+                        status=IndexFileJobStatus.missing,
+                        reason=f"file not found: {file_path}",
+                    )
+                )
+            raise
+        except FileNotFoundError:
+            return IndexFileBatchReadOutcome.terminal(
+                IndexFileJobResult(
+                    status=IndexFileJobStatus.missing,
+                    reason=f"file not found: {file_path}",
+                )
             )
-            for observed_file in request.observed_files
+
+        return IndexFileBatchReadOutcome.loaded(
+            IndexInputFile(
+                path=file_path,
+                size=file_metadata.size,
+                checksum=await compute_checksum(file_bytes),
+                content_type=self.file_service.content_type(file_path),
+                last_modified=file_metadata.modified_at,
+                created_at=file_metadata.created_at,
+                content=file_bytes,
+            )
         )
-
-    return tuple(
-        index_file_request_from_path(
-            request,
-            file_path=file_path,
-        )
-        for file_path in request.file_paths
-    )
-
-
-def index_file_request_from_observed_file(
-    request: RuntimeIndexFileBatchJobRequest,
-    *,
-    observed_file: RuntimeObservedIndexFile,
-) -> IndexFileRuntimeRequest:
-    """Build a file-index request from observed project-index storage metadata."""
-    if observed_file.checksum is None:
-        return index_file_request_from_path(request, file_path=observed_file.path)
-
-    return IndexFileRuntimeRequest(
-        tenant_id=request.tenant_id,
-        project_id=request.project.project_id,
-        project_external_id=request.project.project_external_id,
-        project_name=request.project.project_name,
-        project_path=request.project.project_path,
-        file_path=observed_file.path,
-        mode=RuntimeStorageFileIndexMode.observed_object,
-        object_observation=RuntimeStorageObjectObservation(
-            etag=observed_file.checksum,
-            size=observed_file.size,
-        ),
-        index_embeddings=request.index_embeddings,
-        workflow_id=request.workflow_id,
-    )
-
-
-def index_file_request_from_path(
-    request: RuntimeIndexFileBatchJobRequest,
-    *,
-    file_path: str,
-) -> IndexFileRuntimeRequest:
-    """Build a current-file index request when no observed storage metadata exists."""
-    return IndexFileRuntimeRequest(
-        tenant_id=request.tenant_id,
-        project_id=request.project.project_id,
-        project_external_id=request.project.project_external_id,
-        project_name=request.project.project_name,
-        project_path=request.project.project_path,
-        file_path=file_path,
-        mode=RuntimeStorageFileIndexMode.current_file,
-        object_observation=None,
-        index_embeddings=request.index_embeddings,
-        workflow_id=request.workflow_id,
-    )
 
 
 @dataclass(frozen=True, slots=True)
-class InlineProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
-    """Run project-index child batches immediately in the current process."""
+class LocalProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
+    """Run project-index child batches through the shared batch-index runner."""
 
-    file_runner: ProjectIndexFileRequestRunner
+    checker: IndexFileBatchChecker
+    reader: IndexFileBatchReader[IndexInputFile]
+    indexer: IndexFileBatchIndexer[IndexInputFile]
+    content_classifier: IndexFileBatchContentClassifier
+    read_max_concurrent: int = 8
+    index_max_concurrent: int = 8
 
     async def enqueue_index_file_batch(
         self,
         request: RuntimeIndexFileBatchJobRequest,
     ) -> IndexFileBatchJobResult:
-        file_results: list[IndexFileJobResult] = []
-        for file_request in project_index_file_requests_from_batch_request(request):
-            file_results.append(await self.file_runner.run_index_file_request(file_request))
-
-        outcome_summary = summarize_project_index_file_outcomes(
-            project_index_file_outcomes_from_job_results(file_results)
-        )
-        return IndexFileBatchJobResult(
-            total_files=outcome_summary.total_files,
-            processed_files=outcome_summary.processed_files,
-            missing_files=outcome_summary.missing_files,
-            failed_files=outcome_summary.failed_files,
-            file_results=tuple(file_results),
-            vector_targets=inline_project_index_vector_targets(request, file_results),
-        )
-
-
-def inline_project_index_vector_targets(
-    request: RuntimeIndexFileBatchJobRequest,
-    file_results: list[IndexFileJobResult],
-) -> tuple[EmbeddingIndexTarget, ...]:
-    """Return markdown embedding targets represented by inline project-index results."""
-    if not request.index_embeddings:
-        return ()
-
-    vector_targets: list[EmbeddingIndexTarget] = []
-    for file_path, result in zip(request.target_paths(), file_results, strict=True):
-        if result.status != IndexFileJobStatus.processed:
-            continue
-        if not runtime_file_path_is_markdown_note(file_path):
-            continue
-        if result.entity_id is None:
-            raise RuntimeError(f"Inline project-index processed {file_path} without entity id")
-        if result.entity_checksum is None:
-            raise RuntimeError(
-                f"Inline project-index processed {file_path} without entity checksum"
-            )
-        vector_targets.append(
-            EmbeddingIndexTarget(
-                entity_id=result.entity_id,
-                entity_checksum=result.entity_checksum,
-            )
-        )
-    return tuple(vector_targets)
-
-
-@dataclass(frozen=True, slots=True)
-class LocalProjectIndexFileRunner(ProjectIndexFileRequestRunner):
-    """Run project-index child file requests through the core per-file runner."""
-
-    checker: IndexFileRunnerChecker
-    metadata_source: IndexFileMetadataSource
-    materialized_note_source: IndexFileMaterializedNoteSource
-    file_indexer: IndexFileExecutor
-
-    async def run_index_file_request(
-        self,
-        request: IndexFileRuntimeRequest,
-    ) -> IndexFileJobResult:
-        return await run_index_file(
+        return await run_index_file_batch(
             request,
             checker=self.checker,
-            metadata_source=self.metadata_source,
-            materialized_note_source=self.materialized_note_source,
-            file_indexer=self.file_indexer,
+            reader=self.reader,
+            indexer=self.indexer,
+            content_classifier=self.content_classifier,
+            read_max_concurrent=self.read_max_concurrent,
+            index_max_concurrent=self.index_max_concurrent,
         )
 
 
@@ -327,6 +252,8 @@ class LocalProjectIndexRuntimeFactory:
     )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     batch_size: int = 100
+    read_max_concurrent: int = 8
+    index_max_concurrent: int = 8
 
     async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
         return await self.dependency_provider.dependencies_for_project(project)
@@ -345,15 +272,6 @@ class LocalProjectIndexRuntimeFactory:
                 metadata_source=metadata_source,
             ),
         )
-        file_runner = LocalProjectIndexFileRunner(
-            checker=checker,
-            metadata_source=metadata_source,
-            materialized_note_source=RepositoryCurrentMaterializedNoteSource(
-                session_maker=dependencies.session_maker,
-                entity_repository=dependencies.entity_repository,
-            ),
-            file_indexer=dependencies.file_indexer,
-        )
         maintenance_store = RepositoryProjectIndexMaintenanceStore(
             session_maker=dependencies.session_maker,
             project_id=dependencies.project_id,
@@ -370,7 +288,14 @@ class LocalProjectIndexRuntimeFactory:
                 move_store=maintenance_store,
                 delete_store=maintenance_store,
             ),
-            batch_enqueuer=InlineProjectIndexBatchEnqueuer(file_runner),
+            batch_enqueuer=LocalProjectIndexBatchEnqueuer(
+                checker=checker,
+                reader=LocalIndexFileBatchReader(dependencies.file_service),
+                indexer=dependencies.file_batch_indexer,
+                content_classifier=dependencies.file_service,
+                read_max_concurrent=self.read_max_concurrent,
+                index_max_concurrent=self.index_max_concurrent,
+            ),
             completion_relation_runtime=RepositoryRelationResolutionRuntime(
                 session_maker=dependencies.session_maker,
                 relation_repository=dependencies.relation_repository,
