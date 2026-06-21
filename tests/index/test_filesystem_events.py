@@ -30,19 +30,45 @@ def test_watchfiles_changes_normalize_to_storage_event_payloads(tmp_path: Path) 
     )
 
     assert [(event.event_name, event.object_key) for event in events] == [
+        ("OBJECT_DELETED", "project/notes/deleted.md"),
         ("OBJECT_CREATED_PUT", "project/notes/added.md"),
         ("OBJECT_CREATED_PUT", "project/notes/modified.md"),
-        ("OBJECT_DELETED", "project/notes/deleted.md"),
     ]
     assert {event.bucket_name for event in events} == {"local-test"}
     assert {event.project_path for event in events} == {"project"}
     assert [event.relative_path for event in events] == [
+        "notes/deleted.md",
         "notes/added.md",
         "notes/modified.md",
-        "notes/deleted.md",
     ]
-    assert events[0].size == added.stat().st_size
-    assert events[2].size is None
+    assert events[0].size is None
+    assert events[1].size == added.stat().st_size
+
+
+def test_watchfiles_move_batches_emit_deletes_before_creates(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    notes_dir = project_root / "notes"
+    archive_dir = project_root / "archive"
+    archive_dir.mkdir(parents=True)
+    notes_dir.mkdir(parents=True)
+    old_path = notes_dir / "move-me.md"
+    new_path = archive_dir / "move-me.md"
+    new_path.write_text("# Move Me\n", encoding="utf-8")
+
+    events = local_storage_events_from_watchfiles_changes(
+        project_root=project_root,
+        project_prefix="project",
+        changes=(
+            (Change.added, str(new_path)),
+            (Change.deleted, str(old_path)),
+        ),
+        event_time="2026-06-20T12:00:00Z",
+    )
+
+    assert [(event.event_name, event.object_key) for event in events] == [
+        ("OBJECT_DELETED", "project/notes/move-me.md"),
+        ("OBJECT_CREATED_PUT", "project/archive/move-me.md"),
+    ]
 
 
 def test_existing_file_delete_event_is_treated_as_atomic_write_update(

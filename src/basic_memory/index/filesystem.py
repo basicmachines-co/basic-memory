@@ -70,6 +70,7 @@ def local_storage_event_inputs_from_watchfiles_changes(
         if event_input is not None:
             event_inputs.append(event_input)
 
+    event_inputs.sort(key=local_storage_event_input_order)
     return tuple(event_inputs)
 
 
@@ -113,6 +114,13 @@ def local_relative_path_is_filtered(relative_path: str) -> bool:
     if relative_path.endswith(".tmp"):
         return True
     return any(path_part.startswith(".") for path_part in Path(relative_path).parts)
+
+
+def local_storage_event_input_order(event_input: StorageEventInput) -> tuple[int, StorageKey]:
+    """Order local batch deletes before creates so move batches clear stale entities first."""
+    if event_input.event_name == STORAGE_OBJECT_DELETED_EVENT:
+        return (0, event_input.object_key)
+    return (1, event_input.object_key)
 
 
 def local_storage_event_name_for_change(change: Change, path: Path) -> str | None:

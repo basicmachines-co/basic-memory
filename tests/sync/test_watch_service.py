@@ -483,6 +483,57 @@ async def test_handle_changes_with_local_event_index_runtime_deletes_missing_mar
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_processes_move_as_delete_and_index(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    sync_service,
+    entity_repository,
+):
+    """The event-index watcher models moves as cloud-shaped delete plus index work."""
+
+    old_path = project_config.home / "old" / "local-event-move.md"
+    old_path.parent.mkdir(parents=True)
+    await create_test_file(old_path, "# Local Event Move\n\nMove me.\n")
+    await sync_service.sync(project_config.home)
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(session, "old/local-event-move.md")
+    assert before is not None
+
+    new_path = project_config.home / "new" / "local-event-move.md"
+    new_path.parent.mkdir(parents=True)
+    old_path.rename(new_path)
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.added, str(new_path)),
+            (Change.deleted, str(old_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        old_entity = await entity_repository.get_by_file_path(session, "old/local-event-move.md")
+        moved_entity = await entity_repository.get_by_file_path(session, "new/local-event-move.md")
+    assert old_entity is None
+    assert moved_entity is not None
+    assert watch_service.state.synced_files == 2
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+    assert not [event for event in watch_service.state.recent_events if event.action == "moved"]
+
+
+@pytest.mark.asyncio
 async def test_handle_file_add(watch_service, project_config, test_project, entity_repository):
     """Test handling new file creation."""
     project_dir = project_config.home
