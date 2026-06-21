@@ -176,6 +176,7 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_preserves_move_identity \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_collapses_rapid_move \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_skips_directory_rename_events \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index \
         tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_by_default
 

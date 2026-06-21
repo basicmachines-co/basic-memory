@@ -125,41 +125,55 @@ class LocalWatchMoveProcessor:
         events: Sequence[StorageEventPayload],
     ) -> LocalWatchMoveProcessingResult:
         moved_files, moved_event_indexes = await self.detect_moves(events)
-        if not moved_files:
-            return LocalWatchMoveProcessingResult(
-                remaining_events=tuple(events),
-                processed_moves=0,
-            )
+        processed_moves = 0
+        removed_event_indexes: set[int] = set()
 
-        move_run = await self.maintenance_runner.run_move_batches(
-            moved_files=moved_files,
-            batch_size=self.batch_size,
-        )
-        if move_run.moved_entity_ids:
-            await self.moved_entity_search_refresher.refresh_moved_entities(
-                sorted(move_run.moved_entity_ids)
+        if moved_files:
+            move_run = await self.maintenance_runner.run_move_batches(
+                moved_files=moved_files,
+                batch_size=self.batch_size,
             )
+            if move_run.moved_entity_ids:
+                await self.moved_entity_search_refresher.refresh_moved_entities(
+                    sorted(move_run.moved_entity_ids)
+                )
+
+            moved_old_paths = set(moved_files) - set(move_run.missing_paths)
+            moved_new_paths = {moved_files[old_path] for old_path in moved_old_paths}
+            removed_event_indexes.update(
+                index
+                for index, event in enumerate(events)
+                if index in moved_event_indexes
+                and event.relative_path in moved_old_paths | moved_new_paths
+            )
+            processed_moves = move_run.total_updated_files
 
         transient_event_indexes = await self.detect_transient_missing_events(
             events,
             exclude_indexes=moved_event_indexes,
         )
-        moved_old_paths = set(moved_files) - set(move_run.missing_paths)
-        moved_new_paths = {moved_files[old_path] for old_path in moved_old_paths}
+        removed_event_indexes.update(transient_event_indexes)
+        removed_event_indexes.update(
+            await self.detect_missing_entity_delete_events(
+                events,
+                exclude_indexes=moved_event_indexes | transient_event_indexes,
+            )
+        )
+        if not removed_event_indexes:
+            return LocalWatchMoveProcessingResult(
+                remaining_events=tuple(events),
+                processed_moves=processed_moves,
+            )
+
         retained_events: list[StorageEventPayload] = []
         for index, event in enumerate(events):
-            if index in transient_event_indexes:
-                continue
-            if (
-                index in moved_event_indexes
-                and event.relative_path in moved_old_paths | moved_new_paths
-            ):
+            if index in removed_event_indexes:
                 continue
             retained_events.append(event)
 
         return LocalWatchMoveProcessingResult(
             remaining_events=tuple(retained_events),
-            processed_moves=move_run.total_updated_files,
+            processed_moves=processed_moves,
         )
 
     async def detect_moves(
@@ -234,6 +248,30 @@ class LocalWatchMoveProcessor:
             transient_event_indexes.update(create_indexes_by_path[path])
 
         return transient_event_indexes
+
+    async def detect_missing_entity_delete_events(
+        self,
+        events: Sequence[StorageEventPayload],
+        *,
+        exclude_indexes: set[int],
+    ) -> set[int]:
+        delete_indexes_by_path = local_watch_event_indexes_by_path(
+            local_watch_delete_events(events),
+            exclude_indexes=exclude_indexes,
+        )
+        if not delete_indexes_by_path:
+            return set()
+
+        existing_entity_paths = await self.load_deleted_entity_paths(tuple(delete_indexes_by_path))
+        missing_delete_event_indexes: set[int] = set()
+        for path, event_indexes in delete_indexes_by_path.items():
+            if path in existing_entity_paths:
+                continue
+            if await self.file_service.exists(path):
+                continue
+            missing_delete_event_indexes.update(event_indexes)
+
+        return missing_delete_event_indexes
 
     async def load_deleted_entity_paths(
         self,

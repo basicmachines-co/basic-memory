@@ -659,6 +659,80 @@ async def test_handle_changes_with_local_event_index_runtime_collapses_rapid_mov
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_skips_directory_rename_events(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """Local event-index ignores directory-only rename events like legacy watcher handling."""
+
+    old_dir_path = project_config.home / "old_dir"
+    file_in_dir = old_dir_path / "test_file.md"
+    await create_test_file(
+        file_in_dir,
+        """---
+type: knowledge
+---
+# Test File
+This is a test file in a directory.
+""",
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index directory rename test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(session, "old_dir/test_file.md")
+    assert before is not None
+
+    new_dir_path = project_config.home / "new_dir"
+    old_dir_path.rename(new_dir_path)
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.deleted, str(old_dir_path)),
+            (Change.added, str(new_dir_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        old_entity = await entity_repository.get_by_file_path(session, "old_dir/test_file.md")
+        new_entity = await entity_repository.get_by_file_path(session, "new_dir/test_file.md")
+
+    assert old_entity is not None
+    assert old_entity.id == before.id
+    assert new_entity is None
+    assert watch_service.state.synced_files == 0
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+    assert watch_service.state.recent_events[0].error is None
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index(
     app_config: BasicMemoryConfig,
     project_repository,
