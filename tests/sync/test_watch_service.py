@@ -694,6 +694,109 @@ async def test_handle_changes_with_local_event_index_runtime_deletes_missing_mar
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_skips_deleted_project(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    project_service,
+    tmp_path,
+    monkeypatch,
+):
+    """Local event-index skips removed projects before runtime dispatch."""
+    from textwrap import dedent
+
+    from basic_memory.config import ProjectEntry
+
+    project_dir = project_config.home
+    file_path = project_dir / "local-event-deleted-project.md"
+    await create_test_file(
+        file_path,
+        dedent("""
+            ---
+            type: knowledge
+            ---
+            # Deleted Project
+            Initial content
+        """).strip(),
+    )
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index deleted-project test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(
+            session,
+            "local-event-deleted-project.md",
+        )
+    assert before is not None
+
+    other_project_path = str(tmp_path.parent / "other-project-for-event-index-test")
+    async with db.scoped_session(project_service.session_maker) as session:
+        other_project = await project_service.repository.create(
+            session,
+            {
+                "name": "other-event-index-project",
+                "path": other_project_path,
+                "permalink": "other-event-index-project",
+                "is_active": True,
+            },
+        )
+        await project_service.repository.set_as_default(session, other_project.id)
+
+    config = project_service.config_manager.load_config()
+    config.projects["other-event-index-project"] = ProjectEntry(path=other_project_path)
+    config.default_project = "other-event-index-project"
+    project_service.config_manager.save_config(config)
+
+    await project_service.remove_project(test_project.name)
+
+    await create_test_file(
+        file_path,
+        dedent("""
+            ---
+            type: knowledge
+            ---
+            # Deleted Project
+            Modified content after project deletion
+        """).strip(),
+    )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.modified, str(file_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        after = await entity_repository.get_by_file_path(
+            session,
+            "local-event-deleted-project.md",
+        )
+
+    if after is not None:
+        assert after.checksum == before.checksum
+    assert watch_service.state.synced_files == 0
+    assert watch_service.state.recent_events == []
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_preserves_move_identity(
     app_config: BasicMemoryConfig,
     project_repository,
