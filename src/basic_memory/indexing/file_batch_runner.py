@@ -108,6 +108,17 @@ class IndexFileBatchContentClassifier(Protocol):
     def is_markdown(self, path: FileIndexPath) -> bool: ...
 
 
+def file_index_targets_for_batch_request(
+    request: RuntimeIndexFileBatchJobRequest,
+) -> tuple[FileIndexTarget, ...]:
+    """Return checker targets, preserving force-full as an unconditional read."""
+    targets = file_index_targets_from_runtime_batch_request(request)
+    if not request.force_full:
+        return targets
+
+    return tuple(FileIndexTarget(path=target.path) for target in targets)
+
+
 async def read_current_index_files[LoadedFileT](
     file_paths: Sequence[FileIndexPath],
     *,
@@ -162,7 +173,7 @@ async def run_index_file_batch[LoadedFileT](
             vector_targets=(),
         )
 
-    file_index_plan = await checker.detect(file_index_targets_from_runtime_batch_request(request))
+    file_index_plan = await checker.detect(file_index_targets_for_batch_request(request))
     terminal_results: dict[FileIndexPath, IndexFileJobResult] = {
         decision.path: index_file_job_result_from_decision(decision)
         for decision in file_index_plan.decisions

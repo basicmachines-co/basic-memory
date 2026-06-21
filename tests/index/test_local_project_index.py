@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.index import (
     LocalIndexProjectDependencies,
     LocalProjectIndexBatchEnqueuer,
@@ -20,6 +21,7 @@ from basic_memory.index import (
     LocalProjectIndexRuntime,
     local_project_index_file_paths,
     run_local_project_index,
+    run_local_project_index_for_project,
 )
 from basic_memory.indexing import (
     ChangeDetector,
@@ -44,6 +46,7 @@ from basic_memory.indexing import (
     UnresolvedRelation,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
@@ -501,6 +504,57 @@ async def test_local_project_index_batch_enqueuer_runs_shared_batch_contract() -
         ),
         vector_targets=(EmbeddingIndexTarget(entity_id=1, entity_checksum="checksum-a"),),
     )
+
+
+async def test_local_project_index_force_full_reindexes_unchanged_files(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Force-full local project indexing refreshes files even when checksums match."""
+    del config_manager
+
+    note_path = project_config.home / "notes" / "force-full.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Force Full\n\nThis should be reprocessed.\n", encoding="utf-8")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local project index parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert second.enqueued_files == 1
+    assert second.batch_results[0].processed_files == 1
+    assert second.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "notes/force-full.md")
+        assert entity is not None
+        note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "notes/force-full.md",
+        )
+    assert note_content is not None
+    assert "This should be reprocessed." in note_content.markdown_content
 
 
 @dataclass(slots=True)

@@ -859,6 +859,7 @@ class RuntimeIndexFileBatchJobRequest:
     file_paths: tuple[RuntimeFilePath, ...] = ()
     observed_files: tuple[RuntimeObservedIndexFile, ...] = ()
     index_embeddings: bool = True
+    force_full: bool = False
 
     def dedupe_key(self) -> str:
         """Return the logical file-batch index queue identity."""

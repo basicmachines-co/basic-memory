@@ -24,7 +24,11 @@ from basic_memory.indexing.models import (
     IndexFileJobStatus,
     IndexingBatchResult,
 )
-from basic_memory.runtime import ProjectRuntimeReference, RuntimeIndexFileBatchJobRequest
+from basic_memory.runtime import (
+    ProjectRuntimeReference,
+    RuntimeIndexFileBatchJobRequest,
+    RuntimeObservedIndexFile,
+)
 
 
 class LoadedFile:
@@ -230,3 +234,40 @@ async def test_run_index_file_batch_reads_indexes_and_orders_results() -> None:
     assert result.missing_files == 1
     assert result.failed_files == 1
     assert [target.entity_id for target in result.vector_targets] == [42]
+
+
+@pytest.mark.asyncio
+async def test_run_index_file_batch_force_full_ignores_observed_checksum_skips() -> None:
+    checker = FakeChecker()
+    reader = FakeReader()
+    indexer = FakeIndexer()
+
+    await run_index_file_batch(
+        RuntimeIndexFileBatchJobRequest(
+            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+            project=ProjectRuntimeReference(
+                project_id=101,
+                project_external_id="project-main",
+                project_path="main",
+            ),
+            workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
+            batch_index=0,
+            batch_count=1,
+            observed_files=(
+                RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=12),
+                RuntimeObservedIndexFile(path="notes/broken.md", checksum="etag-b", size=13),
+            ),
+            force_full=True,
+        ),
+        checker=checker,
+        reader=reader,
+        indexer=indexer,
+        content_classifier=FakeClassifier(),
+        read_max_concurrent=2,
+        index_max_concurrent=3,
+    )
+
+    assert checker.targets == (
+        FileIndexTarget(path="notes/a.md"),
+        FileIndexTarget(path="notes/broken.md"),
+    )

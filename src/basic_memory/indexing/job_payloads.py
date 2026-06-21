@@ -193,6 +193,7 @@ class IndexFileBatchJobPayload(BaseModel):
     batch_count: int
     workflow_id: UUID
     index_embeddings: bool = True
+    force_full: bool = False
 
     def targets(self) -> list[ObservedIndexFilePayload]:
         """Return the file targets this batch should evaluate at runtime."""
@@ -221,6 +222,7 @@ class IndexFileBatchJobPayload(BaseModel):
             batch_count=request.batch_count,
             workflow_id=request.workflow_id,
             index_embeddings=request.index_embeddings,
+            force_full=request.force_full,
         )
 
     def to_runtime_request(self) -> RuntimeIndexFileBatchJobRequest:
@@ -240,6 +242,7 @@ class IndexFileBatchJobPayload(BaseModel):
                 observed_file.to_runtime_observed_file() for observed_file in self.observed_files
             ),
             index_embeddings=self.index_embeddings,
+            force_full=self.force_full,
         )
 
     def runtime_job_request(

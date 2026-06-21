@@ -175,6 +175,7 @@ def test_index_file_batch_job_payload_round_trips_runtime_request() -> None:
         file_paths=("notes/a.md",),
         observed_files=(RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=123),),
         index_embeddings=False,
+        force_full=True,
     )
 
     payload = IndexFileBatchJobPayload.from_runtime_request(runtime_request)
@@ -192,6 +193,7 @@ def test_index_file_batch_job_payload_round_trips_runtime_request() -> None:
         batch_count=5,
         workflow_id=workflow_id,
         index_embeddings=False,
+        force_full=True,
     )
     assert payload.targets() == [
         ObservedIndexFilePayload(path="notes/a.md", checksum="etag-a", size=123),

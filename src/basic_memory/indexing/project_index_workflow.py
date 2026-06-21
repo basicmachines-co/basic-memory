@@ -1066,6 +1066,7 @@ def build_project_index_batch_job_plan(
             file_paths=tuple(target.path for target in batch_targets),
             observed_files=batch_targets,
             index_embeddings=request.embeddings,
+            force_full=request.force_full,
         )
         for batch_index, batch_targets in enumerate(batches)
     )
