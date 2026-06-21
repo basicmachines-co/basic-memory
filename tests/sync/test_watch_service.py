@@ -448,6 +448,59 @@ async def test_handle_changes_with_local_event_index_runtime_indexes_markdown_fi
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_coalesces_add_and_modify(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """Local event-index processes one file once when add and modify arrive together."""
+
+    file_path = project_config.home / "local-event-concurrent.md"
+    await create_test_file(
+        file_path,
+        "# Local Event Concurrent\n\nFinal content from the watcher batch.\n",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index concurrent batch test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.added, str(file_path)),
+            (Change.modified, str(file_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(
+            session,
+            "local-event-concurrent.md",
+        )
+    assert entity is not None
+    assert entity.title == "local-event-concurrent"
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_indexes_regular_file(
     app_config: BasicMemoryConfig,
     project_repository,

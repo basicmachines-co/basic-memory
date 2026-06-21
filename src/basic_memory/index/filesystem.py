@@ -71,7 +71,7 @@ def local_storage_event_inputs_from_watchfiles_changes(
             event_inputs.append(event_input)
 
     event_inputs.sort(key=local_storage_event_input_order)
-    return tuple(event_inputs)
+    return coalesce_local_storage_event_inputs(event_inputs)
 
 
 def local_storage_event_input_from_watchfiles_change(
@@ -121,6 +121,21 @@ def local_storage_event_input_order(event_input: StorageEventInput) -> tuple[int
     if event_input.event_name == STORAGE_OBJECT_DELETED_EVENT:
         return (0, event_input.object_key)
     return (1, event_input.object_key)
+
+
+def coalesce_local_storage_event_inputs(
+    event_inputs: Iterable[StorageEventInput],
+) -> tuple[StorageEventInput, ...]:
+    """Drop duplicate local watcher events that resolve to the same storage operation."""
+    coalesced: list[StorageEventInput] = []
+    observed: set[tuple[str, StorageKey]] = set()
+    for event_input in event_inputs:
+        event_key = (event_input.event_name, event_input.object_key)
+        if event_key in observed:
+            continue
+        observed.add(event_key)
+        coalesced.append(event_input)
+    return tuple(coalesced)
 
 
 def local_storage_event_name_for_change(change: Change, path: Path) -> str | None:
