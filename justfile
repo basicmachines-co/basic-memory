@@ -1,8 +1,8 @@
 # Basic Memory - Modern Command Runner
 
-TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--testmon-noselect")
-TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--testmon --testmon-forceselect")
-TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--testmon-noselect")
+TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--import-mode=importlib --testmon-noselect")
+TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--import-mode=importlib --testmon --testmon-forceselect")
+TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--import-mode=importlib --testmon-noselect")
 # CI shards the Postgres unit suite across parallel jobs via pytest-split
 # (e.g. "--splits 3 --group 2"). Empty locally.
 PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
@@ -138,11 +138,20 @@ event-index-contract-test:
         tests/index/test_filesystem_events.py \
         tests/index/test_inline_storage_event_processor.py \
         tests/index/test_local_watch_orchestration.py \
+        tests/index/test_storage_event_operation_processor.py \
         tests/index/test_storage_event_orchestration.py \
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
         tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_by_default
+
+# Focused parity loop for local project scans and shared storage-event routing.
+event-index-parity-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py \
+        tests/index/test_filesystem_events.py \
+        tests/index/test_storage_event_operation_processor.py \
+        tests/index/test_storage_event_orchestration.py
 
 # Focused indexing contract suite for the cloud/core extraction loop.
 index-contract-test: project-index-contract-test event-index-contract-test

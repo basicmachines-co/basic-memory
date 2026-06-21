@@ -65,6 +65,8 @@ def test_local_project_index_file_paths_filter_and_sort(tmp_path: Path) -> None:
     (tmp_path / ".hidden").mkdir()
     (tmp_path / "notes" / "b.md").write_text("# B\n", encoding="utf-8")
     (tmp_path / "notes" / "a.md").write_text("# A\n", encoding="utf-8")
+    (tmp_path / "notes" / "image.png").write_bytes(b"image")
+    (tmp_path / "notes" / "todo.txt").write_text("todo\n", encoding="utf-8")
     (tmp_path / "notes" / "scratch.tmp").write_text("tmp\n", encoding="utf-8")
     (tmp_path / "ignored" / "skip.md").write_text("# Skip\n", encoding="utf-8")
     (tmp_path / ".hidden" / "secret.md").write_text("# Secret\n", encoding="utf-8")

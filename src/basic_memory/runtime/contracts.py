@@ -85,6 +85,11 @@ NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR = (
 RUNTIME_MARKDOWN_CONTENT_TYPE: RuntimeContentType = "text/markdown"
 
 
+def runtime_file_path_is_markdown_note(relative_path: RuntimeFilePath) -> bool:
+    """Return whether a runtime file path is eligible for markdown-note indexing."""
+    return relative_path.endswith(".md")
+
+
 def runtime_job_status_from_workflow_status(
     workflow_status: RuntimeWorkflowStatus,
 ) -> RuntimeJobStatusType:
@@ -920,7 +925,7 @@ def plan_runtime_storage_event_operation(
             skip_reason=RuntimeStorageEventSkipReason.project_root,
         )
 
-    if not relative_path.endswith(".md"):
+    if not runtime_file_path_is_markdown_note(relative_path):
         return RuntimeStorageEventOperation(
             kind=RuntimeStorageEventOperationKind.skip,
             storage_event=storage_event,

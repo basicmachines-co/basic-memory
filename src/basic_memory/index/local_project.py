@@ -63,6 +63,7 @@ from basic_memory.runtime import (
     RuntimeStorageObjectObservation,
     TenantId,
     WorkflowId,
+    runtime_file_path_is_markdown_note,
 )
 from basic_memory.services import FileService
 
@@ -103,6 +104,8 @@ def local_project_index_file_paths(
         if local_relative_path_is_filtered(relative_path):
             continue
         if should_ignore_path(path, project_root, active_ignore_patterns):
+            continue
+        if not runtime_file_path_is_markdown_note(relative_path):
             continue
         file_paths.append(relative_path)
 
