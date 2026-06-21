@@ -120,6 +120,18 @@ class RecordingNoteContentReconciler:
             raise RuntimeError(f"note_content failed for {entity.id}")
 
 
+@dataclass(slots=True)
+class RecordingIndexedNoteContentTimestampProvider:
+    def observed_at(
+        self,
+        indexed: IndexedEntity,
+        file_info: FakeFileInfo | None,
+    ) -> datetime | None:
+        _ = indexed
+        assert file_info is not None
+        return file_info.last_modified
+
+
 @pytest.mark.asyncio
 async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_content(
     monkeypatch: pytest.MonkeyPatch,
@@ -169,13 +181,6 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
         assert scoped_session_maker is session_maker
         yield session
 
-    def observed_at_for_indexed(
-        indexed: IndexedEntity,
-        file_info: FakeFileInfo | None,
-    ) -> datetime | None:
-        assert file_info is not None
-        return file_info.last_modified
-
     monkeypatch.setattr(
         batch_reconciliation_module.db,
         "scoped_session",
@@ -188,7 +193,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
         entity_repository=repository,
         session_maker=session_maker,
         note_content_reconciler=reconciler,
-        observed_at_for_indexed=observed_at_for_indexed,
+        timestamp_provider=RecordingIndexedNoteContentTimestampProvider(),
     )
     files = {
         "ok.md": FakeFileInfo(

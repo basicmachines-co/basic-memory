@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, TypeVar
@@ -16,13 +16,6 @@ from basic_memory import db
 from basic_memory.indexing.file_index_planning import FileIndexPath
 from basic_memory.indexing.models import IndexedEntity
 
-type IndexingTaskFactory[ResultT] = Callable[[], Awaitable[ResultT]]
-type IndexedNoteContentObservedAt[FileInfoT] = Callable[
-    [IndexedEntity, FileInfoT | None],
-    datetime | None,
-]
-type IndexedNoteContentClock = Callable[[], datetime]
-
 
 class IndexedNoteContentEntity(Protocol):
     """Minimal entity identity needed after a batch index write."""
@@ -34,13 +27,62 @@ class IndexedNoteContentFileInfo(Protocol):
     """Minimal loaded-file state needed to timestamp indexed note_content."""
 
     @property
-    def checksum(self) -> str: ...
+    def checksum(self) -> str | None: ...
 
     @property
     def last_modified(self) -> datetime | None: ...
 
 
 EntityT = TypeVar("EntityT", bound=IndexedNoteContentEntity)
+
+
+class IndexingTask[ResultT](Protocol):
+    """Retryable indexing follow-up task."""
+
+    async def run(self) -> ResultT:
+        """Execute one fresh task attempt."""
+
+
+class IndexedNoteContentClock(Protocol):
+    """Clock used when indexing rewrites the observed file."""
+
+    def now(self) -> datetime: ...
+
+
+class IndexedNoteContentTimestampProvider[FileInfoT: IndexedNoteContentFileInfo](Protocol):
+    """Timestamp provider for indexed note_content reconciliation."""
+
+    def observed_at(
+        self,
+        indexed: IndexedEntity,
+        file_info: FileInfoT | None,
+    ) -> datetime | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SystemIndexedNoteContentClock:
+    """System UTC clock for indexed note_content observations."""
+
+    def now(self) -> datetime:
+        return datetime.now(tz=UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultIndexedNoteContentTimestampProvider:
+    """Default timestamp provider for indexed markdown note_content."""
+
+    clock: IndexedNoteContentClock = SystemIndexedNoteContentClock()
+
+    def observed_at(
+        self,
+        indexed: IndexedEntity,
+        file_info: IndexedNoteContentFileInfo | None,
+    ) -> datetime | None:
+        return indexed_note_content_observed_at(
+            indexed,
+            file_info,
+            clock=self.clock,
+        )
 
 
 class IndexedNoteContentEntityRepository(Protocol[EntityT]):
@@ -93,13 +135,13 @@ def indexed_note_content_observed_at(
     if indexed.checksum != file_info.checksum:
         # Frontmatter rewrites create a new storage object during indexing, so the
         # original file timestamp no longer describes the indexed markdown version.
-        return (clock or (lambda: datetime.now(tz=UTC)))()
+        return (clock or SystemIndexedNoteContentClock()).now()
 
     return file_info.last_modified
 
 
 async def run_indexing_tasks_with_retries[ResultT](
-    task_factories: Sequence[IndexingTaskFactory[ResultT]],
+    tasks: Sequence[IndexingTask[ResultT]],
     *,
     max_concurrent: int,
     max_attempts: int = 3,
@@ -115,12 +157,12 @@ async def run_indexing_tasks_with_retries[ResultT](
 
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def run_one(task_factory: IndexingTaskFactory[ResultT]) -> ResultT:
+    async def run_one(task: IndexingTask[ResultT]) -> ResultT:
         async with semaphore:
             wait_seconds = retry_wait_seconds
             for attempt in range(1, max_attempts + 1):
                 try:
-                    return await task_factory()
+                    return await task.run()
                 except SQLAlchemyTimeoutError:
                     if attempt == max_attempts:
                         raise
@@ -131,20 +173,66 @@ async def run_indexing_tasks_with_retries[ResultT](
         raise RuntimeError("indexing task retry loop exited unexpectedly")
 
     results = await asyncio.gather(
-        *(run_one(task_factory) for task_factory in task_factories),
+        *(run_one(task) for task in tasks),
         return_exceptions=True,
     )
     return tuple(results)
 
 
-async def reconcile_indexed_note_content_batch[EntityT: IndexedNoteContentEntity, FileInfoT](
+@dataclass(frozen=True, slots=True)
+class IndexedNoteContentReconciliationTask[
+    EntityT: IndexedNoteContentEntity,
+    FileInfoT: IndexedNoteContentFileInfo,
+]:
+    """Reconcile one indexed markdown entity into note_content."""
+
+    indexed: IndexedEntity
+    entity_by_id: Mapping[int, EntityT]
+    file_infos: Mapping[FileIndexPath, FileInfoT]
+    note_content_reconciler: IndexedNoteContentReconciler[EntityT]
+    timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT]
+    source: str
+
+    async def run(self) -> IndexedNoteContentReconciliationError | None:
+        if self.indexed.markdown_content is None:
+            return None
+
+        entity = self.entity_by_id.get(self.indexed.entity_id)
+        if entity is None:
+            return IndexedNoteContentReconciliationError(
+                self.indexed.path,
+                f"Entity {self.indexed.entity_id} not found after indexing",
+            )
+
+        try:
+            await self.note_content_reconciler.reconcile(
+                entity=entity,
+                markdown_content=self.indexed.markdown_content,
+                observed_at=self.timestamp_provider.observed_at(
+                    self.indexed,
+                    self.file_infos.get(self.indexed.path),
+                ),
+                source=self.source,
+            )
+            return None
+        except Exception as exc:  # pragma: no cover - defensive logging
+            # The entity/search writes are already durable by this point. Report
+            # the note_content follow-up failure as a per-file indexing error.
+            logger.error(f"Failed to reconcile note_content for {self.indexed.path}: {exc}")
+            return IndexedNoteContentReconciliationError(self.indexed.path, str(exc))
+
+
+async def reconcile_indexed_note_content_batch[
+    EntityT: IndexedNoteContentEntity,
+    FileInfoT: IndexedNoteContentFileInfo,
+](
     indexed_entities: Sequence[IndexedEntity],
     *,
     file_infos: Mapping[FileIndexPath, FileInfoT],
     entity_repository: IndexedNoteContentEntityRepository[EntityT],
     session_maker: async_sessionmaker[AsyncSession],
     note_content_reconciler: IndexedNoteContentReconciler[EntityT],
-    observed_at_for_indexed: IndexedNoteContentObservedAt[FileInfoT],
+    timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT],
     max_concurrent: int,
     source: str = "index",
 ) -> tuple[IndexedNoteContentReconciliationError, ...]:
@@ -162,38 +250,18 @@ async def reconcile_indexed_note_content_batch[EntityT: IndexedNoteContentEntity
         )
     entity_by_id = {entity.id: entity for entity in stored_entities}
 
-    def reconcile_task(
-        indexed: IndexedEntity,
-    ) -> IndexingTaskFactory[IndexedNoteContentReconciliationError | None]:
-        async def run() -> IndexedNoteContentReconciliationError | None:
-            if indexed.markdown_content is None:
-                return None
-
-            entity = entity_by_id.get(indexed.entity_id)
-            if entity is None:
-                return IndexedNoteContentReconciliationError(
-                    indexed.path,
-                    f"Entity {indexed.entity_id} not found after indexing",
-                )
-
-            try:
-                await note_content_reconciler.reconcile(
-                    entity=entity,
-                    markdown_content=indexed.markdown_content,
-                    observed_at=observed_at_for_indexed(indexed, file_infos.get(indexed.path)),
-                    source=source,
-                )
-                return None
-            except Exception as exc:  # pragma: no cover - defensive logging
-                # The entity/search writes are already durable by this point. Report
-                # the note_content follow-up failure as a per-file indexing error.
-                logger.error(f"Failed to reconcile note_content for {indexed.path}: {exc}")
-                return IndexedNoteContentReconciliationError(indexed.path, str(exc))
-
-        return run
-
     results = await run_indexing_tasks_with_retries(
-        [reconcile_task(indexed) for indexed in markdown_entities],
+        [
+            IndexedNoteContentReconciliationTask(
+                indexed=indexed,
+                entity_by_id=entity_by_id,
+                file_infos=file_infos,
+                note_content_reconciler=note_content_reconciler,
+                timestamp_provider=timestamp_provider,
+                source=source,
+            )
+            for indexed in markdown_entities
+        ],
         max_concurrent=max_concurrent,
     )
 

@@ -37,6 +37,38 @@ class FakeFileInfo:
         return self.observed_at
 
 
+@dataclass(frozen=True, slots=True)
+class StaticIndexedNoteContentClock:
+    timestamp: datetime
+
+    def now(self) -> datetime:
+        return self.timestamp
+
+
+@dataclass(slots=True)
+class FlakyIndexingTask:
+    attempts: int = 0
+
+    async def run(self) -> str:
+        self.attempts += 1
+        if self.attempts == 1:
+            raise SQLAlchemyTimeoutError("pool timeout")
+        return "ok"
+
+
+@dataclass(slots=True)
+class RecordingIndexedNoteContentTimestampProvider:
+    calls: list[tuple[str, FakeFileInfo | None]]
+
+    def observed_at(
+        self,
+        indexed: IndexedEntity,
+        file_info: FakeFileInfo | None,
+    ) -> datetime | None:
+        self.calls.append((indexed.path, file_info))
+        return file_info.observed_at if file_info is not None else None
+
+
 class FakeEntityRepository:
     def __init__(self, entities: list[FakeEntity]) -> None:
         self.entities = entities
@@ -62,7 +94,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
     repository = FakeEntityRepository([FakeEntity(id=42), FakeEntity(id=43)])
     reconcile = AsyncMock()
     observed_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
-    observed_calls: list[tuple[str, FakeFileInfo | None]] = []
+    timestamp_provider = RecordingIndexedNoteContentTimestampProvider(calls=[])
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -70,13 +102,6 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
     ) -> AsyncIterator[AsyncSession]:
         assert scoped_session_maker is session_maker
         yield session
-
-    def observed_at_for_indexed(
-        indexed: IndexedEntity,
-        file_info: FakeFileInfo | None,
-    ) -> datetime | None:
-        observed_calls.append((indexed.path, file_info))
-        return file_info.observed_at if file_info is not None else None
 
     async def reconcile_note_content(
         *,
@@ -135,13 +160,13 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
         entity_repository=repository,
         session_maker=session_maker,
         note_content_reconciler=cast(Any, SimpleNamespace(reconcile=reconcile_note_content)),
-        observed_at_for_indexed=observed_at_for_indexed,
+        timestamp_provider=timestamp_provider,
         max_concurrent=2,
         source="index",
     )
 
     assert repository.loaded_ids == [42, 404, 43]
-    assert observed_calls == [
+    assert timestamp_provider.calls == [
         ("ok.md", FakeFileInfo(observed_at=observed_at)),
         ("bad.md", None),
     ]
@@ -166,23 +191,16 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
 @pytest.mark.asyncio
 async def test_run_indexing_tasks_with_retries_uses_fresh_task_factory() -> None:
     """Retrying task factories should not reuse an already-awaited coroutine."""
-    attempts = 0
-
-    async def flaky_task() -> str:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise SQLAlchemyTimeoutError("pool timeout")
-        return "ok"
+    task = FlakyIndexingTask()
 
     results = await run_indexing_tasks_with_retries(
-        [lambda: flaky_task()],
+        [task],
         max_concurrent=1,
         retry_wait_seconds=0,
     )
 
     assert results == ("ok",)
-    assert attempts == 2
+    assert task.attempts == 2
 
 
 def test_indexed_note_content_observed_at_uses_original_timestamp_when_unchanged() -> None:
@@ -215,7 +233,7 @@ def test_indexed_note_content_observed_at_uses_clock_when_frontmatter_rewrites_f
             markdown_content="# OK\n",
         ),
         FakeFileInfo(checksum="checksum-ok", observed_at=observed_at),
-        clock=lambda: rewritten_at,
+        clock=StaticIndexedNoteContentClock(rewritten_at),
     )
 
     assert result == rewritten_at

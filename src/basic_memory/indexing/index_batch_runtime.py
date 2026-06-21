@@ -24,11 +24,11 @@ from basic_memory.indexing.models import (
     StorageIndexFileWriter,
 )
 from basic_memory.indexing.note_content_batch_reconciliation import (
+    DefaultIndexedNoteContentTimestampProvider,
     IndexedNoteContentEntity,
     IndexedNoteContentEntityRepository,
-    IndexedNoteContentObservedAt,
     IndexedNoteContentReconciler,
-    indexed_note_content_observed_at,
+    IndexedNoteContentTimestampProvider,
     reconcile_indexed_note_content_batch,
 )
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
@@ -60,7 +60,7 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
     entity_repository: IndexedNoteContentEntityRepository[EntityT]
     session_maker: async_sessionmaker[AsyncSession]
     note_content_reconciler: IndexedNoteContentReconciler[EntityT]
-    observed_at_for_indexed: IndexedNoteContentObservedAt[FileInfoT]
+    timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT]
     note_content_source: str = "index"
 
     async def index_loaded_files(
@@ -87,7 +87,7 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
             entity_repository=self.entity_repository,
             session_maker=self.session_maker,
             note_content_reconciler=self.note_content_reconciler,
-            observed_at_for_indexed=self.observed_at_for_indexed,
+            timestamp_provider=self.timestamp_provider,
             max_concurrent=metadata_update_max_concurrent or max_concurrent,
             source=self.note_content_source,
         )
@@ -164,7 +164,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
             entity_repository=entity_repository,
             session_maker=session_maker,
             note_content_reconciler=note_content_reconciler,
-            observed_at_for_indexed=indexed_note_content_observed_at,
+            timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
         ),
         note_content_reconciler=note_content_reconciler,
     )
