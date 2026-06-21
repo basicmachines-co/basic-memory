@@ -50,35 +50,6 @@ class InlineStorageEventResultRecorder(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class NoopInlineStorageEventResultRecorder:
-    """Default result recorder for runtimes that do not need local callbacks."""
-
-    async def index_file_completed(
-        self,
-        operation: RuntimeStorageEventOperation,
-        result: IndexFileJobResult,
-    ) -> None:
-        return None
-
-    async def delete_file_completed(
-        self,
-        operation: RuntimeStorageEventOperation,
-        result: ExternalFileDeleteResult,
-    ) -> None:
-        return None
-
-    async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:
-        return None
-
-    async def event_failed(
-        self,
-        operation: RuntimeStorageEventOperation,
-        exc: Exception,
-    ) -> None:
-        return None
-
-
-@dataclass(frozen=True, slots=True)
 class InlineStorageEventIndexRuntime:
     """Dependencies needed to execute storage events inline for one project."""
 
@@ -90,7 +61,7 @@ class InlineStorageEventIndexRuntime:
     file_indexer: IndexFileExecutor
     delete_entities: ExternalFileDeleteEntities
     delete_objects: ExternalFileDeleteObjects
-    result_recorder: InlineStorageEventResultRecorder = NoopInlineStorageEventResultRecorder()
+    result_recorder: InlineStorageEventResultRecorder
     index_embeddings: bool = True
 
 

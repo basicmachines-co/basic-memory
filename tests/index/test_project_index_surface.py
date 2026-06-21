@@ -1,5 +1,6 @@
 """Tests for the project-index orchestration surface."""
 
+from dataclasses import MISSING, fields
 from inspect import signature
 
 from basic_memory import index
@@ -47,6 +48,18 @@ def test_index_package_local_factories_are_not_sync_service_adapters() -> None:
 
     for factory_signature in factory_signatures:
         assert "sync_service_factory" not in factory_signature.parameters
+
+
+def test_inline_storage_event_runtime_requires_explicit_result_recorder() -> None:
+    """Inline runtimes should receive local/cloud observer behavior explicitly."""
+    result_recorder_field = next(
+        field
+        for field in fields(index.InlineStorageEventIndexRuntime)
+        if field.name == "result_recorder"
+    )
+
+    assert result_recorder_field.default is MISSING
+    assert result_recorder_field.default_factory is MISSING
 
 
 def test_index_package_exports_storage_event_source_contracts() -> None:

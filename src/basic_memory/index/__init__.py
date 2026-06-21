@@ -30,7 +30,6 @@ from basic_memory.index.inline_operations import (
     InlineStorageEventIndexRuntime,
     InlineStorageEventOperationProcessor,
     InlineStorageEventResultRecorder,
-    NoopInlineStorageEventResultRecorder,
 )
 from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
@@ -106,7 +105,6 @@ __all__ = [
     "InlineStorageEventOperationProcessor",
     "InlineStorageEventResultRecorder",
     "InlineProjectIndexBatchEnqueuer",
-    "NoopInlineStorageEventResultRecorder",
     "DefaultLocalIndexProjectDependencyProvider",
     "LocalIndexProjectDependencies",
     "LocalMarkdownFileIndexer",
