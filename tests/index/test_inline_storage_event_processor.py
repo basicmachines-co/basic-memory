@@ -18,6 +18,7 @@ from basic_memory.indexing import (
 )
 from basic_memory.indexing.file_index_planning import FileIndexTarget
 from basic_memory.runtime import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
     ProjectRuntimeReference,
     RuntimeDeletedNoteEntityDeleteSource,
     RuntimeExternalFileDeleteAction,
@@ -121,6 +122,7 @@ class FakeDeletedEntity(RuntimeDeletedNoteEntityDeleteSource):
     external_id: str
     title: str
     permalink: str
+    content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 class RecordingDeleteEntities:

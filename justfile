@@ -157,12 +157,14 @@ project-index-contract-test: project-index-surface-test project-index-workflow-t
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/test_runtime_storage_events.py \
+        tests/indexing/test_external_file_delete_runner.py \
         tests/index/test_filesystem_events.py \
         tests/index/test_inline_storage_event_processor.py \
         tests/index/test_local_watch_orchestration.py \
@@ -178,6 +180,7 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_treats_delete_add_same_path_as_update \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_handles_atomic_and_true_deletes \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_skips_deleted_project \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_preserves_move_identity \

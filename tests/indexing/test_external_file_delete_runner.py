@@ -12,7 +12,7 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
     run_external_file_delete,
 )
-from basic_memory.runtime import RuntimeExternalFileDeleteAction
+from basic_memory.runtime import RUNTIME_MARKDOWN_CONTENT_TYPE, RuntimeExternalFileDeleteAction
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,7 +20,8 @@ class FakeDeletedEntity:
     id: int
     external_id: str
     title: str
-    permalink: str
+    permalink: str | None
+    content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 class FakeExternalFileEntities:
@@ -170,6 +171,33 @@ async def test_run_external_file_delete_deletes_matching_entity() -> None:
     assert entities.find_calls == ["notes/deleted.md"]
     assert objects.exists_calls == ["notes/deleted.md"]
     assert entities.delete_calls == [(42, "notes/deleted.md")]
+
+
+@pytest.mark.asyncio
+async def test_run_external_file_delete_deletes_regular_file_entity_without_note_metadata() -> None:
+    entity = FakeDeletedEntity(
+        id=55,
+        external_id="file-55",
+        title="report.pdf",
+        permalink=None,
+        content_type="application/pdf",
+    )
+    entities = FakeExternalFileEntities(entity)
+    objects = FakeExternalFileObjects(exists=False)
+
+    result = await run_external_file_delete(
+        "files/report.pdf",
+        entities=entities,
+        objects=objects,
+    )
+
+    assert result.plan.action == RuntimeExternalFileDeleteAction.delete_entity
+    assert result.entity_deleted is True
+    assert result.deleted_entity == entity
+    assert result.deleted_note is None
+    assert entities.find_calls == ["files/report.pdf"]
+    assert objects.exists_calls == ["files/report.pdf"]
+    assert entities.delete_calls == [(55, "files/report.pdf")]
 
 
 @pytest.mark.asyncio

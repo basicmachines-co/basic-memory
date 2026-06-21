@@ -842,6 +842,66 @@ async def test_handle_changes_with_local_event_index_runtime_indexes_regular_fil
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """Local event-index deletes regular file entities like legacy sync."""
+
+    file_path = project_config.home / "local-event-file-delete.pdf"
+    await create_test_file(file_path, "not really a pdf, but enough for deletion parity")
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index regular file delete test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(
+            session,
+            "local-event-file-delete.pdf",
+        )
+    assert before is not None
+    assert before.note_type == "file"
+    assert before.content_type == "application/pdf"
+
+    file_path.unlink()
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.deleted, str(file_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        after = await entity_repository.get_by_file_path(
+            session,
+            "local-event-file-delete.pdf",
+        )
+    assert after is None
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file(
     app_config: BasicMemoryConfig,
     project_repository,

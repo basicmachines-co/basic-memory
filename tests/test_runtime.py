@@ -43,6 +43,7 @@ from basic_memory.runtime.contracts import (
     ProjectRuntimeReference,
     RUNTIME_ACTIVE_WORKFLOW_STATUSES,
     RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS,
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
     RUNTIME_TERMINAL_WORKFLOW_STATUSES,
     RuntimeDeleteStatus,
     RuntimeCapabilities,
@@ -145,6 +146,7 @@ class FakeDeletedNoteEntity:
     external_id: object | None
     title: object | None
     permalink: object | None
+    content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 class TestRuntimeMode:

@@ -252,7 +252,7 @@ class RuntimeAcceptedNoteWriteEntitySource(RuntimeAcceptedNoteEntitySource, Prot
     def project_id(self) -> ProjectId: ...
 
 
-class RuntimeDeletedNoteEntitySource(Protocol):
+class RuntimeDeletedNoteEntitySource(RuntimeContentTypeSource, Protocol):
     """Minimal deleted-note entity shape needed before row cleanup."""
 
     @property
@@ -1118,6 +1118,17 @@ def required_runtime_deleted_note_text(
     return value.strip()
 
 
+def runtime_deleted_note_reference_for_entity(
+    entity: RuntimeDeletedNoteEntitySource,
+    *,
+    file_path: RuntimeFilePath,
+) -> RuntimeDeletedNoteReference | None:
+    """Return deleted-note metadata for markdown entities, not regular file entities."""
+    if not runtime_content_type_is_markdown(entity):
+        return None
+    return RuntimeDeletedNoteReference.from_entity(entity, file_path=file_path)
+
+
 class RuntimeExternalFileDeleteAction(StrEnum):
     """Adapter work selected for an externally observed file delete."""
 
@@ -1132,7 +1143,7 @@ class RuntimeExternalFileDeleteRequest:
 
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
-    deleted_note: RuntimeDeletedNoteReference
+    deleted_note: RuntimeDeletedNoteReference | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1173,7 +1184,10 @@ class RuntimeExternalFileDeletePlan:
             action=RuntimeExternalFileDeleteAction.delete_entity,
             file_path=file_path,
             entity_id=entity.id,
-            deleted_note=RuntimeDeletedNoteReference.from_entity(entity, file_path=file_path),
+            deleted_note=runtime_deleted_note_reference_for_entity(
+                entity,
+                file_path=file_path,
+            ),
             reason=f"delete entity for externally deleted file: {file_path}",
         )
 
@@ -1182,7 +1196,7 @@ class RuntimeExternalFileDeletePlan:
         return self.action == RuntimeExternalFileDeleteAction.delete_entity
 
     def require_delete_request(self) -> RuntimeExternalFileDeleteRequest:
-        if not self.should_delete_entity or self.entity_id is None or self.deleted_note is None:
+        if not self.should_delete_entity or self.entity_id is None:
             raise RuntimeError(
                 f"External file delete plan does not delete an entity: {self.reason}"
             )

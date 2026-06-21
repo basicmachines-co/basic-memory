@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from basic_memory.runtime import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
     RuntimeDeletedNoteResponse,
     RuntimePendingNoteFileDelete,
     plan_accepted_note_delete_change,
@@ -16,6 +17,7 @@ class _DeletedEntity:
     external_id: object | None
     title: object | None
     permalink: object | None
+    content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +28,7 @@ class _DeletedFileEntity:
     permalink: object | None
     file_path: str
     checksum: object | None
+    content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 @dataclass(frozen=True, slots=True)
