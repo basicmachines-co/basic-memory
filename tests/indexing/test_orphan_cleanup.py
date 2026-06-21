@@ -1,7 +1,7 @@
 """Tests for project-index orphan entity cleanup."""
 
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -73,6 +73,18 @@ async def fake_session_scope(
     yield cast(AsyncSession, object())
 
 
+@dataclass(slots=True)
+class RecordingOrphanCleanupSessionProvider:
+    opened_session_makers: list[async_sessionmaker[AsyncSession]] = field(default_factory=list)
+
+    def open_session(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AbstractAsyncContextManager[AsyncSession]:
+        self.opened_session_makers.append(session_maker)
+        return fake_session_scope(session_maker)
+
+
 async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches_db() -> None:
     repository = FakeEntityRepository(
         file_paths=["notes/current.md"],
@@ -80,13 +92,14 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
     )
     search_service = RecordingSearchService()
     logger = RecordingLogger()
+    session_provider = RecordingOrphanCleanupSessionProvider()
 
     result = await cleanup_orphan_entities(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         entity_repository=repository,
         search_service=search_service,
         current_paths={"notes/current.md"},
-        session_scope=fake_session_scope,
+        session_provider=session_provider,
         logger=logger,
     )
 
@@ -98,6 +111,27 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
     assert search_service.deleted_entities == []
     assert logger.info_calls == []
     assert logger.warning_calls == []
+
+
+async def test_cleanup_orphan_entities_uses_session_provider_for_each_db_step() -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session_provider = RecordingOrphanCleanupSessionProvider()
+    repository = FakeEntityRepository(
+        file_paths=["notes/delete.md"],
+        entities_by_path={"notes/delete.md": FakeEntity(id=10)},
+    )
+    search_service = RecordingSearchService()
+
+    result = await cleanup_orphan_entities(
+        session_maker=session_maker,
+        entity_repository=repository,
+        search_service=search_service,
+        current_paths=set(),
+        session_provider=session_provider,
+    )
+
+    assert result.deleted_paths == ("notes/delete.md",)
+    assert session_provider.opened_session_makers == [session_maker, session_maker]
 
 
 async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
@@ -118,13 +152,14 @@ async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
     )
     search_service = RecordingSearchService()
     logger = RecordingLogger()
+    session_provider = RecordingOrphanCleanupSessionProvider()
 
     result = await cleanup_orphan_entities(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         entity_repository=repository,
         search_service=search_service,
         current_paths={"notes/current.md"},
-        session_scope=fake_session_scope,
+        session_provider=session_provider,
         logger=logger,
     )
 

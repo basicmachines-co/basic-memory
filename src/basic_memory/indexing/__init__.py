@@ -443,8 +443,9 @@ from basic_memory.indexing.note_content_batch_reconciliation import (
     run_indexing_tasks_with_retries,
 )
 from basic_memory.indexing.orphan_cleanup import (
+    DefaultOrphanCleanupSessionProvider,
     OrphanCleanupLogger,
-    OrphanCleanupSessionScope,
+    OrphanCleanupSessionProvider,
     OrphanEntityCleanupResult,
     OrphanEntityRepository,
     OrphanIndexedEntity,
@@ -889,7 +890,7 @@ __all__ = [
     "ObservedIndexFilePayload",
     "ObservedObjectIndexCompletionContext",
     "OrphanCleanupLogger",
-    "OrphanCleanupSessionScope",
+    "OrphanCleanupSessionProvider",
     "OrphanEntityCleanupResult",
     "OrphanEntityRepository",
     "OrphanIndexedEntity",
@@ -1129,6 +1130,7 @@ __all__ = [
     "project_index_workflow_logical_key",
     "DefaultProjectDeleteRepositories",
     "DefaultProjectDeleteSessionProvider",
+    "DefaultOrphanCleanupSessionProvider",
     "resolve_project_index_completion_relations",
     "resolve_project_relations",
     "resolve_relations_until_stable",
