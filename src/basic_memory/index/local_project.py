@@ -24,9 +24,12 @@ from basic_memory.index.local_runtime import (
 )
 from basic_memory.indexing import (
     ChangeDetector,
+    EmbeddingIndexTarget,
     FileIndexChecker,
+    IndexFileBatchJobResult,
     IndexFileExecutor,
     IndexFileJobResult,
+    IndexFileJobStatus,
     IndexFileMaterializedNoteSource,
     IndexFileMetadataSource,
     IndexFileRunnerChecker,
@@ -46,9 +49,11 @@ from basic_memory.indexing import (
     ProjectIndexRelationResolutionContext,
     RelationResolutionRuntime,
     StoreProjectIndexMaintenanceRunner,
+    project_index_file_outcomes_from_job_results,
     resolve_project_index_completion_relations,
     run_project_index_coordinator,
     run_index_file,
+    summarize_project_index_file_outcomes,
 )
 from basic_memory.models import Project
 from basic_memory.runtime import (
@@ -60,6 +65,7 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
     TenantId,
+    runtime_file_path_is_markdown_note,
 )
 from basic_memory.services import FileService
 
@@ -243,9 +249,51 @@ class InlineProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
     async def enqueue_index_file_batch(
         self,
         request: RuntimeIndexFileBatchJobRequest,
-    ) -> None:
+    ) -> IndexFileBatchJobResult:
+        file_results: list[IndexFileJobResult] = []
         for file_request in project_index_file_requests_from_batch_request(request):
-            await self.file_runner.run_index_file_request(file_request)
+            file_results.append(await self.file_runner.run_index_file_request(file_request))
+
+        outcome_summary = summarize_project_index_file_outcomes(
+            project_index_file_outcomes_from_job_results(file_results)
+        )
+        return IndexFileBatchJobResult(
+            total_files=outcome_summary.total_files,
+            processed_files=outcome_summary.processed_files,
+            missing_files=outcome_summary.missing_files,
+            failed_files=outcome_summary.failed_files,
+            file_results=tuple(file_results),
+            vector_targets=inline_project_index_vector_targets(request, file_results),
+        )
+
+
+def inline_project_index_vector_targets(
+    request: RuntimeIndexFileBatchJobRequest,
+    file_results: list[IndexFileJobResult],
+) -> tuple[EmbeddingIndexTarget, ...]:
+    """Return markdown embedding targets represented by inline project-index results."""
+    if not request.index_embeddings:
+        return ()
+
+    vector_targets: list[EmbeddingIndexTarget] = []
+    for file_path, result in zip(request.target_paths(), file_results, strict=True):
+        if result.status != IndexFileJobStatus.processed:
+            continue
+        if not runtime_file_path_is_markdown_note(file_path):
+            continue
+        if result.entity_id is None:
+            raise RuntimeError(f"Inline project-index processed {file_path} without entity id")
+        if result.entity_checksum is None:
+            raise RuntimeError(
+                f"Inline project-index processed {file_path} without entity checksum"
+            )
+        vector_targets.append(
+            EmbeddingIndexTarget(
+                entity_id=result.entity_id,
+                entity_checksum=result.entity_checksum,
+            )
+        )
+    return tuple(vector_targets)
 
 
 @dataclass(frozen=True, slots=True)

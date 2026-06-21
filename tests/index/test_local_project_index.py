@@ -26,12 +26,14 @@ from basic_memory.index import (
 from basic_memory.indexing import (
     ChangeDetector,
     ChangeReport,
+    IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
     IndexFileObjectMetadata,
     IndexFileRuntimeRequest,
     FileIndexOperation,
     FileIndexResult,
+    EmbeddingIndexTarget,
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
     RepositoryRelationResolutionRuntime,
@@ -170,9 +172,16 @@ class RecordingMaintenanceRunner:
 @dataclass(slots=True)
 class RecordingBatchEnqueuer:
     requests: list[RuntimeIndexFileBatchJobRequest] = field(default_factory=list)
+    results: list[IndexFileBatchJobResult | None] = field(default_factory=list)
 
-    async def enqueue_index_file_batch(self, request: RuntimeIndexFileBatchJobRequest) -> None:
+    async def enqueue_index_file_batch(
+        self,
+        request: RuntimeIndexFileBatchJobRequest,
+    ) -> IndexFileBatchJobResult | None:
         self.requests.append(request)
+        if self.results:
+            return self.results.pop(0)
+        return None
 
 
 @dataclass(slots=True)
@@ -292,6 +301,46 @@ async def test_run_local_project_index_resolves_relations_after_inline_fanout() 
     assert relation_runtime.resolve_calls == 2
 
 
+async def test_run_local_project_index_preserves_inline_batch_results() -> None:
+    """Local project-index exposes child batch outcomes for cloud/local parity checks."""
+    observed = (RuntimeObservedIndexFile(path="notes/a.md", checksum="a", size=1),)
+    batch_result = IndexFileBatchJobResult(
+        total_files=1,
+        processed_files=1,
+        missing_files=0,
+        failed_files=0,
+        file_results=(
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/a.md",
+                entity_id=42,
+                entity_checksum="checksum-a",
+            ),
+        ),
+        vector_targets=(),
+    )
+    batch_enqueuer = RecordingBatchEnqueuer(results=[batch_result])
+
+    result = await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            tenant_id=TENANT_ID,
+            workflow_id=WORKFLOW_ID,
+            project=project_ref(),
+            search=True,
+            embeddings=False,
+        ),
+        runtime=LocalProjectIndexRuntime(
+            observed_file_source=RecordingObservedFileSource(observed),
+            change_detector=RecordingChangeDetector(ChangeReport(new_files=["notes/a.md"])),
+            maintenance_runner=RecordingMaintenanceRunner(),
+            batch_enqueuer=batch_enqueuer,
+            batch_size=10,
+        ),
+    )
+
+    assert result.batch_results == (batch_result,)
+
+
 def test_local_project_index_runtime_uses_optional_workflow_hooks() -> None:
     """Local inline project indexing does not install hidden workflow adapters."""
     runtime = LocalProjectIndexRuntime(
@@ -371,12 +420,15 @@ def test_project_index_file_requests_from_batch_request_support_current_file_pat
 @dataclass(slots=True)
 class RecordingIndexFileRequestRunner:
     requests: list[IndexFileRuntimeRequest] = field(default_factory=list)
+    results: list[IndexFileJobResult] = field(default_factory=list)
 
     async def run_index_file_request(
         self,
         request: IndexFileRuntimeRequest,
     ) -> IndexFileJobResult:
         self.requests.append(request)
+        if self.results:
+            return self.results.pop(0)
         return IndexFileJobResult(status=IndexFileJobStatus.processed, reason="indexed")
 
 
@@ -385,7 +437,7 @@ async def test_inline_project_index_batch_enqueuer_runs_each_file_request() -> N
     runner = RecordingIndexFileRequestRunner()
     enqueuer = InlineProjectIndexBatchEnqueuer(runner)
 
-    await enqueuer.enqueue_index_file_batch(
+    result = await enqueuer.enqueue_index_file_batch(
         RuntimeIndexFileBatchJobRequest(
             tenant_id=TENANT_ID,
             project=project_ref(),
@@ -405,6 +457,62 @@ async def test_inline_project_index_batch_enqueuer_runs_each_file_request() -> N
         RuntimeStorageObjectObservation(etag="etag-a", size=11),
         RuntimeStorageObjectObservation(etag="etag-b", size=12),
     ]
+    assert result.total_files == 2
+    assert result.processed_files == 2
+
+
+async def test_inline_project_index_batch_enqueuer_returns_cloud_shaped_batch_result() -> None:
+    """Inline project fanout reports ordered batch outcomes like cloud batch jobs."""
+    file_results = [
+        IndexFileJobResult(
+            status=IndexFileJobStatus.processed,
+            reason="file indexed: notes/a.md",
+            entity_id=42,
+            entity_checksum="checksum-a",
+        ),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.missing,
+            reason="file not found: notes/missing.md",
+        ),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.failed,
+            reason="file indexing failed: notes/fail.md: parse failed",
+        ),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.processed,
+            reason="file indexed: assets/file.pdf",
+            entity_id=99,
+            entity_checksum="checksum-pdf",
+        ),
+    ]
+    runner = RecordingIndexFileRequestRunner(results=list(file_results))
+    enqueuer = InlineProjectIndexBatchEnqueuer(runner)
+
+    result = await enqueuer.enqueue_index_file_batch(
+        RuntimeIndexFileBatchJobRequest(
+            tenant_id=TENANT_ID,
+            project=project_ref(),
+            workflow_id=WORKFLOW_ID,
+            batch_index=1,
+            batch_count=2,
+            observed_files=(
+                RuntimeObservedIndexFile(path="notes/a.md", checksum="etag-a", size=11),
+                RuntimeObservedIndexFile(path="notes/missing.md", checksum="etag-b", size=12),
+                RuntimeObservedIndexFile(path="notes/fail.md", checksum="etag-c", size=13),
+                RuntimeObservedIndexFile(path="assets/file.pdf", checksum="etag-d", size=14),
+            ),
+            index_embeddings=True,
+        )
+    )
+
+    assert result == IndexFileBatchJobResult(
+        total_files=4,
+        processed_files=2,
+        missing_files=1,
+        failed_files=1,
+        file_results=tuple(file_results),
+        vector_targets=(EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-a"),),
+    )
 
 
 class NeverCalledChecker:

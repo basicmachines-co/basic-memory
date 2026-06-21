@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.models import (
+    IndexFileBatchJobResult,
     IndexFileJobResult,
     apply_project_index_batch_job_results,
     project_index_file_outcome_from_job_result,
@@ -118,7 +119,7 @@ class ProjectIndexBatchEnqueuer(Protocol):
     async def enqueue_index_file_batch(
         self,
         request: RuntimeIndexFileBatchJobRequest,
-    ) -> None: ...
+    ) -> IndexFileBatchJobResult | None: ...
 
 
 class ProjectIndexFanoutFailureRecorder(Protocol):
@@ -461,6 +462,7 @@ class ProjectIndexCoordinatorResult:
     deleted_files: int
     moved_files: int = 0
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
+    batch_results: tuple[IndexFileBatchJobResult, ...] = ()
     completion: ProjectIndexCompletion | None = None
 
 
@@ -1154,9 +1156,12 @@ async def run_project_index_coordinator(
 
     enqueued_files = 0
     enqueued_batches = 0
+    batch_results: list[IndexFileBatchJobResult] = []
     try:
         for runtime_request in batch_plan.batch_requests:
-            await batch_enqueuer.enqueue_index_file_batch(runtime_request)
+            batch_result = await batch_enqueuer.enqueue_index_file_batch(runtime_request)
+            if batch_result is not None:
+                batch_results.append(batch_result)
             enqueued_batches += 1
             enqueued_files += len(runtime_request.target_paths())
     except Exception as exc:
@@ -1178,6 +1183,7 @@ async def run_project_index_coordinator(
         deleted_files=delete_run.total_deleted_entities,
         moved_files=move_run.total_updated_files,
         relation_cleanup_entity_ids=delete_run.relation_cleanup_entity_ids,
+        batch_results=tuple(batch_results),
         completion=completion,
     )
 
