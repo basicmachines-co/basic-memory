@@ -138,6 +138,7 @@ event-index-contract-test:
         tests/index/test_filesystem_events.py \
         tests/index/test_inline_storage_event_processor.py \
         tests/index/test_local_watch_orchestration.py \
+        tests/index/test_repository_storage_event_project_resolution.py \
         tests/index/test_storage_event_operation_processor.py \
         tests/index/test_storage_event_orchestration.py \
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \

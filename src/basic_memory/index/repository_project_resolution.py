@@ -1,6 +1,6 @@
 """Repository-backed storage-event project resolution."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,25 +26,12 @@ class StorageEventProjectResolutionLogger(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class NoopStorageEventProjectResolutionLogger:
-    """Default logger for callers that do not need resolution diagnostics."""
-
-    def info(self, message: str, /, *args: object, **kwargs: object) -> None:
-        return None
-
-    def warning(self, message: str, /, *args: object, **kwargs: object) -> None:
-        return None
-
-
-@dataclass(frozen=True, slots=True)
 class RepositoryStorageEventProjectResolver(StorageEventProjectResolver):
     """Resolve storage-event project prefixes using the Basic Memory project repository."""
 
     project_repository: ProjectRepository
     session_maker: async_sessionmaker[AsyncSession]
-    resolution_logger: StorageEventProjectResolutionLogger = field(
-        default_factory=NoopStorageEventProjectResolutionLogger
-    )
+    resolution_logger: StorageEventProjectResolutionLogger
 
     async def resolve_project(self, project_path: ProjectPath) -> ProjectRuntimeReference | None:
         project = await self.find_project_by_bucket_prefix(project_path)

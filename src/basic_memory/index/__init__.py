@@ -79,7 +79,6 @@ from basic_memory.index.project_index import (
     run_project_index_coordinator,
 )
 from basic_memory.index.repository_project_resolution import (
-    NoopStorageEventProjectResolutionLogger,
     RepositoryStorageEventProjectResolver,
     StorageEventProjectResolutionLogger,
 )
@@ -128,7 +127,6 @@ __all__ = [
     "ProjectIndexObservedFileSource",
     "ProjectIndexWorkflowRequest",
     "ProjectIndexWorkflowStarter",
-    "NoopStorageEventProjectResolutionLogger",
     "RepositoryStorageEventProjectResolver",
     "StoreProjectIndexMaintenanceRunner",
     "RuntimeStorageEventSource",
