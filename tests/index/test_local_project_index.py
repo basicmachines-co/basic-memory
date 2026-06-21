@@ -53,7 +53,7 @@ from basic_memory.runtime import (
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
 )
-from basic_memory.schemas.search import SearchQuery
+from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services import FileService
 
 
@@ -205,6 +205,14 @@ class RecordingCompletionRelationRuntime:
         return {10} if self.resolve_calls == 1 else set()
 
 
+@dataclass(slots=True)
+class RecordingMovedEntitySearchRefresher:
+    entity_ids: list[tuple[int, ...]] = field(default_factory=list)
+
+    async def refresh_moved_entities(self, entity_ids: Sequence[int]) -> None:
+        self.entity_ids.append(tuple(entity_ids))
+
+
 def project_ref() -> ProjectRuntimeReference:
     return ProjectRuntimeReference(
         project_id=12,
@@ -242,6 +250,7 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
             observed_file_source=observed_source,
             change_detector=change_detector,
             maintenance_runner=maintenance_runner,
+            moved_entity_search_refresher=RecordingMovedEntitySearchRefresher(),
             batch_enqueuer=batch_enqueuer,
             batch_size=2,
         ),
@@ -289,6 +298,7 @@ async def test_run_local_project_index_resolves_relations_after_inline_fanout() 
             observed_file_source=observed_source,
             change_detector=change_detector,
             maintenance_runner=maintenance_runner,
+            moved_entity_search_refresher=RecordingMovedEntitySearchRefresher(),
             batch_enqueuer=batch_enqueuer,
             batch_size=10,
             completion_relation_runtime=relation_runtime,
@@ -337,6 +347,7 @@ async def test_run_local_project_index_preserves_inline_batch_results() -> None:
             observed_file_source=RecordingObservedFileSource(observed),
             change_detector=RecordingChangeDetector(ChangeReport(new_files=["notes/a.md"])),
             maintenance_runner=RecordingMaintenanceRunner(),
+            moved_entity_search_refresher=RecordingMovedEntitySearchRefresher(),
             batch_enqueuer=batch_enqueuer,
             batch_size=10,
         ),
@@ -351,6 +362,7 @@ def test_local_project_index_runtime_uses_optional_workflow_hooks() -> None:
         observed_file_source=RecordingObservedFileSource(()),
         change_detector=RecordingChangeDetector(ChangeReport()),
         maintenance_runner=RecordingMaintenanceRunner(),
+        moved_entity_search_refresher=RecordingMovedEntitySearchRefresher(),
         batch_enqueuer=RecordingBatchEnqueuer(),
     )
 
@@ -702,6 +714,67 @@ async def test_local_project_index_move_updates_permalink_when_configured(
     assert len(results) == 1
     assert results[0].permalink == expected_permalink
     assert results[0].file_path == "archive/renamed-note.md"
+
+
+async def test_local_project_index_move_repairs_observation_search_permalinks(
+    test_project: Project,
+    project_config,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    app_config,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Moved markdown notes refresh derived observation search rows."""
+    app_config.update_permalinks_on_move = True
+    config_manager.save_config(app_config)
+
+    original_path = project_config.home / "notes" / "observed.md"
+    moved_path = project_config.home / "archive" / "observed.md"
+    original_path.parent.mkdir(parents=True, exist_ok=True)
+    moved_path.parent.mkdir(parents=True, exist_ok=True)
+    original_path.write_text(
+        "# Observed\n\n- [fact] Search repair follows the moved note.\n",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local project index parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    original_path.rename(moved_path)
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    expected_permalink_prefix = f"{test_project.permalink}/archive/observed/observations/"
+    assert second.moved_files == 1
+    assert second.enqueued_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        search_rows = await search_service.repository.search(
+            permalink_match=f"{expected_permalink_prefix}*",
+            search_item_types=[SearchItemType.OBSERVATION],
+            session=session,
+        )
+
+    assert len(search_rows) == 1
+    assert search_rows[0].permalink is not None
+    assert search_rows[0].permalink.startswith(expected_permalink_prefix)
+    assert search_rows[0].file_path == "archive/observed.md"
 
 
 @dataclass(slots=True)

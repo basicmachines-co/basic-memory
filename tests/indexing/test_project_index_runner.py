@@ -105,6 +105,7 @@ class FakeProjectIndexMaintenanceRunner:
             total_moves=len(moved_files),
             total_updated_files=len(moved_files),
             records=(),
+            moved_entity_ids=frozenset({77}) if moved_files else frozenset(),
         )
 
     async def run_delete_batches(
@@ -124,6 +125,16 @@ class FakeProjectIndexMaintenanceRunner:
             relation_cleanup_entity_ids=frozenset({99}),
             records=(),
         )
+
+
+class FakeMovedEntitySearchRefresher:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.entity_ids: list[tuple[int, ...]] = []
+
+    async def refresh_moved_entities(self, entity_ids: Sequence[int]) -> None:
+        self.events.append("move_search")
+        self.entity_ids.append(tuple(entity_ids))
 
 
 class FakeWorkflowStarter:
@@ -200,6 +211,7 @@ async def test_run_project_index_coordinator_lists_detects_maintains_starts_and_
         ),
     )
     maintenance_runner = FakeProjectIndexMaintenanceRunner(events)
+    moved_entity_search_refresher = FakeMovedEntitySearchRefresher(events)
     workflow_starter = FakeWorkflowStarter(events)
     batch_enqueuer = FakeBatchEnqueuer(events)
 
@@ -209,6 +221,7 @@ async def test_run_project_index_coordinator_lists_detects_maintains_starts_and_
         observed_file_source=FakeObservedFileSource(events),
         change_detector=change_detector,
         maintenance_runner=maintenance_runner,
+        moved_entity_search_refresher=moved_entity_search_refresher,
         workflow_starter=workflow_starter,
         batch_enqueuer=batch_enqueuer,
         fanout_failure_recorder=FakeFanoutFailureRecorder(events),
@@ -230,6 +243,7 @@ async def test_run_project_index_coordinator_lists_detects_maintains_starts_and_
         "notes/c.md",
     }
     assert maintenance_runner.deleted_paths == ["notes/deleted.md"]
+    assert moved_entity_search_refresher.entity_ids == []
     assert workflow_starter.request == ProjectIndexWorkflowRequest(
         tenant_id=request.tenant_id,
         workflow_id=request.workflow_id,
@@ -278,6 +292,7 @@ async def test_run_project_index_coordinator_plans_maintenance_before_enqueueing
         ),
     )
     maintenance_runner = FakeProjectIndexMaintenanceRunner(events)
+    moved_entity_search_refresher = FakeMovedEntitySearchRefresher(events)
     workflow_starter = FakeWorkflowStarter(events)
     batch_enqueuer = FakeBatchEnqueuer(events)
 
@@ -287,6 +302,7 @@ async def test_run_project_index_coordinator_plans_maintenance_before_enqueueing
         observed_file_source=ObservedFileSource(),
         change_detector=change_detector,
         maintenance_runner=maintenance_runner,
+        moved_entity_search_refresher=moved_entity_search_refresher,
         workflow_starter=workflow_starter,
         batch_enqueuer=batch_enqueuer,
         fanout_failure_recorder=FakeFanoutFailureRecorder(events),
@@ -302,11 +318,12 @@ async def test_run_project_index_coordinator_plans_maintenance_before_enqueueing
         relation_cleanup_entity_ids=frozenset({99}),
         completion=project_index_completion(),
     )
-    assert events == ["list", "detect", "moves", "deletes", "start", "enqueue:0"]
+    assert events == ["list", "detect", "moves", "move_search", "deletes", "start", "enqueue:0"]
     assert change_detector.storage_files == {
         observed_file.path: observed_file for observed_file in observed_files
     }
     assert maintenance_runner.moved_files == {"notes/moved.md": "archive/moved.md"}
+    assert moved_entity_search_refresher.entity_ids == [(77,)]
     assert maintenance_runner.deleted_paths == ["notes/deleted.md"]
     assert maintenance_runner.move_batch_size == 2
     assert maintenance_runner.delete_batch_size == 2
@@ -335,6 +352,7 @@ async def test_run_project_index_coordinator_records_fanout_failure_before_rerai
                 ),
             ),
             maintenance_runner=FakeProjectIndexMaintenanceRunner(events),
+            moved_entity_search_refresher=FakeMovedEntitySearchRefresher(events),
             workflow_starter=FakeWorkflowStarter(events),
             batch_enqueuer=FakeBatchEnqueuer(events, fail_on_batch=1),
             fanout_failure_recorder=failure_recorder,

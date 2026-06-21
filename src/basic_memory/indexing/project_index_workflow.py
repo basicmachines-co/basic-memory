@@ -134,6 +134,31 @@ class ProjectIndexFanoutFailureRecorder(Protocol):
     ) -> None: ...
 
 
+class ProjectIndexMovedEntityRepository(Protocol):
+    """Repository capability for loading moved entities after path maintenance."""
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[int],
+    ) -> Sequence[Entity]:
+        """Return moved entities by database id."""
+
+
+class ProjectIndexMovedEntityIndexer(Protocol):
+    """Search capability for refreshing one moved entity."""
+
+    async def index_entity(self, entity: Entity) -> object:
+        """Refresh search rows for one entity."""
+
+
+class ProjectIndexMovedEntitySearchRefresher(Protocol):
+    """Capability that repairs search rows for moved entities."""
+
+    async def refresh_moved_entities(self, entity_ids: Sequence[int]) -> None:
+        """Refresh search rows for moved entity ids."""
+
+
 class ProjectIndexMoveBatchStore(Protocol):
     """Capability that applies one project-index move-maintenance batch."""
 
@@ -588,6 +613,7 @@ class ProjectIndexMoveBatchResult:
     """Storage adapter result for one project-index move batch."""
 
     updated_files: int
+    moved_entity_ids: frozenset[int] = frozenset()
     missing_paths: tuple[str, ...] = ()
 
 
@@ -607,6 +633,7 @@ class ProjectIndexMoveRun:
     total_moves: int
     total_updated_files: int
     records: tuple[ProjectIndexMoveBatchRecord, ...]
+    moved_entity_ids: frozenset[int] = frozenset()
 
     @property
     def missing_paths(self) -> tuple[str, ...]:
@@ -879,6 +906,7 @@ class RepositoryProjectIndexMaintenanceStore:
         )
         return ProjectIndexMoveBatchResult(
             updated_files=len(updated_old_paths),
+            moved_entity_ids=frozenset(target_paths_by_entity_id),
             missing_paths=missing_paths,
         )
 
@@ -981,6 +1009,36 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RepositoryProjectIndexMovedEntitySearchRefresher:
+    """Refresh search rows for moved entities through explicit sessions."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: ProjectIndexMovedEntityRepository
+    entity_indexer: ProjectIndexMovedEntityIndexer
+
+    async def refresh_moved_entities(self, entity_ids: Sequence[int]) -> None:
+        unique_entity_ids = sorted(set(entity_ids))
+        if not unique_entity_ids:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            entities = await self.entity_repository.find_by_ids(session, unique_entity_ids)
+
+        entities_by_id = {entity.id: entity for entity in entities}
+        missing_entity_ids = [
+            entity_id for entity_id in unique_entity_ids if entity_id not in entities_by_id
+        ]
+        if missing_entity_ids:
+            raise RuntimeError(
+                "Moved entities disappeared before search refresh: "
+                f"{', '.join(str(entity_id) for entity_id in missing_entity_ids)}"
+            )
+
+        for entity_id in unique_entity_ids:
+            await self.entity_indexer.index_entity(entities_by_id[entity_id])
+
+
 def project_index_workflow_logical_key(
     *,
     tenant_id: TenantId,
@@ -1071,10 +1129,12 @@ async def run_project_index_move_batches(
         )
 
     total_updated = 0
+    moved_entity_ids: set[int] = set()
     records: list[ProjectIndexMoveBatchRecord] = []
     for move_batch in move_plan.batches:
         batch_result = await move_store.apply_project_index_move_batch(move_batch)
         total_updated += batch_result.updated_files
+        moved_entity_ids.update(batch_result.moved_entity_ids)
         progress = ProjectIndexMoveBatchProgress(
             moved_files=move_plan.total_moves,
             completed_batches=move_batch.completed_batches,
@@ -1095,6 +1155,7 @@ async def run_project_index_move_batches(
         total_moves=move_plan.total_moves,
         total_updated_files=total_updated,
         records=tuple(records),
+        moved_entity_ids=frozenset(moved_entity_ids),
     )
 
 
@@ -1256,6 +1317,7 @@ async def run_project_index_coordinator(
     observed_file_source: ProjectIndexObservedFileSource,
     change_detector: ProjectIndexChangeDetector,
     maintenance_runner: ProjectIndexMaintenanceRunner,
+    moved_entity_search_refresher: ProjectIndexMovedEntitySearchRefresher,
     workflow_starter: ProjectIndexWorkflowStarter | None,
     batch_enqueuer: ProjectIndexBatchEnqueuer,
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None,
@@ -1273,6 +1335,10 @@ async def run_project_index_coordinator(
         moved_files=change_report.moved_files,
         batch_size=batch_size,
     )
+    if move_run.moved_entity_ids:
+        await moved_entity_search_refresher.refresh_moved_entities(
+            sorted(move_run.moved_entity_ids)
+        )
     delete_run = await maintenance_runner.run_delete_batches(
         deleted_paths=change_report.deleted_files,
         batch_size=batch_size,

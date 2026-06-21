@@ -507,9 +507,13 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
         results=[
             ProjectIndexMoveBatchResult(
                 updated_files=1,
+                moved_entity_ids=frozenset({10}),
                 missing_paths=("notes/b.md",),
             ),
-            ProjectIndexMoveBatchResult(updated_files=1),
+            ProjectIndexMoveBatchResult(
+                updated_files=1,
+                moved_entity_ids=frozenset({11}),
+            ),
         ]
     )
     metadata_reporter = RecordingProjectIndexMetadataReporter()
@@ -542,6 +546,7 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
         total_moves=3,
         total_updated_files=2,
         records=run.records,
+        moved_entity_ids=frozenset({10, 11}),
     )
     assert run.missing_paths == ("notes/b.md",)
     assert metadata_reporter.progress_updates == [
@@ -699,6 +704,7 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
 
     assert result == ProjectIndexMoveBatchResult(
         updated_files=1,
+        moved_entity_ids=frozenset({10}),
         missing_paths=("notes/b.md",),
     )
     assert len(session.statements) == 4
@@ -758,7 +764,10 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
         )
     )
 
-    assert result == ProjectIndexMoveBatchResult(updated_files=1)
+    assert result == ProjectIndexMoveBatchResult(
+        updated_files=1,
+        moved_entity_ids=frozenset({10}),
+    )
     assert content_updater.seen_files == [
         project_index_workflow_module.ProjectIndexMovedFile(
             entity_id=10,

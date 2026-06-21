@@ -39,6 +39,7 @@ from basic_memory.indexing import (
     IndexFileJobStatus,
     IndexInputFile,
     RepositoryIndexedFileChecksumSource,
+    RepositoryProjectIndexMovedEntitySearchRefresher,
     RepositoryProjectIndexMaintenanceStore,
     RepositoryRelationResolutionRuntime,
     StorageCurrentFileChecksumSource,
@@ -47,6 +48,7 @@ from basic_memory.indexing import (
     ProjectIndexCoordinatorResult,
     ProjectIndexFanoutFailureRecorder,
     ProjectIndexMaintenanceRunner,
+    ProjectIndexMovedEntitySearchRefresher,
     ProjectIndexObservedFileSource,
     ProjectIndexWorkflowStarter,
     ProjectIndexRelationResolutionContext,
@@ -141,6 +143,7 @@ class LocalProjectIndexRuntime:
     observed_file_source: ProjectIndexObservedFileSource
     change_detector: ProjectIndexChangeDetector
     maintenance_runner: ProjectIndexMaintenanceRunner
+    moved_entity_search_refresher: ProjectIndexMovedEntitySearchRefresher
     batch_enqueuer: ProjectIndexBatchEnqueuer
     workflow_starter: ProjectIndexWorkflowStarter | None = None
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None = None
@@ -337,6 +340,11 @@ class LocalProjectIndexRuntimeFactory:
                 move_store=maintenance_store,
                 delete_store=maintenance_store,
             ),
+            moved_entity_search_refresher=RepositoryProjectIndexMovedEntitySearchRefresher(
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
+                entity_indexer=dependencies.search_service,
+            ),
             batch_enqueuer=LocalProjectIndexBatchEnqueuer(
                 checker=checker,
                 reader=LocalIndexFileBatchReader(dependencies.file_service),
@@ -425,6 +433,7 @@ async def run_local_project_index(
         observed_file_source=runtime.observed_file_source,
         change_detector=runtime.change_detector,
         maintenance_runner=runtime.maintenance_runner,
+        moved_entity_search_refresher=runtime.moved_entity_search_refresher,
         workflow_starter=runtime.workflow_starter,
         batch_enqueuer=runtime.batch_enqueuer,
         fanout_failure_recorder=runtime.fanout_failure_recorder,
