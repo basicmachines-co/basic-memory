@@ -21,7 +21,6 @@ from basic_memory.indexing.note_materialization_runner import (
     plan_written_note_materialization_publish,
     run_note_materialization,
 )
-from basic_memory.indexing.note_content_reconciler import NoteContentRepositoryFactories
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.models import Entity, NoteContent
 from basic_memory.runtime import (
@@ -192,6 +191,15 @@ class RecordingNoteContentRepository:
         data: NoteContent,
     ) -> NoteContent:
         raise AssertionError("repository adapter tests should not create note_content")
+
+
+@dataclass(frozen=True, slots=True)
+class RecordingNoteContentRepositories:
+    repository: RecordingNoteContentRepository
+
+    def note_content_repository(self, project_id: int) -> RecordingNoteContentRepository:
+        _ = project_id
+        return self.repository
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,9 +472,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         session_lock=session_lock,
         session_scope=lambda _session_maker: FakeScopedSession(session),
-        repositories=NoteContentRepositoryFactories(
-            note_content_repository_factory=lambda _project_id: repository
-        ),
+        repositories=RecordingNoteContentRepositories(repository),
     ).publish_written_file_state(request, prepared, written)
 
     assert result == RuntimeNoteMaterializationResult(
@@ -511,9 +517,7 @@ async def test_repository_note_materialization_status_publisher_records_conflict
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         session_lock=session_lock,
         session_scope=lambda _session_maker: FakeScopedSession(session),
-        repositories=NoteContentRepositoryFactories(
-            note_content_repository_factory=lambda _project_id: repository
-        ),
+        repositories=RecordingNoteContentRepositories(repository),
     ).publish_note_materialization_status(
         request,
         NoteMaterializationStatusPublication(

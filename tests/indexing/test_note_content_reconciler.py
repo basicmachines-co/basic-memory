@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,11 +18,12 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentMaterializedCurrent,
 )
 from basic_memory.indexing.note_content_reconciler import (
+    DefaultNoteContentRepositories,
     NoteContentReconciler,
-    NoteContentRepositoryFactories,
+    NoteContentRepositories,
     RepositoryNoteMaterializationFailureMarker,
     apply_note_content_update_plan,
-    build_default_note_content_repository_factories,
+    build_default_note_content_repositories,
     mark_note_materialization_enqueue_failed,
     reconcile_note_content_for_entity,
 )
@@ -56,6 +58,27 @@ class FakeRepositorySession(FakeSession):
 
     def begin(self) -> FakeTransaction:
         return FakeTransaction()
+
+
+@dataclass(frozen=True, slots=True)
+class FakeNoteContentRepositories:
+    repository_type: type
+
+    def note_content_repository(self, project_id: int) -> Any:
+        return self.repository_type(project_id)
+
+
+def test_note_content_repositories_name_materialization_behavior() -> None:
+    """Materialization bookkeeping should use behavior methods, not Callable aliases."""
+
+    class FakeProvider:
+        def note_content_repository(self, project_id: int) -> NoteContentRepository:
+            assert project_id == 7
+            return NoteContentRepository(project_id=project_id)
+
+    repositories: NoteContentRepositories = FakeProvider()
+
+    assert isinstance(repositories.note_content_repository(7), NoteContentRepository)
 
 
 @pytest.mark.asyncio
@@ -212,9 +235,7 @@ async def test_mark_note_materialization_enqueue_failed_uses_repository_factory(
         project_id=7,
         entity_id=42,
         error_message="pgq unavailable",
-        repositories=NoteContentRepositoryFactories(
-            note_content_repository_factory=cast(Any, FakeNoteContentRepository)
-        ),
+        repositories=FakeNoteContentRepositories(FakeNoteContentRepository),
         attempted_at=attempted_at,
     )
 
@@ -257,9 +278,7 @@ async def test_repository_failure_marker_records_materialization_enqueue_failure
 
     marker = RepositoryNoteMaterializationFailureMarker(
         session_maker=cast(Any, session_maker),
-        repositories=NoteContentRepositoryFactories(
-            note_content_repository_factory=cast(Any, FakeNoteContentRepository)
-        ),
+        repositories=FakeNoteContentRepositories(FakeNoteContentRepository),
     )
 
     await marker.mark_note_materialization_failed(
@@ -274,11 +293,12 @@ async def test_repository_failure_marker_records_materialization_enqueue_failure
     assert isinstance(repository_calls[0]["last_materialization_attempt_at"], datetime)
 
 
-def test_default_note_content_repository_factories_use_core_repository() -> None:
+def test_default_note_content_repositories_use_core_repository() -> None:
     """The default materialization contract should stay backed by core repositories."""
-    factories = build_default_note_content_repository_factories()
+    repositories = build_default_note_content_repositories()
 
-    assert isinstance(factories.note_content_repository_factory(7), NoteContentRepository)
+    assert isinstance(repositories, DefaultNoteContentRepositories)
+    assert isinstance(repositories.note_content_repository(7), NoteContentRepository)
 
 
 @pytest.mark.asyncio
