@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol, Self
 
-from sqlalchemy import bindparam, case, delete, select, text, update
+from sqlalchemy import bindparam, case, column, delete, select, table, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -29,7 +29,7 @@ from basic_memory.indexing.project_index_progress import (
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
 )
-from basic_memory.models import Entity, Relation
+from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.runtime import (
     ProjectExternalId,
     ProjectId,
@@ -679,6 +679,13 @@ DELETE_PROJECT_INDEX_VECTOR_CHUNKS_SQL = text("""
       AND entity_id IN :deleted_entity_ids
 """).bindparams(bindparam("deleted_entity_ids", expanding=True))
 
+PROJECT_INDEX_SEARCH_INDEX_TABLE = table(
+    "search_index",
+    column("project_id"),
+    column("entity_id"),
+    column("file_path"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class RepositoryProjectIndexMaintenanceStore:
@@ -701,12 +708,17 @@ class RepositoryProjectIndexMaintenanceStore:
 
         async with db.scoped_session(self.session_maker) as session:
             existing_paths_result = await session.execute(
-                select(Entity.file_path).where(
+                select(Entity.id, Entity.file_path).where(
                     Entity.project_id == self.project_id,
                     Entity.file_path.in_(old_paths),
                 )
             )
-            updated_old_paths = frozenset(str(path) for path in existing_paths_result.scalars())
+            target_rows = existing_paths_result.mappings().all()
+            updated_old_paths = frozenset(str(row["file_path"]) for row in target_rows)
+            target_paths_by_entity_id = {
+                int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
+                for row in target_rows
+            }
 
             if updated_old_paths:
                 await session.execute(
@@ -719,6 +731,34 @@ class RepositoryProjectIndexMaintenanceStore:
                         file_path=case(
                             target_paths_by_old_path,
                             value=Entity.file_path,
+                        )
+                    )
+                )
+                await session.execute(
+                    update(NoteContent)
+                    .where(
+                        NoteContent.project_id == self.project_id,
+                        NoteContent.entity_id.in_(tuple(target_paths_by_entity_id)),
+                    )
+                    .values(
+                        file_path=case(
+                            target_paths_by_entity_id,
+                            value=NoteContent.entity_id,
+                        )
+                    )
+                )
+                await session.execute(
+                    update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
+                    .where(
+                        PROJECT_INDEX_SEARCH_INDEX_TABLE.c.project_id == self.project_id,
+                        PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id.in_(
+                            tuple(target_paths_by_entity_id)
+                        ),
+                    )
+                    .values(
+                        file_path=case(
+                            target_paths_by_entity_id,
+                            value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
                         )
                     )
                 )

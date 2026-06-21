@@ -641,7 +641,13 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
 ) -> None:
     session_maker = cast(async_sessionmaker[AsyncSession], object())
     session = FakeProjectIndexSession(
-        results=[FakeProjectIndexResult(scalar_values=["notes/a.md"])]
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md"},
+                ]
+            )
+        ]
     )
 
     @asynccontextmanager
@@ -676,9 +682,11 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
         updated_files=1,
         missing_paths=("notes/b.md",),
     )
-    assert len(session.statements) == 2
-    assert "SELECT entity.file_path" in str(session.statements[0])
+    assert len(session.statements) == 4
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
     assert "UPDATE entity" in str(session.statements[1])
+    assert "UPDATE note_content" in str(session.statements[2])
+    assert "UPDATE search_index" in str(session.statements[3])
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,7 @@ from basic_memory.runtime import (
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
 )
+from basic_memory.schemas.search import SearchQuery
 from basic_memory.services import FileService
 
 
@@ -555,6 +556,79 @@ async def test_local_project_index_force_full_reindexes_unchanged_files(
         )
     assert note_content is not None
     assert "This should be reprocessed." in note_content.markdown_content
+
+
+async def test_local_project_index_move_updates_note_content_identity(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Move maintenance keeps note_content mirrored to the current entity path."""
+    del config_manager
+
+    original_path = project_config.home / "notes" / "move-me.md"
+    moved_path = project_config.home / "archive" / "move-me.md"
+    original_path.parent.mkdir(parents=True, exist_ok=True)
+    moved_path.parent.mkdir(parents=True, exist_ok=True)
+    original_path.write_text(
+        "# Move Me\n\nThis note should keep content identity.\n", encoding="utf-8"
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local project index parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    async with db.scoped_session(session_maker) as session:
+        original_entity = await entity_repository.get_by_file_path(session, "notes/move-me.md")
+        assert original_entity is not None
+        original_note_content = await NoteContentRepository(test_project.id).get_by_entity_id(
+            session,
+            original_entity.id,
+        )
+        assert original_note_content is not None
+        original_entity_id = original_entity.id
+
+    original_path.rename(moved_path)
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.moved_files == 1
+    assert second.enqueued_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        assert await entity_repository.get_by_file_path(session, "notes/move-me.md") is None
+        moved_entity = await entity_repository.get_by_file_path(session, "archive/move-me.md")
+        assert moved_entity is not None
+        moved_note_content = await NoteContentRepository(test_project.id).get_by_entity_id(
+            session,
+            moved_entity.id,
+        )
+
+    assert moved_entity.id == original_entity_id
+    assert moved_note_content is not None
+    assert moved_note_content.file_path == "archive/move-me.md"
+
+    results = await search_service.search(SearchQuery(text="content identity"))
+    assert len(results) == 1
+    assert results[0].file_path == "archive/move-me.md"
 
 
 @dataclass(slots=True)
