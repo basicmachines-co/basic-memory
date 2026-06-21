@@ -102,7 +102,7 @@ class RecordingFileIndexer:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def index_markdown_file(self, file_path: str, *, source: str) -> FileIndexResult:
+    async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
         self.calls.append((file_path, source))
         return FileIndexResult(
             file_path=file_path,

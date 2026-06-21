@@ -72,7 +72,9 @@ def test_local_project_index_file_paths_filter_and_sort(tmp_path: Path) -> None:
     assert local_project_index_file_paths(tmp_path, ignore_patterns={"ignored"}) == (
         "notes/a.md",
         "notes/b.md",
+        "notes/image.png",
         "notes/longform.markdown",
+        "notes/todo.txt",
     )
 
 
@@ -84,6 +86,9 @@ async def test_local_project_index_observed_file_source_returns_runtime_targets(
     note_path = tmp_path / "notes" / "a.md"
     note_content = "# A\n"
     note_path.write_text(note_content, encoding="utf-8")
+    regular_path = tmp_path / "notes" / "asset.pdf"
+    regular_content = b"pdf-ish"
+    regular_path.write_bytes(regular_content)
 
     observed = await LocalProjectIndexObservedFileSource(
         FileService(tmp_path),
@@ -95,6 +100,11 @@ async def test_local_project_index_observed_file_source_returns_runtime_targets(
             path="notes/a.md",
             checksum=sha256(note_content.encode("utf-8")).hexdigest(),
             size=len(note_content.encode("utf-8")),
+        ),
+        RuntimeObservedIndexFile(
+            path="notes/asset.pdf",
+            checksum=sha256(regular_content).hexdigest(),
+            size=len(regular_content),
         ),
     )
 
@@ -419,7 +429,7 @@ class StaticMetadataSource:
 class RecordingMarkdownFileIndexer:
     indexed_paths: list[str] = field(default_factory=list)
 
-    async def index_markdown_file(self, file_path: str, *, source: str) -> FileIndexResult:
+    async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
         self.indexed_paths.append(file_path)
         return FileIndexResult.from_fields(
             file_path=file_path,

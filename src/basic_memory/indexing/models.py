@@ -135,13 +135,13 @@ def file_index_operation_from_note_object_metadata(
 
 @dataclass(frozen=True, slots=True)
 class FileIndexResult:
-    """Result for one successfully indexed markdown file."""
+    """Result for one successfully indexed file."""
 
     file_path: str
     entity_id: int
     external_id: str
     title: str
-    permalink: str
+    permalink: str | None
     checksum: str
     operation: FileIndexOperation
 
@@ -171,7 +171,7 @@ class FileIndexResult:
                 field_name="title",
                 file_path=file_path,
             ),
-            permalink=_required_file_index_result_text(
+            permalink=_optional_file_index_result_text(
                 permalink,
                 field_name="permalink",
                 file_path=file_path,
@@ -189,6 +189,21 @@ def _required_file_index_result_text(
 ) -> str:
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"Indexed entity for {file_path} is missing {field_name}")
+    return value.strip()
+
+
+def _optional_file_index_result_text(
+    value: object,
+    *,
+    field_name: str,
+    file_path: str,
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"Indexed entity for {file_path} has invalid {field_name}")
+    if not value.strip():
+        raise RuntimeError(f"Indexed entity for {file_path} has blank {field_name}")
     return value.strip()
 
 
@@ -355,6 +370,8 @@ def plan_index_file_note_live_update(
     if result.status == IndexFileJobStatus.current and result.live_update_source is None:
         return None
     if result.status not in (IndexFileJobStatus.processed, IndexFileJobStatus.current):
+        return None
+    if result.permalink is None:
         return None
 
     project_external_id = _required_index_file_note_live_update_text(

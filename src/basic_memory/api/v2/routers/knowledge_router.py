@@ -416,7 +416,7 @@ async def sync_file(
                 detail=f"Only markdown files can be indexed: '{data.file_path}'",
             )
 
-        indexed = await file_indexer.index_markdown_file(file_path, source="api-sync-file")
+        indexed = await file_indexer.index_file(file_path, source="api-sync-file")
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_id(session, indexed.entity_id)
         if entity is None:  # pragma: no cover

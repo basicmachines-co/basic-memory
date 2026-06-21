@@ -393,11 +393,11 @@ async def test_run_storage_event_indexing_accumulates_project_operation_results(
         ),
     )
 
-    assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 1}
+    assert result.as_dict() == {"processed": 3, "failed": 1, "skipped": 0}
     assert factory.processors[0].calls == [
         ("alpha", "index", "notes/a.md"),
         ("alpha", "delete", "notes/b.md"),
-        ("alpha", "skip", "non_markdown"),
+        ("alpha", "index", "image.png"),
         ("alpha", "index", "notes/fail.md"),
         ("alpha", "failed", "index failed"),
     ]

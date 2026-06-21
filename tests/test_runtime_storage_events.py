@@ -164,11 +164,11 @@ async def test_run_runtime_storage_event_operations_counts_adapter_results() -> 
         processor,
     )
 
-    assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 2}
+    assert result.as_dict() == {"processed": 3, "failed": 1, "skipped": 1}
     assert processor.calls == [
         ("index", "", "notes/a.md"),
         ("delete", "", "notes/b.md"),
-        ("skip", "non_markdown", "image.png"),
+        ("index", "", "image.png"),
         ("skip", "unknown_event", "notes/c.md"),
         ("index", "", "notes/fail.md"),
         ("failed", "index failed", "notes/fail.md"),

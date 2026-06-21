@@ -29,9 +29,11 @@ def test_runtime_observed_index_files_from_metadata_map_uses_sorted_mapping_path
     observed_files = runtime_observed_index_files_from_metadata_map(metadata_by_path)
 
     assert observed_files == (
+        RuntimeObservedIndexFile(path="assets/image.png", checksum="etag-image", size=30),
         RuntimeObservedIndexFile(path="notes/a.md", checksum=None, size=None),
         RuntimeObservedIndexFile(path="notes/b.md", checksum="etag-b", size=20),
         RuntimeObservedIndexFile(path="notes/longform.markdown", checksum="etag-longform", size=40),
+        RuntimeObservedIndexFile(path="notes/todo.txt", checksum="etag-todo", size=10),
     )
     with pytest.raises(FrozenInstanceError):
         setattr(observed_files[0], "path", "notes/changed.md")

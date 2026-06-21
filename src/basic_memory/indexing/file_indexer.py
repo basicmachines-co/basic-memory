@@ -84,6 +84,13 @@ class IndexCurrentMarkdownFileIndexer(Protocol):
         refresh_unchanged_derived_state: bool,
     ) -> SyncedMarkdownFile: ...
 
+    async def index_file(
+        self,
+        file_path: RuntimeFilePath,
+        *,
+        source: str,
+    ) -> FileIndexResult: ...
+
 
 class IndexMarkdownNoteContentReconciler(Protocol):
     """Note-content capability needed after canonical markdown sync succeeds."""
@@ -119,6 +126,15 @@ class FileIndexer:
     def entity_repository(self) -> IndexMarkdownEntityRepository:
         """Expose the entity repository needed by index-file preflight adapters."""
         return self.markdown_indexer.entity_repository
+
+    async def index_file(
+        self,
+        file_path: str,
+        *,
+        source: str = "index",
+    ) -> FileIndexResult:
+        """Index the current file through the configured project index adapter."""
+        return await self.markdown_indexer.index_file(file_path, source=source)
 
     async def index_markdown_file(
         self,

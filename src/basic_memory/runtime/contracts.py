@@ -926,14 +926,6 @@ def plan_runtime_storage_event_operation(
             skip_reason=RuntimeStorageEventSkipReason.project_root,
         )
 
-    if not runtime_file_path_is_markdown_note(relative_path):
-        return RuntimeStorageEventOperation(
-            kind=RuntimeStorageEventOperationKind.skip,
-            storage_event=storage_event,
-            relative_path=relative_path,
-            skip_reason=RuntimeStorageEventSkipReason.non_markdown,
-        )
-
     if storage_event.is_object_created:
         return RuntimeStorageEventOperation(
             kind=RuntimeStorageEventOperationKind.index_file,

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.indexing import (
     FileIndexer,
     FileIndexOperation,
+    FileIndexResult,
     IndexCurrentMarkdownFileIndexer,
     NoteContentReconciler,
     SyncedMarkdownFile,
@@ -79,6 +80,17 @@ def _file_indexer(
     markdown_indexer.session_maker = _FakeSession
     markdown_indexer.entity_repository = entity_repository
     markdown_indexer.index_current_markdown_file = AsyncMock(return_value=index_result)
+    markdown_indexer.index_file = AsyncMock(
+        return_value=FileIndexResult(
+            file_path="notes/note.md",
+            entity_id=42,
+            external_id="note-42",
+            title="Note",
+            permalink="notes/note",
+            checksum=CHECKSUM,
+            operation=FileIndexOperation.updated,
+        )
+    )
 
     note_content_reconciler = Mock()
     note_content_reconciler.reconcile = AsyncMock()
@@ -98,6 +110,7 @@ def test_build_default_file_indexer_composes_note_content_reconciler() -> None:
     markdown_indexer.session_maker = cast(async_sessionmaker[AsyncSession], _FakeSession)
     markdown_indexer.entity_repository = Mock()
     markdown_indexer.index_current_markdown_file = AsyncMock()
+    markdown_indexer.index_file = AsyncMock()
 
     file_indexer = build_default_file_indexer(
         project_id=42,
@@ -107,6 +120,20 @@ def test_build_default_file_indexer_composes_note_content_reconciler() -> None:
     assert isinstance(file_indexer, FileIndexer)
     assert file_indexer.markdown_indexer is markdown_indexer
     assert isinstance(file_indexer.note_content_reconciler, NoteContentReconciler)
+
+
+@pytest.mark.asyncio
+async def test_file_indexer_delegates_generic_file_indexing_to_project_adapter() -> None:
+    file_indexer, markdown_indexer, note_content_reconciler = _file_indexer()
+
+    result = await file_indexer.index_file("assets/file.pdf", source="s3_webhook")
+
+    markdown_indexer.index_file.assert_awaited_once_with(
+        "assets/file.pdf",
+        source="s3_webhook",
+    )
+    note_content_reconciler.reconcile.assert_not_awaited()
+    assert result.file_path == "notes/note.md"
 
 
 @pytest.mark.asyncio

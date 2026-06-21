@@ -105,9 +105,9 @@ class IndexFileMaterializedNoteSource(Protocol):
 
 
 class IndexFileExecutor(Protocol):
-    """Capability that indexes one markdown file from current storage."""
+    """Capability that indexes one file from current storage."""
 
-    async def index_markdown_file(
+    async def index_file(
         self,
         file_path: RuntimeFilePath,
         *,
@@ -187,7 +187,7 @@ async def run_index_file(
 
     source = index_file_source_for_mode(request.mode)
     try:
-        indexed_file = await file_indexer.index_markdown_file(
+        indexed_file = await file_indexer.index_file(
             request.file_path,
             source=source,
         )

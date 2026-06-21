@@ -151,6 +151,18 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
     search_service: IndexEntitySearchWriter
     note_content_reconciler: IndexMarkdownNoteContentReconciler
 
+    async def index_file(
+        self,
+        file_path: RuntimeFilePath,
+        *,
+        source: str,
+    ) -> FileIndexResult:
+        """Read and index the current file with markdown-specific reconciliation when needed."""
+        if self.file_service.is_markdown(file_path):
+            return await self.index_markdown_file(file_path, source=source)
+
+        return await self.index_regular_file(file_path, source=source)
+
     async def index_markdown_file(
         self,
         file_path: RuntimeFilePath,
@@ -197,6 +209,72 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             title=synced.entity.title,
             permalink=synced.entity.permalink,
             checksum=synced.checksum,
+            operation=operation,
+        )
+
+    async def index_regular_file(
+        self,
+        file_path: RuntimeFilePath,
+        *,
+        source: str,
+    ) -> FileIndexResult:
+        """Read, persist, and search-index one regular file entity."""
+        logger.info(f"Indexing regular file: {file_path}", source=source)
+
+        async with db.scoped_session(self.session_maker) as session:
+            existing = await self.entity_repository.get_by_file_path(
+                session,
+                file_path,
+                load_relations=False,
+            )
+        operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+
+        file_bytes = await self.file_service.read_file_bytes(file_path)
+        file_metadata = await self.file_service.get_file_metadata(file_path)
+        checksum = await compute_checksum(file_bytes)
+        input_file = IndexInputFile(
+            path=file_path,
+            size=file_metadata.size,
+            checksum=checksum,
+            content_type=self.file_service.content_type(file_path),
+            last_modified=file_metadata.modified_at,
+            created_at=file_metadata.created_at,
+            content=file_bytes,
+        )
+        batch_result = await self.batch_indexer.index_files(
+            {file_path: input_file},
+            max_concurrent=1,
+            parse_max_concurrent=1,
+        )
+        if batch_result.errors:
+            error_path, error_message = batch_result.errors[0]
+            raise RuntimeError(f"Regular file indexing failed for {error_path}: {error_message}")
+        if len(batch_result.indexed) != 1:
+            raise RuntimeError(f"Regular file indexing produced no result for {file_path}")
+
+        indexed = batch_result.indexed[0]
+        async with db.scoped_session(self.session_maker) as session:
+            refreshed_entities = await self.entity_repository.find_by_ids(
+                session,
+                [indexed.entity_id],
+            )
+        if len(refreshed_entities) != 1:  # pragma: no cover
+            raise ValueError(f"Failed to reload indexed regular file entity for {file_path}")
+
+        entity = refreshed_entities[0]
+        logger.info(
+            f"Indexed regular file: {file_path}",
+            entity_id=entity.id,
+            checksum=indexed.checksum,
+            operation=operation,
+        )
+        return FileIndexResult.from_fields(
+            file_path=file_path,
+            entity_id=entity.id,
+            external_id=entity.external_id,
+            title=entity.title,
+            permalink=entity.permalink,
+            checksum=indexed.checksum,
             operation=operation,
         )
 

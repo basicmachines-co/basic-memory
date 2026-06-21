@@ -122,6 +122,13 @@ local-project-index-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py
 
+# Focused per-file indexing runner/model tests.
+file-index-runner-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_index_file_runner.py \
+        tests/indexing/test_file_indexer.py \
+        tests/indexing/test_models.py
+
 # Focused startup wiring for local project-index fanout.
 local-project-index-startup-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -130,6 +137,11 @@ local-project-index-startup-test:
 
 # Focused project-wide indexing orchestration surface tests.
 project-index-contract-test: project-index-surface-test local-project-index-test local-project-index-startup-test
+
+# Focused event-based indexing contract tests for the cloud/core extraction loop.
+local-event-index-regular-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:
@@ -144,6 +156,7 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
         tests/sync/test_watch_service.py::test_handle_changes_with_event_index_runtime_records_failed_counts \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_processes_move_as_delete_and_index \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index \
@@ -160,7 +173,7 @@ event-index-parity-test:
         tests/index/test_storage_event_orchestration.py
 
 # Focused indexing contract suite for the cloud/core extraction loop.
-index-contract-test: project-index-contract-test event-index-contract-test
+index-contract-test: file-index-runner-test project-index-contract-test event-index-contract-test
 
 # Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
 runtime-refactor-contract-test:

@@ -550,7 +550,7 @@ class TestRuntimeContracts:
         markdown_created_event = event("project/notes/longform.markdown", "OBJECT_CREATED_POST")
         deleted_event = event("project/notes/b.md", "OBJECT_DELETED")
         root_event = event("project/", "OBJECT_CREATED_PUT")
-        non_markdown_event = event("project/image.png", "OBJECT_CREATED_POST")
+        regular_file_created_event = event("project/image.png", "OBJECT_CREATED_POST")
         unknown_event = event("project/notes/c.md", "OBJECT_RESTORED")
 
         operations = plan_runtime_storage_event_operations(
@@ -559,7 +559,7 @@ class TestRuntimeContracts:
                 markdown_created_event,
                 deleted_event,
                 root_event,
-                non_markdown_event,
+                regular_file_created_event,
                 unknown_event,
             ]
         )
@@ -586,10 +586,9 @@ class TestRuntimeContracts:
                 skip_reason=RuntimeStorageEventSkipReason.project_root,
             ),
             RuntimeStorageEventOperation(
-                kind=RuntimeStorageEventOperationKind.skip,
-                storage_event=non_markdown_event,
+                kind=RuntimeStorageEventOperationKind.index_file,
+                storage_event=regular_file_created_event,
                 relative_path="image.png",
-                skip_reason=RuntimeStorageEventSkipReason.non_markdown,
             ),
             RuntimeStorageEventOperation(
                 kind=RuntimeStorageEventOperationKind.skip,

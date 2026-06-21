@@ -7,7 +7,6 @@ from basic_memory.runtime.contracts import (
     RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeObservedIndexFile,
-    runtime_file_path_is_markdown_note,
 )
 
 
@@ -36,12 +35,11 @@ def runtime_observed_index_file_from_metadata(
 def runtime_observed_index_files_from_metadata_map(
     metadata_by_path: Mapping[RuntimeFilePath, RuntimeObservedIndexFileMetadataSource],
 ) -> tuple[RuntimeObservedIndexFile, ...]:
-    """Return stable markdown-note targets from path-keyed storage metadata."""
+    """Return stable project-index targets from path-keyed storage metadata."""
     return tuple(
         runtime_observed_index_file_from_metadata(
             path,
             metadata_by_path[path],
         )
         for path in sorted(metadata_by_path)
-        if runtime_file_path_is_markdown_note(path)
     )
