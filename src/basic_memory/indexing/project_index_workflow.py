@@ -1104,9 +1104,9 @@ async def run_project_index_coordinator(
     observed_file_source: ProjectIndexObservedFileSource,
     change_detector: ProjectIndexChangeDetector,
     maintenance_runner: ProjectIndexMaintenanceRunner,
-    workflow_starter: ProjectIndexWorkflowStarter,
+    workflow_starter: ProjectIndexWorkflowStarter | None,
     batch_enqueuer: ProjectIndexBatchEnqueuer,
-    fanout_failure_recorder: ProjectIndexFanoutFailureRecorder,
+    fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None,
     batch_size: int,
 ) -> ProjectIndexCoordinatorResult:
     """Run the storage-neutral project-index coordinator fan-out."""
@@ -1142,13 +1142,15 @@ async def run_project_index_coordinator(
         ),
         batch_size=batch_size,
     )
-    completion = await workflow_starter.start_project_index_workflow(
-        workflow_request,
-        total_files=batch_plan.total_files,
-        batch_count=batch_plan.batch_count,
-        batch_size=batch_size,
-        coordinator_job_id=coordinator_job_id,
-    )
+    completion = None
+    if workflow_starter is not None:
+        completion = await workflow_starter.start_project_index_workflow(
+            workflow_request,
+            total_files=batch_plan.total_files,
+            batch_count=batch_plan.batch_count,
+            batch_size=batch_size,
+            coordinator_job_id=coordinator_job_id,
+        )
 
     enqueued_files = 0
     enqueued_batches = 0
@@ -1158,14 +1160,15 @@ async def run_project_index_coordinator(
             enqueued_batches += 1
             enqueued_files += len(runtime_request.target_paths())
     except Exception as exc:
-        await fanout_failure_recorder.record_project_index_fanout_failure(
-            workflow_id=request.workflow_id,
-            error_message=(
-                "Failed to enqueue project index batch jobs after "
-                f"{enqueued_files}/{batch_plan.total_files} files: {exc}"
-            ),
-            progress="fan-out failed",
-        )
+        if fanout_failure_recorder is not None:
+            await fanout_failure_recorder.record_project_index_fanout_failure(
+                workflow_id=request.workflow_id,
+                error_message=(
+                    "Failed to enqueue project index batch jobs after "
+                    f"{enqueued_files}/{batch_plan.total_files} files: {exc}"
+                ),
+                progress="fan-out failed",
+            )
         raise
 
     return ProjectIndexCoordinatorResult(

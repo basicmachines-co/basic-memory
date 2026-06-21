@@ -38,12 +38,10 @@ from basic_memory.indexing import (
     StorageCurrentFileChecksumSource,
     ProjectIndexBatchEnqueuer,
     ProjectIndexChangeDetector,
-    ProjectIndexCompletion,
     ProjectIndexCoordinatorResult,
     ProjectIndexFanoutFailureRecorder,
     ProjectIndexMaintenanceRunner,
     ProjectIndexObservedFileSource,
-    ProjectIndexWorkflowRequest,
     ProjectIndexWorkflowStarter,
     ProjectIndexRelationResolutionContext,
     RelationResolutionRuntime,
@@ -62,7 +60,6 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
     TenantId,
-    WorkflowId,
     runtime_file_path_is_markdown_note,
 )
 from basic_memory.services import FileService
@@ -139,36 +136,6 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
 
 
 @dataclass(frozen=True, slots=True)
-class NoopProjectIndexWorkflowStarter(ProjectIndexWorkflowStarter):
-    """Local workflow starter for runtimes that do not persist progress rows."""
-
-    async def start_project_index_workflow(
-        self,
-        request: ProjectIndexWorkflowRequest,
-        *,
-        total_files: int,
-        batch_count: int,
-        batch_size: int,
-        coordinator_job_id: RuntimeJobId | None,
-    ) -> ProjectIndexCompletion | None:
-        return None
-
-
-@dataclass(frozen=True, slots=True)
-class NoopProjectIndexFanoutFailureRecorder(ProjectIndexFanoutFailureRecorder):
-    """Local fanout failure recorder for runtimes without workflow persistence."""
-
-    async def record_project_index_fanout_failure(
-        self,
-        *,
-        workflow_id: WorkflowId,
-        error_message: str,
-        progress: str,
-    ) -> None:
-        return None
-
-
-@dataclass(frozen=True, slots=True)
 class LocalProjectIndexRuntime:
     """Dependencies for running project-wide local indexing through core fanout."""
 
@@ -176,10 +143,8 @@ class LocalProjectIndexRuntime:
     change_detector: ProjectIndexChangeDetector
     maintenance_runner: ProjectIndexMaintenanceRunner
     batch_enqueuer: ProjectIndexBatchEnqueuer
-    workflow_starter: ProjectIndexWorkflowStarter = NoopProjectIndexWorkflowStarter()
-    fanout_failure_recorder: ProjectIndexFanoutFailureRecorder = (
-        NoopProjectIndexFanoutFailureRecorder()
-    )
+    workflow_starter: ProjectIndexWorkflowStarter | None = None
+    fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None = None
     completion_relation_runtime: RelationResolutionRuntime | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None

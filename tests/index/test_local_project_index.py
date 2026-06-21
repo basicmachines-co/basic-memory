@@ -19,8 +19,6 @@ from basic_memory.index import (
     LocalProjectIndexFileRunner,
     LocalProjectIndexRuntimeFactory,
     LocalProjectIndexRuntime,
-    NoopProjectIndexFanoutFailureRecorder,
-    NoopProjectIndexWorkflowStarter,
     local_project_index_file_paths,
     project_index_file_requests_from_batch_request,
     run_local_project_index,
@@ -36,7 +34,6 @@ from basic_memory.indexing import (
     FileIndexResult,
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
-    ProjectIndexWorkflowRequest,
     RepositoryRelationResolutionRuntime,
     ResolvedRelationTarget,
     StoreProjectIndexMaintenanceRunner,
@@ -223,8 +220,6 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
             change_detector=change_detector,
             maintenance_runner=maintenance_runner,
             batch_enqueuer=batch_enqueuer,
-            workflow_starter=NoopProjectIndexWorkflowStarter(),
-            fanout_failure_recorder=NoopProjectIndexFanoutFailureRecorder(),
             batch_size=2,
         ),
     )
@@ -272,8 +267,6 @@ async def test_run_local_project_index_resolves_relations_after_inline_fanout() 
             change_detector=change_detector,
             maintenance_runner=maintenance_runner,
             batch_enqueuer=batch_enqueuer,
-            workflow_starter=NoopProjectIndexWorkflowStarter(),
-            fanout_failure_recorder=NoopProjectIndexFanoutFailureRecorder(),
             batch_size=10,
             completion_relation_runtime=relation_runtime,
         ),
@@ -289,24 +282,17 @@ async def test_run_local_project_index_resolves_relations_after_inline_fanout() 
     assert relation_runtime.resolve_calls == 2
 
 
-async def test_noop_local_project_index_workflow_starter_returns_no_completion() -> None:
-    """The first local runner does not persist UI workflow state."""
-    completion = await NoopProjectIndexWorkflowStarter().start_project_index_workflow(
-        ProjectIndexWorkflowRequest(
-            tenant_id=TENANT_ID,
-            workflow_id=WORKFLOW_ID,
-            project=project_ref(),
-            force_full=False,
-            search=True,
-            embeddings=True,
-        ),
-        total_files=1,
-        batch_count=1,
-        batch_size=100,
-        coordinator_job_id=None,
+def test_local_project_index_runtime_uses_optional_workflow_hooks() -> None:
+    """Local inline project indexing does not install hidden workflow adapters."""
+    runtime = LocalProjectIndexRuntime(
+        observed_file_source=RecordingObservedFileSource(()),
+        change_detector=RecordingChangeDetector(ChangeReport()),
+        maintenance_runner=RecordingMaintenanceRunner(),
+        batch_enqueuer=RecordingBatchEnqueuer(),
     )
 
-    assert completion is None
+    assert runtime.workflow_starter is None
+    assert runtime.fanout_failure_recorder is None
 
 
 def test_project_index_file_requests_from_batch_request_preserve_observed_metadata() -> None:
