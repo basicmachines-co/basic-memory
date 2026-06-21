@@ -172,7 +172,9 @@ event-index-contract-test:
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
         tests/sync/test_watch_service.py::test_handle_changes_with_event_index_runtime_records_failed_counts \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_updates_existing_markdown_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_coalesces_add_and_modify \
+        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_multiple_files_once \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_handles_atomic_and_true_deletes \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
