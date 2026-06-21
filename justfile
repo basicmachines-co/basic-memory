@@ -148,6 +148,7 @@ event-index-contract-test:
 # Focused parity loop for local project scans and shared storage-event routing.
 event-index-parity-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/test_runtime.py::TestRuntimeContracts::test_runtime_storage_event_operation_plans_index_delete_and_skip_work \
         tests/index/test_local_project_index.py \
         tests/index/test_filesystem_events.py \
         tests/index/test_storage_event_operation_processor.py \

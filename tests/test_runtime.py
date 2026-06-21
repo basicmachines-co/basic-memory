@@ -547,6 +547,7 @@ class TestRuntimeContracts:
             )
 
         created_event = event("project/notes/a.md", "OBJECT_CREATED_PUT")
+        markdown_created_event = event("project/notes/longform.markdown", "OBJECT_CREATED_POST")
         deleted_event = event("project/notes/b.md", "OBJECT_DELETED")
         root_event = event("project/", "OBJECT_CREATED_PUT")
         non_markdown_event = event("project/image.png", "OBJECT_CREATED_POST")
@@ -555,6 +556,7 @@ class TestRuntimeContracts:
         operations = plan_runtime_storage_event_operations(
             [
                 created_event,
+                markdown_created_event,
                 deleted_event,
                 root_event,
                 non_markdown_event,
@@ -567,6 +569,11 @@ class TestRuntimeContracts:
                 kind=RuntimeStorageEventOperationKind.index_file,
                 storage_event=created_event,
                 relative_path="notes/a.md",
+            ),
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.index_file,
+                storage_event=markdown_created_event,
+                relative_path="notes/longform.markdown",
             ),
             RuntimeStorageEventOperation(
                 kind=RuntimeStorageEventOperationKind.delete_file,
@@ -595,8 +602,11 @@ class TestRuntimeContracts:
             "notes/a.md"
         )
 
+        root_operation = next(
+            operation for operation in operations if operation.storage_event == root_event
+        )
         with pytest.raises(RuntimeError, match="Storage event operation has no relative path"):
-            operations[2].require_relative_path()
+            root_operation.require_relative_path()
         with pytest.raises(FrozenInstanceError):
             setattr(operations[0], "kind", RuntimeStorageEventOperationKind.skip)
 

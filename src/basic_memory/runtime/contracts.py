@@ -83,11 +83,12 @@ NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR = (
     "Refresh to review the latest content, then retry your write if you want it to win."
 )
 RUNTIME_MARKDOWN_CONTENT_TYPE: RuntimeContentType = "text/markdown"
+RUNTIME_MARKDOWN_FILE_SUFFIXES: frozenset[str] = frozenset({".md", ".markdown"})
 
 
 def runtime_file_path_is_markdown_note(relative_path: RuntimeFilePath) -> bool:
     """Return whether a runtime file path is eligible for markdown-note indexing."""
-    return relative_path.endswith(".md")
+    return PurePosixPath(relative_path).suffix.lower() in RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 
 def runtime_job_status_from_workflow_status(
