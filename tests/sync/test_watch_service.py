@@ -501,6 +501,113 @@ async def test_handle_changes_with_local_event_index_runtime_coalesces_add_and_m
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_handles_atomic_and_true_deletes(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """Local event-index keeps existing files and removes truly deleted files in one batch."""
+
+    atomic_path = project_config.home / "local-event-atomic.md"
+    delete_path = project_config.home / "local-event-true-delete.md"
+    await create_test_file(
+        atomic_path,
+        """---
+type: note
+title: Atomic
+---
+# Atomic
+Original content.
+""",
+    )
+    await create_test_file(
+        delete_path,
+        """---
+type: note
+title: True Delete
+---
+# True Delete
+Remove me.
+""",
+    )
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index atomic delete parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        atomic_before = await entity_repository.get_by_file_path(
+            session,
+            "local-event-atomic.md",
+        )
+        delete_before = await entity_repository.get_by_file_path(
+            session,
+            "local-event-true-delete.md",
+        )
+    assert atomic_before is not None
+    assert delete_before is not None
+
+    await create_test_file(
+        atomic_path,
+        """---
+type: note
+title: Atomic
+---
+# Atomic
+Updated by atomic write.
+""",
+    )
+    delete_path.unlink()
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.deleted, str(atomic_path)),
+            (Change.deleted, str(delete_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        atomic_after = await entity_repository.get_by_file_path(
+            session,
+            "local-event-atomic.md",
+        )
+        delete_after = await entity_repository.get_by_file_path(
+            session,
+            "local-event-true-delete.md",
+        )
+
+    assert atomic_after is not None
+    assert atomic_after.id == atomic_before.id
+    assert atomic_after.checksum != atomic_before.checksum
+    assert delete_after is None
+    assert watch_service.state.synced_files == 2
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_indexes_regular_file(
     app_config: BasicMemoryConfig,
     project_repository,
