@@ -102,6 +102,14 @@ class RecordingDeleteBatchStore:
         return self.results.pop(0)
 
 
+@dataclass(slots=True)
+class RecordingProjectIndexMetadataReporter:
+    progress_updates: list[RuntimeWorkflowMetadataPatch] = field(default_factory=list)
+
+    async def report_progress(self, progress: RuntimeWorkflowMetadataPatch) -> None:
+        self.progress_updates.append(progress)
+
+
 class FakeProjectIndexScalarResult:
     """Minimal scalar result stand-in for repository maintenance tests."""
 
@@ -485,10 +493,7 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
             ProjectIndexMoveBatchResult(updated_files=1),
         ]
     )
-    progress_updates: list[RuntimeWorkflowMetadataPatch] = []
-
-    async def record_progress(progress: RuntimeWorkflowMetadataPatch) -> None:
-        progress_updates.append(progress)
+    metadata_reporter = RecordingProjectIndexMetadataReporter()
 
     run = await run_project_index_move_batches(
         moved_files={
@@ -498,7 +503,7 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
         },
         batch_size=2,
         move_store=store,
-        progress_callback=record_progress,
+        metadata_reporter=metadata_reporter,
     )
 
     assert store.batches == [
@@ -520,7 +525,7 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
         records=run.records,
     )
     assert run.missing_paths == ("notes/b.md",)
-    assert progress_updates == [
+    assert metadata_reporter.progress_updates == [
         {
             "moved_files": 3,
             "completed_batches": 1,
@@ -551,16 +556,13 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
             ),
         ]
     )
-    progress_updates: list[RuntimeWorkflowMetadataPatch] = []
-
-    async def record_progress(progress: RuntimeWorkflowMetadataPatch) -> None:
-        progress_updates.append(progress)
+    metadata_reporter = RecordingProjectIndexMetadataReporter()
 
     run = await run_project_index_delete_batches(
         deleted_paths=("notes/a.md", "notes/b.md", "notes/c.md"),
         batch_size=2,
         delete_store=store,
-        progress_callback=record_progress,
+        metadata_reporter=metadata_reporter,
     )
 
     assert store.batches == [
@@ -580,7 +582,7 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
         records=run.records,
     )
     assert run.missing_paths == ("notes/b.md", "notes/c.md")
-    assert progress_updates == [
+    assert metadata_reporter.progress_updates == [
         {
             "deleted_files": 3,
             "completed_batches": 1,

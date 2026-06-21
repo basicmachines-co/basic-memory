@@ -129,8 +129,9 @@ class RecordingMaintenanceRunner:
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        progress_callback: object | None = None,
+        metadata_reporter: object | None = None,
     ) -> ProjectIndexMoveRun:
+        del metadata_reporter
         self.moved_files.append(dict(moved_files))
         return ProjectIndexMoveRun(
             total_moves=len(moved_files),
@@ -143,8 +144,9 @@ class RecordingMaintenanceRunner:
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        progress_callback: object | None = None,
+        metadata_reporter: object | None = None,
     ) -> ProjectIndexDeleteRun:
+        del metadata_reporter
         self.deleted_paths.append(tuple(deleted_paths))
         return ProjectIndexDeleteRun(
             total_deletes=len(deleted_paths),

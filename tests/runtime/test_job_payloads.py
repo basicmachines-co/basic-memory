@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from basic_memory import runtime as runtime_module
 from basic_memory.runtime import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+    RuntimeJobPayloadSerializer,
     RuntimeJobPayloadSource,
     RuntimeJobRequest,
     RuntimeNoteFileDeleteJobPayload,
@@ -49,6 +50,15 @@ class FakeRuntimeJobPayload:
     ) -> RuntimeJobRequest:
         self.headers = headers
         return self.request
+
+
+@dataclass(frozen=True, slots=True)
+class NoteFileDeletePayloadSerializer:
+    def serialize(
+        self,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> RuntimeNoteFileDeleteJobPayload:
+        return RuntimeNoteFileDeleteJobPayload.from_runtime_request(request)
 
 
 class FakeWorkflowPayload(BaseModel):
@@ -115,10 +125,13 @@ async def test_runtime_payload_job_enqueuer_validates_serializes_and_queues() ->
     payload = RuntimeNoteFileDeleteJobPayload.from_runtime_request(runtime_request)
     execute_after = timedelta(seconds=5)
     runtime = FakeJobRuntime(job_id="job-42")
+    payload_serializer: RuntimeJobPayloadSerializer[RuntimeNoteFileDeleteJobRequest] = (
+        NoteFileDeletePayloadSerializer()
+    )
     enqueuer = RuntimePayloadJobEnqueuer(
         runtime=runtime,
         entrypoint="delete_note_file",
-        payload_factory=RuntimeNoteFileDeleteJobPayload.from_runtime_request,
+        payload_serializer=payload_serializer,
     )
 
     job_id = await enqueuer.enqueue(

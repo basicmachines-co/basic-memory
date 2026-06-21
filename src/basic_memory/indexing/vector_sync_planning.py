@@ -1,7 +1,7 @@
 """Portable vector-sync planning helpers."""
 
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,12 +18,42 @@ from basic_memory.runtime import ProjectId
 
 type CheckpointPhase = str | None
 type EntityId = int
-type VectorSyncBatchProgressCallback = Callable[[EntityId, int, int], None]
-type VectorSyncClock = Callable[[], float]
-type VectorSyncProgressReporter = Callable[[str, VectorSyncProgress], Awaitable[None]]
 
 VECTOR_RESUME_PHASES = frozenset({"forward_refs_complete", "syncing_vectors"})
 VECTOR_SYNC_CHUNK_SIZE = 100
+
+
+class VectorSyncBatchProgressCallback(Protocol):
+    """Low-level vector backend progress callback shape."""
+
+    def __call__(self, entity_id: EntityId, index: int, total_count: int) -> None:
+        """Report progress for one vector-sync entity inside a backend batch."""
+
+
+class VectorSyncClock(Protocol):
+    """Monotonic clock used to calculate vector-sync progress timing."""
+
+    def now(self) -> float:
+        """Return a monotonic timestamp in seconds."""
+
+
+class VectorSyncProgressReporter(Protocol):
+    """Runtime adapter that records durable vector-sync progress."""
+
+    async def report_progress(
+        self,
+        progress: str,
+        vector_progress: VectorSyncProgress,
+    ) -> None:
+        """Persist or publish vector-sync progress."""
+
+
+@dataclass(frozen=True, slots=True)
+class SystemVectorSyncClock:
+    """Production monotonic clock for vector-sync timing."""
+
+    def now(self) -> float:
+        return time.perf_counter()
 
 
 class VectorSyncExecutor(Protocol):
@@ -149,11 +179,11 @@ async def run_vector_sync(
     *,
     vector_sync: VectorSyncExecutor,
     logger: VectorSyncLogger,
-    report_progress: VectorSyncProgressReporter | None = None,
     resume_progress: VectorSyncProgress | None = None,
     chunk_size: int = VECTOR_SYNC_CHUNK_SIZE,
     project_id: int | None = None,
-    clock: VectorSyncClock = time.perf_counter,
+    progress_reporter: VectorSyncProgressReporter | None = None,
+    clock: VectorSyncClock | None = None,
 ) -> VectorSyncProgress:
     """Sync semantic vectors for entity ids with durable chunk boundaries."""
     if chunk_size <= 0:
@@ -168,8 +198,9 @@ async def run_vector_sync(
     if total == 0:
         return progress_state
 
-    sync_start = clock() - progress_state.elapsed_seconds
-    last_callback_at = clock()
+    effective_clock = clock or SystemVectorSyncClock()
+    sync_start = effective_clock.now() - progress_state.elapsed_seconds
+    last_callback_at = effective_clock.now()
 
     if progress_state.next_index > 0:
         logger.info(f"♻️ [VECTOR] Resuming at entity {progress_state.next_index}/{total}")
@@ -187,7 +218,7 @@ async def run_vector_sync(
             nonlocal last_callback_at
 
             del entity_id, total_count
-            now = clock()
+            now = effective_clock.now()
             previous_entity_seconds = now - last_callback_at
             completed = chunk_start_index + index
 
@@ -210,14 +241,14 @@ async def run_vector_sync(
             progress_state,
             batch_result,
             next_index=chunk_start + len(chunk_entity_ids),
-            elapsed_seconds=clock() - sync_start,
+            elapsed_seconds=effective_clock.now() - sync_start,
         )
         for failed_entity_id in new_failed_entity_ids:
             logger.error(f"❌ [VECTOR] Failed to sync entity {failed_entity_id}")
 
-        if report_progress is not None:
+        if progress_reporter is not None:
             percent_complete = 100.0 * progress_state.next_index / total if total > 0 else 100.0
-            await report_progress(
+            await progress_reporter.report_progress(
                 (
                     f"Syncing vectors: {progress_state.next_index}/{total} entities "
                     f"({percent_complete:.1f}%)..."

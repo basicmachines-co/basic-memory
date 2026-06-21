@@ -1,8 +1,9 @@
 """Portable project-index workflow progress state."""
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 
 from pydantic import Field, StrictInt, StrictStr, ValidationError, model_validator
 
@@ -21,10 +22,12 @@ from basic_memory.runtime import (
 
 PROJECT_INDEX_PROGRESS_EVENT_INTERVAL = 50
 
-type ProjectIndexProgressCallback = Callable[
-    [RuntimeWorkflowMetadataPatch],
-    Awaitable[None],
-]
+
+class ProjectIndexMetadataReporter(Protocol):
+    """Runtime adapter that records project-index workflow metadata progress."""
+
+    async def report_progress(self, progress: RuntimeWorkflowMetadataPatch) -> None:
+        """Persist or publish one metadata progress patch."""
 
 
 class ProjectIndexFileOutcome(StrEnum):

@@ -95,8 +95,9 @@ class FakeProjectIndexMaintenanceRunner:
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        progress_callback: object | None = None,
+        metadata_reporter: object | None = None,
     ) -> ProjectIndexMoveRun:
+        del metadata_reporter
         self.events.append("moves")
         self.moved_files = moved_files
         self.move_batch_size = batch_size
@@ -111,8 +112,9 @@ class FakeProjectIndexMaintenanceRunner:
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        progress_callback: object | None = None,
+        metadata_reporter: object | None = None,
     ) -> ProjectIndexDeleteRun:
+        del metadata_reporter
         self.events.append("deletes")
         self.deleted_paths = deleted_paths
         self.delete_batch_size = batch_size

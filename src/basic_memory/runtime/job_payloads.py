@@ -1,6 +1,6 @@
 """Pydantic boundary models for portable runtime worker payloads."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol, Self
@@ -61,10 +61,11 @@ async def enqueue_runtime_job_payload(
     return await runtime.enqueue(payload.runtime_job_request(headers=headers))
 
 
-type RuntimeJobPayloadFactory[RequestT: RuntimeJobRequestSource] = Callable[
-    [RequestT],
-    RuntimeSerializedJobPayload,
-]
+class RuntimeJobPayloadSerializer[RequestT: RuntimeJobRequestSource](Protocol):
+    """Capability that validates and serializes a runtime job request payload."""
+
+    def serialize(self, request: RequestT) -> RuntimeSerializedJobPayload:
+        """Return a validated payload ready for queue serialization."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +74,7 @@ class RuntimePayloadJobEnqueuer[RequestT: RuntimeJobRequestSource]:
 
     runtime: JobRuntime
     entrypoint: JobEntrypoint
-    payload_factory: RuntimeJobPayloadFactory[RequestT]
+    payload_serializer: RuntimeJobPayloadSerializer[RequestT]
 
     async def enqueue(
         self,
@@ -84,7 +85,7 @@ class RuntimePayloadJobEnqueuer[RequestT: RuntimeJobRequestSource]:
         execute_after: timedelta | None = None,
     ) -> RuntimeJobId:
         """Validate, serialize, and enqueue one runtime request."""
-        payload = self.payload_factory(request)
+        payload = self.payload_serializer.serialize(request)
         return await self.runtime.enqueue(
             runtime_job_request_from_source(
                 request,

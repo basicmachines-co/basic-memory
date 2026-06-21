@@ -19,7 +19,7 @@ from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCompletion,
     ProjectIndexCounters,
-    ProjectIndexProgressCallback,
+    ProjectIndexMetadataReporter,
     apply_project_index_file_outcome,
     initial_project_index_counters,
     project_index_counters_from_metadata,
@@ -86,7 +86,7 @@ class ProjectIndexMaintenanceRunner(Protocol):
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        progress_callback: ProjectIndexProgressCallback | None = None,
+        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexMoveRun: ...
 
     async def run_delete_batches(
@@ -94,7 +94,7 @@ class ProjectIndexMaintenanceRunner(Protocol):
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        progress_callback: ProjectIndexProgressCallback | None = None,
+        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexDeleteRun: ...
 
 
@@ -806,13 +806,13 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        progress_callback: ProjectIndexProgressCallback | None = None,
+        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexMoveRun:
         return await run_project_index_move_batches(
             moved_files=moved_files,
             batch_size=batch_size,
             move_store=self.move_store,
-            progress_callback=progress_callback,
+            metadata_reporter=metadata_reporter,
         )
 
     async def run_delete_batches(
@@ -820,13 +820,13 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        progress_callback: ProjectIndexProgressCallback | None = None,
+        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexDeleteRun:
         return await run_project_index_delete_batches(
             deleted_paths=deleted_paths,
             batch_size=batch_size,
             delete_store=self.delete_store,
-            progress_callback=progress_callback,
+            metadata_reporter=metadata_reporter,
         )
 
 
@@ -905,7 +905,7 @@ async def run_project_index_move_batches(
     moved_files: Mapping[str, str],
     batch_size: int,
     move_store: ProjectIndexMoveBatchStore,
-    progress_callback: ProjectIndexProgressCallback | None = None,
+    metadata_reporter: ProjectIndexMetadataReporter | None = None,
 ) -> ProjectIndexMoveRun:
     """Apply project-index move maintenance through a storage adapter."""
     move_plan = build_project_index_move_batch_plan(
@@ -930,8 +930,8 @@ async def run_project_index_move_batches(
             total_batches=move_plan.batch_count,
             updated_files=total_updated,
         )
-        if progress_callback is not None:
-            await progress_callback(progress.workflow_metadata())
+        if metadata_reporter is not None:
+            await metadata_reporter.report_progress(progress.workflow_metadata())
         records.append(
             ProjectIndexMoveBatchRecord(
                 batch=move_batch,
@@ -952,7 +952,7 @@ async def run_project_index_delete_batches(
     deleted_paths: Sequence[str],
     batch_size: int,
     delete_store: ProjectIndexDeleteBatchStore,
-    progress_callback: ProjectIndexProgressCallback | None = None,
+    metadata_reporter: ProjectIndexMetadataReporter | None = None,
 ) -> ProjectIndexDeleteRun:
     """Apply project-index delete maintenance through a storage adapter."""
     delete_plan = build_project_index_delete_batch_plan(
@@ -983,8 +983,8 @@ async def run_project_index_delete_batches(
                 total_batches=delete_plan.batch_count,
                 deleted_entities=total_deleted,
             )
-            if progress_callback is not None:
-                await progress_callback(progress.workflow_metadata())
+            if metadata_reporter is not None:
+                await metadata_reporter.report_progress(progress.workflow_metadata())
 
         records.append(
             ProjectIndexDeleteBatchRecord(

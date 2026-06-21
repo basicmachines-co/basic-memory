@@ -202,7 +202,7 @@ from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 from basic_memory.runtime.job_payloads import (
     DELETE_NOTE_FILE_ENTRYPOINT,
     MATERIALIZE_NOTE_FILE_ENTRYPOINT,
-    RuntimeJobPayloadFactory,
+    RuntimeJobPayloadSerializer,
     RuntimeJobPayloadSource,
     RuntimeNoteFileDeleteJobPayload,
     RuntimeNoteMaterializationJobPayload,
@@ -361,7 +361,7 @@ __all__ = [
     "RuntimeJobDedupeKey",
     "RuntimeJobCounts",
     "RuntimeJobId",
-    "RuntimeJobPayloadFactory",
+    "RuntimeJobPayloadSerializer",
     "RuntimeJobPayloadSource",
     "RuntimeJobReference",
     "RuntimeJobRequest",

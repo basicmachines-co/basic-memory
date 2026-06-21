@@ -10,6 +10,7 @@ from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.vector_sync_planning import (
     RepositoryVectorSyncEntitySource,
     VectorSyncBatchProgressCallback,
+    VectorSyncProgressReporter,
     plan_vector_sync_progress,
     run_vector_sync,
 )
@@ -59,6 +60,31 @@ class RecordingLogger:
 
     def error(self, message: str, **kwargs: object) -> None:
         self.errors.append((message, kwargs))
+
+
+@dataclass(slots=True)
+class RecordingVectorSyncProgressReporter:
+    updates: list[tuple[str, VectorSyncProgress]] = field(default_factory=list)
+
+    async def report_progress(
+        self,
+        progress: str,
+        vector_progress: VectorSyncProgress,
+    ) -> None:
+        self.updates.append(
+            (
+                progress,
+                VectorSyncProgress.from_checkpoint_state(vector_progress.to_checkpoint_state()),
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StaticVectorSyncClock:
+    values: list[float]
+
+    def now(self) -> float:
+        return self.values.pop(0)
 
 
 @dataclass(slots=True)
@@ -247,26 +273,14 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
         ]
     )
     logger = RecordingLogger()
-    progress_updates: list[tuple[str, VectorSyncProgress]] = []
-
-    async def record_progress(progress: str, vector_progress: VectorSyncProgress) -> None:
-        progress_updates.append(
-            (
-                progress,
-                VectorSyncProgress.from_checkpoint_state(vector_progress.to_checkpoint_state()),
-            )
-        )
-
-    clock_values = [20.0, 20.0, 23.0]
-
-    def clock() -> float:
-        return clock_values.pop(0)
+    progress_reporter: VectorSyncProgressReporter = RecordingVectorSyncProgressReporter()
+    clock = StaticVectorSyncClock([20.0, 20.0, 23.0])
 
     resumed = await run_vector_sync(
         list(range(1, 126)),
         vector_sync=vector_sync,
         logger=logger,
-        report_progress=record_progress,
+        progress_reporter=progress_reporter,
         resume_progress=VectorSyncProgress(
             entity_ids=list(range(1, 126)),
             next_index=100,
@@ -281,6 +295,7 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
         clock=clock,
     )
 
+    assert isinstance(progress_reporter, RecordingVectorSyncProgressReporter)
     assert vector_sync.calls == [list(range(101, 126))]
     assert resumed.next_index == 125
     assert resumed.entities_synced == 125
@@ -290,8 +305,8 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
     assert resumed.embed_seconds_total == 13.0
     assert resumed.write_seconds_total == 3.0
     assert resumed.elapsed_seconds == 18.0
-    assert progress_updates[-1][0] == "Syncing vectors: 125/125 entities (100.0%)..."
-    assert progress_updates[-1][1].next_index == 125
+    assert progress_reporter.updates[-1][0] == "Syncing vectors: 125/125 entities (100.0%)..."
+    assert progress_reporter.updates[-1][1].next_index == 125
     assert logger.errors == [("❌ [VECTOR] Failed to sync entity 125", {})]
     assert logger.infos[-1][1] == {"project_id": 7}
 
@@ -315,10 +330,7 @@ async def test_run_vector_sync_logs_periodic_batch_progress() -> None:
         progress_events=[(1, 1, 3)],
     )
     logger = RecordingLogger()
-    clock_values = [0.0, 0.0, 6.5, 8.0]
-
-    def clock() -> float:
-        return clock_values.pop(0)
+    clock = StaticVectorSyncClock([0.0, 0.0, 6.5, 8.0])
 
     await run_vector_sync(
         [1, 2, 3],

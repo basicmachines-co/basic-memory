@@ -504,7 +504,7 @@ from basic_memory.indexing.project_index_progress import (
     ProjectIndexFileOutcome,
     ProjectIndexFileOutcomeSummary,
     ProjectIndexMissingBatches,
-    ProjectIndexProgressCallback,
+    ProjectIndexMetadataReporter,
     ProjectIndexWorkflowPayloadState,
     ProjectIndexWorkflowProgressState,
     apply_project_index_batch_outcomes,
@@ -526,7 +526,6 @@ from basic_memory.indexing.project_index_progress import (
 )
 from basic_memory.indexing.project_index_runtime import (
     ProjectIndexForwardReferenceRun,
-    ProjectIndexProgressReporter,
     ProjectIndexRuntime,
     build_default_project_index_runtime,
 )
@@ -618,6 +617,7 @@ from basic_memory.indexing.vector_sync_planning import (
     CheckpointPhase,
     VECTOR_SYNC_CHUNK_SIZE,
     RepositoryVectorSyncEntitySource,
+    SystemVectorSyncClock,
     VectorSyncBatchProgressCallback,
     VectorSyncClock,
     VectorSyncExecutor,
@@ -955,8 +955,7 @@ __all__ = [
     "ProjectIndexMoveRun",
     "ProjectIndexMoveTarget",
     "ProjectIndexObservedFileSource",
-    "ProjectIndexProgressCallback",
-    "ProjectIndexProgressReporter",
+    "ProjectIndexMetadataReporter",
     "RepositoryProjectIndexMaintenanceStore",
     "ProjectIndexRuntime",
     "ProjectIndexStaleWorkflowPlan",
@@ -1001,6 +1000,7 @@ __all__ = [
     "SystemAcceptedNoteMutationClock",
     "SystemIndexedNoteContentClock",
     "SystemNoteMaterializationClock",
+    "SystemVectorSyncClock",
     "UnresolvedRelationCounter",
     "UnresolvedForwardReference",
     "UnresolvedRelation",

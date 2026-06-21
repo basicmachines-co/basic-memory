@@ -7,7 +7,7 @@ capabilities are supplied.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -29,7 +29,7 @@ from basic_memory.indexing.forward_reference_resolution import (
     run_forward_reference_resolution,
 )
 from basic_memory.indexing.progress import VectorSyncProgress
-from basic_memory.indexing.project_index_progress import ProjectIndexProgressCallback
+from basic_memory.indexing.project_index_progress import ProjectIndexMetadataReporter
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexDeleteBatchStore,
     ProjectIndexDeleteRun,
@@ -46,15 +46,11 @@ from basic_memory.indexing.vector_sync_planning import (
     VectorSyncEntitySource,
     VectorSyncExecutor,
     VectorSyncLogger,
+    VectorSyncProgressReporter,
     plan_vector_sync_progress,
     run_vector_sync,
 )
 from basic_memory.runtime import ProjectId
-
-type ProjectIndexProgressReporter = Callable[
-    [str, VectorSyncProgress],
-    Awaitable[None],
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +150,7 @@ class ProjectIndexRuntime:
         entity_ids: Sequence[EntityId],
         *,
         logger: VectorSyncLogger,
-        report_progress: ProjectIndexProgressReporter | None = None,
+        progress_reporter: VectorSyncProgressReporter | None = None,
         resume_progress: VectorSyncProgress | None = None,
     ) -> VectorSyncProgress:
         """Sync semantic vectors for the given entity ids."""
@@ -162,7 +158,7 @@ class ProjectIndexRuntime:
             entity_ids,
             vector_sync=self.vector_sync,
             logger=logger,
-            report_progress=report_progress,
+            progress_reporter=progress_reporter,
             resume_progress=resume_progress,
             project_id=self.project_id,
         )
@@ -172,14 +168,14 @@ class ProjectIndexRuntime:
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        progress_callback: ProjectIndexProgressCallback | None = None,
+        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexMoveRun:
         """Apply moved-file updates for the current project."""
         return await run_project_index_move_batches(
             moved_files=dict(moved_files),
             batch_size=batch_size,
             move_store=self.move_store,
-            progress_callback=progress_callback,
+            metadata_reporter=metadata_reporter,
         )
 
     async def run_delete_batches(
@@ -187,14 +183,14 @@ class ProjectIndexRuntime:
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        progress_callback: ProjectIndexProgressCallback | None = None,
+        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexDeleteRun:
         """Delete file-backed entities for the current project."""
         return await run_project_index_delete_batches(
             deleted_paths=list(deleted_paths),
             batch_size=batch_size,
             delete_store=self.delete_store,
-            progress_callback=progress_callback,
+            metadata_reporter=metadata_reporter,
         )
 
     async def resolve_forward_references(self) -> ProjectIndexForwardReferenceRun:
