@@ -17,10 +17,10 @@ from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_pat
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
     DefaultLocalIndexProjectDependencyProvider,
-    LocalIndexEntityService,
     LocalIndexProjectDependencies,
     LocalIndexProjectDependencyProvider,
 )
+from basic_memory.index.local_moves import LocalProjectIndexMoveContentUpdater
 from basic_memory.index.local_runtime import (
     LOCAL_EVENT_INDEX_TENANT_ID,
     LocalStorageFileMetadataSource,
@@ -58,11 +58,6 @@ from basic_memory.indexing import (
     read_current_index_files,
     run_project_index_coordinator,
     run_index_file_batch,
-)
-from basic_memory.indexing.project_index_workflow import (
-    ProjectIndexMoveContentUpdater,
-    ProjectIndexMovedFile,
-    ProjectIndexMovedFileContentUpdate,
 )
 from basic_memory.models import Project
 from basic_memory.runtime import (
@@ -249,45 +244,6 @@ class LocalProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
             content_classifier=self.content_classifier,
             read_max_concurrent=self.read_max_concurrent,
             index_max_concurrent=self.index_max_concurrent,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
-    """Apply local markdown permalink policy for moved project-index files."""
-
-    entity_service: LocalIndexEntityService
-    file_service: FileService
-
-    async def update_moved_file_content(
-        self,
-        session: AsyncSession,
-        moved_file: ProjectIndexMovedFile,
-    ) -> ProjectIndexMovedFileContentUpdate | None:
-        app_config = self.entity_service.app_config
-        if app_config is None:
-            raise RuntimeError("local project-index move content updates require app_config")
-        if app_config.disable_permalinks or not app_config.update_permalinks_on_move:
-            return None
-        if not self.file_service.is_markdown(moved_file.new_path):
-            return None
-
-        permalink = await self.entity_service.resolve_permalink(
-            Path(moved_file.new_path),
-            skip_conflict_check=True,
-            session=session,
-        )
-        if permalink == moved_file.old_permalink:
-            return None
-
-        update = await self.file_service.update_frontmatter_with_result(
-            moved_file.new_path,
-            {"permalink": permalink},
-        )
-        return ProjectIndexMovedFileContentUpdate(
-            permalink=permalink,
-            checksum=update.checksum,
-            markdown_content=update.content,
         )
 
 

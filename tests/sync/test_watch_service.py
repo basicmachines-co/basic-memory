@@ -10,8 +10,12 @@ from watchfiles import Change
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ProjectMode, WATCH_STATUS_JSON
-from basic_memory.index import StorageEventIndexRuntime
-from basic_memory.index import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index import (
+    LocalProjectIndexRuntimeFactory,
+    LocalWatchEventIndexRuntimeFactory,
+    StorageEventIndexRuntime,
+    run_local_project_index_for_project,
+)
 from basic_memory.models.project import Project
 from basic_memory.runtime import (
     ProjectRuntimeReference,
@@ -517,21 +521,35 @@ async def test_handle_changes_with_local_event_index_runtime_deletes_missing_mar
 
 
 @pytest.mark.asyncio
-async def test_handle_changes_with_local_event_index_runtime_processes_move_as_delete_and_index(
+async def test_handle_changes_with_local_event_index_runtime_preserves_move_identity(
     app_config: BasicMemoryConfig,
     project_repository,
     session_maker,
     test_project,
     project_config,
-    sync_service,
     entity_repository,
+    monkeypatch,
 ):
-    """The event-index watcher models moves as cloud-shaped delete plus index work."""
+    """Local event-index watcher moves preserve the accepted entity identity."""
 
     old_path = project_config.home / "old" / "local-event-move.md"
     old_path.parent.mkdir(parents=True)
     await create_test_file(old_path, "# Local Event Move\n\nMove me.\n")
-    await sync_service.sync(project_config.home)
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index move parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
 
     async with db.scoped_session(session_maker) as session:
         before = await entity_repository.get_by_file_path(session, "old/local-event-move.md")
@@ -561,10 +579,11 @@ async def test_handle_changes_with_local_event_index_runtime_processes_move_as_d
         moved_entity = await entity_repository.get_by_file_path(session, "new/local-event-move.md")
     assert old_entity is None
     assert moved_entity is not None
-    assert watch_service.state.synced_files == 2
+    assert moved_entity.id == before.id
+    assert moved_entity.external_id == before.external_id
+    assert watch_service.state.synced_files == 1
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"
-    assert not [event for event in watch_service.state.recent_events if event.action == "moved"]
 
 
 @pytest.mark.asyncio

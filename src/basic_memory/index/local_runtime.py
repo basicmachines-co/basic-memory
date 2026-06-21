@@ -16,6 +16,11 @@ from basic_memory.index.local_dependencies import (
     DefaultLocalIndexProjectDependencyProvider,
     LocalIndexProjectDependencyProvider,
 )
+from basic_memory.index.local_moves import (
+    LocalProjectIndexMoveContentUpdater,
+    LocalWatchMoveProcessor,
+)
+from basic_memory.index.local_watch import LocalWatchStorageEventIndexRuntime
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
@@ -30,9 +35,12 @@ from basic_memory.indexing import (
     OrphanSearchIndex,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
+    RepositoryProjectIndexMaintenanceStore,
+    RepositoryProjectIndexMovedEntitySearchRefresher,
     RepositoryRelationResolutionRuntime,
     RelationResolutionRuntime,
     StorageCurrentFileChecksumSource,
+    StoreProjectIndexMaintenanceRunner,
     plan_index_file_relation_resolution,
     resolve_project_relations,
 )
@@ -206,6 +214,7 @@ class LocalWatchEventIndexRuntimeFactory:
     )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     index_embeddings: bool = True
+    move_batch_size: int = 100
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
         dependencies = await self.dependency_provider.dependencies_for_project(project)
@@ -220,6 +229,23 @@ class LocalWatchEventIndexRuntimeFactory:
             current_checksum_source=StorageCurrentFileChecksumSource(
                 metadata_source=metadata_source,
             ),
+        )
+        maintenance_store = RepositoryProjectIndexMaintenanceStore(
+            session_maker=dependencies.session_maker,
+            project_id=dependencies.project_id,
+            move_content_updater=LocalProjectIndexMoveContentUpdater(
+                entity_service=dependencies.entity_service,
+                file_service=dependencies.file_service,
+            ),
+        )
+        maintenance_runner = StoreProjectIndexMaintenanceRunner(
+            move_store=maintenance_store,
+            delete_store=maintenance_store,
+        )
+        moved_entity_search_refresher = RepositoryProjectIndexMovedEntitySearchRefresher(
+            session_maker=dependencies.session_maker,
+            entity_repository=dependencies.entity_repository,
+            entity_indexer=dependencies.search_service,
         )
         inline_runtime = InlineStorageEventIndexRuntime(
             tenant_id=self.tenant_id,
@@ -250,13 +276,21 @@ class LocalWatchEventIndexRuntimeFactory:
             ),
             index_embeddings=self.index_embeddings,
         )
-        return StorageEventIndexRuntime(
+        return LocalWatchStorageEventIndexRuntime(
             project_resolver=LocalStorageEventProjectResolver(
                 project=project_ref,
                 project_prefix=project_prefix,
             ),
             operation_processor_factory=LocalStorageEventOperationProcessorFactory(
                 runtime=inline_runtime,
+            ),
+            move_processor=LocalWatchMoveProcessor(
+                session_maker=dependencies.session_maker,
+                file_service=dependencies.file_service,
+                entity_repository=dependencies.entity_repository,
+                maintenance_runner=maintenance_runner,
+                moved_entity_search_refresher=moved_entity_search_refresher,
+                batch_size=self.move_batch_size,
             ),
         )
 

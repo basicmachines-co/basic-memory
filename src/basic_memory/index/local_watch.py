@@ -12,6 +12,7 @@ from basic_memory.index.filesystem import (
     LOCAL_FILESYSTEM_BUCKET_NAME,
     local_storage_events_from_watchfiles_changes,
 )
+from basic_memory.index.local_moves import LocalWatchMoveProcessor
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     run_storage_event_indexing,
@@ -53,6 +54,13 @@ class LocalWatchEventIndexRequest:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class LocalWatchStorageEventIndexRuntime(StorageEventIndexRuntime):
+    """Storage-event runtime with local watcher move detection."""
+
+    move_processor: LocalWatchMoveProcessor | None = None
+
+
 async def run_local_watch_event_indexing(
     request: LocalWatchEventIndexRequest,
     *,
@@ -66,4 +74,12 @@ async def run_local_watch_event_indexing(
         event_time=request.event_time,
         bucket_name=request.bucket_name,
     )
-    return await run_storage_event_indexing(events, runtime)
+    result = RuntimeStorageEventProcessingResult.empty()
+    if isinstance(runtime, LocalWatchStorageEventIndexRuntime):
+        move_processor = runtime.move_processor
+        if move_processor is not None:
+            move_result = await move_processor.process_moves(events)
+            events = move_result.remaining_events
+            result = result.with_processed(move_result.processed_moves)
+
+    return result.add(await run_storage_event_indexing(events, runtime))
