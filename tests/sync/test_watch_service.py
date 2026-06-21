@@ -541,14 +541,27 @@ async def test_handle_changes_with_local_event_index_runtime_deletes_missing_mar
     session_maker,
     test_project,
     project_config,
-    sync_service,
     entity_repository,
+    monkeypatch,
 ):
     """The concrete local event-index runtime reconciles watcher delete events."""
 
     file_path = project_config.home / "local-event-delete.md"
     await create_test_file(file_path, "# Local Event Delete\n\nDelete me.\n")
-    await sync_service.sync(project_config.home)
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index delete parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
 
     async with db.scoped_session(session_maker) as session:
         before = await entity_repository.get_by_file_path(session, "local-event-delete.md")
@@ -792,8 +805,8 @@ async def test_handle_changes_with_local_event_index_runtime_resolves_relations_
     session_maker,
     test_project,
     project_config,
-    sync_service,
     relation_repository,
+    monkeypatch,
 ):
     """Local event-index updates run the same post-index relation repair as cloud jobs."""
 
@@ -809,7 +822,20 @@ title: Source
 - relates_to [[Target Note]]
 """,
     )
-    await sync_service.sync(project_config.home)
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index relation repair test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
 
     async with db.scoped_session(session_maker) as session:
         unresolved_before = await relation_repository.find_unresolved_relations(session)
