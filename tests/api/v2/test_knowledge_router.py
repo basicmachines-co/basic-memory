@@ -32,6 +32,12 @@ async def _get_entity_by_external_id(entity_repository, session_maker, external_
         return await entity_repository.get_by_external_id(session, external_id)
 
 
+async def _get_note_content(session_maker, project_id: int, entity_id: int):
+    repository = NoteContentRepository(project_id=project_id)
+    async with db.scoped_session(session_maker) as session:
+        return await repository.get_by_entity_id(session, entity_id)
+
+
 @pytest.mark.asyncio
 async def test_resolve_identifier_by_permalink(
     client: AsyncClient, test_graph, v2_project_url, test_project: Project, entity_repository
@@ -477,7 +483,12 @@ async def test_create_entity_returns_accepted_content_before_async_indexing(
 
 @pytest.mark.asyncio
 async def test_update_entity_by_id(
-    client: AsyncClient, file_service, v2_project_url, entity_repository
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
 ):
     """Test updating an entity by external_id using PUT (replace)."""
     # Create an entity first
@@ -521,6 +532,13 @@ async def test_update_entity_by_id(
     assert "Updated content via V2" in file_content
     assert "Original content" not in file_content
 
+    note_content = await _get_note_content(session_maker, test_project.id, updated_entity.id)
+    assert note_content is not None
+    assert note_content.db_version == 2
+    assert "Updated content via V2" in note_content.markdown_content
+    assert "Original content" not in note_content.markdown_content
+    assert note_content.file_write_status == "synced"
+
 
 @pytest.mark.asyncio
 async def test_update_entity_by_id_does_not_duplicate(
@@ -553,10 +571,10 @@ async def test_update_entity_by_id_does_not_duplicate(
 
 
 @pytest.mark.asyncio
-async def test_put_entity_with_fast_param_returns_fully_indexed_row(
+async def test_put_entity_with_fast_param_returns_accepted_content_before_async_indexing(
     client: AsyncClient, v2_project_url, entity_repository, session_maker
 ):
-    """PUT ignores the legacy fast param and still returns a fully indexed row."""
+    """PUT ignores the legacy fast param and returns accepted note_content."""
     external_id = str(uuid.uuid4())
     update_data = {
         "title": "FastPutEntity",
@@ -579,8 +597,11 @@ async def test_put_entity_with_fast_param_returns_fully_indexed_row(
     assert response.status_code == 201
     created_entity = EntityResponseV2.model_validate(response.json())
     assert created_entity.external_id == external_id
-    assert len(created_entity.observations) == 1
-    assert len(created_entity.relations) == 1
+    assert created_entity.content is not None
+    assert "This should be deferred" in created_entity.content
+    assert "related_to [[AnotherEntity]]" in created_entity.content
+    assert created_entity.observations == []
+    assert created_entity.relations == []
 
     db_entity = await _get_entity_by_external_id(entity_repository, session_maker, external_id)
     assert db_entity is not None
@@ -654,7 +675,12 @@ async def test_create_skips_vector_sync_when_semantic_disabled(
 
 @pytest.mark.asyncio
 async def test_edit_entity_by_id_append(
-    client: AsyncClient, file_service, v2_project_url, entity_repository
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
 ):
     """Test editing an entity by external_id using PATCH (append operation)."""
     # Create an entity first
@@ -697,10 +723,22 @@ async def test_edit_entity_by_id_append(
     assert "Original content" in file_content
     assert "Appended content" in file_content
 
+    note_content = await _get_note_content(session_maker, test_project.id, edited_entity.id)
+    assert note_content is not None
+    assert note_content.db_version == 2
+    assert "Original content" in note_content.markdown_content
+    assert "Appended content" in note_content.markdown_content
+    assert note_content.file_write_status == "synced"
+
 
 @pytest.mark.asyncio
 async def test_edit_entity_by_id_find_replace(
-    client: AsyncClient, file_service, v2_project_url, entity_repository
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
 ):
     """Test editing an entity by external_id using PATCH (find/replace operation)."""
     # Create an entity first
@@ -741,10 +779,22 @@ async def test_edit_entity_by_id_find_replace(
     assert "New text" in file_content
     assert "Old text" not in file_content
 
+    note_content = await _get_note_content(session_maker, test_project.id, edited_entity.id)
+    assert note_content is not None
+    assert note_content.db_version == 2
+    assert "New text" in note_content.markdown_content
+    assert "Old text" not in note_content.markdown_content
+    assert note_content.file_write_status == "synced"
+
 
 @pytest.mark.asyncio
 async def test_delete_entity_by_id(
-    client: AsyncClient, file_service, v2_project_url, entity_repository
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
 ):
     """Test deleting an entity by external_id."""
     # Create an entity first
@@ -772,6 +822,9 @@ async def test_delete_entity_by_id(
     response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
     assert response.status_code == 404
 
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is None
+
 
 @pytest.mark.asyncio
 async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url):
@@ -787,7 +840,14 @@ async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url
 
 
 @pytest.mark.asyncio
-async def test_move_entity(client: AsyncClient, file_service, v2_project_url, entity_repository):
+async def test_move_entity(
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+):
     """Test moving an entity to a new location."""
     # Create an entity first
     create_data = {
@@ -822,6 +882,12 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
     # external_id should remain the same (stable reference)
     assert moved_entity.external_id == original_external_id
     assert moved_entity.file_path == "moved/MovedEntity.md"
+
+    note_content = await _get_note_content(session_maker, test_project.id, moved_entity.id)
+    assert note_content is not None
+    assert note_content.file_path == "moved/MovedEntity.md"
+    assert note_content.db_version == 2
+    assert note_content.file_write_status == "synced"
 
 
 @pytest.mark.asyncio

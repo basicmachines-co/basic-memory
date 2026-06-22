@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -53,9 +53,30 @@ def _assert_only_root_span(spans: list[tuple[str, dict]], expected_name: str) ->
     assert [name for name, _ in spans] == [expected_name]
 
 
-@asynccontextmanager
-async def _fake_scoped_session(session_maker):
-    yield object()
+def _accepted_change(entity, response_content: str, *, status_code: int = 200):
+    return SimpleNamespace(
+        status_code=status_code,
+        payload={
+            "external_id": entity.external_id,
+            "id": entity.id,
+            "title": entity.title,
+            "note_type": entity.note_type,
+            "content_type": entity.content_type,
+            "permalink": entity.permalink,
+            "file_path": entity.file_path,
+            "content": response_content,
+            "entity_metadata": entity.entity_metadata,
+            "observations": [],
+            "relations": [],
+            "created_at": entity.created_at.isoformat(),
+            "updated_at": entity.updated_at.isoformat(),
+            "created_by": entity.created_by,
+            "last_updated_by": entity.last_updated_by,
+            "api_version": "v2",
+        },
+        materialization=object(),
+        file_delete=None,
+    )
 
 
 @pytest.mark.asyncio
@@ -70,29 +91,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
 
     class FakeNoteContentMutationService:
         async def create_note(self, **kwargs):
-            return SimpleNamespace(
-                status_code=201,
-                payload={
-                    "external_id": entity.external_id,
-                    "id": entity.id,
-                    "title": entity.title,
-                    "note_type": entity.note_type,
-                    "content_type": entity.content_type,
-                    "permalink": entity.permalink,
-                    "file_path": entity.file_path,
-                    "content": response_content,
-                    "entity_metadata": entity.entity_metadata,
-                    "observations": [],
-                    "relations": [],
-                    "created_at": entity.created_at.isoformat(),
-                    "updated_at": entity.updated_at.isoformat(),
-                    "created_by": entity.created_by,
-                    "last_updated_by": entity.last_updated_by,
-                    "api_version": "v2",
-                },
-                materialization=object(),
-                file_delete=None,
-            )
+            return _accepted_change(entity, response_content, status_code=201)
 
     class FakeNoteContentMaterializationProvider:
         async def materialize_write_change(self, accepted):
@@ -126,27 +125,17 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
 async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(logfire, "span", fake_span)
-    monkeypatch.setattr(knowledge_router_module.db, "scoped_session", _fake_scoped_session)
 
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
 
-    class FakeEntityService:
-        async def update_entity_with_content(self, existing, data):
-            return SimpleNamespace(
-                entity=entity,
-                content=response_content,
-                search_content="updated telemetry content",
-            )
+    class FakeNoteContentMutationService:
+        async def update_note(self, **kwargs):
+            return _accepted_change(entity, response_content)
 
-    class FakeSearchService:
-        async def index_entity(self, entity, content=None):
-            assert content == "updated telemetry content"
-            return None
-
-    class FakeEntityRepository:
-        async def get_by_external_id(self, session, external_id):
-            return entity
+    class FakeNoteContentMaterializationProvider:
+        async def materialize_write_change(self, accepted):
+            assert accepted.materialization is not None
 
     class FakeVectorSyncScheduler:
         def schedule_entity_vector_sync(self, *args, **kwargs):
@@ -163,10 +152,9 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         ),
         response=response,
         project_id=123,
-        entity_service=cast(Any, FakeEntityService()),
-        search_service=cast(Any, FakeSearchService()),
-        entity_repository=cast(Any, FakeEntityRepository()),
-        session_maker=cast(Any, object()),
+        project_external_id="project-123",
+        note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
+        note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
@@ -180,27 +168,17 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
 async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(logfire, "span", fake_span)
-    monkeypatch.setattr(knowledge_router_module.db, "scoped_session", _fake_scoped_session)
 
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
 
-    class FakeEntityService:
-        async def edit_entity_with_content(self, **kwargs):
-            return SimpleNamespace(
-                entity=entity,
-                content=response_content,
-                search_content="edited telemetry content",
-            )
+    class FakeNoteContentMutationService:
+        async def edit_note(self, **kwargs):
+            return _accepted_change(entity, response_content)
 
-    class FakeSearchService:
-        async def index_entity(self, entity, content=None):
-            assert content == "edited telemetry content"
-            return None
-
-    class FakeEntityRepository:
-        async def get_by_external_id(self, session, external_id):
-            return entity
+    class FakeNoteContentMaterializationProvider:
+        async def materialize_write_change(self, accepted):
+            assert accepted.materialization is not None
 
     class FakeVectorSyncScheduler:
         def schedule_entity_vector_sync(self, *args, **kwargs):
@@ -209,10 +187,9 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     result = await knowledge_router_module.edit_entity_by_id(
         data=EditEntityRequest(operation="append", content="edited telemetry content"),
         project_id=123,
-        entity_service=cast(Any, FakeEntityService()),
-        search_service=cast(Any, FakeSearchService()),
-        entity_repository=cast(Any, FakeEntityRepository()),
-        session_maker=cast(Any, object()),
+        project_external_id="project-123",
+        note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
+        note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,

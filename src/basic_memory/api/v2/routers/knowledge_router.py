@@ -82,6 +82,16 @@ def _schedule_vector_sync_if_enabled(
         )
 
 
+def entity_response_from_note_content_payload(payload) -> EntityResponseV2:
+    """Serialize an accepted-note payload through the v2 entity response model."""
+    return EntityResponseV2.model_validate(runtime_note_content_payload_as_dict(payload))
+
+
+def delete_response_from_note_content_payload(payload) -> DeleteEntitiesResponse:
+    """Serialize an accepted-note delete payload through the existing delete model."""
+    return DeleteEntitiesResponse.model_validate(runtime_note_content_payload_as_dict(payload))
+
+
 ## Graph endpoint
 
 
@@ -490,9 +500,7 @@ async def get_entity_by_id(
             session=session,
         )
         if note_payload is not None:
-            result = EntityResponseV2.model_validate(
-                runtime_note_content_payload_as_dict(note_payload)
-            )
+            result = entity_response_from_note_content_payload(note_payload)
             logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
             return result
 
@@ -552,9 +560,7 @@ async def create_entity(
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
         await note_content_materialization_provider.materialize_write_change(accepted)
-        result = EntityResponseV2.model_validate(
-            runtime_note_content_payload_as_dict(accepted.payload)
-        )
+        result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
             app_config=app_config,
@@ -576,12 +582,13 @@ async def update_entity_by_id(
     data: Entity,
     response: Response,
     project_id: ProjectExternalIdPathDep,
-    entity_service: EntityServiceV2ExternalDep,
-    search_service: SearchServiceV2ExternalDep,
-    entity_repository: EntityRepositoryV2ExternalDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
+    note_content_mutation_service: NoteContentMutationServiceDep,
+    note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     app_config: AppConfigDep,
-    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Update an entity by external ID.
@@ -603,47 +610,28 @@ async def update_entity_by_id(
     ):
         logger.info(f"API v2 request: update_entity_by_id entity_id={entity_id}")
 
-        async with db.scoped_session(session_maker) as session:
-            existing = await entity_repository.get_by_external_id(session, entity_id)
-        created = existing is None
+        try:
+            accepted = await note_content_mutation_service.update_note(
+                project_external_id=project_external_id,
+                entity_external_id=entity_id,
+                data=data,
+                user_profile_id=None,
+                source="api",
+            )
+        except NoteContentMutationServiceError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        if existing:
-            write_result = await entity_service.update_entity_with_content(existing, data)
-            entity = write_result.entity
-            response.status_code = 200
-        else:
-            write_result = await entity_service.create_entity_with_content(data)
-            entity = write_result.entity
-            if entity.external_id != entity_id:
-                async with db.scoped_session(session_maker) as session:
-                    entity = await entity_repository.update(
-                        session,
-                        entity.id,
-                        {"external_id": entity_id},
-                    )
-                # external_id fixup only changes the DB row. The file content is unchanged,
-                # so the markdown captured during the write remains valid downstream.
-                if not entity:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Entity with external_id '{entity_id}' not found",
-                    )
-            response.status_code = 201
-
-        await search_service.index_entity(entity, content=write_result.search_content)
+        await note_content_materialization_provider.materialize_write_change(accepted)
+        response.status_code = accepted.status_code
+        result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
             app_config=app_config,
-            entity_id=entity.id,
+            entity_id=result.id,
             project_id=project_id,
         )
 
-        result = EntityResponseV2.model_validate(entity)
-        result = result.model_copy(update={"content": write_result.content})
-
-        logger.info(
-            f"API v2 response: external_id={entity_id}, created={created}, status_code={response.status_code}"
-        )
+        logger.info(f"API v2 response: external_id={entity_id}, status_code={response.status_code}")
         return result
 
 
@@ -651,12 +639,13 @@ async def update_entity_by_id(
 async def edit_entity_by_id(
     data: EditEntityRequest,
     project_id: ProjectExternalIdPathDep,
-    entity_service: EntityServiceV2ExternalDep,
-    search_service: SearchServiceV2ExternalDep,
-    entity_repository: EntityRepositoryV2ExternalDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
+    note_content_mutation_service: NoteContentMutationServiceDep,
+    note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     app_config: AppConfigDep,
-    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Edit an existing entity by external ID using operations like append, prepend, etc.
@@ -681,44 +670,31 @@ async def edit_entity_by_id(
             f"API v2 request: edit_entity_by_id entity_id={entity_id}, operation='{data.operation}'"
         )
 
-        async with db.scoped_session(session_maker) as session:
-            entity = await entity_repository.get_by_external_id(session, entity_id)
-        if not entity:  # pragma: no cover
-            raise HTTPException(
-                status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
-            )
-
         try:
-            identifier = entity.permalink or entity.file_path
-            write_result = await entity_service.edit_entity_with_content(
-                identifier=identifier,
-                operation=data.operation,
-                content=data.content,
-                section=data.section,
-                find_text=data.find_text,
-                expected_replacements=data.expected_replacements,
+            accepted = await note_content_mutation_service.edit_note(
+                project_external_id=project_external_id,
+                entity_external_id=entity_id,
+                data=data,
+                user_profile_id=None,
+                source="api",
             )
-            updated_entity = write_result.entity
-            await search_service.index_entity(updated_entity, content=write_result.search_content)
-            _schedule_vector_sync_if_enabled(
-                vector_sync_scheduler=vector_sync_scheduler,
-                app_config=app_config,
-                entity_id=updated_entity.id,
-                project_id=project_id,
-            )
+        except NoteContentMutationServiceError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-            result = EntityResponseV2.model_validate(updated_entity)
-            result = result.model_copy(update={"content": write_result.content})
+        await note_content_materialization_provider.materialize_write_change(accepted)
+        result = entity_response_from_note_content_payload(accepted.payload)
+        _schedule_vector_sync_if_enabled(
+            vector_sync_scheduler=vector_sync_scheduler,
+            app_config=app_config,
+            entity_id=result.id,
+            project_id=project_id,
+        )
 
-            logger.info(
-                f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=200"
-            )
+        logger.info(
+            f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=200"
+        )
 
-            return result
-
-        except Exception as e:
-            logger.error(f"Error editing entity {entity_id}: {e}")
-            raise HTTPException(status_code=400, detail=str(e))
+        return result
 
 
 ## Delete endpoints
@@ -727,9 +703,11 @@ async def edit_entity_by_id(
 @router.delete("/entities/{entity_id}", response_model=DeleteEntitiesResponse)
 async def delete_entity_by_id(
     project_id: ProjectExternalIdPathDep,
-    entity_service: EntityServiceV2ExternalDep,
-    entity_repository: EntityRepositoryV2ExternalDep,
-    session_maker: SessionMakerDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
+    note_content_mutation_service: NoteContentMutationServiceDep,
+    note_content_materialization_provider: NoteContentMaterializationProviderDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> DeleteEntitiesResponse:
     """Delete an entity by external ID.
@@ -750,18 +728,20 @@ async def delete_entity_by_id(
     ):
         logger.info(f"API v2 request: delete_entity_by_id entity_id={entity_id}")
 
-        async with db.scoped_session(session_maker) as session:
-            entity = await entity_repository.get_by_external_id(session, entity_id)
-        if entity is None:
-            logger.info(f"API v2 response: external_id={entity_id} not found, deleted=False")
-            return DeleteEntitiesResponse(deleted=False)
+        try:
+            accepted = await note_content_mutation_service.delete_note(
+                project_external_id=project_external_id,
+                entity_external_id=entity_id,
+            )
+        except NoteContentMutationServiceError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        # Delete the entity using internal ID
-        deleted = await entity_service.delete_entity(entity.id)
+        await note_content_materialization_provider.materialize_delete_change(accepted)
+        result = delete_response_from_note_content_payload(accepted.payload)
 
-        logger.info(f"API v2 response: external_id={entity_id}, deleted={deleted}")
+        logger.info(f"API v2 response: external_id={entity_id}, deleted={result.deleted}")
 
-        return DeleteEntitiesResponse(deleted=deleted)
+        return result
 
 
 ## Move endpoint
@@ -771,13 +751,13 @@ async def delete_entity_by_id(
 async def move_entity(
     data: MoveEntityRequestV2,
     project_id: ProjectExternalIdPathDep,
-    entity_service: EntityServiceV2ExternalDep,
-    entity_repository: EntityRepositoryV2ExternalDep,
-    project_config: ProjectConfigV2ExternalDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
+    note_content_mutation_service: NoteContentMutationServiceDep,
+    note_content_materialization_provider: NoteContentMaterializationProviderDep,
     app_config: AppConfigDep,
-    search_service: SearchServiceV2ExternalDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
-    session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Move an entity to a new file location.
@@ -804,50 +784,28 @@ async def move_entity(
         )
 
         try:
-            # First, get the entity by external_id to verify it exists
-            async with db.scoped_session(session_maker) as session:
-                entity = await entity_repository.get_by_external_id(session, entity_id)
-            if not entity:  # pragma: no cover
-                raise HTTPException(
-                    status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
-                )
-
-            # Move the entity using its current file path as identifier
-            moved_entity = await entity_service.move_entity(
-                identifier=entity.file_path,  # Use file path for resolution
+            accepted = await note_content_mutation_service.move_note(
+                project_external_id=project_external_id,
+                entity_external_id=entity_id,
                 destination_path=data.destination_path,
-                project_config=project_config,
-                app_config=app_config,
+                user_profile_id=None,
+                source="api",
             )
+        except NoteContentMutationServiceError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-            # Reindex at new location
-            async with db.scoped_session(session_maker) as session:
-                reindexed_entity = await entity_service.link_resolver.resolve_link(
-                    data.destination_path,
-                    session=session,
-                )
-            if reindexed_entity:
-                await search_service.index_entity(reindexed_entity)
-                _schedule_vector_sync_if_enabled(
-                    vector_sync_scheduler=vector_sync_scheduler,
-                    app_config=app_config,
-                    entity_id=reindexed_entity.id,
-                    project_id=project_id,
-                )
+        await note_content_materialization_provider.materialize_write_change(accepted)
+        result = entity_response_from_note_content_payload(accepted.payload)
+        _schedule_vector_sync_if_enabled(
+            vector_sync_scheduler=vector_sync_scheduler,
+            app_config=app_config,
+            entity_id=result.id,
+            project_id=project_id,
+        )
 
-            result = EntityResponseV2.model_validate(moved_entity)
+        logger.info(f"API v2 response: moved external_id={entity_id} to '{data.destination_path}'")
 
-            logger.info(
-                f"API v2 response: moved external_id={entity_id} to '{data.destination_path}'"
-            )
-
-            return result
-
-        except HTTPException:  # pragma: no cover
-            raise  # pragma: no cover
-        except Exception as e:
-            logger.error(f"Error moving entity: {e}")
-            raise HTTPException(status_code=400, detail=str(e))
+        return result
 
 
 ## Move directory endpoint
