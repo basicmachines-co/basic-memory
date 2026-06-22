@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from watchfiles.main import FileChange
 
@@ -25,6 +26,21 @@ from basic_memory.runtime import (
     StorageEventPayload,
     group_storage_events_by_bucket,
 )
+
+
+class LocalWatchProjectSource(Protocol):
+    """Minimal project shape needed to build local watcher storage events."""
+
+    @property
+    def path(self) -> object: ...
+
+
+def local_project_prefix(project: LocalWatchProjectSource) -> ProjectPath:
+    """Return the storage-event prefix for a local watcher project."""
+    project_path = str(project.path).strip() if project.path else ""
+    if not project_path:
+        raise ValueError("local watcher project requires path")
+    return Path(project_path).expanduser().resolve().name
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +70,30 @@ class LocalWatchEventIndexRequest:
             project_root=project_root,
             project_prefix=project_prefix,
             changes=tuple(changes),
+            event_time=event_time,
+            bucket_name=bucket_name,
+            ignore_patterns=ignore_patterns,
+        )
+
+    @classmethod
+    def from_project_changes(
+        cls,
+        *,
+        project: LocalWatchProjectSource,
+        changes: Iterable[FileChange],
+        event_time: str | None = None,
+        bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME,
+        ignore_patterns: LocalFilesystemIgnorePatterns | None = None,
+    ) -> "LocalWatchEventIndexRequest":
+        """Build a watcher request from the configured local project."""
+        project_path = str(project.path).strip() if project.path else ""
+        if not project_path:
+            raise ValueError("local watcher project requires path")
+        project_root = Path(project_path).expanduser().resolve()
+        return cls.from_changes(
+            project_root=project_root,
+            project_prefix=local_project_prefix(project),
+            changes=changes,
             event_time=event_time,
             bucket_name=bucket_name,
             ignore_patterns=ignore_patterns,

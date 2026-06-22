@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from uuid import UUID
 
 from loguru import logger
@@ -21,6 +20,7 @@ from basic_memory.index.local_moves import (
     LocalWatchMoveProcessor,
 )
 from basic_memory.index.local_watch import LocalWatchStorageEventIndexRuntime
+from basic_memory.index.local_watch import local_project_prefix
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
@@ -299,8 +299,3 @@ class LocalWatchEventIndexRuntimeFactory:
                 batch_size=self.move_batch_size,
             ),
         )
-
-
-def local_project_prefix(project: Project) -> ProjectPath:
-    """Return the cloud-compatible project prefix for local watcher events."""
-    return Path(project.path).expanduser().resolve().name

@@ -675,15 +675,14 @@ class WatchService:
             raise RuntimeError("event-index change handling requires a runtime factory")
 
         start_time = time.time()
-        directory = Path(project.path).resolve()
-        project_prefix = directory.name
+        directory = Path(project.path).expanduser().resolve()
+        request = LocalWatchEventIndexRequest.from_project_changes(
+            project=project,
+            changes=changes,
+            ignore_patterns=self._get_ignore_patterns(directory),
+        )
         result = await run_local_watch_event_indexing(
-            LocalWatchEventIndexRequest.from_changes(
-                project_root=directory,
-                project_prefix=project_prefix,
-                changes=changes,
-                ignore_patterns=self._get_ignore_patterns(directory),
-            ),
+            request,
             runtime=await self._event_index_runtime_factory.runtime_for_project(project),
         )
 
@@ -700,7 +699,7 @@ class WatchService:
                 f"failed={result.counts.failed} skipped={result.counts.skipped}"
             )
         self.state.add_event(
-            path=project_prefix,
+            path=request.project_prefix,
             action="index",
             status=status,
             error=error,
