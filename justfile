@@ -127,6 +127,11 @@ project-index-runner-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/indexing/test_project_index_runner.py
 
+# Focused provider-neutral change-planning tests.
+change-planning-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_change_planning.py
+
 # Focused local project-index adapter tests.
 local-project-index-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -160,6 +165,11 @@ local-project-index-regular-file-test:
         tests/index/test_local_project_index.py::test_local_project_index_updates_regular_file_checksum \
         tests/index/test_local_project_index.py::test_local_project_index_moves_and_deletes_regular_file_entities \
         tests/index/test_local_project_index.py::test_local_project_index_resolves_regular_file_relations
+
+# Focused local project-index markdown move conflict parity test.
+local-project-index-markdown-move-conflict-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_moves_markdown_over_deleted_path_with_permalink_repair
 
 # Focused local project-index changed-during-index parity test.
 local-project-index-race-test:
@@ -213,7 +223,7 @@ local-project-index-startup-test:
         tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
 
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test local-project-index-test local-project-index-wikilink-stability-test local-project-index-startup-test
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-wikilink-stability-test local-project-index-startup-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:

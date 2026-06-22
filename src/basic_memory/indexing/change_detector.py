@@ -43,7 +43,7 @@ class ChangeDetectionStore(Protocol):
 
     async def load_move_candidates(
         self,
-        new_file_checksums: Mapping[FileIndexPath, FileIndexChecksum],
+        move_target_checksums: Mapping[FileIndexPath, FileIndexChecksum],
     ) -> tuple[FileMoveCandidate, ...]: ...
 
 
@@ -100,13 +100,13 @@ class ChangeDetector:
 
     async def load_move_candidates(
         self,
-        new_file_checksums: Mapping[FileIndexPath, FileIndexChecksum],
+        move_target_checksums: Mapping[FileIndexPath, FileIndexChecksum],
     ) -> tuple[FileMoveCandidate, ...]:
         """Load indexed entities that can prove an observed path is a move."""
-        if not new_file_checksums:
+        if not move_target_checksums:
             return ()
 
-        checksums = sorted(set(new_file_checksums.values()))
+        checksums = sorted(set(move_target_checksums.values()))
         async with db.scoped_session(self.session_maker) as session:
             candidates = await self.entity_repository.find_by_checksums(session, checksums)
 
@@ -153,10 +153,10 @@ async def detect_project_file_changes(
         )
         with logfire.span(
             "change_detector.detect_moves",
-            candidate_count=len(candidate_snapshot.new_file_checksum_by_path),
+            candidate_count=len(candidate_snapshot.move_target_checksum_by_path),
         ):
             move_candidates = await store.load_move_candidates(
-                candidate_snapshot.new_file_checksum_by_path
+                candidate_snapshot.move_target_checksum_by_path
             )
 
         snapshot = ChangeDetectionSnapshot(

@@ -73,6 +73,15 @@ class ChangeDetectionSnapshot:
             if path not in self.db_checksum_by_path
         }
 
+    @property
+    def move_target_checksum_by_path(self) -> dict[FileIndexPath, FileIndexChecksum]:
+        """Return observed paths that could be destinations for indexed moves."""
+        return {
+            path: storage_checksum
+            for path, storage_checksum in self.storage_checksum_by_path.items()
+            if self.db_checksum_by_path.get(path) != storage_checksum
+        }
+
 
 def storage_checksums_from_sources(
     storage_files: Mapping[FileIndexPath, StorageChecksumSource],
@@ -115,7 +124,9 @@ def plan_file_changes(
         unchanged_files.append(path)
 
     moved_files = plan_moved_files(
-        new_file_checksum_by_path={path: storage_checksum_by_path[path] for path in new_files},
+        new_file_checksum_by_path={
+            path: storage_checksum_by_path[path] for path in (*new_files, *modified_files)
+        },
         storage_paths=storage_paths,
         move_candidates=move_candidates,
     )
@@ -124,7 +135,7 @@ def plan_file_changes(
 
     return ChangeReport(
         new_files=[path for path in new_files if path not in moved_new_paths],
-        modified_files=modified_files,
+        modified_files=[path for path in modified_files if path not in moved_new_paths],
         deleted_files=sorted(set(all_db_paths) - storage_paths - moved_old_paths),
         moved_files=moved_files,
         unchanged_files=unchanged_files,

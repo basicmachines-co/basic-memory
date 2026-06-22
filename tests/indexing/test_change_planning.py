@@ -96,6 +96,21 @@ def test_plan_file_changes_removes_moved_files_from_new_and_deleted_sets() -> No
     assert report.total_changes == 1
 
 
+def test_plan_file_changes_detects_move_over_existing_path_by_checksum() -> None:
+    report = plan_file_changes(
+        storage_checksum_by_path={"target.md": "source-checksum"},
+        db_checksum_by_path={"target.md": "target-checksum"},
+        all_db_paths=("target.md", "source.md"),
+        move_candidates=(FileMoveCandidate(path="source.md", checksum="source-checksum"),),
+    )
+
+    assert report.new_files == []
+    assert report.modified_files == []
+    assert report.deleted_files == []
+    assert report.moved_files == {"source.md": "target.md"}
+    assert report.total_changes == 1
+
+
 def test_plan_file_changes_treats_copy_as_new_when_original_path_still_exists() -> None:
     report = plan_file_changes(
         storage_checksum_by_path={
@@ -143,9 +158,9 @@ class FakeChangeDetectionStore:
 
     async def load_move_candidates(
         self,
-        new_file_checksums: Mapping[str, str],
+        move_target_checksums: Mapping[str, str],
     ) -> tuple[FileMoveCandidate, ...]:
-        self.loaded_move_checksums = dict(new_file_checksums)
+        self.loaded_move_checksums = dict(move_target_checksums)
         return (FileMoveCandidate(path="old/moved.md", checksum="moved-checksum"),)
 
 
@@ -210,6 +225,7 @@ async def test_detect_project_file_changes_loads_store_state_and_plans_moves() -
         "new.md",
     )
     assert store.loaded_move_checksums == {
+        "modified.md": "new-checksum",
         "new/moved.md": "moved-checksum",
         "new.md": "new-file-checksum",
     }
@@ -260,7 +276,12 @@ async def test_change_detector_adapts_entity_repository_with_explicit_sessions(
         "null-checksum.md",
     )
     assert repository.loaded_all_paths is True
-    assert repository.loaded_move_checksums == ("moved-checksum", "new-file-checksum")
+    assert repository.loaded_move_checksums == (
+        "moved-checksum",
+        "new-checksum",
+        "new-file-checksum",
+        "now-has-checksum",
+    )
     assert len(sessions) == 3
     assert report == ChangeReport(
         new_files=["new.md", "null-checksum.md"],

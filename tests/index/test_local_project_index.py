@@ -1252,6 +1252,88 @@ async def test_local_project_index_move_updates_permalink_when_configured(
     assert results[0].file_path == "archive/renamed-note.md"
 
 
+async def test_local_project_index_moves_markdown_over_deleted_path_with_permalink_repair(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    app_config,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Markdown move-with-delete parity should keep the moved source identity."""
+    app_config.update_permalinks_on_move = True
+    config_manager.save_config(app_config)
+
+    target_path = project_config.home / "note.md"
+    source_path = project_config.home / "other" / "note-1.md"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("# Target\n\nThis note gets replaced.\n", encoding="utf-8")
+    source_path.write_text("# Source\n\nThis note moves over the target.\n", encoding="utf-8")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local markdown move conflict parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+
+    async with db.scoped_session(session_maker) as session:
+        target_before = await entity_repository.get_by_file_path(session, "note.md")
+        source_before = await entity_repository.get_by_file_path(session, "other/note-1.md")
+
+    assert target_before is not None
+    assert source_before is not None
+    target_entity_id = target_before.id
+    source_entity_id = source_before.id
+
+    target_path.unlink()
+    source_path.rename(target_path)
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    expected_permalink = f"{test_project.permalink}/note"
+    assert second.moved_files == 1
+    assert second.deleted_files == 0
+    assert second.enqueued_files == 0
+    assert f"permalink: {expected_permalink}" in target_path.read_text(encoding="utf-8")
+
+    async with db.scoped_session(session_maker) as session:
+        replaced_target = await session.get(Entity, target_entity_id)
+        old_source = await entity_repository.get_by_file_path(session, "other/note-1.md")
+        moved_source = await entity_repository.get_by_file_path(session, "note.md")
+        moved_note_content = await NoteContentRepository(test_project.id).get_by_entity_id(
+            session,
+            source_entity_id,
+        )
+
+    assert replaced_target is None
+    assert old_source is None
+    assert moved_source is not None
+    assert moved_source.id == source_entity_id
+    assert moved_source.permalink == expected_permalink
+    assert moved_note_content is not None
+    assert moved_note_content.file_path == "note.md"
+    assert f"permalink: {expected_permalink}" in moved_note_content.markdown_content
+
+    results = await search_service.search(SearchQuery(permalink=expected_permalink))
+    assert len(results) == 1
+    assert results[0].entity_id == source_entity_id
+    assert results[0].file_path == "note.md"
+
+
 async def test_local_project_index_move_repairs_observation_search_permalinks(
     test_project: Project,
     project_config,
