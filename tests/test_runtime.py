@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 
+import basic_memory.runtime as runtime
 from basic_memory.runtime import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
     NOTE_OBJECT_ACTOR_KIND_METADATA,
@@ -968,17 +969,26 @@ class TestRuntimeContracts:
             ),
         )
 
-    def test_runtime_capabilities_fail_fast_when_factories_are_missing(self):
-        capabilities: RuntimeCapabilities[object, object] = RuntimeCapabilities()
+    def test_runtime_does_not_export_cloud_only_snapshot_or_history_contracts(self):
+        unsupported_exports = {
+            "NoteHistoryPage",
+            "NoteHistoryProvider",
+            "NoteHistoryReference",
+            "NoteHistoryVersion",
+            "SnapshotArchiveRequest",
+            "SnapshotBrowseFile",
+            "SnapshotProvider",
+            "SnapshotReference",
+            "SnapshotRestorePlan",
+            "plan_snapshot_name",
+        }
 
-        with pytest.raises(RuntimeError, match="Snapshot provider factory"):
-            capabilities.require_snapshot_provider_factory()
-
-        with pytest.raises(RuntimeError, match="Note history provider factory"):
-            capabilities.require_note_history_provider_factory()
+        assert unsupported_exports.isdisjoint(runtime.__all__)
+        for export_name in unsupported_exports:
+            assert not hasattr(runtime, export_name)
 
     def test_runtime_capabilities_require_configured_adapters(self):
-        empty_capabilities: RuntimeCapabilities[object, object] = RuntimeCapabilities()
+        empty_capabilities = RuntimeCapabilities()
 
         with pytest.raises(RuntimeError, match="Job runtime"):
             empty_capabilities.require_job_runtime()

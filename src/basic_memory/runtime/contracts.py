@@ -2,14 +2,14 @@
 
 These contracts describe product-core capabilities without depending on a
 specific deployment backend. Local Basic Memory, hosted cloud, and future
-enterprise runtimes can each provide adapters for jobs, storage events, history,
-and snapshots while sharing the same typed handoff values.
+enterprise runtimes can each provide adapters for jobs and storage events while
+sharing the same typed handoff values.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -63,8 +63,6 @@ type RuntimeNoteContentChecksum = str
 type RuntimeNoteActorKind = str
 type RuntimeNoteActorName = str
 type RuntimeNoteChangeSource = str
-type SnapshotName = str
-type SnapshotVersion = str
 
 STORAGE_OBJECT_CREATED_EVENTS: frozenset[StorageEventName] = frozenset(
     {"OBJECT_CREATED_PUT", "OBJECT_CREATED_POST"}
@@ -2658,148 +2656,12 @@ class RuntimeProjectDeleteResult:
         )
 
 
-class NoteHistoryProvider(Protocol):
-    """Capability for reading materialized note file history."""
-
-    async def list_versions(
-        self,
-        reference: NoteHistoryReference,
-        *,
-        max_keys: int,
-        key_marker: StorageKey | None = None,
-        version_id_marker: StorageVersionId | None = None,
-    ) -> NoteHistoryPage: ...
-
-    async def read_version(
-        self,
-        reference: NoteHistoryReference,
-        version_id: StorageVersionId,
-        *,
-        max_bytes: int | None = None,
-    ) -> bytes: ...
-
-
-class NoteHistoryVersionSource(Protocol):
-    """Storage-version shape needed to build portable note history."""
-
-    @property
-    def version_id(self) -> StorageVersionId: ...
-
-    @property
-    def key(self) -> StorageKey: ...
-
-    @property
-    def is_latest(self) -> bool: ...
-
-    @property
-    def last_modified(self) -> datetime: ...
-
-    @property
-    def size(self) -> int: ...
-
-    @property
-    def etag(self) -> StorageEtag: ...
-
-
-class NoteHistoryPageSource(Protocol):
-    """Storage-version page shape needed to build portable note history."""
-
-    @property
-    def versions(self) -> Iterable[NoteHistoryVersionSource]: ...
-
-    @property
-    def next_key_marker(self) -> StorageKey | None: ...
-
-    @property
-    def next_version_id_marker(self) -> StorageVersionId | None: ...
-
-
-class SnapshotProvider(Protocol):
-    """Capability for creating and reading bucket snapshot state."""
-
-    async def create_snapshot(
-        self,
-        bucket_name: StorageBucketName,
-        name: SnapshotName,
-    ) -> SnapshotVersion: ...
-
-    async def list_objects(
-        self,
-        reference: SnapshotReference,
-        *,
-        prefix: StorageKey = "",
-    ) -> tuple[SnapshotObjectReference, ...]: ...
-
-    async def list_all_objects(
-        self,
-        reference: SnapshotReference,
-        *,
-        prefix: StorageKey = "",
-    ) -> tuple[SnapshotObjectReference, ...]: ...
-
-    async def read_object(
-        self,
-        reference: SnapshotReference,
-        key: StorageKey,
-    ) -> bytes: ...
-
-    async def restore_object(
-        self,
-        reference: SnapshotReference,
-        key: StorageKey,
-    ) -> None: ...
-
-
-class SnapshotReferenceSource(Protocol):
-    """Persisted snapshot shape needed to build portable snapshot identity."""
-
-    @property
-    def tenant_id(self) -> TenantId: ...
-
-    @property
-    def bucket_name(self) -> StorageBucketName: ...
-
-    @property
-    def name(self) -> SnapshotName: ...
-
-    @property
-    def snapshot_version(self) -> SnapshotVersion: ...
-
-
-class SnapshotObjectSource(Protocol):
-    """Storage-object shape needed to build portable snapshot listings."""
-
-    @property
-    def key(self) -> StorageKey: ...
-
-    @property
-    def size(self) -> int: ...
-
-    @property
-    def last_modified(self) -> datetime: ...
-
-    @property
-    def etag(self) -> StorageEtag: ...
-
-
-type SnapshotProviderFactory[SnapshotProviderInputT] = Callable[
-    [SnapshotProviderInputT], SnapshotProvider
-]
-type NoteHistoryProviderFactory[NoteHistoryProviderInputT] = Callable[
-    [NoteHistoryProviderInputT], NoteHistoryProvider
-]
-
-
 @dataclass(frozen=True, slots=True)
-class RuntimeCapabilities[SnapshotProviderInputT, NoteHistoryProviderInputT]:
+class RuntimeCapabilities:
     """Internal adapter bundle selected for one runtime surface."""
 
     job_runtime: JobRuntime | None = None
     storage_event_source: StorageEventSource | None = None
-    snapshot_provider_factory: SnapshotProviderFactory[SnapshotProviderInputT] | None = None
-    note_history_provider_factory: NoteHistoryProviderFactory[NoteHistoryProviderInputT] | None = (
-        None
-    )
 
     def require_job_runtime(self) -> JobRuntime:
         if self.job_runtime is None:
@@ -2810,20 +2672,6 @@ class RuntimeCapabilities[SnapshotProviderInputT, NoteHistoryProviderInputT]:
         if self.storage_event_source is None:
             raise RuntimeError("Storage event source is not configured")
         return self.storage_event_source
-
-    def require_snapshot_provider_factory(
-        self,
-    ) -> SnapshotProviderFactory[SnapshotProviderInputT]:
-        if self.snapshot_provider_factory is None:
-            raise RuntimeError("Snapshot provider factory is not configured")
-        return self.snapshot_provider_factory
-
-    def require_note_history_provider_factory(
-        self,
-    ) -> NoteHistoryProviderFactory[NoteHistoryProviderInputT]:
-        if self.note_history_provider_factory is None:
-            raise RuntimeError("Note history provider factory is not configured")
-        return self.note_history_provider_factory
 
 
 @dataclass(frozen=True, slots=True)
@@ -2870,238 +2718,9 @@ class RuntimeJobCounts:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class NoteHistoryReference:
-    """Note history identity independent of a concrete storage provider."""
-
-    tenant_id: TenantId
-    bucket_name: StorageBucketName
-    project_external_id: ProjectExternalId
-    note_external_id: NoteExternalId
-    file_path: str
-    object_key: StorageKey
-
-
-@dataclass(frozen=True, slots=True)
-class NoteHistoryVersion:
-    """One materialized object version in a note's file history."""
-
-    version_id: StorageVersionId
-    key: StorageKey
-    is_latest: bool
-    last_modified: datetime
-    size: int
-    etag: StorageEtag
-
-    @classmethod
-    def from_source(cls, source: NoteHistoryVersionSource) -> Self:
-        """Build a portable note-history version from storage-provider metadata."""
-        return cls(
-            version_id=source.version_id,
-            key=source.key,
-            is_latest=source.is_latest,
-            last_modified=source.last_modified,
-            size=source.size,
-            etag=source.etag,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class NoteHistoryPage:
-    """One page of note file history plus storage pagination markers."""
-
-    versions: tuple[NoteHistoryVersion, ...]
-    next_key_marker: StorageKey | None = None
-    next_version_id_marker: StorageVersionId | None = None
-
-    @classmethod
-    def from_source(cls, source: NoteHistoryPageSource) -> Self:
-        """Build a portable note-history page from storage-provider pagination."""
-        return cls(
-            versions=tuple(NoteHistoryVersion.from_source(version) for version in source.versions),
-            next_key_marker=source.next_key_marker,
-            next_version_id_marker=source.next_version_id_marker,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SnapshotReference:
-    """Snapshot identity independent of concrete storage APIs."""
-
-    tenant_id: TenantId
-    bucket_name: StorageBucketName
-    snapshot_name: SnapshotName
-    snapshot_version: SnapshotVersion
-
-    @classmethod
-    def from_source(cls, source: SnapshotReferenceSource) -> Self:
-        """Build portable snapshot identity from a persisted snapshot record."""
-        return cls(
-            tenant_id=source.tenant_id,
-            bucket_name=source.bucket_name,
-            snapshot_name=source.name,
-            snapshot_version=source.snapshot_version,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SnapshotObjectReference:
-    """One object visible in a bucket snapshot listing."""
-
-    key: StorageKey
-    size: int
-    last_modified: datetime
-    etag: StorageEtag
-
-    @classmethod
-    def from_source(cls, source: SnapshotObjectSource) -> Self:
-        """Build a portable snapshot object reference from storage-provider metadata."""
-        return cls(
-            key=source.key,
-            size=source.size,
-            last_modified=source.last_modified,
-            etag=source.etag,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SnapshotBrowseFile:
-    """One file returned by an internal snapshot browse operation."""
-
-    key: StorageKey
-    size: int
-    last_modified: datetime
-    etag: StorageEtag | None = None
-
-    @classmethod
-    def from_source(cls, source: SnapshotObjectSource) -> Self:
-        """Build browse-file data from storage-provider metadata."""
-        return cls(
-            key=source.key,
-            size=source.size,
-            last_modified=source.last_modified,
-            etag=source.etag,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SnapshotArchivePlan:
-    """Selected snapshot objects and filename for one archive download."""
-
-    filename: str
-    listing_prefix: StorageKey
-    object_keys: tuple[StorageKey, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class SnapshotArchiveRequest:
-    """Portable snapshot archive request before a provider reads object bytes."""
-
-    snapshot_name: SnapshotName
-    project: ProjectName | None = None
-
-    @property
-    def listing_prefix(self) -> StorageKey:
-        """Return the storage-provider prefix used to list archive candidates."""
-        return f"{self.project}/" if self.project else ""
-
-    @property
-    def filename(self) -> str:
-        """Return the existing snapshot archive filename shape."""
-        if self.project:
-            return f"snapshot-{self.project}-{self.snapshot_name}.zip"
-        return f"snapshot-{self.snapshot_name}.zip"
-
-    def plan_archive(self, objects: Iterable[SnapshotObjectSource]) -> SnapshotArchivePlan:
-        """Filter listed snapshot objects into archive member keys."""
-        return SnapshotArchivePlan(
-            filename=self.filename,
-            listing_prefix=self.listing_prefix,
-            object_keys=tuple(
-                obj.key
-                for obj in objects
-                if not obj.key.endswith("/") and should_include_snapshot_archive_path(obj.key)
-            ),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class SnapshotRestorePlan:
-    """Selected snapshot object keys and affected project folders for restore."""
-
-    object_keys: tuple[StorageKey, ...]
-    project_names: tuple[ProjectName, ...]
-
-    @classmethod
-    def from_file_path(cls, path: StorageKey) -> Self:
-        """Build a restore plan for one explicit snapshot object key."""
-        project_name = snapshot_key_project_name(path)
-        return cls(
-            object_keys=(path,),
-            project_names=(project_name,) if project_name is not None else (),
-        )
-
-    @classmethod
-    def from_objects(cls, objects: Iterable[SnapshotObjectSource]) -> Self:
-        """Build a restore plan from a provider object listing."""
-        object_keys = tuple(obj.key for obj in objects)
-        return cls(
-            object_keys=object_keys,
-            project_names=snapshot_key_project_names(object_keys),
-        )
-
-
-def snapshot_browse_project_names(
-    files: Iterable[SnapshotBrowseFile],
-) -> tuple[ProjectName, ...]:
-    """Return sorted top-level project folders present in snapshot browse results."""
-    return snapshot_key_project_names(file.key for file in files)
-
-
-def snapshot_key_project_name(key: StorageKey) -> ProjectName | None:
-    """Return the top-level project folder for a snapshot object key."""
-    project_name, separator, _ = key.partition("/")
-    if not separator:
-        return None
-    return project_name
-
-
-def snapshot_key_project_names(keys: Iterable[StorageKey]) -> tuple[ProjectName, ...]:
-    """Return sorted unique top-level project folders from snapshot object keys."""
-    projects: set[ProjectName] = set()
-    for key in keys:
-        project_name = snapshot_key_project_name(key)
-        if project_name:
-            projects.add(project_name)
-    return tuple(sorted(projects))
-
-
-def snapshot_restore_folder_prefix(prefix: StorageKey) -> StorageKey:
-    """Normalize a snapshot folder restore prefix for storage-provider listing."""
-    return prefix if prefix.endswith("/") else f"{prefix}/"
-
-
 def should_include_runtime_archive_path(archive_path: StorageKey) -> bool:
     """Return whether a runtime object key should be included in an archive download."""
     parts = PurePosixPath(archive_path).parts
     if any(part.startswith(".") for part in parts):
         return False
     return "__pycache__" not in parts
-
-
-def should_include_snapshot_archive_path(archive_path: StorageKey) -> bool:
-    """Return whether a snapshot object key should be included in an archive download."""
-    return should_include_runtime_archive_path(archive_path)
-
-
-def plan_snapshot_name(
-    *,
-    description: str,
-    created_at: datetime,
-    auto: bool = False,
-) -> SnapshotName:
-    """Build the portable snapshot name persisted by runtime snapshot records."""
-    timestamp = created_at.strftime("%Y%m%d-%H%M%S")
-    prefix = "auto" if auto else "manual"
-    description_slug = description.replace(" ", "-").lower()[:50]
-    return f"{prefix}-{description_slug}-{timestamp}"
