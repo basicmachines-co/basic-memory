@@ -33,6 +33,7 @@ from basic_memory.index.inline_operations import (
 )
 from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
+    LocalWatchStorageEventSource,
     LocalWatchStorageEventIndexRuntime,
     run_local_watch_event_indexing,
 )
@@ -118,6 +119,7 @@ __all__ = [
     "LocalProjectIndexRuntimeFactory",
     "LocalProjectIndexRuntime",
     "LocalWatchEventIndexRequest",
+    "LocalWatchStorageEventSource",
     "LocalWatchEventIndexRuntimeFactory",
     "LocalWatchMoveProcessingResult",
     "LocalWatchMoveProcessor",

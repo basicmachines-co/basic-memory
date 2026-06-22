@@ -22,6 +22,8 @@ from basic_memory.runtime import (
     ProjectPath,
     RuntimeStorageEventProcessingResult,
     StorageBucketName,
+    StorageEventPayload,
+    group_storage_events_by_bucket,
 )
 
 
@@ -65,20 +67,34 @@ class LocalWatchStorageEventIndexRuntime(StorageEventIndexRuntime):
     move_processor: LocalWatchMoveProcessor | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LocalWatchStorageEventSource:
+    """Normalize local watcher changes into the shared storage-event source shape."""
+
+    request: LocalWatchEventIndexRequest
+
+    def events(self) -> tuple[StorageEventPayload, ...]:
+        return local_storage_events_from_watchfiles_changes(
+            project_root=self.request.project_root,
+            project_prefix=self.request.project_prefix,
+            changes=self.request.changes,
+            event_time=self.request.event_time,
+            bucket_name=self.request.bucket_name,
+            ignore_patterns=self.request.ignore_patterns,
+        )
+
+    def events_by_bucket(self) -> dict[StorageBucketName, tuple[StorageEventPayload, ...]]:
+        return group_storage_events_by_bucket(self.events())
+
+
 async def run_local_watch_event_indexing(
     request: LocalWatchEventIndexRequest,
     *,
     runtime: StorageEventIndexRuntime,
 ) -> RuntimeStorageEventProcessingResult:
     """Normalize local file changes and process them through storage-event indexing."""
-    events = local_storage_events_from_watchfiles_changes(
-        project_root=request.project_root,
-        project_prefix=request.project_prefix,
-        changes=request.changes,
-        event_time=request.event_time,
-        bucket_name=request.bucket_name,
-        ignore_patterns=request.ignore_patterns,
-    )
+    event_source = LocalWatchStorageEventSource(request)
+    events = event_source.events()
     result = RuntimeStorageEventProcessingResult.empty()
     if isinstance(runtime, LocalWatchStorageEventIndexRuntime):
         move_processor = runtime.move_processor

@@ -7,6 +7,7 @@ from watchfiles import Change
 
 from basic_memory.index import (
     LocalWatchEventIndexRequest,
+    LocalWatchStorageEventSource,
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
@@ -99,3 +100,28 @@ async def test_run_local_watch_event_indexing_normalizes_changes_and_dispatches(
     assert result.as_dict() == {"processed": 1, "failed": 0, "skipped": 0}
     assert resolver.requested_paths == ["local-project"]
     assert processor.calls == [("index", "notes/a.md")]
+
+
+def test_local_watch_storage_event_source_groups_events_by_bucket(tmp_path: Path) -> None:
+    project_root = tmp_path / "local-project"
+    project_root.mkdir()
+    note_path = project_root / "notes" / "a.md"
+    note_path.parent.mkdir()
+    note_path.write_text("# A\n", encoding="utf-8")
+
+    source = LocalWatchStorageEventSource(
+        LocalWatchEventIndexRequest(
+            project_root=project_root,
+            project_prefix="local-project",
+            changes=((Change.added, str(note_path)),),
+            event_time="2026-06-20T16:00:00Z",
+            bucket_name="local-bucket",
+        )
+    )
+
+    events_by_bucket = source.events_by_bucket()
+
+    assert list(events_by_bucket) == ["local-bucket"]
+    assert [event.object_key for event in events_by_bucket["local-bucket"]] == [
+        "local-project/notes/a.md"
+    ]
