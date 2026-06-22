@@ -22,9 +22,10 @@ See the [README.md](README.md) file for a project overview.
 - Run unit tests (Postgres): `just test-unit-postgres`
 - Run integration tests (SQLite): `just test-int-sqlite`
 - Run integration tests (Postgres): `just test-int-postgres`
-- Run impacted tests: `just testmon` (pytest-testmon; only tests affected by changed code)
+- Run impacted tests: `just fast-test` or `just testmon` (pytest-testmon; only tests affected by changed code)
 - Run MCP smoke test: `just test-smoke`
-- Fast local loop: `just fast-check` (default iteration flow)
+- Fast static check: `just fast-check` (fix, format, typecheck)
+- Fast test loop: `just fast-test` (pytest-testmon impacted tests)
 - Local consistency check: `just doctor`
 - Run all consolidated agent package checks: `just package-check`
 - Run Claude Code plugin checks: `just package-check-claude-code`
@@ -39,7 +40,7 @@ See the [README.md](README.md) file for a project overview.
 - Type check: `just typecheck` or `uv run ty check src tests test-int`
 - Type check (pyright): `just typecheck-pyright` or `uv run pyright`
 - Format: `just format` or `uv run ruff format .`
-- Run all code checks: `just check` (runs lint, format, typecheck, test)
+- Run all static code checks: `just check` (runs lint, format, typecheck)
 - Create db migration: `just migration "Your migration message"`
 - Run development MCP Inspector: `just run-inspector`
 
@@ -54,10 +55,11 @@ See the [README.md](README.md) file for a project overview.
 ### Code/Test/Verify Loop (fast path)
 
 1) **Code:** make changes.
-2) **Test:** `just fast-check` (lint/format/typecheck + pytest-testmon impacted tests for changed code).
-3) **Verify:** `just doctor` (end-to-end file ↔ DB loop in a temp project).
-4) **Package verify:** `just package-check` when changes touch `plugins/`, `skills/`, `integrations/`, package metadata, or release wiring.
-5) **Full gate (when needed):** `just test` or `just check` for SQLite + Postgres.
+2) **Check:** `just fast-check` (fix, format, typecheck; no tests).
+3) **Test:** `just fast-test` for pytest-testmon impacted tests, or a targeted `uv run pytest ...` command.
+4) **Verify:** `just doctor` (end-to-end file ↔ DB loop in a temp project).
+5) **Package verify:** `just package-check` when changes touch `plugins/`, `skills/`, `integrations/`, package metadata, or release wiring.
+6) **Full gate (when needed):** `just test` for SQLite + Postgres.
 
 Run `just test-smoke` when you specifically need the MCP smoke flow.
 

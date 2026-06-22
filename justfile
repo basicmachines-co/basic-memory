@@ -1,6 +1,6 @@
 # Basic Memory - Modern Command Runner
 
-TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--import-mode=importlib --testmon-noselect")
+PYTEST_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_FLAGS", "--import-mode=importlib")
 TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--import-mode=importlib --testmon --testmon-forceselect")
 TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--import-mode=importlib --testmon-noselect")
 # CI shards the Postgres unit suite across parallel jobs via pytest-split
@@ -21,7 +21,10 @@ install:
 # Set BASIC_MEMORY_TEST_POSTGRES=1 to run against Postgres (uses testcontainers).
 #
 # Quick Start:
-#   just test              # Run all tests against SQLite (default)
+#   just check             # Run static checks only (fix, format, typecheck)
+#   just fast-check        # Fast static check: fix, format, typecheck
+#   just fast-test         # Run pytest-testmon impacted tests
+#   just test              # Run all tests against SQLite and Postgres
 #   just test-sqlite       # Run all tests against SQLite
 #   just test-postgres     # Run all tests against Postgres (testcontainers)
 #   just test-unit-sqlite  # Run unit tests against SQLite
@@ -42,41 +45,44 @@ test-sqlite: test-unit-sqlite test-int-sqlite
 test-postgres: test-unit-postgres test-int-postgres
 
 # Run unit tests against SQLite
-test-unit-sqlite: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-sqlite tests
+test-unit-sqlite:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} tests
 
 # Run unit tests against Postgres
-# Exit code 5 (no tests collected) is success: a testmon-selected PR build can
-# leave a pytest-split shard empty.
-test-unit-postgres: testmon-seed
+# Exit code 5 (no tests collected) is success: a pytest-split shard can be empty.
+test-unit-postgres:
     #!/usr/bin/env bash
     set -euo pipefail
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} {{PYTEST_SPLIT_FLAGS}} --testmon-env=unit-postgres tests || test $? -eq 5
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} {{PYTEST_SPLIT_FLAGS}} tests || test $? -eq 5
 
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)
-test-int-sqlite: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-sqlite -m "not semantic and not benchmark" test-int
+test-int-sqlite:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int
 
 # Run integration tests against Postgres
 # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
 # See: https://github.com/jlowin/fastmcp/issues/1311
-test-int-postgres: testmon-seed
+test-int-postgres:
     #!/usr/bin/env bash
     set -euo pipefail
     # Use gtimeout (macOS/Homebrew) or timeout (Linux)
     TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic and not benchmark" test-int' || test $? -eq 137
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int' || test $? -eq 137
     else
         echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic and not benchmark" test-int
+        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int
     fi
 
-# Run tests impacted by recent changes (requires pytest-testmon)
-# Pass paths or node ids after `just testmon` to limit the candidate set further.
-testmon *args: testmon-seed
+# Fast test selection for local iteration; run targeted tests explicitly when possible.
+fast-test *args: testmon-seed
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_SELECT_FLAGS}} --testmon-env=local {{args}}
+
+# Run tests impacted by recent changes (requires pytest-testmon).
+# Backcompat alias for the fast-test recipe.
+testmon *args:
+    just fast-test {{args}}
 
 # Seed pytest-testmon data into this worktree from the shared Git cache.
 testmon-seed:
@@ -86,7 +92,7 @@ testmon-seed:
 testmon-refresh:
     #!/usr/bin/env bash
     set -euo pipefail
-    BASIC_MEMORY_TESTMON_FLAGS="{{TESTMON_REFRESH_FLAGS}}" just test
+    BASIC_MEMORY_PYTEST_FLAGS="{{TESTMON_REFRESH_FLAGS}}" just test
     uv run python scripts/testmon_cache.py refresh
 
 # Show local and shared pytest-testmon cache locations.
@@ -94,15 +100,14 @@ testmon-status:
     uv run python scripts/testmon_cache.py status
 
 # Run MCP smoke test (fast end-to-end loop)
-test-smoke: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=smoke -m smoke test-int/mcp/test_smoke_integration.py
+test-smoke:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m smoke test-int/mcp/test_smoke_integration.py
 
-# Fast local loop: lint, format, typecheck, impacted tests via pytest-testmon
+# Fast static check: auto-fix lint, format, and typecheck, but do not run tests.
 fast-check:
     just fix
     just format
     just typecheck
-    just testmon
 
 # Fast local loop with live OpenAI-backed checks disabled.
 fast-check-no-openai:
@@ -345,18 +350,18 @@ postgres-migrate:
 # Run Windows-specific tests only (only works on Windows platform)
 # These tests verify Windows-specific database optimizations (locking mode, NullPool)
 # Will be skipped automatically on non-Windows platforms
-test-windows: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=windows -m windows tests test-int
+test-windows:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m windows tests test-int
 
 # Run benchmark tests only (performance testing)
 # These are slow tests that measure sync performance with various file counts
 # Excluded from default test runs to keep CI fast
-test-benchmark: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=benchmark -m benchmark tests test-int
+test-benchmark:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m benchmark tests test-int
 
 # Run semantic search quality benchmarks (all combos)
-test-semantic: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=semantic -m semantic test-int/semantic/
+test-semantic:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic test-int/semantic/
 
 # Run semantic benchmarks with JSON artifact output, then show report
 test-semantic-report:
@@ -368,8 +373,8 @@ test-litellm-live *args:
     BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_LITELLM_INTEGRATION=1 PYTHONPATH=test-int:src uv run python -m semantic.litellm_live_harness {{args}}
 
 # Run semantic benchmarks (Postgres combos only)
-test-semantic-postgres: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=semantic-postgres -m semantic -k postgres test-int/semantic/
+test-semantic-postgres:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic -k postgres test-int/semantic/
 
 # View semantic benchmark results (rich formatted table)
 # Usage: just semantic-report [--filter-combo sqlite] [--filter-suite paraphrase] [--sort-by avg_latency_ms]
@@ -385,8 +390,8 @@ benchmark-compare baseline candidate *args:
 
 # Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
 # Use this before releasing to ensure everything works across all backends and platforms
-test-all: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=all tests test-int
+test-all:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} tests test-int
 
 # Generate HTML coverage report
 coverage:
@@ -511,8 +516,8 @@ telemetry-smoke:
 update-deps:
     uv sync --upgrade
 
-# Run all code quality checks and tests
-check: lint format typecheck test
+# Run static code quality checks. Use `just test` for the actual test suites.
+check: lint format typecheck
 
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
