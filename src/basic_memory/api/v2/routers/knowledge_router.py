@@ -12,12 +12,14 @@ Key improvements:
 
 import os
 import pathlib
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
 from basic_memory import db
+from basic_memory.cloud import NoteContentMutationServiceError
 from basic_memory.ignore_utils import (
     IGNORED_PATH_REJECTION_DETAIL,
     load_gitignore_patterns,
@@ -28,6 +30,8 @@ from basic_memory.deps import (
     FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
     LinkResolverV2ExternalDep,
+    NoteContentMaterializationProviderDep,
+    NoteContentMutationServiceDep,
     NoteContentQueryServiceDep,
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
@@ -510,9 +514,12 @@ async def get_entity_by_id(
 @router.post("/entities", response_model=EntityResponseV2)
 async def create_entity(
     project_id: ProjectExternalIdPathDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
     data: Entity,
-    entity_service: EntityServiceV2ExternalDep,
-    search_service: SearchServiceV2ExternalDep,
+    note_content_mutation_service: NoteContentMutationServiceDep,
+    note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     app_config: AppConfigDep,
 ) -> EntityResponseV2:
@@ -534,24 +541,29 @@ async def create_entity(
             "API v2 request", endpoint="create_entity", note_type=data.note_type, title=data.title
         )
 
-        # Note writes are now internally consistent before the response returns. We only leave
-        # truly derived work, like semantic vectors, on the async scheduler.
-        write_result = await entity_service.create_entity_with_content(data)
-        entity = write_result.entity
-        await search_service.index_entity(entity, content=write_result.search_content)
+        try:
+            accepted = await note_content_mutation_service.create_note(
+                project_external_id=project_external_id,
+                data=data,
+                user_profile_id=None,
+                source="api",
+            )
+        except NoteContentMutationServiceError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+
+        await note_content_materialization_provider.materialize_write_change(accepted)
+        result = EntityResponseV2.model_validate(
+            runtime_note_content_payload_as_dict(accepted.payload)
+        )
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
             app_config=app_config,
-            entity_id=entity.id,
+            entity_id=result.id,
             project_id=project_id,
         )
 
-        result = EntityResponseV2.model_validate(entity)
-        # The write service already returns the canonical markdown accepted for this request.
-        result = result.model_copy(update={"content": write_result.content})
-
         logger.info(
-            f"API v2 response: endpoint='create_entity' external_id={entity.external_id}, title={result.title}, permalink={result.permalink}, status_code=201"
+            f"API v2 response: endpoint='create_entity' external_id={result.external_id}, title={result.title}, permalink={result.permalink}, status_code=201"
         )
         return result
 

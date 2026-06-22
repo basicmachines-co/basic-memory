@@ -14,7 +14,9 @@ from typing import Annotated, Any, Coroutine, Protocol
 
 from fastapi import Depends
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.deps.config import AppConfigDep
 from basic_memory.deps.db import SessionMakerDep
 from basic_memory.deps.projects import (
@@ -37,16 +39,33 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
-from basic_memory.cloud import NoteContentQueryService
+from basic_memory.cloud import (
+    LocalNoteContentMaterializationProvider,
+    NoteContentMutationService,
+    NoteContentQueryService,
+)
 from basic_memory.index import (
     LocalProjectIndexObservation,
     LocalProjectIndexRunner,
     ProjectIndexCoordinatorResult,
     build_local_markdown_file_indexer,
 )
-from basic_memory.indexing import BatchIndexer, IndexFileExecutor, StorageIndexFileWriter
+from basic_memory.indexing import (
+    AcceptedNoteMutationDependencies,
+    AcceptedNoteMutationMovePolicy,
+    AcceptedNoteMutationPreparer,
+    BatchIndexer,
+    IndexFileExecutor,
+    StorageIndexFileWriter,
+    SystemAcceptedNoteMutationClock,
+    build_default_accepted_note_repositories,
+)
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
+from basic_memory.models import Project
+from basic_memory.repository import ObservationRepository, RelationRepository
+from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas import ProjectIndexRunResponse
 from basic_memory.services import EntityService, ProjectService
 from basic_memory.services.context_service import ContextService
@@ -215,6 +234,99 @@ async def get_note_content_query_service(
 
 NoteContentQueryServiceDep = Annotated[
     NoteContentQueryService, Depends(get_note_content_query_service)
+]
+
+
+@dataclass(frozen=True, slots=True)
+class LocalAcceptedNotePreparerFactory:
+    """Construct prepare-only note semantics for local accepted-note mutations."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    app_config: BasicMemoryConfig
+
+    def create_note_preparer(self, project: Project) -> AcceptedNoteMutationPreparer:
+        entity_parser = EntityParser(Path(project.path))
+        markdown_processor = MarkdownProcessor(entity_parser, app_config=self.app_config)
+        file_service = FileService(
+            Path(project.path),
+            markdown_processor,
+            app_config=self.app_config,
+        )
+        entity_repository = EntityRepository(project_id=project.id)
+        search_repository = create_search_repository(
+            self.session_maker,
+            project_id=project.id,
+            app_config=self.app_config,
+        )
+        search_service = SearchService(
+            search_repository,
+            entity_repository,
+            file_service,
+            self.session_maker,
+        )
+        link_resolver = LinkResolver(
+            entity_repository=entity_repository,
+            search_service=search_service,
+            session_maker=self.session_maker,
+        )
+        return EntityService(
+            entity_repository=entity_repository,
+            observation_repository=ObservationRepository(project_id=project.id),
+            relation_repository=RelationRepository(project_id=project.id),
+            entity_parser=entity_parser,
+            file_service=file_service,
+            link_resolver=link_resolver,
+            session_maker=self.session_maker,
+            search_service=search_service,
+            app_config=self.app_config,
+        )
+
+
+async def get_note_content_mutation_service(
+    project_repository: ProjectRepositoryDep,
+    session_maker: SessionMakerDep,
+    app_config: AppConfigDep,
+) -> NoteContentMutationService:
+    """Create the local accepted-note mutation facade for API routes."""
+    accepted_note_repositories = build_default_accepted_note_repositories()
+    return NoteContentMutationService(
+        session_maker=session_maker,
+        mutation_dependencies=AcceptedNoteMutationDependencies(
+            project_repository=project_repository,
+            lookup_repositories=accepted_note_repositories,
+            preparer_factory=LocalAcceptedNotePreparerFactory(
+                session_maker=session_maker,
+                app_config=app_config,
+            ),
+            write_repositories=accepted_note_repositories,
+            clock=SystemAcceptedNoteMutationClock(),
+            move_policy=AcceptedNoteMutationMovePolicy(
+                disable_permalinks=app_config.disable_permalinks,
+                update_permalinks_on_move=app_config.update_permalinks_on_move,
+            ),
+        ),
+    )
+
+
+NoteContentMutationServiceDep = Annotated[
+    NoteContentMutationService, Depends(get_note_content_mutation_service)
+]
+
+
+async def get_note_content_materialization_provider(
+    file_service: FileServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
+) -> LocalNoteContentMaterializationProvider:
+    """Create the local inline materializer for accepted-note route writes."""
+    return LocalNoteContentMaterializationProvider(
+        session_maker=session_maker,
+        file_service=file_service,
+    )
+
+
+NoteContentMaterializationProviderDep = Annotated[
+    LocalNoteContentMaterializationProvider,
+    Depends(get_note_content_materialization_provider),
 ]
 
 

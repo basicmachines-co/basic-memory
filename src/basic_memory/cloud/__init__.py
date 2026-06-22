@@ -14,6 +14,9 @@ from basic_memory.cloud.directory_deletes import (
 from basic_memory.cloud.note_content_reads import (
     NoteContentQueryService,
 )
+from basic_memory.cloud.note_content_materialization import (
+    LocalNoteContentMaterializationProvider,
+)
 from basic_memory.cloud.note_content_writes import (
     NoteContentMutationService,
     NoteContentMutationServiceError,
@@ -33,6 +36,7 @@ __all__ = [
     "NoteContentMutationService",
     "NoteContentMutationServiceError",
     "NoteContentQueryService",
+    "LocalNoteContentMaterializationProvider",
     "ProjectDeleteAcceptanceError",
     "ProjectDeleteAcceptanceRequest",
     "ProjectDeleteAcceptanceService",

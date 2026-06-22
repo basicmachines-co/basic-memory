@@ -68,18 +68,35 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\ntelemetry content"
     )
 
-    class FakeEntityService:
-        async def create_entity_with_content(self, data):
+    class FakeNoteContentMutationService:
+        async def create_note(self, **kwargs):
             return SimpleNamespace(
-                entity=entity,
-                content=response_content,
-                search_content="telemetry content",
+                status_code=201,
+                payload={
+                    "external_id": entity.external_id,
+                    "id": entity.id,
+                    "title": entity.title,
+                    "note_type": entity.note_type,
+                    "content_type": entity.content_type,
+                    "permalink": entity.permalink,
+                    "file_path": entity.file_path,
+                    "content": response_content,
+                    "entity_metadata": entity.entity_metadata,
+                    "observations": [],
+                    "relations": [],
+                    "created_at": entity.created_at.isoformat(),
+                    "updated_at": entity.updated_at.isoformat(),
+                    "created_by": entity.created_by,
+                    "last_updated_by": entity.last_updated_by,
+                    "api_version": "v2",
+                },
+                materialization=object(),
+                file_delete=None,
             )
 
-    class FakeSearchService:
-        async def index_entity(self, entity, content=None):
-            assert content == "telemetry content"
-            return None
+    class FakeNoteContentMaterializationProvider:
+        async def materialize_write_change(self, accepted):
+            assert accepted.materialization is not None
 
     class FakeVectorSyncScheduler:
         def schedule_entity_vector_sync(self, *args, **kwargs):
@@ -87,6 +104,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
 
     result = await knowledge_router_module.create_entity(
         project_id=123,
+        project_external_id="project-123",
         data=Entity(
             title="Telemetry Entity",
             directory="notes",
@@ -94,8 +112,8 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
             content_type="text/markdown",
             content="telemetry content",
         ),
-        entity_service=cast(Any, FakeEntityService()),
-        search_service=cast(Any, FakeSearchService()),
+        note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
+        note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
     )

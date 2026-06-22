@@ -294,6 +294,10 @@ async def test_get_entity_by_id_allows_long_relation_type(
                 "relation_type": long_relation_type,
             },
         )
+        await NoteContentRepository(project_id=relation_repository.project_id).delete_by_entity_id(
+            session,
+            source_entity.id,
+        )
 
     response = await client.get(f"{v2_project_url}/knowledge/entities/{source_entity.external_id}")
 
@@ -404,10 +408,42 @@ async def test_create_entity_returns_content(client: AsyncClient, file_service, 
 
 
 @pytest.mark.asyncio
-async def test_create_entity_with_observations_and_relations(
+async def test_create_entity_accepts_note_content_and_materializes_file(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    session_maker,
+):
+    """Create accepts markdown into note_content before local file materialization."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "AcceptedCreate",
+            "directory": "test",
+            "content": "Accepted create content",
+        },
+    )
+
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.content is not None
+
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        note_content = await repository.get_by_entity_id(session, entity.id)
+
+    assert note_content is not None
+    assert note_content.db_version == 1
+    assert note_content.markdown_content == entity.content
+    assert note_content.file_write_status == "synced"
+    assert note_content.file_checksum is not None
+
+
+@pytest.mark.asyncio
+async def test_create_entity_returns_accepted_content_before_async_indexing(
     client: AsyncClient, file_service, v2_project_url
 ):
-    """Test creating an entity with observations and relations via v2."""
+    """Accepted-note creates return content before async indexing parses relations."""
     data = {
         "title": "TestV2Complex",
         "directory": "test",
@@ -432,13 +468,11 @@ async def test_create_entity_with_observations_and_relations(
     assert isinstance(entity.id, int)
     assert entity.api_version == "v2"
 
-    assert len(entity.observations) == 1
-    assert entity.observations[0].category == "note"
-    assert entity.observations[0].content == "This is a test observation #tag1"
-    assert entity.observations[0].tags == ["tag1"]
-
-    assert len(entity.relations) == 1
-    assert entity.relations[0].relation_type == "related to"
+    assert entity.content is not None
+    assert "This is a test observation #tag1" in entity.content
+    assert '"related to" [[OtherEntity]]' in entity.content
+    assert entity.observations == []
+    assert entity.relations == []
 
 
 @pytest.mark.asyncio
