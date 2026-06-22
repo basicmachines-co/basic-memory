@@ -808,6 +808,102 @@ Updated by atomic write.
 
 
 @pytest.mark.asyncio
+async def test_handle_changes_with_local_event_index_runtime_updates_atomic_relations(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+):
+    """Atomic-write delete events should reindex markdown relations from current content."""
+
+    target_path = project_config.home / "target-note.md"
+    main_path = project_config.home / "atomic-relations.md"
+    await create_test_file(
+        target_path,
+        """---
+type: note
+title: Target Note
+---
+# Target Note
+""",
+    )
+    await create_test_file(
+        main_path,
+        """---
+type: note
+title: Atomic Relations
+---
+# Atomic Relations
+
+- relates_to [[Target Note]]
+""",
+    )
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index atomic relation test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(session, "atomic-relations.md")
+        target = await entity_repository.get_by_file_path(session, "target-note.md")
+    assert before is not None
+    assert target is not None
+    assert {relation.relation_type for relation in before.outgoing_relations} == {"relates_to"}
+    before_checksum = before.checksum
+
+    await create_test_file(
+        main_path,
+        """---
+type: note
+title: Atomic Relations
+---
+# Atomic Relations
+
+- relates_to [[Target Note]]
+- references [[Target Note]]
+""",
+    )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.deleted, str(main_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        after = await entity_repository.get_by_file_path(session, "atomic-relations.md")
+
+    assert after is not None
+    assert after.id == before.id
+    assert after.external_id == before.external_id
+    assert after.checksum != before_checksum
+    assert {relation.relation_type for relation in after.outgoing_relations} == {
+        "references",
+        "relates_to",
+    }
+    assert {relation.to_id for relation in after.outgoing_relations} == {target.id}
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_handle_changes_with_local_event_index_runtime_indexes_regular_file(
     app_config: BasicMemoryConfig,
     project_repository,
