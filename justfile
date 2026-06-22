@@ -112,6 +112,13 @@ fast-check-no-openai:
 # Runtime / Event Indexing Refactor
 # ==============================================================================
 
+# Focused portable storage-event contract tests.
+storage-event-contract-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/test_runtime_storage_events.py \
+        tests/index/test_storage_event_operation_processor.py \
+        tests/index/test_storage_event_orchestration.py
+
 # Focused provider-neutral project-index orchestration surface tests.
 project-index-surface-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -285,9 +292,8 @@ local-event-index-stress-test:
         tests/index/test_local_watch_stress_parity.py
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
-event-index-contract-test: filesystem-event-temp-file-test local-event-index-atomic-relation-test local-event-index-stress-test
+event-index-contract-test: storage-event-contract-test filesystem-event-temp-file-test local-event-index-atomic-relation-test local-event-index-stress-test
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/test_runtime_storage_events.py \
         tests/indexing/test_external_file_delete_runner.py \
         tests/index/test_filesystem_events.py \
         tests/index/test_inline_storage_event_processor.py \
@@ -295,8 +301,6 @@ event-index-contract-test: filesystem-event-temp-file-test local-event-index-ato
         tests/index/test_local_watch_regular_file_parity.py \
         tests/index/test_local_watch_orchestration.py \
         tests/index/test_repository_storage_event_project_resolution.py \
-        tests/index/test_storage_event_operation_processor.py \
-        tests/index/test_storage_event_orchestration.py \
         tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
         tests/sync/test_watch_service.py::test_handle_changes_with_event_index_runtime_records_failed_counts \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
