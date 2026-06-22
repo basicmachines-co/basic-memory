@@ -12,9 +12,14 @@ from basic_memory.index import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
+    plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
-from basic_memory.runtime import ProjectRuntimeReference, RuntimeStorageEventOperation
+from basic_memory.runtime import (
+    ProjectRuntimeReference,
+    RuntimeStorageEventOperation,
+    RuntimeStorageEventProcessingResult,
+)
 
 
 def project_reference(project_path: str) -> ProjectRuntimeReference:
@@ -147,3 +152,36 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     assert request.project_root == project_root.resolve()
     assert request.project_prefix == "configured-project-root"
     assert [event.object_key for event in source.events()] == ["configured-project-root/notes/a.md"]
+
+
+def test_local_watch_status_update_plans_success() -> None:
+    update = plan_local_watch_event_index_status_update(
+        project_prefix="configured-project-root",
+        result=RuntimeStorageEventProcessingResult.empty().with_processed(2).with_skipped(1),
+    )
+
+    assert update.path == "configured-project-root"
+    assert update.action == "index"
+    assert update.status == "success"
+    assert update.error is None
+    assert update.synced_files_increment == 2
+    assert update.error_count_increment == 0
+    assert update.record_last_error is False
+
+
+def test_local_watch_status_update_plans_failure_details() -> None:
+    update = plan_local_watch_event_index_status_update(
+        project_prefix="configured-project-root",
+        result=RuntimeStorageEventProcessingResult.empty()
+        .with_processed(1)
+        .with_failed(2)
+        .with_skipped(3),
+    )
+
+    assert update.path == "configured-project-root"
+    assert update.action == "index"
+    assert update.status == "error"
+    assert update.error == "event-index processed=1 failed=2 skipped=3"
+    assert update.synced_files_increment == 1
+    assert update.error_count_increment == 2
+    assert update.record_last_error is True

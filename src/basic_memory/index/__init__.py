@@ -33,10 +33,12 @@ from basic_memory.index.inline_operations import (
 )
 from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
+    LocalWatchEventIndexStatusUpdate,
     LocalWatchProjectSource,
     LocalWatchStorageEventSource,
     LocalWatchStorageEventIndexRuntime,
     local_project_prefix,
+    plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
 from basic_memory.index.local_moves import (
@@ -120,6 +122,7 @@ __all__ = [
     "LocalProjectIndexRuntimeFactory",
     "LocalProjectIndexRuntime",
     "LocalWatchEventIndexRequest",
+    "LocalWatchEventIndexStatusUpdate",
     "LocalWatchProjectSource",
     "LocalWatchStorageEventSource",
     "LocalWatchEventIndexRuntimeFactory",
@@ -173,6 +176,7 @@ __all__ = [
     "local_storage_events_from_watchfiles_changes",
     "local_project_index_file_paths",
     "local_project_prefix",
+    "plan_local_watch_event_index_status_update",
     "project_index_workflow_logical_key",
     "run_local_watch_event_indexing",
     "run_local_project_index",

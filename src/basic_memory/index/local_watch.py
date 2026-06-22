@@ -101,6 +101,48 @@ class LocalWatchEventIndexRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class LocalWatchEventIndexStatusUpdate:
+    """Watch-status mutation planned from a local event-index result."""
+
+    path: ProjectPath
+    status: str
+    synced_files_increment: int
+    error_count_increment: int
+    error: str | None = None
+    action: str = "index"
+
+    @property
+    def record_last_error(self) -> bool:
+        return self.error_count_increment > 0
+
+
+def plan_local_watch_event_index_status_update(
+    *,
+    project_prefix: ProjectPath,
+    result: RuntimeStorageEventProcessingResult,
+) -> LocalWatchEventIndexStatusUpdate:
+    """Plan the local watch-status update for an event-index result."""
+    if result.counts.failed:
+        return LocalWatchEventIndexStatusUpdate(
+            path=project_prefix,
+            status="error",
+            synced_files_increment=result.counts.processed,
+            error_count_increment=result.counts.failed,
+            error=(
+                f"event-index processed={result.counts.processed} "
+                f"failed={result.counts.failed} skipped={result.counts.skipped}"
+            ),
+        )
+
+    return LocalWatchEventIndexStatusUpdate(
+        path=project_prefix,
+        status="success",
+        synced_files_increment=result.counts.processed,
+        error_count_increment=0,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class LocalWatchStorageEventIndexRuntime(StorageEventIndexRuntime):
     """Storage-event runtime with local watcher move detection."""
 

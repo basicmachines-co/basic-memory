@@ -29,6 +29,7 @@ from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_pat
 from basic_memory.index import (
     LocalWatchEventIndexRequest,
     StorageEventIndexRuntime,
+    plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
 from basic_memory.models import Project
@@ -687,22 +688,19 @@ class WatchService:
         )
 
         self.state.last_scan = datetime.now()
-        self.state.synced_files += result.counts.processed
-        status = "success"
-        error = None
-        if result.counts.failed:
-            self.state.error_count += result.counts.failed
+        status_update = plan_local_watch_event_index_status_update(
+            project_prefix=request.project_prefix,
+            result=result,
+        )
+        self.state.synced_files += status_update.synced_files_increment
+        if status_update.record_last_error:
+            self.state.error_count += status_update.error_count_increment
             self.state.last_error = datetime.now()
-            status = "error"
-            error = (
-                f"event-index processed={result.counts.processed} "
-                f"failed={result.counts.failed} skipped={result.counts.skipped}"
-            )
         self.state.add_event(
-            path=request.project_prefix,
-            action="index",
-            status=status,
-            error=error,
+            path=status_update.path,
+            action=status_update.action,
+            status=status_update.status,
+            error=status_update.error,
         )
         duration_ms = int((time.time() - start_time) * 1000)
         logger.info(
