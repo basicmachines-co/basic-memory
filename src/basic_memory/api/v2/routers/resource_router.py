@@ -70,7 +70,7 @@ async def get_resource_content(
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
 
-        note_resource = await note_content_query_service.get_note_resource(
+        note_resource = await note_content_query_service.get_note_resource_with_read_repair(
             project_external_id=project_id,
             entity_external_id=entity_id,
             session=session,

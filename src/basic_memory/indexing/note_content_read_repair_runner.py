@@ -365,7 +365,18 @@ def note_content_response_payload_from_read_view[
     read_plan = plan_runtime_note_content_read(view.entity, view.note_content)
     if read_plan.action is RuntimeNoteContentReadAction.entity_metadata:
         return EntityResponseV2.model_validate(read_plan.require_entity_metadata()).model_dump(
-            mode="json"
+            mode="json",
+            exclude={
+                "db_version",
+                "db_checksum",
+                "file_version",
+                "file_checksum",
+                "file_write_status",
+                "last_source",
+                "file_updated_at",
+                "last_materialization_error",
+                "sync_error",
+            },
         )
 
     if read_plan.action is not RuntimeNoteContentReadAction.accepted_note:

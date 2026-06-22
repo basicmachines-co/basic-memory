@@ -84,6 +84,36 @@ class NoteContentQueryService:
             )
         return note_content_response_payload_from_read_view(note_view)
 
+    async def get_note_entity_payload_with_read_repair(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        session: AsyncSession | None = None,
+        source: str = "read_repair",
+    ) -> RuntimeNoteContentResponsePayload | None:
+        """Return entity payload, repairing missing note_content when a reader exists."""
+        payload = await self.get_note_entity_payload(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+            session=session,
+        )
+        if payload is not None or self.read_repair_file_reader is None:
+            return payload
+
+        repaired = await self.reconcile_note_content_from_file(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+            source=source,
+        )
+        if not repaired:
+            return None
+        return await self.get_note_entity_payload(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+            session=session,
+        )
+
     async def get_note_resource(
         self,
         *,
@@ -108,6 +138,36 @@ class NoteContentQueryService:
             return None
 
         return note_content_resource_from_read_view(note_view)
+
+    async def get_note_resource_with_read_repair(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        session: AsyncSession | None = None,
+        source: str = "read_repair",
+    ) -> RuntimeNoteContentResource | None:
+        """Return markdown resource, repairing missing note_content when possible."""
+        resource = await self.get_note_resource(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+            session=session,
+        )
+        if resource is not None or self.read_repair_file_reader is None:
+            return resource
+
+        repaired = await self.reconcile_note_content_from_file(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+            source=source,
+        )
+        if not repaired:
+            return None
+        return await self.get_note_resource(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+            session=session,
+        )
 
     async def reconcile_note_content_from_file(
         self,

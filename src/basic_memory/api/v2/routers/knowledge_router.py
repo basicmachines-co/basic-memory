@@ -494,7 +494,7 @@ async def get_entity_by_id(
         if project is None:  # pragma: no cover
             raise HTTPException(status_code=404, detail=f"Project with ID {project_id} not found")
 
-        note_payload = await note_content_query_service.get_note_entity_payload(
+        note_payload = await note_content_query_service.get_note_entity_payload_with_read_repair(
             project_external_id=project.external_id,
             entity_external_id=entity_id,
             session=session,
