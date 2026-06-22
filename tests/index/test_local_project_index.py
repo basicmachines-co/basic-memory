@@ -777,6 +777,106 @@ async def test_local_project_index_move_repairs_observation_search_permalinks(
     assert search_rows[0].file_path == "archive/observed.md"
 
 
+async def test_local_project_index_resolves_order_dependent_relations_after_batches(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project indexing resolves relations after all batches finish."""
+    del config_manager
+
+    concept_dir = project_config.home / "concept"
+    concept_dir.mkdir(parents=True, exist_ok=True)
+    (concept_dir / "entity_a.md").write_text(
+        """---
+type: knowledge
+permalink: concept/entity-a
+---
+# Entity A
+
+## Relations
+- depends_on [[concept/entity-b]]
+- depends_on [[concept/entity-c]]
+""",
+        encoding="utf-8",
+    )
+    (concept_dir / "entity_b.md").write_text(
+        """---
+type: knowledge
+permalink: concept/entity-b
+---
+# Entity B
+
+## Relations
+- depends_on [[concept/entity-c]]
+""",
+        encoding="utf-8",
+    )
+    (concept_dir / "entity_c.md").write_text(
+        """---
+type: knowledge
+permalink: concept/entity-c
+---
+# Entity C
+
+## Relations
+- depends_on [[concept/entity-a]]
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local relation parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=1),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 3
+    assert result.enqueued_batches == 3
+
+    async with db.scoped_session(session_maker) as session:
+        entity_a = await entity_repository.get_by_file_path(session, "concept/entity_a.md")
+        entity_b = await entity_repository.get_by_file_path(session, "concept/entity_b.md")
+        entity_c = await entity_repository.get_by_file_path(session, "concept/entity_c.md")
+        relation_search_rows = await search_service.repository.search(
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+
+    assert entity_a is not None
+    assert entity_b is not None
+    assert entity_c is not None
+
+    a_targets = {relation.to_id for relation in entity_a.outgoing_relations}
+    b_targets = {relation.to_id for relation in entity_b.outgoing_relations}
+    c_targets = {relation.to_id for relation in entity_c.outgoing_relations}
+
+    assert a_targets == {entity_b.id, entity_c.id}
+    assert b_targets == {entity_c.id}
+    assert c_targets == {entity_a.id}
+
+    a_incoming_sources = {relation.from_id for relation in entity_a.incoming_relations}
+    b_incoming_sources = {relation.from_id for relation in entity_b.incoming_relations}
+    c_incoming_sources = {relation.from_id for relation in entity_c.incoming_relations}
+
+    assert a_incoming_sources == {entity_c.id}
+    assert b_incoming_sources == {entity_a.id}
+    assert c_incoming_sources == {entity_a.id, entity_b.id}
+    assert {row.to_id for row in relation_search_rows} == {entity_a.id, entity_b.id, entity_c.id}
+
+
 async def test_local_project_index_directory_delete_removes_notes_and_repairs_survivors(
     test_project: Project,
     project_config,
