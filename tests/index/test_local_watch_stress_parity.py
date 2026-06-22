@@ -8,6 +8,7 @@ from watchfiles import Change
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.index import LocalWatchEventIndexRuntimeFactory
+from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.sync.watch_service import WatchService
 
 
@@ -187,3 +188,70 @@ New content for note {index}.
     assert watch_service.state.synced_files == 21
     assert watch_service.state.recent_events[0].status == "success"
     assert watch_service.state.recent_events[1].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_local_event_index_handles_rapid_atomic_writes_to_same_file(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+) -> None:
+    """Rapid atomic-write temp noise should settle to the current destination file."""
+    tmp1_path = project_config.home / "document.1.tmp"
+    tmp2_path = project_config.home / "document.2.tmp"
+    final_path = project_config.home / "document.md"
+    await create_test_file(tmp1_path, "# First Version\n")
+    await create_test_file(tmp2_path, "# Second Version\n")
+
+    tmp1_path.replace(final_path)
+    tmp2_path.replace(final_path)
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index rapid atomic-write test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.added, str(tmp1_path)),
+            (Change.deleted, str(tmp1_path)),
+            (Change.added, str(tmp2_path)),
+            (Change.deleted, str(tmp2_path)),
+            (Change.added, str(final_path)),
+            (Change.modified, str(final_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        final_entity = await entity_repository.get_by_file_path(session, "document.md")
+        final_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "document.md",
+        )
+        tmp1_entity = await entity_repository.get_by_file_path(session, "document.1.tmp")
+        tmp2_entity = await entity_repository.get_by_file_path(session, "document.2.tmp")
+
+    assert final_entity is not None
+    assert final_entity.title == "document"
+    assert final_content is not None
+    assert "# Second Version" in final_content.markdown_content
+    assert tmp1_entity is None
+    assert tmp2_entity is None
+    assert watch_service.state.synced_files == 1
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
