@@ -139,6 +139,8 @@ async def run_storage_event_source_indexing(
     result = RuntimeStorageEventProcessingResult.empty()
 
     for bucket_name, events in source.events_by_bucket().items():
+        if not events:
+            continue
         try:
             bucket_result = await runtime.bucket_processor.process_bucket_events(
                 bucket_name,
@@ -162,6 +164,8 @@ async def run_storage_event_bucket_indexing(
     result = RuntimeStorageEventProcessingResult.empty()
 
     for bucket_name, events in source.events_by_bucket().items():
+        if not events:
+            continue
         try:
             resolution = await runtime.bucket_resolver.resolve_bucket_context(
                 bucket_name,

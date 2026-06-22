@@ -220,6 +220,25 @@ async def test_run_storage_event_source_indexing_routes_bucket_batches_in_order(
 
 
 @pytest.mark.asyncio
+async def test_run_storage_event_source_indexing_ignores_empty_bucket_batches() -> None:
+    processor = RecordingBucketProcessor()
+
+    result = await run_storage_event_source_indexing(
+        StaticStorageEventSource(
+            {
+                "empty-bucket": (),
+                "alpha-bucket": (storage_event(key="alpha/notes/a.md"),),
+            }
+        ),
+        StorageEventSourceIndexRuntime(bucket_processor=processor),
+    )
+
+    assert result.as_dict() == {"processed": 1, "failed": 0, "skipped": 0}
+    assert processor.calls == [("alpha-bucket", ("alpha/notes/a.md",))]
+    assert processor.failures == []
+
+
+@pytest.mark.asyncio
 async def test_run_storage_event_source_indexing_counts_bucket_failures() -> None:
     processor = RecordingBucketProcessor(fail_bucket="alpha-bucket")
 
@@ -281,6 +300,32 @@ async def test_run_storage_event_bucket_indexing_resolves_contexts_and_counts_sk
         ("alpha-bucket", "alpha-runtime", ("alpha/notes/a.md", "alpha/notes/b.md")),
         ("beta-bucket", "beta-runtime", ("beta/notes/d.md",)),
     ]
+    assert processor.failures == []
+
+
+@pytest.mark.asyncio
+async def test_run_storage_event_bucket_indexing_ignores_empty_bucket_batches() -> None:
+    resolver = RecordingBucketContextResolver(
+        contexts_by_bucket={"alpha-bucket": BucketRuntimeContext("alpha-runtime")}
+    )
+    processor = RecordingBucketContextProcessor()
+
+    result = await run_storage_event_bucket_indexing(
+        StaticStorageEventSource(
+            {
+                "empty-bucket": (),
+                "alpha-bucket": (storage_event(key="alpha/notes/a.md"),),
+            }
+        ),
+        StorageEventBucketIndexRuntime(
+            bucket_resolver=resolver,
+            bucket_processor=processor,
+        ),
+    )
+
+    assert result.as_dict() == {"processed": 1, "failed": 0, "skipped": 0}
+    assert resolver.requested_buckets == [("alpha-bucket", 1)]
+    assert processor.calls == [("alpha-bucket", "alpha-runtime", ("alpha/notes/a.md",))]
     assert processor.failures == []
 
 
