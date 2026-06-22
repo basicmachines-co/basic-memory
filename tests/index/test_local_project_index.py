@@ -890,6 +890,95 @@ type: note
     assert stale_relation_rows == []
 
 
+async def test_local_project_index_resolves_duplicate_permalink_update(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Updated notes with duplicate permalinks should repair to their current path."""
+    del config_manager
+
+    one_path = project_config.home / "one.md"
+    two_path = project_config.home / "two.md"
+    one_path.write_text(
+        """---
+permalink: one
+---
+
+original one content
+""",
+        encoding="utf-8",
+    )
+    two_path.write_text(
+        """---
+permalink: two
+---
+
+original two content
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local permalink conflict parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+    assert "permalink: one" in one_path.read_text(encoding="utf-8")
+    assert "permalink: two" in two_path.read_text(encoding="utf-8")
+
+    two_path.write_text(
+        """---
+title: two.md
+type: note
+permalink: one
+tags: []
+---
+
+updated two content
+""",
+        encoding="utf-8",
+    )
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.enqueued_files == 1
+    repaired_content = two_path.read_text(encoding="utf-8")
+    assert "permalink: two" in repaired_content
+    assert "permalink: one-1" not in repaired_content
+
+    async with db.scoped_session(session_maker) as session:
+        one_entity = await entity_repository.get_by_file_path(session, "one.md")
+        two_entity = await entity_repository.get_by_file_path(session, "two.md")
+        two_note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "two.md",
+        )
+
+    assert one_entity is not None
+    assert one_entity.permalink == "one"
+    assert two_entity is not None
+    assert two_entity.permalink == "two"
+    assert two_note_content is not None
+    assert "updated two content" in two_note_content.markdown_content
+    assert "permalink: two" in two_note_content.markdown_content
+
+
 @dataclass(slots=True)
 class RecordingMarkdownFileIndexer:
     indexed_paths: list[str] = field(default_factory=list)
