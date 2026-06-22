@@ -33,6 +33,7 @@ from basic_memory.indexing import (
     IndexFileRelationResolutionContext,
     IndexFileObjectMetadata,
     OrphanSearchIndex,
+    ProjectIndexMovedEntitySearchRefresher,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
     RepositoryProjectIndexMaintenanceStore,
@@ -116,6 +117,7 @@ class LocalInlineStorageEventResultRecorder:
     tenant_id: TenantId
     project: ProjectRuntimeReference
     search_service: OrphanSearchIndex[Entity]
+    relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
     relation_runtime: RelationResolutionRuntime
 
     async def index_file_completed(
@@ -168,6 +170,9 @@ class LocalInlineStorageEventResultRecorder:
         if not isinstance(result.deleted_entity, Entity):
             raise RuntimeError("Local external file delete returned an incomplete entity result")
         await self.search_service.handle_delete(result.deleted_entity)
+        await self.relation_cleanup_search_refresher.refresh_moved_entities(
+            tuple(sorted(result.relation_cleanup_entity_ids)),
+        )
 
     async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:
         logger.debug(
@@ -266,6 +271,7 @@ class LocalWatchEventIndexRuntimeFactory:
                 tenant_id=self.tenant_id,
                 project=project_ref,
                 search_service=dependencies.search_service,
+                relation_cleanup_search_refresher=moved_entity_search_refresher,
                 relation_runtime=RepositoryRelationResolutionRuntime(
                     session_maker=dependencies.session_maker,
                     relation_repository=dependencies.relation_repository,

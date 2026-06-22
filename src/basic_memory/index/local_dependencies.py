@@ -67,6 +67,8 @@ class LocalIndexEntityRepository(
 ):
     """Entity repository capabilities needed by local event/project indexing."""
 
+    project_id: ProjectId | None
+
     async def get_by_file_path(
         self,
         session: AsyncSession,

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
+from basic_memory.indexing import ExternalFileDeleteEntityDeleteResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.external_file_delete_runner as external_file_delete_runner
@@ -30,9 +31,11 @@ class FakeExternalFileEntities:
         entity: FakeDeletedEntity | None,
         *,
         delete_succeeds: bool = True,
+        relation_cleanup_entity_ids: frozenset[int] = frozenset(),
     ) -> None:
         self.entity = entity
         self.delete_succeeds = delete_succeeds
+        self.relation_cleanup_entity_ids = relation_cleanup_entity_ids
         self.find_calls: list[str] = []
         self.delete_calls: list[tuple[int, str]] = []
 
@@ -45,9 +48,14 @@ class FakeExternalFileEntities:
         *,
         entity_id: int,
         file_path: str,
-    ) -> bool:
+    ) -> ExternalFileDeleteEntityDeleteResult:
         self.delete_calls.append((entity_id, file_path))
-        return self.delete_succeeds
+        return ExternalFileDeleteEntityDeleteResult(
+            entity_deleted=self.delete_succeeds,
+            relation_cleanup_entity_ids=(
+                self.relation_cleanup_entity_ids if self.delete_succeeds else frozenset()
+            ),
+        )
 
 
 class FakeExternalFileObjects:
@@ -62,6 +70,7 @@ class FakeExternalFileObjects:
 
 class FakeEntityRepository:
     def __init__(self, entity: FakeDeletedEntity | None) -> None:
+        self.project_id: int | None = 1
         self.entity = entity
         self.get_calls: list[tuple[object, str]] = []
         self.delete_calls: list[tuple[object, dict[str, object]]] = []
@@ -103,6 +112,7 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
     session = cast(AsyncSession, object())
     session_maker = cast(async_sessionmaker[AsyncSession], object())
     scoped_session_calls: list[async_sessionmaker[AsyncSession]] = []
+    relation_cleanup_calls: list[tuple[object, int, int]] = []
 
     def fake_scoped_session(
         scoped_session_maker: async_sessionmaker[AsyncSession],
@@ -110,10 +120,24 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
         scoped_session_calls.append(scoped_session_maker)
         return FakeScopedSession(session)
 
+    async def fake_relation_cleanup_sources_for_deleted_entity(
+        cleanup_session: AsyncSession,
+        *,
+        project_id: int,
+        entity_id: int,
+    ) -> frozenset[int]:
+        relation_cleanup_calls.append((cleanup_session, project_id, entity_id))
+        return frozenset({7})
+
     monkeypatch.setattr(
         external_file_delete_runner.db,
         "scoped_session",
         fake_scoped_session,
+    )
+    monkeypatch.setattr(
+        external_file_delete_runner,
+        "relation_cleanup_sources_for_deleted_entity",
+        fake_relation_cleanup_sources_for_deleted_entity,
     )
 
     entity = FakeDeletedEntity(
@@ -135,10 +159,12 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
     )
 
     assert found == entity
-    assert deleted is True
+    assert deleted.entity_deleted is True
+    assert deleted.relation_cleanup_entity_ids == frozenset({7})
     assert scoped_session_calls == [session_maker, session_maker]
     assert repository.get_calls == [(session, "notes/deleted.md")]
     assert repository.delete_calls == [(session, {"id": 42, "file_path": "notes/deleted.md"})]
+    assert relation_cleanup_calls == [(session, 1, 42)]
 
 
 @pytest.mark.asyncio
@@ -170,6 +196,31 @@ async def test_run_external_file_delete_deletes_matching_entity() -> None:
     assert result.deleted_note.permalink == "deleted-note"
     assert entities.find_calls == ["notes/deleted.md"]
     assert objects.exists_calls == ["notes/deleted.md"]
+    assert entities.delete_calls == [(42, "notes/deleted.md")]
+
+
+@pytest.mark.asyncio
+async def test_run_external_file_delete_returns_relation_cleanup_sources() -> None:
+    entity = FakeDeletedEntity(
+        id=42,
+        external_id="note-42",
+        title="Deleted note",
+        permalink="deleted-note",
+    )
+    entities = FakeExternalFileEntities(
+        entity,
+        relation_cleanup_entity_ids=frozenset({7, 9}),
+    )
+    objects = FakeExternalFileObjects(exists=False)
+
+    result = await run_external_file_delete(
+        "notes/deleted.md",
+        entities=entities,
+        objects=objects,
+    )
+
+    assert result.entity_deleted is True
+    assert result.relation_cleanup_entity_ids == frozenset({7, 9})
     assert entities.delete_calls == [(42, "notes/deleted.md")]
 
 

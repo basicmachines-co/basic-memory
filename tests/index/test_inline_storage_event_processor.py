@@ -9,6 +9,7 @@ from basic_memory.index import (
     InlineStorageEventOperationProcessor,
 )
 from basic_memory.indexing import (
+    ExternalFileDeleteEntityDeleteResult,
     ExternalFileDeleteResult,
     FileIndexOperation,
     FileIndexPlan,
@@ -143,9 +144,9 @@ class RecordingDeleteEntities:
         *,
         entity_id: int,
         file_path: str,
-    ) -> bool:
+    ) -> ExternalFileDeleteEntityDeleteResult:
         self.delete_requests.append((entity_id, file_path))
-        return True
+        return ExternalFileDeleteEntityDeleteResult(entity_deleted=True)
 
 
 class RecordingDeleteObjects:

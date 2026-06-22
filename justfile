@@ -161,6 +161,11 @@ local-event-index-regular-file-test:
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file
 
+# Focused local event-index relation cleanup parity test.
+local-event-index-relation-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_watch_regular_file_parity.py::test_local_event_index_deletes_regular_file_relation_target_and_repairs_search
+
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 event-index-contract-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \

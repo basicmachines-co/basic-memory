@@ -13,6 +13,7 @@ from basic_memory.index import (
     run_local_project_index_for_project,
 )
 from basic_memory.models.knowledge import Entity
+from basic_memory.schemas.search import SearchItemType
 from basic_memory.sync.watch_service import WatchService
 
 
@@ -91,5 +92,96 @@ async def test_local_event_index_moves_regular_file_over_deleted_path(
     assert moved_source.permalink is None
     assert moved_source.content_type == "application/pdf"
     assert target_path.read_text(encoding="utf-8") == "source content"
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_local_event_index_deletes_regular_file_relation_target_and_repairs_search(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    search_service,
+    monkeypatch,
+) -> None:
+    """Deleting a regular-file relation target should repair the surviving note search rows."""
+    asset_path = project_config.home / "asset.pdf"
+    source_path = project_config.home / "source.md"
+    await create_test_file(asset_path, "pdf-ish")
+    await create_test_file(
+        source_path,
+        """---
+type: note
+title: Source
+---
+# Source
+
+- relates_to [[asset.pdf]]
+""",
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index relation delete parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        source_before = await entity_repository.get_by_file_path(session, "source.md")
+        target_before = await entity_repository.get_by_file_path(session, "asset.pdf")
+        assert source_before is not None
+        assert target_before is not None
+        assert len(source_before.outgoing_relations) == 1
+        relation_before = source_before.outgoing_relations[0]
+        assert relation_before.to_id == target_before.id
+        assert relation_before.permalink is not None
+        relation_search_rows = await search_service.repository.search(
+            permalink=relation_before.permalink,
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+        assert len(relation_search_rows) == 1
+
+        source_entity_id = source_before.id
+        target_entity_id = target_before.id
+        relation_permalink = relation_before.permalink
+
+    asset_path.unlink()
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, {(Change.deleted, str(asset_path))})
+
+    async with db.scoped_session(session_maker) as session:
+        deleted_target = await session.get(Entity, target_entity_id)
+        source_after = await entity_repository.get_by_file_path(session, "source.md")
+        stale_relation_rows = await search_service.repository.search(
+            permalink=relation_permalink,
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+
+    assert deleted_target is None
+    assert source_after is not None
+    assert source_after.id == source_entity_id
+    assert source_after.outgoing_relations == []
+    assert stale_relation_rows == []
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"

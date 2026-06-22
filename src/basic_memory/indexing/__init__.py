@@ -147,6 +147,7 @@ from basic_memory.indexing.embedding_index_planning import (
 )
 from basic_memory.indexing.external_file_delete_runner import (
     ExternalFileDeleteEntities,
+    ExternalFileDeleteEntityDeleteResult,
     ExternalFileDeleteObjects,
     ExternalFileDeleteResult,
     run_external_file_delete,
@@ -733,6 +734,7 @@ __all__ = [
     "INDEX_EMBEDDINGS_ENTRYPOINT",
     "EntityId",
     "ExternalFileDeleteEntities",
+    "ExternalFileDeleteEntityDeleteResult",
     "ExternalFileDeleteObjects",
     "ExternalFileDeleteResult",
     "FileIndexDecision",
