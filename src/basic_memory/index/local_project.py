@@ -93,7 +93,11 @@ def local_project_index_file_paths(
     file_paths: list[str] = []
 
     for path in project_root.rglob("*"):
-        if not path.is_file():
+        try:
+            is_file = path.is_file()
+        except OSError:
+            continue
+        if not is_file:
             continue
         relative_path = path.relative_to(project_root).as_posix()
         if local_relative_path_is_filtered(relative_path):

@@ -137,6 +137,11 @@ local-project-index-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py
 
+# Focused local project-index scan parity tests.
+local-project-index-scan-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_scan_parity.py
+
 # Focused local project-index directory delete parity test.
 local-project-index-directory-delete-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -250,7 +255,7 @@ project-index-cli-test:
         tests/cli/test_status_wait_timeout.py
 
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-path-conflict-test local-project-index-thematic-break-test local-project-index-observation-category-test local-project-index-wikilink-stability-test local-project-index-startup-test project-index-cli-test
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-scan-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-path-conflict-test local-project-index-thematic-break-test local-project-index-observation-category-test local-project-index-wikilink-stability-test local-project-index-startup-test project-index-cli-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:
