@@ -209,6 +209,11 @@ local-project-index-relation-parity-test:
         tests/index/test_local_project_index.py::test_local_project_index_resolves_order_dependent_relations_after_batches \
         tests/index/test_local_project_index.py::test_local_project_index_deduplicates_relations_by_type
 
+# Focused local project-index observation category parity test.
+local-project-index-observation-category-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_preserves_loose_observation_categories
+
 # Focused local project-index wikilink stability parity test.
 local-project-index-wikilink-stability-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -238,8 +243,14 @@ local-project-index-startup-test:
         tests/services/test_initialization.py::test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_by_default \
         tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
 
+# Focused CLI project-index surface tests.
+project-index-cli-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/cli/test_db_reindex.py \
+        tests/cli/test_status_wait_timeout.py
+
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-path-conflict-test local-project-index-thematic-break-test local-project-index-wikilink-stability-test local-project-index-startup-test
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-path-conflict-test local-project-index-thematic-break-test local-project-index-observation-category-test local-project-index-wikilink-stability-test local-project-index-startup-test project-index-cli-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:

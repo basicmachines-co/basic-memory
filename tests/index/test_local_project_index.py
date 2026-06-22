@@ -1570,6 +1570,68 @@ permalink: concept/duplicate-relations
     assert {row.to_id for row in relation_search_rows} == {target.id}
 
 
+async def test_local_project_index_preserves_loose_observation_categories(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Observation category parsing should match the legacy sync oracle."""
+    del config_manager
+
+    concept_dir = project_config.home / "concept"
+    concept_dir.mkdir(parents=True, exist_ok=True)
+    (concept_dir / "invalid_category.md").write_text(
+        """---
+type: knowledge
+permalink: concept/invalid-category
+created: 2024-01-01
+modified: 2024-01-01
+---
+# Test Categories
+
+## Observations
+- [random category] This is fine
+- [ a space category] Should default to note
+- This one is not an observation, should be ignored
+- [design] This is valid
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local observation category parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(
+            session,
+            "concept/invalid_category.md",
+        )
+
+    assert entity is not None
+    assert len(entity.observations) == 3
+    assert {observation.category for observation in entity.observations} == {
+        "random category",
+        "a space category",
+        "design",
+    }
+
+
 async def test_local_project_index_keeps_wikilink_source_stable_when_target_appears(
     test_project: Project,
     project_config,
