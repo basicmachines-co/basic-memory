@@ -20,6 +20,12 @@ from basic_memory.gateway.note_content_writes import (
     NoteContentMutationServiceError,
     note_content_mutation_error_from_rejection,
 )
+from basic_memory.gateway.project_deletes import (
+    ProjectDeleteAcceptanceError,
+    ProjectDeleteAcceptanceRequest,
+    ProjectDeleteAcceptanceService,
+    ProjectDeleteJobEnqueuer,
+)
 
 __all__ = [
     "DirectoryDeleteService",
@@ -28,6 +34,10 @@ __all__ = [
     "NoteContentMutationService",
     "NoteContentMutationServiceError",
     "NoteContentQueryService",
+    "ProjectDeleteAcceptanceError",
+    "ProjectDeleteAcceptanceRequest",
+    "ProjectDeleteAcceptanceService",
+    "ProjectDeleteJobEnqueuer",
     "directory_delete_service_error_from_rejection",
     "note_content_mutation_error_from_rejection",
 ]
