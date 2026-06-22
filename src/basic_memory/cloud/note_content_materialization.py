@@ -79,10 +79,10 @@ class LocalNoteContentMaterializationProvider:
     async def materialize_write_change(
         self,
         accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
-    ) -> None:
+    ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
         """Write accepted note content to the local filesystem when needed."""
         if accepted.materialization is None:
-            return
+            return accepted
 
         storage = LocalNoteContentStorage(self.file_service)
         cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(storage)
@@ -103,14 +103,15 @@ class LocalNoteContentMaterializationProvider:
             ),
             cleanup_enqueuer=cleanup_enqueuer,
         )
+        return accepted
 
     async def materialize_delete_change(
         self,
         accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
-    ) -> None:
+    ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
         """Delete materialized files immediately after local accepted-note deletes."""
         if accepted.file_delete is None:
-            return
+            return accepted
 
         storage = LocalNoteContentStorage(self.file_service)
         await InlineNoteFileDeleteEnqueuer(storage).enqueue_note_file_delete(
@@ -119,3 +120,4 @@ class LocalNoteContentMaterializationProvider:
                 file_delete=accepted.file_delete,
             )
         )
+        return accepted

@@ -433,6 +433,8 @@ async def test_create_entity_accepts_note_content_and_materializes_file(
     assert response.status_code == 200
     entity = EntityResponseV2.model_validate(response.json())
     assert entity.content is not None
+    assert entity.db_version == 1
+    assert entity.file_write_status == "pending"
 
     repository = NoteContentRepository(project_id=test_project.id)
     async with db.scoped_session(session_maker) as session:
@@ -525,6 +527,8 @@ async def test_update_entity_by_id(
     assert updated_entity.api_version == "v2"
     assert updated_entity.content is not None
     assert "Updated content via V2" in updated_entity.content
+    assert updated_entity.db_version == 2
+    assert updated_entity.file_write_status == "pending"
 
     # Verify file was updated
     file_path = file_service.get_entity_path(updated_entity)

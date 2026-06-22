@@ -159,6 +159,22 @@ class EntityResponseV2(BaseModel):
     created_by: Optional[str] = Field(None, description="User profile ID of creator")
     last_updated_by: Optional[str] = Field(None, description="User profile ID of last editor")
 
+    # Accepted note_content state. These are present for markdown note routes that
+    # use the accepted-note runtime and null for legacy indexed entity responses.
+    db_version: Optional[int] = Field(None, description="Accepted note_content DB version")
+    db_checksum: Optional[str] = Field(None, description="Accepted note_content checksum")
+    file_version: Optional[int] = Field(None, description="Materialized file version")
+    file_checksum: Optional[str] = Field(None, description="Materialized file checksum")
+    file_write_status: Optional[str] = Field(None, description="Materialized file write status")
+    last_source: Optional[str] = Field(None, description="Last accepted note_content source")
+    file_updated_at: Optional[datetime] = Field(
+        None, description="Timestamp of the last materialized file update"
+    )
+    last_materialization_error: Optional[str] = Field(
+        None, description="Most recent note materialization error"
+    )
+    sync_error: Optional[str] = Field(None, description="Current note sync error")
+
     # V2-specific metadata
     api_version: Literal["v2"] = Field(
         default="v2", description="API version (always 'v2' for this response)"

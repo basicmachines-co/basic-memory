@@ -96,6 +96,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
     class FakeNoteContentMaterializationProvider:
         async def materialize_write_change(self, accepted):
             assert accepted.materialization is not None
+            return accepted
 
     class FakeVectorSyncScheduler:
         def schedule_entity_vector_sync(self, *args, **kwargs):
@@ -136,6 +137,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
     class FakeNoteContentMaterializationProvider:
         async def materialize_write_change(self, accepted):
             assert accepted.materialization is not None
+            return accepted
 
     class FakeVectorSyncScheduler:
         def schedule_entity_vector_sync(self, *args, **kwargs):
@@ -179,6 +181,7 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     class FakeNoteContentMaterializationProvider:
         async def materialize_write_change(self, accepted):
             assert accepted.materialization is not None
+            return accepted
 
     class FakeVectorSyncScheduler:
         def schedule_entity_vector_sync(self, *args, **kwargs):

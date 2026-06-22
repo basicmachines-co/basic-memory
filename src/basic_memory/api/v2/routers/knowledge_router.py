@@ -559,7 +559,7 @@ async def create_entity(
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        await note_content_materialization_provider.materialize_write_change(accepted)
+        accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
@@ -621,7 +621,7 @@ async def update_entity_by_id(
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        await note_content_materialization_provider.materialize_write_change(accepted)
+        accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         response.status_code = accepted.status_code
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
@@ -681,7 +681,7 @@ async def edit_entity_by_id(
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        await note_content_materialization_provider.materialize_write_change(accepted)
+        accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
@@ -736,7 +736,7 @@ async def delete_entity_by_id(
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        await note_content_materialization_provider.materialize_delete_change(accepted)
+        accepted = await note_content_materialization_provider.materialize_delete_change(accepted)
         result = delete_response_from_note_content_payload(accepted.payload)
 
         logger.info(f"API v2 response: external_id={entity_id}, deleted={result.deleted}")
@@ -794,7 +794,7 @@ async def move_entity(
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        await note_content_materialization_provider.materialize_write_change(accepted)
+        accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
