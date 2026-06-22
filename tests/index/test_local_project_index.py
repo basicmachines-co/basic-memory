@@ -1980,6 +1980,59 @@ async def test_local_project_index_does_not_add_frontmatter_when_disabled(
     assert "type:" not in indexed_content
 
 
+async def test_local_project_index_indexes_thematic_break_content_without_frontmatter(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    app_config,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Leading thematic-break markdown stays raw and searchable without frontmatter."""
+    app_config.ensure_frontmatter_on_sync = False
+    config_manager.save_config(app_config)
+
+    thematic_path = project_config.home / "notes" / "thematic-break.md"
+    thematic_path.parent.mkdir(parents=True, exist_ok=True)
+    original_content = "---\nBody content after a thematic break.\n"
+    thematic_path.write_text(original_content, encoding="utf-8")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local frontmatter policy parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 1
+    persisted_content = thematic_path.read_text(encoding="utf-8")
+    assert persisted_content == original_content
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "notes/thematic-break.md")
+        note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "notes/thematic-break.md",
+        )
+
+    assert entity is not None
+    assert note_content is not None
+    assert note_content.markdown_content == persisted_content
+
+    results = await search_service.search(SearchQuery(text="Body content after a thematic break"))
+    assert len(results) == 1
+    assert results[0].file_path == "notes/thematic-break.md"
+
+
 async def test_local_project_index_writes_frontmatter_when_enabled_even_if_permalinks_disabled(
     test_project: Project,
     project_config,

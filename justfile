@@ -190,7 +190,13 @@ local-project-index-new-permalink-conflict-test:
 local-project-index-frontmatter-policy-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py::test_local_project_index_does_not_add_frontmatter_when_disabled \
+        tests/index/test_local_project_index.py::test_local_project_index_indexes_thematic_break_content_without_frontmatter \
         tests/index/test_local_project_index.py::test_local_project_index_writes_frontmatter_when_enabled_even_if_permalinks_disabled
+
+# Focused local project-index thematic-break frontmatter parity test.
+local-project-index-thematic-break-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_indexes_thematic_break_content_without_frontmatter
 
 # Focused local project-index relation resolution parity test.
 local-project-index-relation-parity-test:
@@ -228,7 +234,7 @@ local-project-index-startup-test:
         tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
 
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-wikilink-stability-test local-project-index-startup-test
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-thematic-break-test local-project-index-wikilink-stability-test local-project-index-startup-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:
