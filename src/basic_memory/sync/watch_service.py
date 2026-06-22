@@ -3,7 +3,6 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -25,10 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
-from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
+from basic_memory.ignore_utils import load_gitignore_patterns
 from basic_memory.index import (
     LocalWatchEventIndexRequest,
     StorageEventIndexRuntime,
+    local_project_root,
+    local_watch_project_change_batches,
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
@@ -190,29 +191,22 @@ class WatchService:
                 recursive=True,
                 stop_event=stop_event,
             ):
-                # group changes by project and filter using ignore patterns
-                project_changes = defaultdict(list)
-                for change, path in changes:
-                    for project in projects:
-                        if self.is_project_path(project, path):
-                            # Check if the file should be ignored based on gitignore patterns
-                            project_path = Path(project.path)
-                            file_path = Path(path)
-                            ignore_patterns = self._get_ignore_patterns(project_path)
-
-                            if should_ignore_path(file_path, project_path, ignore_patterns):
-                                logger.trace(
-                                    f"Ignoring watched file change: {file_path.relative_to(project_path)}"
-                                )
-                                continue
-
-                            project_changes[project].append((change, path))
-                            break
+                ignore_patterns_by_project_root = {
+                    local_project_root(project): self._get_ignore_patterns(
+                        local_project_root(project)
+                    )
+                    for project in projects
+                }
+                project_changes = local_watch_project_change_batches(
+                    projects=projects,
+                    changes=changes,
+                    ignore_patterns_by_project_root=ignore_patterns_by_project_root,
+                )
 
                 # create coroutines to handle changes
                 change_handlers = [
-                    self.handle_changes(project, set(changes))
-                    for project, changes in project_changes.items()
+                    self.handle_changes(batch.project, set(batch.changes))
+                    for batch in project_changes
                 ]
 
                 # process changes

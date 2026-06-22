@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 
 from watchfiles.main import FileChange
 
+from basic_memory.ignore_utils import should_ignore_path
 from basic_memory.index.filesystem import (
     LOCAL_FILESYSTEM_BUCKET_NAME,
     LocalFilesystemIgnorePatterns,
@@ -27,6 +28,8 @@ from basic_memory.runtime import (
     group_storage_events_by_bucket,
 )
 
+LocalWatchProjectT = TypeVar("LocalWatchProjectT", bound="LocalWatchProjectSource")
+
 
 class LocalWatchProjectSource(Protocol):
     """Minimal project shape needed to build local watcher storage events."""
@@ -35,12 +38,61 @@ class LocalWatchProjectSource(Protocol):
     def path(self) -> object: ...
 
 
-def local_project_prefix(project: LocalWatchProjectSource) -> ProjectPath:
-    """Return the storage-event prefix for a local watcher project."""
+def local_project_root(project: LocalWatchProjectSource) -> Path:
+    """Return the resolved filesystem root for a local watcher project."""
     project_path = str(project.path).strip() if project.path else ""
     if not project_path:
         raise ValueError("local watcher project requires path")
-    return Path(project_path).expanduser().resolve().name
+    return Path(project_path).expanduser().resolve()
+
+
+def local_project_prefix(project: LocalWatchProjectSource) -> ProjectPath:
+    """Return the storage-event prefix for a local watcher project."""
+    return local_project_root(project).name
+
+
+@dataclass(frozen=True, slots=True)
+class LocalWatchProjectChangeBatch(Generic[LocalWatchProjectT]):
+    """A watcher change batch routed to one local project."""
+
+    project: LocalWatchProjectT
+    changes: tuple[FileChange, ...]
+
+
+def local_watch_project_change_batches(
+    *,
+    projects: Iterable[LocalWatchProjectT],
+    changes: Iterable[FileChange],
+    ignore_patterns_by_project_root: Mapping[Path, LocalFilesystemIgnorePatterns],
+) -> tuple[LocalWatchProjectChangeBatch[LocalWatchProjectT], ...]:
+    """Route watcher changes to project-scoped batches before indexing."""
+    project_roots = tuple((project, local_project_root(project)) for project in projects)
+    routed_changes: list[tuple[LocalWatchProjectT, list[FileChange]]] = [
+        (project, []) for project, _project_root in project_roots
+    ]
+
+    for change, path in changes:
+        file_path = Path(path).expanduser().resolve()
+        for index, (_project, project_root) in enumerate(project_roots):
+            if file_path == project_root:
+                continue
+            try:
+                file_path.relative_to(project_root)
+            except ValueError:
+                continue
+
+            ignore_patterns = ignore_patterns_by_project_root[project_root]
+            if should_ignore_path(file_path, project_root, ignore_patterns):
+                continue
+
+            routed_changes[index][1].append((change, path))
+            break
+
+    return tuple(
+        LocalWatchProjectChangeBatch(project=project, changes=tuple(project_changes))
+        for project, project_changes in routed_changes
+        if project_changes
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,10 +138,7 @@ class LocalWatchEventIndexRequest:
         ignore_patterns: LocalFilesystemIgnorePatterns | None = None,
     ) -> "LocalWatchEventIndexRequest":
         """Build a watcher request from the configured local project."""
-        project_path = str(project.path).strip() if project.path else ""
-        if not project_path:
-            raise ValueError("local watcher project requires path")
-        project_root = Path(project_path).expanduser().resolve()
+        project_root = local_project_root(project)
         return cls.from_changes(
             project_root=project_root,
             project_prefix=local_project_prefix(project),

@@ -7,11 +7,13 @@ from types import SimpleNamespace
 from watchfiles import Change
 
 from basic_memory.index import (
+    LocalWatchProjectChangeBatch,
     LocalWatchEventIndexRequest,
     LocalWatchStorageEventSource,
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
+    local_watch_project_change_batches,
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
@@ -152,6 +154,74 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     assert request.project_root == project_root.resolve()
     assert request.project_prefix == "configured-project-root"
     assert [event.object_key for event in source.events()] == ["configured-project-root/notes/a.md"]
+
+
+def test_local_watch_project_change_batches_route_changes_to_projects(tmp_path: Path) -> None:
+    alpha_root = tmp_path / "alpha"
+    beta_root = tmp_path / "beta"
+    outside_root = tmp_path / "outside"
+    alpha_root.mkdir()
+    beta_root.mkdir()
+    outside_root.mkdir()
+    alpha_note = alpha_root / "notes" / "a.md"
+    beta_note = beta_root / "notes" / "b.md"
+    outside_note = outside_root / "notes" / "ignored.md"
+    for note in (alpha_note, beta_note, outside_note):
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text("# Note\n", encoding="utf-8")
+    alpha = SimpleNamespace(path=str(alpha_root))
+    beta = SimpleNamespace(path=str(beta_root))
+
+    batches = local_watch_project_change_batches(
+        projects=(alpha, beta),
+        changes=(
+            (Change.added, str(alpha_note)),
+            (Change.modified, str(beta_note)),
+            (Change.added, str(outside_note)),
+        ),
+        ignore_patterns_by_project_root={
+            alpha_root.resolve(): set(),
+            beta_root.resolve(): set(),
+        },
+    )
+
+    assert batches == (
+        LocalWatchProjectChangeBatch(
+            project=alpha,
+            changes=((Change.added, str(alpha_note)),),
+        ),
+        LocalWatchProjectChangeBatch(
+            project=beta,
+            changes=((Change.modified, str(beta_note)),),
+        ),
+    )
+
+
+def test_local_watch_project_change_batches_apply_project_ignore_patterns(tmp_path: Path) -> None:
+    project_root = tmp_path / "local-project"
+    project_root.mkdir()
+    kept_note = project_root / "notes" / "kept.md"
+    ignored_note = project_root / "ignored.md"
+    kept_note.parent.mkdir()
+    kept_note.write_text("# Kept\n", encoding="utf-8")
+    ignored_note.write_text("# Ignored\n", encoding="utf-8")
+    project = SimpleNamespace(path=str(project_root))
+
+    batches = local_watch_project_change_batches(
+        projects=(project,),
+        changes=(
+            (Change.added, str(ignored_note)),
+            (Change.added, str(kept_note)),
+        ),
+        ignore_patterns_by_project_root={project_root.resolve(): {"ignored.md"}},
+    )
+
+    assert batches == (
+        LocalWatchProjectChangeBatch(
+            project=project,
+            changes=((Change.added, str(kept_note)),),
+        ),
+    )
 
 
 def test_local_watch_status_update_plans_success() -> None:
