@@ -97,6 +97,76 @@ async def test_local_event_index_moves_regular_file_over_deleted_path(
 
 
 @pytest.mark.asyncio
+async def test_local_event_index_resolves_regular_file_relation_and_writes_source_permalink(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+    monkeypatch,
+) -> None:
+    """Regular-file relation parity should use the event-index path end to end."""
+    asset_path = project_config.home / "asset.pdf"
+    source_path = project_config.home / "note.md"
+    await create_test_file(asset_path, "pdf-ish")
+    await create_test_file(
+        source_path,
+        """---
+title: a note
+type: note
+tags: []
+---
+
+- relates_to [[asset.pdf]]
+""",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("event-index regular file relation test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.added, str(asset_path)),
+            (Change.added, str(source_path)),
+        },
+    )
+
+    expected_permalink = f"{test_project.permalink}/note"
+    source_content = source_path.read_text(encoding="utf-8")
+    assert f"permalink: {expected_permalink}" in source_content
+
+    async with db.scoped_session(session_maker) as session:
+        source_entity = await entity_repository.get_by_file_path(session, "note.md")
+        target_entity = await entity_repository.get_by_file_path(session, "asset.pdf")
+
+    assert source_entity is not None
+    assert source_entity.permalink == expected_permalink
+    assert target_entity is not None
+    assert target_entity.permalink is None
+    assert target_entity.content_type == "application/pdf"
+    assert len(source_entity.outgoing_relations) == 1
+    relation = source_entity.outgoing_relations[0]
+    assert relation.to_id == target_entity.id
+    assert watch_service.state.synced_files == 2
+    assert watch_service.state.recent_events[0].action == "index"
+    assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
 async def test_local_event_index_deletes_regular_file_relation_target_and_repairs_search(
     app_config: BasicMemoryConfig,
     project_repository,
