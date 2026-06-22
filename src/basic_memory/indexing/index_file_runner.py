@@ -178,7 +178,10 @@ async def run_index_file(
         if terminal_result is not None:
             return terminal_result
     else:
-        current_metadata = await metadata_source.load_current_file_metadata(request.file_path)
+        try:
+            current_metadata = await metadata_source.load_current_file_metadata(request.file_path)
+        except FileOperationError:
+            current_metadata = None
         if current_metadata is None:
             return IndexFileJobResult(
                 status=IndexFileJobStatus.missing,

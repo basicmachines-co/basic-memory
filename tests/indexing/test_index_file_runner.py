@@ -380,6 +380,25 @@ async def test_run_index_file_current_file_mode_skips_missing_file() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_index_file_current_file_mode_treats_metadata_error_as_missing() -> None:
+    file_indexer = FakeFileIndexer()
+
+    result = await run_index_file(
+        current_file_request(),
+        checker=FakeChecker(read_plan()),
+        metadata_source=FakeMetadataSource(None, error=FileOperationError("file vanished")),
+        materialized_note_source=FakeMaterializedNoteSource(None),
+        file_indexer=file_indexer,
+    )
+
+    assert result == IndexFileJobResult(
+        status=IndexFileJobStatus.missing,
+        reason="file not found: notes/a.md",
+    )
+    assert file_indexer.calls == []
+
+
+@pytest.mark.asyncio
 async def test_run_index_file_treats_delete_after_metadata_check_as_missing() -> None:
     result = await run_index_file(
         observed_request(),
