@@ -222,8 +222,13 @@ local-event-index-relation-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_watch_regular_file_parity.py::test_local_event_index_deletes_regular_file_relation_target_and_repairs_search
 
+# Focused local filesystem event temp/backup filtering parity test.
+filesystem-event-temp-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_filesystem_events.py::test_editor_swap_and_backup_changes_are_filtered_before_indexing
+
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
-event-index-contract-test:
+event-index-contract-test: filesystem-event-temp-file-test
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/test_runtime_storage_events.py \
         tests/indexing/test_external_file_delete_runner.py \

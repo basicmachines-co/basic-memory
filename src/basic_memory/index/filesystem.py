@@ -22,6 +22,7 @@ from basic_memory.runtime.storage_project_resolution import storage_object_key_f
 
 LOCAL_FILESYSTEM_BUCKET_NAME: StorageBucketName = "local-filesystem"
 LOCAL_FILESYSTEM_CREATED_EVENT = "OBJECT_CREATED_PUT"
+LOCAL_FILTERED_FILE_SUFFIXES = (".tmp", ".swp", "~")
 type LocalFilesystemIgnorePatterns = set[str]
 
 
@@ -120,7 +121,7 @@ def local_storage_event_input_from_watchfiles_change(
 
 def local_relative_path_is_filtered(relative_path: str) -> bool:
     """Return whether a project-relative path should be ignored before indexing."""
-    if relative_path.endswith(".tmp"):
+    if relative_path.endswith(LOCAL_FILTERED_FILE_SUFFIXES):
         return True
     return any(path_part.startswith(".") for path_part in Path(relative_path).parts)
 
