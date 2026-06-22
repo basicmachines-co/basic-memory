@@ -1,9 +1,11 @@
 """Typed scheduler tests for derived async work."""
 
 import asyncio
+from typing import cast
 
 import pytest
 
+from basic_memory.index import ProjectIndexCoordinatorResult
 from basic_memory.deps.services import (
     LocalEntityVectorSyncScheduler,
     LocalProjectIndexScheduler,
@@ -15,8 +17,14 @@ class StubProjectIndexRunner:
     def __init__(self) -> None:
         self.indexed: list[tuple[int, bool]] = []
 
-    async def index_project(self, project_id: int, *, force_full: bool = False) -> None:
+    async def index_project(
+        self,
+        project_id: int,
+        *,
+        force_full: bool = False,
+    ) -> ProjectIndexCoordinatorResult:
         self.indexed.append((project_id, force_full))
+        return cast(ProjectIndexCoordinatorResult, object())
 
 
 class StubSearchService:

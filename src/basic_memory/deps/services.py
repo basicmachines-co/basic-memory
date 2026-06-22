@@ -37,7 +37,12 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
-from basic_memory.index import LocalProjectIndexRunner, build_local_markdown_file_indexer
+from basic_memory.index import (
+    LocalProjectIndexObservation,
+    LocalProjectIndexRunner,
+    ProjectIndexCoordinatorResult,
+    build_local_markdown_file_indexer,
+)
 from basic_memory.indexing import BatchIndexer, IndexFileExecutor, StorageIndexFileWriter
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -437,10 +442,21 @@ IndexFileExecutorV2ExternalDep = Annotated[
 # --- Project Indexing ---
 
 
-class ScheduledProjectIndexRunner(Protocol):
-    """Capability needed by background scheduling to run a project index."""
+class ProjectIndexRunner(Protocol):
+    """Run project-wide indexing in the current process."""
 
-    async def index_project(self, project_id: int, *, force_full: bool = False) -> object: ...
+    async def index_project(
+        self,
+        project_id: int,
+        *,
+        force_full: bool = False,
+    ) -> ProjectIndexCoordinatorResult: ...
+
+
+class ProjectIndexObserver(Protocol):
+    """Observe project files visible to the active runtime."""
+
+    async def observe_project(self, project_id: int) -> LocalProjectIndexObservation: ...
 
 
 async def get_project_index_runner(
@@ -454,10 +470,21 @@ async def get_project_index_runner(
     )
 
 
-ProjectIndexRunnerDep = Annotated[LocalProjectIndexRunner, Depends(get_project_index_runner)]
-ScheduledProjectIndexRunnerDep = Annotated[
-    ScheduledProjectIndexRunner,
-    Depends(get_project_index_runner),
+async def get_project_index_observer(
+    project_repository: ProjectRepositoryDep,
+    session_maker: SessionMakerDep,
+) -> LocalProjectIndexRunner:
+    """Create the local project-index observer used by status routes."""
+    return LocalProjectIndexRunner(
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+
+
+ProjectIndexRunnerDep = Annotated[ProjectIndexRunner, Depends(get_project_index_runner)]
+ProjectIndexObserverDep = Annotated[
+    ProjectIndexObserver,
+    Depends(get_project_index_observer),
 ]
 
 
@@ -531,7 +558,7 @@ class LocalEntityVectorSyncScheduler:
 
 @dataclass(frozen=True, slots=True)
 class LocalProjectIndexScheduler:
-    project_index_runner: ScheduledProjectIndexRunner
+    project_index_runner: ProjectIndexRunner
     test_mode: bool
 
     def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None:
@@ -565,7 +592,7 @@ async def get_entity_vector_sync_scheduler(
 
 
 async def get_project_index_scheduler(
-    project_index_runner: ScheduledProjectIndexRunnerDep,
+    project_index_runner: ProjectIndexRunnerDep,
     app_config: AppConfigDep,
 ) -> ProjectIndexScheduler:
     return LocalProjectIndexScheduler(

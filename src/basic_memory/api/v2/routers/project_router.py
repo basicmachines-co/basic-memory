@@ -22,6 +22,7 @@ from basic_memory.deps import (
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
     ProjectIndexRunnerDep,
+    ProjectIndexObserverDep,
     ProjectIndexSchedulerDep,
     ProjectExternalIdPathDep,
     SessionDep,
@@ -268,7 +269,7 @@ async def index_project(
 
 @router.post("/{project_id}/status", response_model=ProjectIndexStatusResponse)
 async def get_project_status(
-    project_index_runner: ProjectIndexRunnerDep,
+    project_index_observer: ProjectIndexObserverDep,
     project_internal_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external ID (UUID)"),
     force_full: bool = Query(False, description="Accepted for compatibility; ignored"),
@@ -278,7 +279,7 @@ async def get_project_status(
         f"API v2 request: get_project_status for project_id={project_id} "
         f"(force_full ignored={force_full})"
     )
-    observation = await project_index_runner.observe_project(project_internal_id)
+    observation = await project_index_observer.observe_project(project_internal_id)
     return ProjectIndexStatusResponse.from_observation(observation)
 
 
