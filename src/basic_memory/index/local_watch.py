@@ -80,6 +80,19 @@ def local_watch_path_is_observable(*, project_roots: Iterable[Path], path: Path 
     return not path_obj.name.endswith(".tmp")
 
 
+def local_watch_path_is_under_project(*, project_root: Path, path: Path | str) -> bool:
+    """Return whether path is a descendant of a local project root."""
+    project_root = project_root.expanduser().resolve()
+    path_obj = Path(path).expanduser().resolve()
+    if path_obj == project_root:
+        return False
+    try:
+        path_obj.relative_to(project_root)
+    except ValueError:
+        return False
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class LocalWatchProjectChangeBatch(Generic[LocalWatchProjectT]):
     """A watcher change batch routed to one local project."""
@@ -103,11 +116,7 @@ def local_watch_project_change_batches(
     for change, path in changes:
         file_path = Path(path).expanduser().resolve()
         for index, (_project, project_root) in enumerate(project_roots):
-            if file_path == project_root:
-                continue
-            try:
-                file_path.relative_to(project_root)
-            except ValueError:
+            if not local_watch_path_is_under_project(project_root=project_root, path=file_path):
                 continue
 
             ignore_patterns = ignore_patterns_by_project_root[project_root]

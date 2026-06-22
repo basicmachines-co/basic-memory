@@ -31,6 +31,7 @@ from basic_memory.index import (
     local_project_root,
     local_watch_filter_roots,
     local_watch_path_is_observable,
+    local_watch_path_is_under_project,
     local_watch_project_change_batches,
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
@@ -337,9 +338,10 @@ class WatchService:
         """
         Checks if path is a subdirectory or file within a project
         """
-        project_path = Path(project.path).resolve()
-        sub_path = Path(path).resolve()
-        return project_path in sub_path.parents
+        return local_watch_path_is_under_project(
+            project_root=local_project_root(project),
+            path=path,
+        )
 
     async def handle_changes(self, project: Project, changes: Set[FileChange]) -> None:
         """Process a batch of file changes"""

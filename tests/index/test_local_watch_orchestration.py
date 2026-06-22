@@ -15,6 +15,7 @@ from basic_memory.index import (
     StorageEventProjectResolver,
     local_watch_filter_roots,
     local_watch_path_is_observable,
+    local_watch_path_is_under_project,
     local_watch_project_change_batches,
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
@@ -223,6 +224,30 @@ def test_local_watch_project_change_batches_apply_project_ignore_patterns(tmp_pa
             project=project,
             changes=((Change.added, str(kept_note)),),
         ),
+    )
+
+
+def test_local_watch_path_under_project_excludes_project_root(tmp_path: Path) -> None:
+    project_root = tmp_path / "local-project"
+    project_root.mkdir()
+    nested_file = project_root / "notes" / "a.md"
+    nested_file.parent.mkdir()
+    nested_file.write_text("# A\n", encoding="utf-8")
+    outside_file = tmp_path / "outside" / "a.md"
+    outside_file.parent.mkdir()
+    outside_file.write_text("# Outside\n", encoding="utf-8")
+
+    assert local_watch_path_is_under_project(
+        project_root=project_root,
+        path=nested_file,
+    )
+    assert not local_watch_path_is_under_project(
+        project_root=project_root,
+        path=project_root,
+    )
+    assert not local_watch_path_is_under_project(
+        project_root=project_root,
+        path=outside_file,
     )
 
 
