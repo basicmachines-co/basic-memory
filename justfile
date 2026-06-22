@@ -310,6 +310,11 @@ event-index-contract-test: filesystem-event-temp-file-test local-event-index-ato
         tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index \
         tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_by_default
 
+# Legacy sync regression oracle while the new event-index path catches up.
+sync-regression-oracle-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/sync
+
 # Focused parity loop for local project scans and shared storage-event routing.
 event-index-parity-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
