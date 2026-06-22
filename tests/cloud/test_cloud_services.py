@@ -10,10 +10,14 @@ from uuid import UUID, uuid4
 import pytest
 from basic_memory.indexing import (
     AcceptedNoteCreateMutation,
+    AcceptedNoteDeleteMutation,
+    AcceptedNoteEditMutation,
+    AcceptedNoteMoveMutation,
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
     AcceptedNoteMutationRejectKind,
+    AcceptedNoteUpdateMutation,
     DirectoryDeleteRuntime,
     DirectoryDeleteRejectKind,
     NoteContentReadRepairFile,
@@ -26,6 +30,7 @@ from basic_memory.runtime import (
     RuntimeNoteContentReadRepairStatus,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
+from basic_memory.schemas.request import EditEntityRequest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.cloud.note_content_reads as note_content_reads
@@ -400,6 +405,112 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
     assert request.actor.kind == "mcp_client"
     assert request.actor.name == "Claude Code"
     assert received_dependencies is dependencies
+
+
+@pytest.mark.asyncio
+async def test_note_content_mutation_service_delegates_remaining_methods_to_core_runners(
+    monkeypatch,
+) -> None:
+    tenant_session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker())
+    dependencies = cast(AcceptedNoteMutationDependencies, object())
+    user_profile_id = uuid4()
+    update_data = EntitySchema(title="Updated", directory="notes", content="# Updated")
+    edit_data = EditEntityRequest(
+        operation="find_replace",
+        find_text="# Old",
+        content="# New",
+        expected_replacements=1,
+    )
+    returned = SimpleNamespace(status_code=200, payload={"ok": True})
+    calls: list[tuple[str, AsyncSession, object, object]] = []
+
+    def runner(name: str):
+        async def fake_runner(
+            repository_session: AsyncSession,
+            *,
+            request: object,
+            dependencies: object,
+        ):
+            calls.append((name, repository_session, request, dependencies))
+            return returned
+
+        return fake_runner
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_update", runner("update"))
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_edit", runner("edit"))
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_move", runner("move"))
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_delete", runner("delete"))
+
+    service = NoteContentMutationService(
+        session_maker=tenant_session_maker,
+        mutation_dependencies=dependencies,
+    )
+
+    assert (
+        await service.update_note(
+            project_external_id="project-123",
+            entity_external_id="entity-123",
+            data=update_data,
+            user_profile_id=user_profile_id,
+            source="api",
+            actor_kind="mcp_client",
+            actor_name="Claude Code",
+        )
+    ) is returned
+    assert (
+        await service.edit_note(
+            project_external_id="project-123",
+            entity_external_id="entity-123",
+            data=edit_data,
+            user_profile_id=user_profile_id,
+            source="mcp",
+            actor_kind="mcp_client",
+            actor_name="Claude Code",
+        )
+    ) is returned
+    assert (
+        await service.move_note(
+            project_external_id="project-123",
+            entity_external_id="entity-123",
+            destination_path="archive/entity.md",
+            user_profile_id=user_profile_id,
+            source="api",
+            actor_kind="mcp_client",
+            actor_name="Claude Code",
+        )
+    ) is returned
+    assert (
+        await service.delete_note(
+            project_external_id="project-123",
+            entity_external_id="entity-123",
+        )
+    ) is returned
+
+    assert [call[0] for call in calls] == ["update", "edit", "move", "delete"]
+    for _, session, _, received_dependencies in calls:
+        assert isinstance(session, FakeSession)
+        assert received_dependencies is dependencies
+
+    update_request = calls[0][2]
+    assert isinstance(update_request, AcceptedNoteUpdateMutation)
+    assert update_request.data is update_data
+    assert update_request.actor.user_profile_id == user_profile_id
+    assert update_request.actor.kind == "mcp_client"
+    assert update_request.actor.name == "Claude Code"
+
+    edit_request = calls[1][2]
+    assert isinstance(edit_request, AcceptedNoteEditMutation)
+    assert edit_request.data is edit_data
+    assert edit_request.source == "mcp"
+
+    move_request = calls[2][2]
+    assert isinstance(move_request, AcceptedNoteMoveMutation)
+    assert move_request.destination_path == "archive/entity.md"
+
+    delete_request = calls[3][2]
+    assert isinstance(delete_request, AcceptedNoteDeleteMutation)
+    assert delete_request.project_external_id == "project-123"
+    assert delete_request.entity_external_id == "entity-123"
 
 
 @pytest.mark.asyncio

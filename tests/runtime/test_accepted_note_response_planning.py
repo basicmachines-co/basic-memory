@@ -230,6 +230,7 @@ def test_runtime_note_content_payload_as_dict_serializes_accepted_response():
 
     assert payload == response.to_response_payload()
     assert payload["last_source"] == "api"
+    assert "workflow_id" not in payload
 
 
 def test_runtime_note_content_payload_serializers_preserve_mapping_payloads():

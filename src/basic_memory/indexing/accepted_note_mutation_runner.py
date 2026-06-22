@@ -28,6 +28,9 @@ from basic_memory.indexing.accepted_note_write_runner import (
     prepare_accepted_note_replace,
 )
 from basic_memory.models import Entity, NoteContent, Project
+from basic_memory.repository import NoteContentRepository
+from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
+from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.runtime import (
     NoteExternalId,
     ProjectExternalId,
@@ -246,6 +249,36 @@ class AcceptedNoteMutationRepositories(Protocol):
         self,
         project_id: ProjectId,
     ) -> AcceptedNoteMutationNoteContentRepository: ...
+
+
+class AcceptedNoteRepositories(
+    AcceptedNoteMutationRepositories,
+    AcceptedNoteWriteRepositories,
+    Protocol,
+):
+    """Repository capability set for DB-first accepted-note mutations."""
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultAcceptedNoteRepositories:
+    """Default core repositories for accepted-note mutation orchestration."""
+
+    def entity_repository(self, project_id: ProjectId) -> EntityRepository:
+        return EntityRepository(project_id=project_id)
+
+    def pending_entity_repository(self, project_id: ProjectId) -> EntityRepository:
+        return EntityRepository(project_id=project_id)
+
+    def note_content_repository(self, project_id: ProjectId) -> NoteContentRepository:
+        return NoteContentRepository(project_id=project_id)
+
+    def search_repository(self, project_id: ProjectId) -> AcceptedNoteSearchRepository:
+        return AcceptedNoteSearchRepository(project_id=project_id)
+
+
+def build_default_accepted_note_repositories() -> AcceptedNoteRepositories:
+    """Compose default repositories for accepted-note mutation orchestration."""
+    return DefaultAcceptedNoteRepositories()
 
 
 @dataclass(frozen=True, slots=True)

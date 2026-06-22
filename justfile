@@ -319,6 +319,12 @@ event-index-parity-test:
 index-contract-test: file-index-runner-test file-index-batch-test file-index-semantic-dependency-test project-index-contract-test event-index-contract-test
 
 # Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
+runtime-core-pytest *args:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov {{args}}
+
+runtime-core-fast-check-no-openai:
+    OPENAI_API_KEY= just fast-check
+
 runtime-refactor-contract-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/indexing/test_accepted_note_write_runner.py \
