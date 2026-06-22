@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,17 @@ LOCAL_FILESYSTEM_BUCKET_NAME: StorageBucketName = "local-filesystem"
 LOCAL_FILESYSTEM_CREATED_EVENT = "OBJECT_CREATED_PUT"
 LOCAL_FILTERED_FILE_SUFFIXES = (".tmp", ".swp", "~")
 type LocalFilesystemIgnorePatterns = set[str]
+
+
+@dataclass(frozen=True, slots=True)
+class LocalStoragePathMetadata:
+    """Current filesystem metadata needed to normalize one local storage event."""
+
+    exists: bool
+    is_file: bool
+    is_dir: bool
+    etag: str
+    size: int | None
 
 
 def local_storage_events_from_watchfiles_changes(
@@ -102,10 +114,11 @@ def local_storage_event_input_from_watchfiles_change(
     if ignore_patterns is not None and should_ignore_path(path, project_root, ignore_patterns):
         return None
 
-    if path.exists() and path.is_dir():
+    metadata = local_storage_path_metadata(path)
+    if metadata is None or metadata.is_dir:
         return None
 
-    event_name = local_storage_event_name_for_change(change, path)
+    event_name = local_storage_event_name_for_change(change, metadata)
     if event_name is None:
         return None
 
@@ -117,8 +130,8 @@ def local_storage_event_input_from_watchfiles_change(
             project_prefix=project_prefix,
             relative_path=relative_path,
         ),
-        etag=local_storage_etag(path),
-        size=local_storage_size(path),
+        etag=metadata.etag,
+        size=metadata.size,
     )
 
 
@@ -151,12 +164,15 @@ def coalesce_local_storage_event_inputs(
     return tuple(coalesced)
 
 
-def local_storage_event_name_for_change(change: Change, path: Path) -> str | None:
+def local_storage_event_name_for_change(
+    change: Change,
+    metadata: LocalStoragePathMetadata,
+) -> str | None:
     """Map a filesystem watcher change into the portable storage event vocabulary."""
     if change in {Change.added, Change.modified}:
         return LOCAL_FILESYSTEM_CREATED_EVENT
     if change == Change.deleted:
-        if path.exists() and path.is_file():
+        if metadata.exists and metadata.is_file:
             return LOCAL_FILESYSTEM_CREATED_EVENT
         return STORAGE_OBJECT_DELETED_EVENT
     return None
@@ -167,16 +183,38 @@ def local_storage_object_key(*, project_prefix: str, relative_path: str) -> Stor
     return storage_object_key_from_project_prefix(project_prefix, relative_path)
 
 
-def local_storage_etag(path: Path) -> str:
-    """Return metadata identity for a local file event without reading file contents."""
-    if not path.exists() or not path.is_file():
-        return "missing"
-    stat = path.stat()
-    return f"local:{stat.st_mtime_ns}:{stat.st_size}"
+def local_storage_path_metadata(path: Path) -> LocalStoragePathMetadata | None:
+    """Return local file metadata, or None when the watcher path cannot be inspected."""
+    try:
+        exists = path.exists()
+        if not exists:
+            return LocalStoragePathMetadata(
+                exists=False,
+                is_file=False,
+                is_dir=False,
+                etag="missing",
+                size=None,
+            )
 
+        is_dir = path.is_dir()
+        is_file = path.is_file()
+        if not is_file:
+            return LocalStoragePathMetadata(
+                exists=True,
+                is_file=False,
+                is_dir=is_dir,
+                etag="missing",
+                size=None,
+            )
 
-def local_storage_size(path: Path) -> int | None:
-    """Return the current file size for existing local files."""
-    if not path.exists() or not path.is_file():
+        stat = path.stat()
+    except OSError:
         return None
-    return path.stat().st_size
+
+    return LocalStoragePathMetadata(
+        exists=True,
+        is_file=True,
+        is_dir=False,
+        etag=f"local:{stat.st_mtime_ns}:{stat.st_size}",
+        size=stat.st_size,
+    )

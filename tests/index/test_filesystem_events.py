@@ -146,6 +146,39 @@ def test_outside_project_changes_are_filtered_before_indexing(
     assert [event.object_key for event in events] == ["project/valid.md"]
 
 
+def test_unreadable_project_changes_are_filtered_before_indexing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    valid = project_root / "valid.md"
+    unreadable = project_root / "unreadable.md"
+    valid.write_text("# Valid\n", encoding="utf-8")
+    unreadable.write_text("# Unreadable\n", encoding="utf-8")
+
+    original_is_file = Path.is_file
+
+    def is_file_or_permission_error(path: Path) -> bool:
+        if path == unreadable.resolve():
+            raise PermissionError("permission denied")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", is_file_or_permission_error)
+
+    events = local_storage_events_from_watchfiles_changes(
+        project_root=project_root,
+        project_prefix="project",
+        changes=(
+            (Change.added, str(unreadable)),
+            (Change.added, str(valid)),
+        ),
+        event_time="2026-06-20T12:00:00Z",
+    )
+
+    assert [event.object_key for event in events] == ["project/valid.md"]
+
+
 def test_editor_swap_and_backup_changes_are_filtered_before_indexing(
     tmp_path: Path,
 ) -> None:
