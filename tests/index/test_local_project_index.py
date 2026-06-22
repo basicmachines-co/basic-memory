@@ -1489,6 +1489,90 @@ permalink: concept/duplicate-relations
     assert {row.to_id for row in relation_search_rows} == {target.id}
 
 
+async def test_local_project_index_keeps_wikilink_source_stable_when_target_appears(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Adding a wikilink target must not make the unchanged source look modified."""
+    del config_manager
+
+    source_path = project_config.home / "test_wikilink.md"
+    source_path.write_text(
+        """---
+title: Test Wikilink
+type: note
+---
+# Test File
+
+This file contains a wikilink to [[another-file]].
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local wikilink stability parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert first.enqueued_files == 1
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert second.enqueued_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        source_before = await entity_repository.get_by_file_path(session, "test_wikilink.md")
+    assert source_before is not None
+    source_checksum = source_before.checksum
+    source_entity_id = source_before.id
+
+    target_path = project_config.home / "another_file.md"
+    target_path.write_text(
+        """---
+title: Another File
+type: note
+---
+# Another File
+
+This is the target file.
+""",
+        encoding="utf-8",
+    )
+
+    third = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert third.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        source_after = await entity_repository.get_by_file_path(session, "test_wikilink.md")
+        target = await entity_repository.get_by_file_path(session, "another_file.md")
+    assert source_after is not None
+    assert target is not None
+    assert source_after.id == source_entity_id
+    assert source_after.checksum == source_checksum
+
+    fourth = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert fourth.enqueued_files == 0
+
+
 async def test_local_project_index_directory_delete_removes_notes_and_repairs_survivors(
     test_project: Project,
     project_config,

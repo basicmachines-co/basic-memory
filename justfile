@@ -183,6 +183,11 @@ local-project-index-relation-parity-test:
         tests/index/test_local_project_index.py::test_local_project_index_resolves_order_dependent_relations_after_batches \
         tests/index/test_local_project_index.py::test_local_project_index_deduplicates_relations_by_type
 
+# Focused local project-index wikilink stability parity test.
+local-project-index-wikilink-stability-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_keeps_wikilink_source_stable_when_target_appears
+
 # Focused per-file indexing runner/model tests.
 file-index-runner-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -208,7 +213,7 @@ local-project-index-startup-test:
         tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
 
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test local-project-index-test local-project-index-startup-test
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test local-project-index-test local-project-index-wikilink-stability-test local-project-index-startup-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:
