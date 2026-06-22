@@ -51,6 +51,35 @@ def local_project_prefix(project: LocalWatchProjectSource) -> ProjectPath:
     return local_project_root(project).name
 
 
+def local_watch_filter_roots(projects: Iterable[LocalWatchProjectSource]) -> tuple[Path, ...]:
+    """Return watcher roots ordered for project-relative hidden-path checks."""
+    return tuple(
+        sorted(
+            (local_project_root(project) for project in projects),
+            key=lambda project_root: len(project_root.parts),
+        )
+    )
+
+
+def local_watch_path_is_observable(*, project_roots: Iterable[Path], path: Path | str) -> bool:
+    """Return whether a filesystem watcher path should reach local indexing."""
+    path_obj = Path(path).expanduser().resolve()
+
+    relative_path = None
+    for project_root in project_roots:
+        try:
+            relative_path = path_obj.relative_to(project_root)
+            break
+        except ValueError:
+            continue
+
+    path_parts = relative_path.parts if relative_path is not None else path_obj.parts
+    if any(path_part.startswith(".") for path_part in path_parts):
+        return False
+
+    return not path_obj.name.endswith(".tmp")
+
+
 @dataclass(frozen=True, slots=True)
 class LocalWatchProjectChangeBatch(Generic[LocalWatchProjectT]):
     """A watcher change batch routed to one local project."""

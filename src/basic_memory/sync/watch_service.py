@@ -29,6 +29,8 @@ from basic_memory.index import (
     LocalWatchEventIndexRequest,
     StorageEventIndexRuntime,
     local_project_root,
+    local_watch_filter_roots,
+    local_watch_path_is_observable,
     local_watch_project_change_batches,
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
@@ -173,15 +175,7 @@ class WatchService:
         """Run one cycle of watching the given projects until stop_event is set."""
         project_paths = [project.path for project in projects]
         previous_filter_roots = self._sorted_watch_filter_roots
-        self._sorted_watch_filter_roots = tuple(
-            sorted(
-                (Path(project.path).expanduser().resolve() for project in projects),
-                # Trigger: configured project roots can overlap.
-                # Why: an enclosing project's hidden directory should still hide descendants.
-                # Outcome: choose the outermost matching root when checking hidden path parts.
-                key=lambda project_path: len(project_path.parts),
-            )
-        )
+        self._sorted_watch_filter_roots = local_watch_filter_roots(projects)
 
         try:
             async for changes in awatch(
@@ -327,45 +321,13 @@ class WatchService:
             True if the file should be watched, False if it should be ignored
         """
 
-        path_obj = Path(path).expanduser().resolve()
-
         project_paths = self._sorted_watch_filter_roots
         if project_paths is None:
-            project_paths = tuple(
-                sorted(
-                    (
-                        Path(entry.path).expanduser().resolve()
-                        for entry in self.app_config.projects.values()
-                        if entry.path
-                    ),
-                    # Trigger: direct callers may not run inside a watch cycle.
-                    # Why: tests and one-off calls still need the same hidden-path semantics.
-                    # Outcome: compute the stable outermost-first order only for fallback calls.
-                    key=lambda project_path: len(project_path.parts),
-                )
+            project_paths = local_watch_filter_roots(
+                (entry for entry in self.app_config.projects.values() if entry.path)
             )
 
-        relative_path = None
-        for project_path in project_paths:
-            try:
-                relative_path = path_obj.relative_to(project_path)
-                break
-            except ValueError:
-                continue
-
-        # Trigger: a project may live under a hidden parent such as ~/.claude.
-        # Why: only dotfiles and dot-directories inside the watched project should be ignored.
-        # Outcome: hidden parents outside the project root do not mute legitimate project changes.
-        path_parts = relative_path.parts if relative_path is not None else path_obj.parts
-        for part in path_parts:
-            if part.startswith("."):
-                return False
-
-        # Skip temp files used in atomic operations
-        if path.endswith(".tmp"):
-            return False
-
-        return True
+        return local_watch_path_is_observable(project_roots=project_paths, path=path)
 
     async def write_status(self):
         """Write current state to status file"""

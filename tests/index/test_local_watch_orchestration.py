@@ -13,6 +13,8 @@ from basic_memory.index import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
+    local_watch_filter_roots,
+    local_watch_path_is_observable,
     local_watch_project_change_batches,
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
@@ -221,6 +223,54 @@ def test_local_watch_project_change_batches_apply_project_ignore_patterns(tmp_pa
             project=project,
             changes=((Change.added, str(kept_note)),),
         ),
+    )
+
+
+def test_local_watch_filter_roots_sort_outermost_first(tmp_path: Path) -> None:
+    outer_root = tmp_path / "outer"
+    nested_root = outer_root / "nested"
+    nested_root.mkdir(parents=True)
+
+    roots = local_watch_filter_roots(
+        (
+            SimpleNamespace(path=str(nested_root)),
+            SimpleNamespace(path=str(outer_root)),
+        )
+    )
+
+    assert roots == (outer_root.resolve(), nested_root.resolve())
+
+
+def test_local_watch_path_visibility_uses_project_relative_hidden_parts(tmp_path: Path) -> None:
+    hidden_parent_project = tmp_path / ".claude" / "project"
+    hidden_parent_project.mkdir(parents=True)
+    visible_note = hidden_parent_project / "notes" / "visible.md"
+    visible_note.parent.mkdir()
+    visible_note.write_text("# Visible\n", encoding="utf-8")
+
+    outer_project = tmp_path / "outer"
+    nested_project = outer_project / ".private" / "subproject"
+    nested_project.mkdir(parents=True)
+    hidden_nested_note = nested_project / "notes" / "hidden.md"
+    hidden_nested_note.parent.mkdir()
+    hidden_nested_note.write_text("# Hidden\n", encoding="utf-8")
+
+    assert local_watch_path_is_observable(
+        project_roots=(hidden_parent_project.resolve(),),
+        path=visible_note,
+    )
+    assert not local_watch_path_is_observable(
+        project_roots=local_watch_filter_roots(
+            (
+                SimpleNamespace(path=str(outer_project)),
+                SimpleNamespace(path=str(nested_project)),
+            )
+        ),
+        path=hidden_nested_note,
+    )
+    assert not local_watch_path_is_observable(
+        project_roots=(hidden_parent_project.resolve(),),
+        path=hidden_parent_project / "notes" / "draft.tmp",
     )
 
 
