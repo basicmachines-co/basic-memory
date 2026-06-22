@@ -29,11 +29,25 @@ async def load_note_content_query_view(
 ) -> NoteContentReadView[Entity, NoteContent] | None:
     """Load one project-scoped note view from current DB state."""
     async with db.scoped_session(session_maker) as session:
-        return await load_note_content_read_view_with_default_repositories(
-            session,
+        return await load_note_content_query_view_from_session(
+            session=session,
             project_external_id=project_external_id,
             entity_external_id=entity_external_id,
         )
+
+
+async def load_note_content_query_view_from_session(
+    *,
+    session: AsyncSession,
+    project_external_id: str,
+    entity_external_id: str,
+) -> NoteContentReadView[Entity, NoteContent] | None:
+    """Load one project-scoped note view using caller-owned session scope."""
+    return await load_note_content_read_view_with_default_repositories(
+        session,
+        project_external_id=project_external_id,
+        entity_external_id=entity_external_id,
+    )
 
 
 class NoteContentQueryService:
@@ -53,13 +67,21 @@ class NoteContentQueryService:
         *,
         project_external_id: str,
         entity_external_id: str,
+        session: AsyncSession | None = None,
     ) -> RuntimeNoteContentResponsePayload | None:
         """Return the entity payload, enriching markdown notes from note_content."""
-        note_view = await load_note_content_query_view(
-            session_maker=self.session_maker,
-            project_external_id=project_external_id,
-            entity_external_id=entity_external_id,
-        )
+        if session is None:
+            note_view = await load_note_content_query_view(
+                session_maker=self.session_maker,
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
+        else:
+            note_view = await load_note_content_query_view_from_session(
+                session=session,
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
         return note_content_response_payload_from_read_view(note_view)
 
     async def get_note_resource(
@@ -67,13 +89,21 @@ class NoteContentQueryService:
         *,
         project_external_id: str,
         entity_external_id: str,
+        session: AsyncSession | None = None,
     ) -> RuntimeNoteContentResource | None:
         """Return full markdown content from note_content when available."""
-        note_view = await load_note_content_query_view(
-            session_maker=self.session_maker,
-            project_external_id=project_external_id,
-            entity_external_id=entity_external_id,
-        )
+        if session is None:
+            note_view = await load_note_content_query_view(
+                session_maker=self.session_maker,
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
+        else:
+            note_view = await load_note_content_query_view_from_session(
+                session=session,
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
         if note_view is None:
             return None
 

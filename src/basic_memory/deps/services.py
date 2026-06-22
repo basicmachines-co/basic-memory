@@ -37,6 +37,7 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
+from basic_memory.cloud import NoteContentQueryService
 from basic_memory.index import (
     LocalProjectIndexObservation,
     LocalProjectIndexRunner,
@@ -200,6 +201,21 @@ async def get_search_service_v2_external(
 
 
 SearchServiceV2ExternalDep = Annotated[SearchService, Depends(get_search_service_v2_external)]
+
+
+# --- Note Content Reads ---
+
+
+async def get_note_content_query_service(
+    session_maker: SessionMakerDep,
+) -> NoteContentQueryService:
+    """Create the runtime note-content read facade for API routes."""
+    return NoteContentQueryService(session_maker=session_maker)
+
+
+NoteContentQueryServiceDep = Annotated[
+    NoteContentQueryService, Depends(get_note_content_query_service)
+]
 
 
 # --- Link Resolver ---

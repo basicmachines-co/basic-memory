@@ -21,6 +21,7 @@ from basic_memory.deps import (
     ProjectConfigV2ExternalDep,
     FileServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
+    NoteContentQueryServiceDep,
     SearchServiceV2ExternalDep,
     SessionDep,
     SessionMakerDep,
@@ -41,6 +42,7 @@ async def get_resource_content(
     config: ProjectConfigV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
+    note_content_query_service: NoteContentQueryServiceDep,
     session: SessionDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
@@ -67,6 +69,17 @@ async def get_resource_content(
         action="get_content",
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
+
+        note_resource = await note_content_query_service.get_note_resource(
+            project_external_id=project_id,
+            entity_external_id=entity_id,
+            session=session,
+        )
+        if note_resource is not None:
+            return Response(
+                content=note_resource.content,
+                media_type=note_resource.content_type,
+            )
 
         with logfire.span(
             "api.resource.get_content.load_entity",

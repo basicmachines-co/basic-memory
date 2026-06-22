@@ -13,6 +13,7 @@ from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
 from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
 from basic_memory.schemas import DeleteEntitiesResponse
@@ -203,6 +204,48 @@ async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url,
     assert entity.external_id == entity_external_id
     assert entity.title == "TestGetById"
     assert entity.api_version == "v2"
+
+
+@pytest.mark.asyncio
+async def test_get_entity_by_id_reads_accepted_note_content(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    session_maker,
+):
+    """Markdown entity reads should return accepted DB content when present."""
+    create_response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "AcceptedKnowledge",
+            "directory": "test",
+            "content": "Original file content",
+        },
+    )
+    assert create_response.status_code == 200
+    created = EntityResponseV2.model_validate(create_response.json())
+
+    accepted_content = "# AcceptedKnowledge\n\nAccepted note_content body.\n"
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.upsert(
+            session,
+            {
+                "entity_id": created.id,
+                "markdown_content": accepted_content,
+                "db_version": 42,
+                "db_checksum": "accepted-db-checksum",
+                "file_write_status": "pending",
+                "last_source": "test",
+            },
+        )
+
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{created.external_id}")
+
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.external_id == created.external_id
+    assert entity.content == accepted_content
 
 
 @pytest.mark.asyncio

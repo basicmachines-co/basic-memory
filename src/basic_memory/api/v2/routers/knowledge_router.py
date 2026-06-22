@@ -28,6 +28,7 @@ from basic_memory.deps import (
     FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
     LinkResolverV2ExternalDep,
+    NoteContentQueryServiceDep,
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
     AppConfigDep,
@@ -39,6 +40,7 @@ from basic_memory.deps import (
     SessionDep,
     SessionMakerDep,
 )
+from basic_memory.runtime import runtime_note_content_payload_as_dict
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.request import EditEntityRequest
@@ -446,7 +448,9 @@ async def index_file(
 @router.get("/entities/{entity_id}", response_model=EntityResponseV2)
 async def get_entity_by_id(
     project_id: ProjectExternalIdPathDep,
+    project_repository: ProjectRepositoryDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    note_content_query_service: NoteContentQueryServiceDep,
     session: SessionDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
@@ -471,6 +475,22 @@ async def get_entity_by_id(
         action="get_entity",
     ):
         logger.info(f"API v2 request: get_entity_by_id entity_id={entity_id}")
+
+        project = await project_repository.get_by_id(session, project_id)
+        if project is None:  # pragma: no cover
+            raise HTTPException(status_code=404, detail=f"Project with ID {project_id} not found")
+
+        note_payload = await note_content_query_service.get_note_entity_payload(
+            project_external_id=project.external_id,
+            entity_external_id=entity_id,
+            session=session,
+        )
+        if note_payload is not None:
+            result = EntityResponseV2.model_validate(
+                runtime_note_content_payload_as_dict(note_payload)
+            )
+            logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+            return result
 
         entity = await entity_repository.get_by_external_id(session, entity_id)
         if not entity:
