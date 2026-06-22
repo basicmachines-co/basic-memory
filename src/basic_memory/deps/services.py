@@ -4,7 +4,7 @@ This module provides service-layer dependencies:
 - EntityParser, MarkdownProcessor
 - FileService, EntityService
 - SearchService, LinkResolver, ContextService
-- SyncService, ProjectService, DirectoryService
+- ProjectService, DirectoryService
 """
 
 import asyncio
@@ -47,7 +47,6 @@ from basic_memory.services.directory_service import DirectoryService
 from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
-from basic_memory.sync import SyncService
 
 # --- Entity Parser ---
 
@@ -462,92 +461,6 @@ ScheduledProjectIndexRunnerDep = Annotated[
 ]
 
 
-# --- Sync Service ---
-
-
-async def get_sync_service(
-    app_config: AppConfigDep,
-    entity_service: EntityServiceDep,
-    entity_parser: EntityParserDep,
-    entity_repository: EntityRepositoryDep,
-    relation_repository: RelationRepositoryDep,
-    project_repository: ProjectRepositoryDep,
-    search_service: SearchServiceDep,
-    file_service: FileServiceDep,
-    session_maker: SessionMakerDep,
-) -> SyncService:  # pragma: no cover
-    return SyncService(
-        app_config=app_config,
-        entity_service=entity_service,
-        entity_parser=entity_parser,
-        entity_repository=entity_repository,
-        relation_repository=relation_repository,
-        project_repository=project_repository,
-        search_service=search_service,
-        file_service=file_service,
-        session_maker=session_maker,
-    )
-
-
-SyncServiceDep = Annotated[SyncService, Depends(get_sync_service)]
-
-
-async def get_sync_service_v2(
-    app_config: AppConfigDep,
-    entity_service: EntityServiceV2Dep,
-    entity_parser: EntityParserV2Dep,
-    entity_repository: EntityRepositoryV2Dep,
-    relation_repository: RelationRepositoryV2Dep,
-    project_repository: ProjectRepositoryDep,
-    search_service: SearchServiceV2Dep,
-    file_service: FileServiceV2Dep,
-    session_maker: SessionMakerDep,
-) -> SyncService:  # pragma: no cover
-    """Create SyncService for v2 API."""
-    return SyncService(
-        app_config=app_config,
-        entity_service=entity_service,
-        entity_parser=entity_parser,
-        entity_repository=entity_repository,
-        relation_repository=relation_repository,
-        project_repository=project_repository,
-        search_service=search_service,
-        file_service=file_service,
-        session_maker=session_maker,
-    )
-
-
-SyncServiceV2Dep = Annotated[SyncService, Depends(get_sync_service_v2)]
-
-
-async def get_sync_service_v2_external(
-    app_config: AppConfigDep,
-    entity_service: EntityServiceV2ExternalDep,
-    entity_parser: EntityParserV2ExternalDep,
-    entity_repository: EntityRepositoryV2ExternalDep,
-    relation_repository: RelationRepositoryV2ExternalDep,
-    project_repository: ProjectRepositoryDep,
-    search_service: SearchServiceV2ExternalDep,
-    file_service: FileServiceV2ExternalDep,
-    session_maker: SessionMakerDep,
-) -> SyncService:  # pragma: no cover
-    """Create SyncService for v2 API (uses external_id)."""
-    return SyncService(
-        app_config=app_config,
-        entity_service=entity_service,
-        entity_parser=entity_parser,
-        entity_repository=entity_repository,
-        relation_repository=relation_repository,
-        project_repository=project_repository,
-        search_service=search_service,
-        file_service=file_service,
-        session_maker=session_maker,
-    )
-
-
-SyncServiceV2ExternalDep = Annotated[SyncService, Depends(get_sync_service_v2_external)]
-
-
 # --- Background Task Scheduler ---
 
 
@@ -596,8 +509,8 @@ class LocalTaskScheduler:
         # Trigger: running inside pytest (BASIC_MEMORY_ENV=test)
         # Why: background create_task() outlives test fixtures and races
         #      against engine disposal, causing flaky SQLite errors
-        # Outcome: skip background scheduling; tests exercise the sync
-        #          codepaths directly when they need to
+        # Outcome: skip background scheduling; focused tests run the
+        #          index operation directly when they need to.
         if self._test_mode:
             return
 
@@ -615,11 +528,11 @@ async def get_task_scheduler(
     async def _sync_entity_vectors(entity_id: int, **_: Any) -> None:
         await search_service.sync_entity_vectors(entity_id)
 
-    async def _sync_project(
+    async def _index_project(
         project_id: int | None = None, force_full: bool = False, **_: Any
     ) -> None:
         if project_id is None:
-            raise ValueError("sync_project requires project_id")
+            raise ValueError("index_project requires project_id")
         await project_index_runner.index_project(project_id, force_full=force_full)
 
     async def _reindex_project(**_: Any) -> None:
@@ -628,7 +541,7 @@ async def get_task_scheduler(
     scheduler = LocalTaskScheduler(
         {
             "sync_entity_vectors": _sync_entity_vectors,
-            "sync_project": _sync_project,
+            "index_project": _index_project,
             "reindex_project": _reindex_project,
         },
         test_mode=app_config.is_test_env,

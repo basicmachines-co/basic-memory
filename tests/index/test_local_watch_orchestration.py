@@ -309,7 +309,7 @@ def test_local_watch_status_update_plans_success() -> None:
     assert update.action == "index"
     assert update.status == "success"
     assert update.error is None
-    assert update.synced_files_increment == 2
+    assert update.indexed_files_increment == 2
     assert update.error_count_increment == 0
     assert update.record_last_error is False
 
@@ -327,6 +327,6 @@ def test_local_watch_status_update_plans_failure_details() -> None:
     assert update.action == "index"
     assert update.status == "error"
     assert update.error == "event-index processed=1 failed=2 skipped=3"
-    assert update.synced_files_increment == 1
+    assert update.indexed_files_increment == 1
     assert update.error_count_increment == 2
     assert update.record_last_error is True

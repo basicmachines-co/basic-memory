@@ -169,13 +169,13 @@ class ProjectClient:
         )
         return ProjectStatusResponse.model_validate(response.json())
 
-    async def sync(
+    async def index(
         self,
         project_external_id: str,
         force_full: bool = False,
         run_in_background: bool = True,
     ) -> dict[str, Any]:
-        """Trigger a sync operation for a project.
+        """Trigger a project indexing operation.
 
         Args:
             project_external_id: Project external ID (UUID)
@@ -191,7 +191,7 @@ class ProjectClient:
         """
         from basic_memory.mcp.tools.utils import call_post
 
-        url = f"/v2/projects/{project_external_id}/sync"
+        url = f"/v2/projects/{project_external_id}/index"
         params = []
         if force_full:
             params.append("force_full=true")

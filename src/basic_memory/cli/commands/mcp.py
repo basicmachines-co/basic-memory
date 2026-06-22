@@ -41,7 +41,7 @@ def mcp(
     - streamable-http: Recommended for web deployments
     - sse: Server-Sent Events (for compatibility with existing clients)
 
-    Initialization, file sync, and cleanup are handled by the MCP server's lifespan.
+    Initialization, file indexing, and cleanup are handled by the MCP server's lifespan.
 
     Note: This command is available regardless of cloud mode setting.
     Users who have cloud mode enabled can still use local MCP for Claude Code
@@ -111,7 +111,7 @@ def mcp(
     maybe_install_uvloop(ConfigManager().config)
 
     # Run the MCP server (blocks)
-    # Lifespan handles: initialization, migrations, file sync, cleanup
+    # Lifespan handles: initialization, migrations, file indexing, cleanup
     logger.info(f"Starting MCP server with {transport.upper()} transport")
 
     if transport == "stdio":

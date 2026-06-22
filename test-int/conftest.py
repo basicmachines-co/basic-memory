@@ -381,7 +381,7 @@ def app_config(
         projects=projects,
         default_project="test-project",
         update_permalinks_on_move=True,
-        sync_changes=False,  # Disable file sync in tests - prevents lifespan from starting blocking task
+        index_changes=False,  # Disable file indexing in tests - prevents lifespan from starting blocking task
         database_backend=database_backend,
         database_url=database_url,
         # Trigger: semantic_search_enabled defaults to True whenever fastembed/sqlite-vec

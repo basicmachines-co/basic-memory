@@ -195,10 +195,6 @@ async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
     monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
     monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        AsyncMock(side_effect=AssertionError("search reindex should not use SyncService")),
-    )
-    monkeypatch.setattr(
         "basic_memory.index.run_local_project_index_for_project",
         project_index,
     )

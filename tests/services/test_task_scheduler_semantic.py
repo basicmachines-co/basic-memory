@@ -55,8 +55,8 @@ async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sync_project_task_maps_to_project_index_runner(tmp_path):
-    """Explicit sync_project task should call the event-index project runner."""
+async def test_index_project_task_maps_to_project_index_runner(tmp_path):
+    """Explicit index_project task should call the event-index project runner."""
     project_index_runner = StubProjectIndexRunner()
     search_service = StubSearchService()
     app_config = BasicMemoryConfig(
@@ -72,7 +72,7 @@ async def test_sync_project_task_maps_to_project_index_runner(tmp_path):
         app_config=app_config,
     )
     cast(Any, scheduler)._test_mode = False
-    scheduler.schedule("sync_project", project_id=13, force_full=True)
+    scheduler.schedule("index_project", project_id=13, force_full=True)
     await asyncio.sleep(0.05)
 
     assert project_index_runner.indexed == [(13, True)]

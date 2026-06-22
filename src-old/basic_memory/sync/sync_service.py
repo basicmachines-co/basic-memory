@@ -50,6 +50,10 @@ from basic_memory.services.search_service import SearchService
 # Circuit breaker configuration
 MAX_CONSECUTIVE_FAILURES = 3
 SLOW_FILE_SYNC_WARNING_MS = 500
+SYNC_SERVICE_DEPRECATION_MESSAGE = (
+    "SyncService is deprecated reference-only legacy indexing code. New local and cloud "
+    "indexing work must use basic_memory.index; basic_memory.sync will be removed."
+)
 
 
 @dataclass
@@ -149,7 +153,13 @@ class _ScanEntityState:
 
 
 class SyncService:
-    """Syncs documents and knowledge files with database."""
+    """Deprecated reference-only filesystem scan implementation.
+
+    New indexing runtime work belongs in ``basic_memory.index``. This class is
+    retained only as source material while the event-based flow replaces it.
+    """
+
+    __deprecated__ = SYNC_SERVICE_DEPRECATION_MESSAGE
 
     def __init__(
         self,

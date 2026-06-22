@@ -54,7 +54,7 @@ class EntityResolveResponse(BaseModel):
     )
 
 
-class SyncFileRequest(BaseModel):
+class IndexFileRequest(BaseModel):
     """Request to index a single markdown file that exists on disk.
 
     Used as a recovery path when an identifier fails resolution but maps to a

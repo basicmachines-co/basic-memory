@@ -5,13 +5,18 @@ The success-path tests use the full ASGI stack via the app fixture.
 Error-path tests monkeypatch SchemaClient methods to trigger the except branch.
 """
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.index import LocalProjectIndexRunner
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 from basic_memory.mcp.tools.write_note import write_note
+from basic_memory.models import Project
+from basic_memory.repository import ProjectRepository
 
 
 # --- Helpers ---
@@ -22,6 +27,24 @@ def _write_schema_file(project_path: Path, filename: str, content: str):
     path = project_path / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+@pytest.fixture
+def index_project(
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> Callable[[], Awaitable[None]]:
+    """Return a project-index runner for files written directly by these tests."""
+
+    async def run_index() -> None:
+        runner = LocalProjectIndexRunner(
+            project_repository=project_repository,
+            session_maker=session_maker,
+        )
+        await runner.index_project(test_project.id, force_full=True)
+
+    return run_index
 
 
 PERSON_SCHEMA = """\
@@ -62,7 +85,7 @@ permalink: people/{permalink}
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_by_type(app, test_project, sync_service):
+async def test_schema_validate_by_type(app, test_project, index_project):
     """Validate all notes of a given entity type."""
     project_path = Path(test_project.path)
 
@@ -73,8 +96,8 @@ async def test_schema_validate_by_type(app, test_project, sync_service):
         PERSON_NOTE.format(name="Alice", permalink="alice"),
     )
 
-    # Sync so the database picks up the files
-    await sync_service.sync(project_path)
+    # Index so the database picks up the files written directly to disk.
+    await index_project()
 
     result = await schema_validate(
         note_type="person",
@@ -89,7 +112,7 @@ async def test_schema_validate_by_type(app, test_project, sync_service):
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_json_output(app, test_project, sync_service):
+async def test_schema_validate_json_output(app, test_project, index_project):
     """JSON output returns a dict with full structured data."""
     project_path = Path(test_project.path)
 
@@ -100,7 +123,7 @@ async def test_schema_validate_json_output(app, test_project, sync_service):
         PERSON_NOTE.format(name="Alice", permalink="alice"),
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_validate(
         note_type="person",
@@ -117,7 +140,7 @@ async def test_schema_validate_json_output(app, test_project, sync_service):
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_picoschema_modifier_descriptions(app, test_project, sync_service):
+async def test_schema_validate_picoschema_modifier_descriptions(app, test_project, index_project):
     """Modifier descriptions should not become literal field names."""
     project_path = Path(test_project.path)
 
@@ -160,7 +183,7 @@ permalink: pico/pico-test-1
 """,
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_validate(
         note_type="pico_test",
@@ -182,7 +205,7 @@ permalink: pico/pico-test-1
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_by_identifier(app, test_project, sync_service):
+async def test_schema_validate_by_identifier(app, test_project, index_project):
     """Validate a specific note by identifier."""
     project_path = Path(test_project.path)
 
@@ -193,7 +216,7 @@ async def test_schema_validate_by_identifier(app, test_project, sync_service):
         PERSON_NOTE.format(name="Alice", permalink="alice"),
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_validate(
         identifier="people/alice",
@@ -206,7 +229,7 @@ async def test_schema_validate_by_identifier(app, test_project, sync_service):
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_by_title(app, test_project, sync_service):
+async def test_schema_validate_by_title(app, test_project, index_project):
     """Validate a specific note by title (not permalink).
 
     Regression test for issue #33: schema_validate(identifier="Note Title")
@@ -221,7 +244,7 @@ async def test_schema_validate_by_title(app, test_project, sync_service):
         PERSON_NOTE.format(name="Alice", permalink="alice"),
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     # Use the title "Alice" instead of the permalink "people/alice"
     result = await schema_validate(
@@ -237,7 +260,7 @@ async def test_schema_validate_by_title(app, test_project, sync_service):
 
 @pytest.mark.asyncio
 async def test_schema_validate_identifier_no_schema_returns_guidance(
-    app, test_project, sync_service
+    app, test_project, index_project
 ):
     """When a note exists but no schema is defined, return guidance.
 
@@ -253,7 +276,7 @@ async def test_schema_validate_identifier_no_schema_returns_guidance(
         PERSON_NOTE.format(name="Alice", permalink="alice"),
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_validate(
         identifier="Alice",
@@ -267,7 +290,7 @@ async def test_schema_validate_identifier_no_schema_returns_guidance(
 
 
 @pytest.mark.asyncio
-async def test_schema_infer(app, test_project, sync_service):
+async def test_schema_infer(app, test_project, index_project):
     """Infer a schema from existing notes."""
     project_path = Path(test_project.path)
 
@@ -278,7 +301,7 @@ async def test_schema_infer(app, test_project, sync_service):
             PERSON_NOTE.format(name=name, permalink=name.lower()),
         )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_infer(
         note_type="person",
@@ -294,7 +317,7 @@ async def test_schema_infer(app, test_project, sync_service):
 
 
 @pytest.mark.asyncio
-async def test_schema_diff(app, test_project, sync_service):
+async def test_schema_diff(app, test_project, index_project):
     """Detect drift between schema and actual usage."""
     project_path = Path(test_project.path)
 
@@ -320,7 +343,7 @@ permalink: people/dave
 """,
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_diff(
         note_type="person",
@@ -337,7 +360,7 @@ permalink: people/dave
 
 
 @pytest.mark.asyncio
-async def test_write_note_metadata_creates_schema_note(app, test_project, sync_service):
+async def test_write_note_metadata_creates_schema_note(app, test_project, index_project):
     """Create a schema note via write_note(metadata=...), then validate against it.
 
     Proves the end-to-end workflow: write_note → sync → schema_validate.
@@ -368,7 +391,7 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, sync_s
     )
 
     # 3. Sync picks up person notes written directly to disk
-    await sync_service.sync(project_path)
+    await index_project()
 
     # 4. Validate — schema_validate should find the schema and validate person notes
     result = await schema_validate(
@@ -382,7 +405,7 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, sync_s
 
 
 @pytest.mark.asyncio
-async def test_schema_title_mismatch_finds_by_metadata(app, test_project, sync_service):
+async def test_schema_title_mismatch_finds_by_metadata(app, test_project, index_project):
     """Schema lookup works even when the schema title doesn't match the entity type.
 
     Regression test: the old text-search approach failed when the schema note's title
@@ -434,7 +457,7 @@ permalink: employees/{name.lower()}
 """,
         )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     # Validate — must find "Employee Schema" via entity_metadata['entity'] == "employee"
     result = await schema_validate(
@@ -455,7 +478,7 @@ permalink: employees/{name.lower()}
 
 
 @pytest.mark.asyncio
-async def test_schema_infer_empty_schema_returns_guidance(app, test_project, sync_service):
+async def test_schema_infer_empty_schema_returns_guidance(app, test_project, index_project):
     """When notes exist but no fields meet the threshold, return guidance instead of data."""
     project_path = Path(test_project.path)
 
@@ -487,7 +510,7 @@ permalink: things/{name}
 """,
         )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_infer(
         note_type="widget",
@@ -505,7 +528,7 @@ permalink: things/{name}
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_no_notes_returns_guidance(app, test_project, sync_service):
+async def test_schema_validate_no_notes_returns_guidance(app, test_project, index_project):
     """When no notes of the requested type exist, return guidance on creating notes."""
     result = await schema_validate(
         note_type="employee",
@@ -521,7 +544,7 @@ async def test_schema_validate_no_notes_returns_guidance(app, test_project, sync
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_no_schema_returns_guidance(app, test_project, sync_service):
+async def test_schema_validate_no_schema_returns_guidance(app, test_project, index_project):
     """When notes exist but no schema is defined, return guidance on creating one."""
     project_path = Path(test_project.path)
 
@@ -533,7 +556,7 @@ async def test_schema_validate_no_schema_returns_guidance(app, test_project, syn
             PERSON_NOTE.format(name=name, permalink=name.lower()),
         )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_validate(
         note_type="person",
@@ -549,7 +572,7 @@ async def test_schema_validate_no_schema_returns_guidance(app, test_project, syn
 
 
 @pytest.mark.asyncio
-async def test_schema_diff_no_schema_returns_guidance(app, test_project, sync_service):
+async def test_schema_diff_no_schema_returns_guidance(app, test_project, index_project):
     """When no schema exists for the type, return guidance on creating one."""
     project_path = Path(test_project.path)
 
@@ -560,7 +583,7 @@ async def test_schema_diff_no_schema_returns_guidance(app, test_project, sync_se
         PERSON_NOTE.format(name="Alice", permalink="alice"),
     )
 
-    await sync_service.sync(project_path)
+    await index_project()
 
     result = await schema_diff(
         note_type="person",

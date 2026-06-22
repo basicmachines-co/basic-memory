@@ -252,8 +252,7 @@ file-index-semantic-dependency-test:
 # Focused startup wiring for local project-index fanout.
 local-project-index-startup-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/services/test_initialization.py::test_initialize_file_sync_uses_project_index_runtime_for_initial_sync_by_default \
-        tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
+        tests/services/test_initialization.py::test_initialize_file_indexing_uses_project_index_runtime_for_initial_sync_by_default
 
 # Focused CLI project-index surface tests.
 project-index-cli-test:
@@ -299,7 +298,7 @@ event-index-contract-test: storage-event-contract-test filesystem-event-temp-fil
         tests/index/test_local_watch_regular_file_parity.py \
         tests/index/test_local_watch_orchestration.py \
         tests/index/test_repository_storage_event_project_resolution.py \
-        tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_by_default
+        tests/services/test_initialization.py::test_initialize_file_indexing_wires_event_index_runtime_by_default
 
 # Focused parity loop for local project scans and shared storage-event routing.
 event-index-parity-test:

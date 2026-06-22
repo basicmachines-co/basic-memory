@@ -47,6 +47,13 @@ from basic_memory.index.local_watch import (
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
+from basic_memory.index.watch_service import (
+    WatchEvent,
+    WatchEventIndexRuntimeFactory,
+    WatchService,
+    WatchServiceState,
+)
+from basic_memory.index.watch_coordinator import WatchCoordinator, WatchStatus
 from basic_memory.index.local_moves import (
     LocalWatchMoveProcessingResult,
     LocalWatchMoveProcessor,
@@ -133,6 +140,12 @@ __all__ = [
     "LocalWatchProjectSource",
     "LocalWatchStorageEventSource",
     "LocalWatchEventIndexRuntimeFactory",
+    "WatchEvent",
+    "WatchEventIndexRuntimeFactory",
+    "WatchService",
+    "WatchServiceState",
+    "WatchCoordinator",
+    "WatchStatus",
     "LocalWatchMoveProcessingResult",
     "LocalWatchMoveProcessor",
     "LocalWatchStorageEventIndexRuntime",

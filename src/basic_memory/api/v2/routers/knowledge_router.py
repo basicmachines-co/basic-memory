@@ -53,7 +53,7 @@ from basic_memory.schemas.v2 import (
     MoveDirectoryRequestV2,
     DeleteDirectoryRequestV2,
     OrphanEntitiesResponse,
-    SyncFileRequest,
+    IndexFileRequest,
 )
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.utils import validate_project_path
@@ -257,7 +257,7 @@ async def resolve_identifier(
         return result
 
 
-## Single-file sync endpoint
+## Single-file indexing endpoint
 
 
 def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
@@ -306,9 +306,9 @@ def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
     return "/".join(canonical_segments)
 
 
-@router.post("/sync-file", response_model=EntityResponseV2)
-async def sync_file(
-    data: SyncFileRequest,
+@router.post("/index-file", response_model=EntityResponseV2)
+async def index_file(
+    data: IndexFileRequest,
     project_id: ProjectExternalIdPathDep,
     file_service: FileServiceV2ExternalDep,
     file_indexer: IndexFileExecutorV2ExternalDep,
@@ -336,12 +336,12 @@ async def sync_file(
             not markdown, 404 if the file does not exist on disk
     """
     with logfire.span(
-        "api.request.knowledge.sync_file",
+        "api.request.knowledge.index_file",
         entrypoint="api",
         domain="knowledge",
-        action="sync_file",
+        action="index_file",
     ):
-        logger.info(f"API v2 request: sync_file file_path='{data.file_path}'")
+        logger.info(f"API v2 request: index_file file_path='{data.file_path}'")
 
         if not validate_project_path(data.file_path, project_config.home):
             raise HTTPException(
@@ -400,7 +400,7 @@ async def sync_file(
         # Why: scan and watch flows filter ignored files before they ever reach the
         #      indexer; indexing one here would bypass the ignored-file contract and
         #      make hidden or gitignored content searchable
-        # Outcome: the same should_ignore_path() rules apply to single-file sync
+        # Outcome: the same should_ignore_path() rules apply to single-file indexing
         ignore_patterns = load_gitignore_patterns(project_config.home)
         if should_ignore_path(
             project_config.home / file_path, project_config.home, ignore_patterns
@@ -416,7 +416,7 @@ async def sync_file(
                 detail=f"Only markdown files can be indexed: '{data.file_path}'",
             )
 
-        indexed = await file_indexer.index_file(file_path, source="api-sync-file")
+        indexed = await file_indexer.index_file(file_path, source="api-index-file")
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_id(session, indexed.entity_id)
         if entity is None:  # pragma: no cover
@@ -428,7 +428,7 @@ async def sync_file(
         # Trigger: semantic search is enabled and the entity index was just refreshed
         # Why: project indexing refreshes embedding vectors after changed files are
         #      indexed; without the single-entity equivalent, a note recovered via
-        #      sync-file stays missing or stale in semantic search until later work
+        #      index-file stays missing or stale in semantic search until later work
         # Outcome: vectors refresh synchronously before the response returns,
         #          mirroring project indexing instead of the out-of-band scheduler
         if app_config.semantic_search_enabled:
@@ -436,7 +436,7 @@ async def sync_file(
 
         result = EntityResponseV2.model_validate(entity)
         logger.info(
-            f"API v2 response: sync_file file_path='{file_path}' external_id={result.external_id}"
+            f"API v2 response: index_file file_path='{file_path}' external_id={result.external_id}"
         )
         return result
 

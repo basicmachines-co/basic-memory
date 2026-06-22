@@ -111,19 +111,19 @@ async def create_cloud_project(
         raise CloudUtilsError(f"Failed to create cloud project '{project_name}': {e}") from e
 
 
-async def sync_project(project_name: str, force_full: bool = False) -> None:
-    """Trigger sync for a specific project on cloud.
+async def index_project(project_name: str, force_full: bool = False) -> None:
+    """Trigger indexing for a specific project on cloud.
 
     Args:
-        project_name: Name of project to sync
+        project_name: Name of project to index
         force_full: ignored, kept for backwards compatibility
     """
     try:
-        from basic_memory.cli.commands.command_utils import run_sync
+        from basic_memory.cli.commands.command_utils import run_project_index
 
-        await run_sync(project=project_name)
+        await run_project_index(project=project_name)
     except Exception as e:
-        raise CloudUtilsError(f"Failed to sync project '{project_name}': {e}") from e
+        raise CloudUtilsError(f"Failed to index project '{project_name}': {e}") from e
 
 
 async def project_exists(

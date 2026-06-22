@@ -30,6 +30,7 @@ from basic_memory.config import (
     DatabaseBackend,
 )
 from basic_memory.db import DatabaseType
+from basic_memory.index import LocalProjectIndexRunner, WatchService
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Base
@@ -48,8 +49,6 @@ from basic_memory.services.directory_service import DirectoryService
 from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
-from basic_memory.sync.sync_service import SyncService
-from basic_memory.sync.watch_service import WatchService
 
 
 # =============================================================================
@@ -540,32 +539,6 @@ def entity_parser(project_config):
 
 
 @pytest_asyncio.fixture
-async def sync_service(
-    app_config: BasicMemoryConfig,
-    entity_service: EntityService,
-    entity_parser: EntityParser,
-    project_repository: ProjectRepository,
-    entity_repository: EntityRepository,
-    relation_repository: RelationRepository,
-    search_service: SearchService,
-    file_service: FileService,
-    session_maker: async_sessionmaker[AsyncSession],
-) -> SyncService:
-    """Create sync service for testing."""
-    return SyncService(
-        app_config=app_config,
-        entity_service=entity_service,
-        project_repository=project_repository,
-        entity_repository=entity_repository,
-        relation_repository=relation_repository,
-        entity_parser=entity_parser,
-        search_service=search_service,
-        file_service=file_service,
-        session_maker=session_maker,
-    )
-
-
-@pytest_asyncio.fixture
 async def directory_service(
     entity_repository,
     project_config,
@@ -772,24 +745,13 @@ async def test_graph(
 def watch_service(
     app_config: BasicMemoryConfig,
     project_repository,
-    sync_service,
     session_maker: async_sessionmaker[AsyncSession],
 ) -> WatchService:
-    """Create WatchService with injected sync_service factory.
-
-    The sync_service_factory allows tests to use the fixture-provided sync_service
-    instead of the production get_sync_service() which creates its own db connection.
-    """
-
-    async def sync_service_factory(project):
-        """Return the test fixture's sync_service regardless of project."""
-        return sync_service
-
+    """Create the event-index local watcher for tests."""
     return WatchService(
         app_config=app_config,
         project_repository=project_repository,
         session_maker=session_maker,
-        sync_service_factory=sync_service_factory,
     )
 
 
@@ -823,7 +785,11 @@ def test_files(project_config, project_root) -> dict[str, Path]:
 
 
 @pytest_asyncio.fixture
-async def synced_files(sync_service, project_config, test_files):
-    # Initial sync - should create forward reference
-    await sync_service.sync(project_config.home)
+async def indexed_files(project_repository, session_maker, test_project, test_files):
+    """Index copied fixture files through the local project-index runner."""
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+    await runner.index_project(test_project.id, force_full=True)
     return test_files

@@ -45,6 +45,11 @@ from watchfiles import awatch
 from watchfiles.main import FileChange, Change
 import time
 
+SYNC_WATCH_SERVICE_DEPRECATION_MESSAGE = (
+    "basic_memory.sync.WatchService is deprecated reference-only legacy watcher code. "
+    "Use basic_memory.index.WatchService for local event-based indexing."
+)
+
 
 class WatchEvent(BaseModel):
     timestamp: datetime
@@ -109,6 +114,10 @@ class WatchEventIndexRuntimeFactory(Protocol):
 
 
 class WatchService:
+    """Deprecated reference-only watcher retained while callers move to basic_memory.index."""
+
+    __deprecated__ = SYNC_WATCH_SERVICE_DEPRECATION_MESSAGE
+
     def __init__(
         self,
         app_config: BasicMemoryConfig,

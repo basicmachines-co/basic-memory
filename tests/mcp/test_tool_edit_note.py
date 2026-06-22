@@ -1414,12 +1414,12 @@ async def test_edit_note_append_recovers_markdown_suffix_file_from_stem(client, 
 async def test_edit_note_append_recovers_wrong_cased_identifier(client, test_project):
     """A wrong-cased identifier edits the canonical on-disk file after recovery (#581).
 
-    The sync-file endpoint canonicalizes casing by matching real directory entries,
+    The index-file endpoint canonicalizes casing by matching real directory entries,
     so syncing 'notes/Disk-Note.md' indexes 'notes/disk-note.md' identically on
     case-sensitive (CI) and case-insensitive (macOS) filesystems — no filesystem
     probe is needed here. The regression: the retry used to strictly re-resolve the
     raw wrong-cased identifier, which can miss the just-indexed canonical entity;
-    the fix returns the entity identity straight from the sync-file response.
+    the fix returns the entity identity straight from the index-file response.
     """
     note_path = Path(test_project.path) / "notes" / "disk-note.md"
     note_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1445,15 +1445,15 @@ async def test_edit_note_append_recovers_wrong_cased_identifier(client, test_pro
 
 @pytest.mark.asyncio
 async def test_resolve_after_disk_recovery_falls_back_to_strict_resolve():
-    """Older servers that omit external_id from sync-file trigger a strict re-resolve.
+    """Older servers that omit external_id from index-file trigger a strict re-resolve.
 
-    The recovery path prefers the entity identity from the sync-file response; when a
+    The recovery path prefers the entity identity from the index-file response; when a
     server predates that field, the only safe option is a strict re-resolve of the
     raw identifier (which fails loudly on a miss instead of guessing).
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/sync-file"):
+        if request.url.path.endswith("/index-file"):
             return httpx.Response(
                 200,
                 json={
@@ -1483,7 +1483,7 @@ async def test_resolve_after_disk_recovery_falls_back_to_strict_resolve():
 async def test_resolve_after_disk_recovery_propagates_unexpected_errors():
     """Server-side failures during disk recovery must not be masked as a not-found miss.
 
-    Only 400/404 sync-file rejections mean "nothing to recover"; a 500 (or auth
+    Only 400/404 index-file rejections mean "nothing to recover"; a 500 (or auth
     failure) would otherwise be swallowed and edit_note would continue into
     auto-create with a misleading not-found error.
     """

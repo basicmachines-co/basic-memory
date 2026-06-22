@@ -19,55 +19,55 @@ class TestMcpContainer:
         assert container.config == app_config
         assert container.mode == RuntimeMode.LOCAL
 
-    def test_should_sync_files_when_enabled_local_mode(self, app_config):
-        """Sync should be enabled in local mode when config says so."""
-        app_config.sync_changes = True
+    def test_should_watch_files_when_enabled_local_mode(self, app_config):
+        """Local watching should be enabled in local mode when config says so."""
+        app_config.index_changes = True
         container = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
-        assert container.should_sync_files is True
+        assert container.should_watch_files is True
 
-    def test_should_not_sync_files_when_disabled(self, app_config):
-        """Sync should be disabled when config says so."""
-        app_config.sync_changes = False
+    def test_should_not_watch_files_when_disabled(self, app_config):
+        """Local watching should be disabled when config says so."""
+        app_config.index_changes = False
         container = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
-        assert container.should_sync_files is False
+        assert container.should_watch_files is False
 
-    def test_should_not_sync_files_in_test_mode(self, app_config):
-        """Sync should be disabled in test mode regardless of config."""
-        app_config.sync_changes = True
+    def test_should_not_watch_files_in_test_mode(self, app_config):
+        """Local watching should be disabled in test mode regardless of config."""
+        app_config.index_changes = True
         container = McpContainer(config=app_config, mode=RuntimeMode.TEST)
-        assert container.should_sync_files is False
+        assert container.should_watch_files is False
 
-    def test_should_not_sync_files_in_cloud_mode(self, app_config):
-        """Sync should be disabled in cloud mode (cloud handles sync differently)."""
-        app_config.sync_changes = True
+    def test_should_not_watch_files_in_cloud_mode(self, app_config):
+        """Local watching should be disabled in cloud mode."""
+        app_config.index_changes = True
         container = McpContainer(config=app_config, mode=RuntimeMode.CLOUD)
-        assert container.should_sync_files is False
+        assert container.should_watch_files is False
 
 
-class TestSyncSkipReason:
-    """Tests for sync_skip_reason property."""
+class TestWatchSkipReason:
+    """Tests for watch_skip_reason property."""
 
     def test_skip_reason_in_test_mode(self, app_config):
         """Returns test message when in test mode."""
         container = McpContainer(config=app_config, mode=RuntimeMode.TEST)
-        assert container.sync_skip_reason == "Test environment detected"
+        assert container.watch_skip_reason == "Test environment detected"
 
     def test_skip_reason_in_cloud_mode(self, app_config):
         """Returns cloud message when in cloud mode."""
         container = McpContainer(config=app_config, mode=RuntimeMode.CLOUD)
-        assert container.sync_skip_reason == "Cloud mode enabled"
+        assert container.watch_skip_reason == "Cloud mode enabled"
 
-    def test_skip_reason_when_sync_disabled(self, app_config):
-        """Returns disabled message when sync is disabled."""
-        app_config.sync_changes = False
+    def test_skip_reason_when_watch_disabled(self, app_config):
+        """Returns disabled message when local watching is disabled."""
+        app_config.index_changes = False
         container = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
-        assert container.sync_skip_reason == "Sync changes disabled"
+        assert container.watch_skip_reason == "Local file watching disabled"
 
-    def test_no_skip_reason_when_should_sync(self, app_config):
-        """Returns None when sync should run."""
-        app_config.sync_changes = True
+    def test_no_skip_reason_when_should_watch(self, app_config):
+        """Returns None when local watching should run."""
+        app_config.index_changes = True
         container = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
-        assert container.sync_skip_reason is None
+        assert container.watch_skip_reason is None
 
 
 class TestContainerAccessors:

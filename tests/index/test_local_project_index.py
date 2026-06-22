@@ -135,14 +135,6 @@ async def test_local_project_index_skips_hidden_markdown_files(
         "# Hidden\n\nThis file should stay out of the index.\n", encoding="utf-8"
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local hidden-file parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -199,14 +191,6 @@ modified: 2024-01-01
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local null-checksum parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -242,14 +226,6 @@ async def test_local_project_index_uses_file_mtime_for_new_markdown_entities(
     expected_mtime = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
     os.utime(note_path, (expected_mtime, expected_mtime))
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local timestamp parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -282,14 +258,6 @@ async def test_local_project_index_updates_entity_mtime_on_file_modification(
     note_path.write_text("# Timestamp Update\n\nInitial content.\n", encoding="utf-8")
     initial_mtime = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
     os.utime(note_path, (initial_mtime, initial_mtime))
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local timestamp parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     first = await run_local_project_index_for_project(
         test_project,
@@ -339,14 +307,6 @@ async def test_local_project_index_indexes_regular_files(
     pdf_path.write_bytes(b"pdf-ish")
     image_path.write_bytes(b"png-ish")
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local regular-file parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -381,14 +341,6 @@ async def test_local_project_index_updates_regular_file_checksum(
 
     pdf_path = project_config.home / "doc.pdf"
     pdf_path.write_bytes(b"original")
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local regular-file parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     first = await run_local_project_index_for_project(
         test_project,
@@ -434,14 +386,6 @@ async def test_local_project_index_moves_and_deletes_regular_file_entities(
 
     pdf_path = project_config.home / "doc.pdf"
     pdf_path.write_bytes(b"pdf-ish")
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local regular-file parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     first = await run_local_project_index_for_project(
         test_project,
@@ -517,14 +461,6 @@ tags: []
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local regular-file relation test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -585,14 +521,6 @@ permalink: changing
 - [test] This is the observed content
 """,
         encoding="utf-8",
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local changed-during-index parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     runtime_factory = LocalProjectIndexRuntimeFactory(batch_size=10)
@@ -1069,14 +997,6 @@ async def test_local_project_index_force_full_reindexes_unchanged_files(
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text("# Force Full\n\nThis should be reprocessed.\n", encoding="utf-8")
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local project index parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     first = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -1123,14 +1043,6 @@ async def test_local_project_index_move_updates_note_content_identity(
     moved_path.parent.mkdir(parents=True, exist_ok=True)
     original_path.write_text(
         "# Move Me\n\nThis note should keep content identity.\n", encoding="utf-8"
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local project index parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     first = await run_local_project_index_for_project(
@@ -1198,14 +1110,6 @@ async def test_local_project_index_move_updates_permalink_when_configured(
     moved_path.parent.mkdir(parents=True, exist_ok=True)
     original_path.write_text("# Rename Me\n\nThis note moves with a permalink.\n", encoding="utf-8")
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local project index parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     first = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -1270,14 +1174,6 @@ async def test_local_project_index_moves_markdown_over_deleted_path_with_permali
     source_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text("# Target\n\nThis note gets replaced.\n", encoding="utf-8")
     source_path.write_text("# Source\n\nThis note moves over the target.\n", encoding="utf-8")
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local markdown move conflict parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     first = await run_local_project_index_for_project(
         test_project,
@@ -1353,14 +1249,6 @@ async def test_local_project_index_move_repairs_observation_search_permalinks(
     original_path.write_text(
         "# Observed\n\n- [fact] Search repair follows the moved note.\n",
         encoding="utf-8",
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local project index parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     first = await run_local_project_index_for_project(
@@ -1446,14 +1334,6 @@ permalink: concept/entity-c
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local relation parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=1),
@@ -1533,14 +1413,6 @@ permalink: concept/duplicate-relations
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local duplicate relation parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=1),
@@ -1601,14 +1473,6 @@ modified: 2024-01-01
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local observation category parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -1654,14 +1518,6 @@ type: note
 This file contains a wikilink to [[another-file]].
 """,
         encoding="utf-8",
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local wikilink stability parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     first = await run_local_project_index_for_project(
@@ -1753,14 +1609,6 @@ type: note
 - relates_to [[Deleted Target]]
 """,
         encoding="utf-8",
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local directory delete parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     first = await run_local_project_index_for_project(
@@ -1861,14 +1709,6 @@ original two content
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local permalink conflict parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     first = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -1948,14 +1788,6 @@ permalink: two
 original two content
 """,
         encoding="utf-8",
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local permalink conflict parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     first = await run_local_project_index_for_project(
@@ -2041,14 +1873,6 @@ This file has hyphens in the name.
         encoding="utf-8",
     )
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local path conflict parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -2109,14 +1933,6 @@ async def test_local_project_index_does_not_add_frontmatter_when_disabled(
     plain_path = project_config.home / "plain.md"
     plain_path.write_text("# Plain\n\nNo frontmatter should be created.\n", encoding="utf-8")
 
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local frontmatter policy parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
-
     result = await run_local_project_index_for_project(
         test_project,
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
@@ -2147,14 +1963,6 @@ async def test_local_project_index_indexes_thematic_break_content_without_frontm
     thematic_path.parent.mkdir(parents=True, exist_ok=True)
     original_content = "---\nBody content after a thematic break.\n"
     thematic_path.write_text(original_content, encoding="utf-8")
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local frontmatter policy parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     result = await run_local_project_index_for_project(
         test_project,
@@ -2198,14 +2006,6 @@ async def test_local_project_index_writes_frontmatter_when_enabled_even_if_perma
 
     note_path = project_config.home / "override.md"
     note_path.write_text("# Override\n", encoding="utf-8")
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("local frontmatter policy parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     result = await run_local_project_index_for_project(
         test_project,

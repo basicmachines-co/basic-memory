@@ -2,7 +2,7 @@
 
 # PEP 563 lazy annotations let signatures reference IndexProgress without importing
 # the indexing stack at module load; reset/reindex import their heavy database and
-# sync dependencies at call time so CLI startup stays fast (#886).
+# indexing dependencies at call time so CLI startup stays fast (#886).
 from __future__ import annotations
 
 import os
@@ -134,7 +134,7 @@ async def _reindex_projects(app_config):
     This ensures all database operations use the same event loop,
     and proper cleanup happens when the function completes.
     """
-    # Deferred: SQLAlchemy, repositories, and the sync stack load only when a
+    # Deferred: SQLAlchemy, repositories, and the indexing stack load only when a
     # reindex actually runs, not on every CLI start (#886).
     from basic_memory import db
     from basic_memory.repository import ProjectRepository

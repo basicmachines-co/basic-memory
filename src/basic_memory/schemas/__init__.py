@@ -55,10 +55,6 @@ from basic_memory.schemas.directory import (
     DirectoryNode,
 )
 
-from basic_memory.schemas.sync_report import (
-    SyncReportResponse,
-)
-
 # For convenient imports, export all models
 __all__ = [
     # Base
@@ -92,6 +88,4 @@ __all__ = [
     "ProjectIndexStatusResponse",
     # Directory
     "DirectoryNode",
-    # Sync
-    "SyncReportResponse",
 ]

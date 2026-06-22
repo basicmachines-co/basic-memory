@@ -49,10 +49,10 @@ def resolve_runtime_mode(
         return RuntimeMode.TEST
 
     # Trigger: BASIC_MEMORY_CLOUD_MODE env var is set
-    # Why: cloud deployments must not start local file sync; cloud handles
-    #      file storage via object storage, and local sync tries to open a
+    # Why: cloud deployments must not start local file indexing; cloud handles
+    #      file storage via object storage, and local indexing tries to open a
     #      SQLite/Postgres DB that does not exist in the cloud container.
-    # Outcome: returns CLOUD mode, skipping file sync initialization.
+    # Outcome: returns CLOUD mode, skipping file-index initialization.
     cloud_mode = os.getenv("BASIC_MEMORY_CLOUD_MODE", "").lower() in ("1", "true")
     if cloud_mode:
         return RuntimeMode.CLOUD

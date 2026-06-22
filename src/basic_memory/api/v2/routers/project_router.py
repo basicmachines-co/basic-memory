@@ -230,8 +230,8 @@ async def synchronize_projects(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{project_id}/sync")
-async def sync_project(
+@router.post("/{project_id}/index")
+async def index_project(
     project_index_runner: ProjectIndexRunnerDep,
     project_config: ProjectConfigV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
@@ -242,17 +242,18 @@ async def sync_project(
     """Run project-wide indexing through the event-index coordinator."""
     if run_in_background:
         task_scheduler.schedule(
-            "sync_project",
+            "index_project",
             project_id=project_internal_id,
             force_full=force_full,
         )
         logger.info(
-            f"Filesystem sync initiated for project: {project_config.name} (force_full={force_full})"
+            f"Filesystem indexing initiated for project: {project_config.name} "
+            f"(force_full={force_full})"
         )
 
         return {
-            "status": "sync_started",
-            "message": f"Filesystem sync initiated for project '{project_config.name}'",
+            "status": "index_started",
+            "message": f"Filesystem indexing initiated for project '{project_config.name}'",
         }
 
     result = await project_index_runner.index_project(
@@ -260,7 +261,8 @@ async def sync_project(
         force_full=force_full,
     )
     logger.info(
-        f"Filesystem sync completed for project: {project_config.name} (force_full={force_full})"
+        f"Filesystem indexing completed for project: {project_config.name} "
+        f"(force_full={force_full})"
     )
     return ProjectIndexRunResponse.from_result(result)
 

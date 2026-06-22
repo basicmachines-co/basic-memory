@@ -365,8 +365,8 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     # Watch service configuration
-    sync_delay: int = Field(
-        default=1000, description="Milliseconds to wait after changes before syncing", gt=0
+    index_delay: int = Field(
+        default=1000, description="Milliseconds to wait after changes before indexing", gt=0
     )
 
     watch_project_reload_interval: int = Field(
@@ -375,32 +375,15 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
-    watch_event_index: bool = Field(
-        default=True,
-        description="Route filesystem watcher changes and startup indexing through the event-based indexing runtime. Set false to use the legacy sync implementation for comparison.",
-    )
-
     # update permalinks on move
     update_permalinks_on_move: bool = Field(
         default=False,
         description="Whether to update permalinks when files are moved or renamed. default (False)",
     )
 
-    sync_changes: bool = Field(
+    index_changes: bool = Field(
         default=True,
-        description="Whether to sync changes in real time. default (True)",
-    )
-
-    sync_thread_pool_size: int = Field(
-        default=4,
-        description="Size of thread pool for file I/O operations in sync service. Default of 4 is optimized for cloud deployments with 1-2GB RAM.",
-        gt=0,
-    )
-
-    sync_max_concurrent_files: int = Field(
-        default=10,
-        description="Maximum number of files to process concurrently during sync. Limits memory usage on large projects (2000+ files). Lower values reduce memory consumption.",
-        gt=0,
+        description="Whether to index local file changes in real time. default (True)",
     )
     index_batch_size: int = Field(
         default=32,

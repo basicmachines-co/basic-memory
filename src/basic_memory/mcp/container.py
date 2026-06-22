@@ -7,7 +7,7 @@ rather than reading globals.
 Design principles:
 - Only this module reads ConfigManager directly
 - Runtime mode (cloud/local/test) is resolved here
-- File sync decisions are centralized here
+- File indexing decisions are centralized here
 """
 
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
 
 if TYPE_CHECKING:  # pragma: no cover
-    from basic_memory.sync import SyncCoordinator
+    from basic_memory.index import WatchCoordinator
 
 
 @dataclass
@@ -46,43 +46,43 @@ class McpContainer:
     # --- Runtime Mode Properties ---
 
     @property
-    def should_sync_files(self) -> bool:
-        """Whether local file sync should be started.
+    def should_watch_files(self) -> bool:
+        """Whether local file watching should be started.
 
-        Sync is enabled when:
-        - sync_changes is True in config
-        - Not in test mode (tests manage their own sync)
-        - Not in cloud mode (cloud handles sync differently)
+        Watching is enabled when:
+        - index_changes is True in config
+        - Not in test mode (tests manage their own watcher lifecycle)
+        - Not in cloud mode (cloud handles storage events differently)
         """
-        return self.config.sync_changes and not self.mode.is_test and not self.mode.is_cloud
+        return self.config.index_changes and not self.mode.is_test and not self.mode.is_cloud
 
     @property
-    def sync_skip_reason(self) -> str | None:
-        """Reason why sync is skipped, or None if sync should run.
+    def watch_skip_reason(self) -> str | None:
+        """Reason why local watching is skipped, or None if it should run.
 
-        Useful for logging why sync was disabled.
+        Useful for logging why local watching was disabled.
         """
         if self.mode.is_test:
             return "Test environment detected"
         if self.mode.is_cloud:
             return "Cloud mode enabled"
-        if not self.config.sync_changes:
-            return "Sync changes disabled"
+        if not self.config.index_changes:
+            return "Local file watching disabled"
         return None
 
-    def create_sync_coordinator(self) -> "SyncCoordinator":
-        """Create a SyncCoordinator with this container's settings.
+    def create_watch_coordinator(self) -> "WatchCoordinator":
+        """Create a WatchCoordinator with this container's settings.
 
         Returns:
-            SyncCoordinator configured for this runtime environment
+            WatchCoordinator configured for this runtime environment
         """
         # Deferred import to avoid circular dependency
-        from basic_memory.sync import SyncCoordinator
+        from basic_memory.index import WatchCoordinator
 
-        return SyncCoordinator(
+        return WatchCoordinator(
             config=self.config,
-            should_sync=self.should_sync_files,
-            skip_reason=self.sync_skip_reason,
+            should_watch=self.should_watch_files,
+            skip_reason=self.watch_skip_reason,
         )
 
 

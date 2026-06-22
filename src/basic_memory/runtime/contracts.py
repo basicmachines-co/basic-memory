@@ -649,7 +649,7 @@ class RuntimeScheduledTaskName(StrEnum):
     """Background task names that may be adapted by runtime providers."""
 
     sync_entity_vectors = "sync_entity_vectors"
-    sync_project = "sync_project"
+    index_project = "index_project"
 
 
 class RuntimeStorageFileIndexMode(StrEnum):
@@ -1317,8 +1317,8 @@ class RuntimeScheduledVectorSyncTask:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeScheduledProjectSyncTask:
-    """Typed scheduler handoff for syncing one project."""
+class RuntimeScheduledProjectIndexTask:
+    """Typed scheduler handoff for indexing one project."""
 
     project_id: ProjectId
     force_full: bool = False
@@ -1327,18 +1327,18 @@ class RuntimeScheduledProjectSyncTask:
     def from_payload(cls, payload: RuntimeSchedulerTaskPayload) -> Self:
         project_id = payload.get("project_id")
         if project_id is None:
-            raise ValueError("sync_project requires project_id")
+            raise ValueError("index_project requires project_id")
         if isinstance(project_id, bool) or not isinstance(project_id, int):
-            raise TypeError("sync_project project_id must be an int")
+            raise TypeError("index_project project_id must be an int")
 
         force_full = payload.get("force_full", False)
         if not isinstance(force_full, bool):
-            raise TypeError("sync_project force_full must be a bool")
+            raise TypeError("index_project force_full must be a bool")
 
         return cls(project_id=project_id, force_full=force_full)
 
 
-type RuntimeScheduledTask = RuntimeScheduledVectorSyncTask | RuntimeScheduledProjectSyncTask
+type RuntimeScheduledTask = RuntimeScheduledVectorSyncTask | RuntimeScheduledProjectIndexTask
 
 
 def runtime_scheduled_task_from_payload(
@@ -1348,8 +1348,8 @@ def runtime_scheduled_task_from_payload(
     """Return a typed runtime task for known scheduler names, or None."""
     if task_name == RuntimeScheduledTaskName.sync_entity_vectors:
         return RuntimeScheduledVectorSyncTask.from_payload(payload)
-    if task_name == RuntimeScheduledTaskName.sync_project:
-        return RuntimeScheduledProjectSyncTask.from_payload(payload)
+    if task_name == RuntimeScheduledTaskName.index_project:
+        return RuntimeScheduledProjectIndexTask.from_payload(payload)
     return None
 
 

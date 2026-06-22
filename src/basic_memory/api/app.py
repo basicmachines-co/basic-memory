@@ -67,10 +67,10 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         app.state.session_maker = session_maker
         logger.info("Database connections cached in app state")
 
-        # Create and start sync coordinator (lifecycle centralized in coordinator)
-        sync_coordinator = container.create_sync_coordinator()
-        await sync_coordinator.start()
-        app.state.sync_coordinator = sync_coordinator
+        # Create and start local watch coordinator (lifecycle centralized in coordinator)
+        watch_coordinator = container.create_watch_coordinator()
+        await watch_coordinator.start()
+        app.state.watch_coordinator = watch_coordinator
 
     # Proceed with startup
     yield
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         mode=container.mode.name.lower(),
     ):
         logger.info("Shutting down Basic Memory API")
-        await sync_coordinator.stop()
+        await watch_coordinator.stop()
         await container.shutdown_database()
 
 

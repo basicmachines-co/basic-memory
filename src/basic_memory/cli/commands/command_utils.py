@@ -42,12 +42,12 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(_with_cleanup())
 
 
-async def run_sync(
+async def run_project_index(
     project: Optional[str] = None,
     force_full: bool = False,
     run_in_background: bool = True,
 ):
-    """Run sync operation via API endpoint.
+    """Run project indexing via API endpoint.
 
     Args:
         project: Optional project name
@@ -64,7 +64,7 @@ async def run_sync(
         async with get_client(project_name=project) as client:
             project_item = await get_active_project(client, project, None)
             project_client = ProjectClient(client)
-            data = await project_client.sync(
+            data = await project_client.index(
                 project_item.external_id,
                 force_full=force_full,
                 run_in_background=run_in_background,
@@ -82,7 +82,7 @@ async def run_sync(
                     f"(batches: {enqueued_batches}, deleted orphans: {deleted_files})"
                 )
     except (ToolError, ValueError) as e:
-        console.print(f"[red]Sync failed: {e}[/red]")
+        console.print(f"[red]Index failed: {e}[/red]")
         raise typer.Exit(1)
 
 

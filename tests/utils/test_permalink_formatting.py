@@ -1,13 +1,16 @@
-"""Test permalink formatting during sync."""
+"""Test permalink formatting during local project indexing."""
 
 from pathlib import Path
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig
+from basic_memory.index import LocalProjectIndexRunner
+from basic_memory.models import Project
+from basic_memory.repository import ProjectRepository
 from basic_memory.services import EntityService
-from basic_memory.sync.sync_service import SyncService
 from basic_memory.utils import build_canonical_permalink, generate_permalink
 from basic_memory.workspace_context import workspace_permalink_context
 
@@ -15,14 +18,18 @@ from basic_memory.workspace_context import workspace_permalink_context
 async def create_test_file(path: Path, content: str = "test content") -> None:
     """Create a test file with given content."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
 
 
 @pytest.mark.asyncio
 async def test_permalink_formatting(
-    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
+    project_config: ProjectConfig,
+    entity_service: EntityService,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
 ):
-    """Test that permalinks are properly formatted during sync.
+    """Test that permalinks are properly formatted during project indexing.
 
     This ensures:
     - Underscores are converted to hyphens
@@ -60,8 +67,11 @@ Testing permalink generation.
 """
         await create_test_file(project_dir / filename, content)
 
-    # Run sync
-    await sync_service.sync(project_config.home)
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+    await runner.index_project(test_project.id, force_full=True)
 
     # Verify permalinks - with project-prefixed permalinks enabled,
     # auto-generated permalinks include the project slug prefix

@@ -3,9 +3,12 @@
 from collections.abc import Sequence
 from dataclasses import MISSING, fields
 from inspect import signature
+from importlib.util import find_spec
 from typing import get_type_hints
 
 from basic_memory import index
+from basic_memory import deps
+from basic_memory.deps import services as service_deps
 from basic_memory.index.local_dependencies import (
     LocalIndexEntityRepository,
     LocalIndexEntityService,
@@ -48,6 +51,19 @@ def test_index_package_exports_local_event_index_runtime_contracts() -> None:
     assert callable(index.local_project_prefix)
 
 
+def test_index_package_exports_local_watch_service_surface() -> None:
+    """The local runtime watcher lives with event-index orchestration, not sync."""
+    watch_signature = signature(index.WatchService)
+
+    assert index.WatchService.__module__ == "basic_memory.index.watch_service"
+    assert index.WatchServiceState.__name__ == "WatchServiceState"
+    assert index.WatchEvent.__name__ == "WatchEvent"
+    assert index.WatchCoordinator.__name__ == "WatchCoordinator"
+    assert index.WatchStatus.__name__ == "WatchStatus"
+    assert "event_index_runtime_factory" in watch_signature.parameters
+    assert "sync_service_factory" not in watch_signature.parameters
+
+
 def test_index_package_local_factories_are_not_sync_service_adapters() -> None:
     """The new index runtime must not depend on the legacy SyncService shape."""
     factory_signatures = (
@@ -57,6 +73,28 @@ def test_index_package_local_factories_are_not_sync_service_adapters() -> None:
 
     for factory_signature in factory_signatures:
         assert "sync_service_factory" not in factory_signature.parameters
+
+
+def test_sync_package_is_not_active_runtime_surface() -> None:
+    """The legacy sync package is quarantined outside the active runtime package."""
+    assert find_spec("basic_memory.sync") is None
+
+
+def test_fastapi_deps_do_not_export_sync_service_dependencies() -> None:
+    """Runtime dependency injection should no longer construct SyncService."""
+    sync_dep_names = {
+        "get_sync_service",
+        "SyncServiceDep",
+        "get_sync_service_v2",
+        "SyncServiceV2Dep",
+        "get_sync_service_v2_external",
+        "SyncServiceV2ExternalDep",
+    }
+
+    for name in sync_dep_names:
+        assert not hasattr(service_deps, name)
+        assert not hasattr(deps, name)
+        assert name not in deps.__all__
 
 
 def test_inline_storage_event_runtime_requires_explicit_result_recorder() -> None:

@@ -7,7 +7,6 @@ to ensure consistent application startup across all entry points.
 import asyncio
 import os
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 
@@ -104,11 +103,13 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
         logger.info("Continuing with initialization despite synchronization error")
 
 
-async def initialize_file_sync(
+async def initialize_file_indexing(
     app_config: BasicMemoryConfig,
     quiet: bool = True,
 ) -> None:
-    """Initialize file synchronization services. This function starts the watch service and does not return
+    """Initialize file indexing services.
+
+    This function starts the watch service and does not return.
 
     Args:
         app_config: The Basic Memory project configuration
@@ -119,13 +120,17 @@ async def initialize_file_sync(
     """
     # Never start file watching during tests. Even "background" watchers add tasks/threads
     # and can interact badly with strict asyncio teardown (especially on Windows/aiosqlite).
-    # Skip file sync in test environments to avoid interference with tests
+    # Skip file indexing in test environments to avoid interference with tests
     if app_config.is_test_env:
-        logger.info("Test environment detected - skipping file sync initialization")
+        logger.info("Test environment detected - skipping file indexing initialization")
         return None
 
     # delay import
-    from basic_memory.sync import WatchService
+    from basic_memory.index import (
+        LocalProjectIndexRuntimeFactory,
+        LocalWatchEventIndexRuntimeFactory,
+        WatchService,
+    )
 
     # Get database session (migrations already run if needed)
     _, session_maker = await db.get_or_create_db(
@@ -135,21 +140,13 @@ async def initialize_file_sync(
     project_repository = ProjectRepository()
 
     # Filter to constrained project if MCP server was started with --project.
-    # Applied to both the initial background sync and the watch service so that
+    # Applied to both the initial background indexing and the watch service so that
     # running multiple `basic-memory mcp --project X` processes does not produce
     # duplicate watchers fighting over the same files.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
 
-    event_index_runtime_factory = None
-    project_index_runtime_factory = None
-    if app_config.watch_event_index:
-        from basic_memory.index import (
-            LocalProjectIndexRuntimeFactory,
-            LocalWatchEventIndexRuntimeFactory,
-        )
-
-        event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory()
-        project_index_runtime_factory = LocalProjectIndexRuntimeFactory()
+    event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory()
+    project_index_runtime_factory = LocalProjectIndexRuntimeFactory()
 
     # Initialize watch service
     watch_service = WatchService(
@@ -167,50 +164,35 @@ async def initialize_file_sync(
 
     if constrained_project:
         active_projects = [p for p in active_projects if p.name == constrained_project]
-        logger.info(f"Background sync constrained to project: {constrained_project}")
+        logger.info(f"Background indexing constrained to project: {constrained_project}")
 
-    # Only sync projects that are in config (source of truth) and have an
+    # Only index projects that are in config (source of truth) and have an
     # absolute local path; see BasicMemoryConfig.is_locally_syncable. This keeps
-    # background sync from adopting the process cwd as a project root and
+    # background indexing from adopting the process cwd as a project root and
     # mutating unrelated files (issue #949).
     skip = [p.name for p in active_projects if not app_config.is_locally_syncable(p.name, p.path)]
     if skip:
         active_projects = [p for p in active_projects if p.name not in skip]
-        logger.info(f"Skipping projects that are not locally syncable for sync: {skip}")
+        logger.info(f"Skipping projects that are not locally indexable: {skip}")
 
-    # Start sync for all projects as background tasks (non-blocking)
-    async def sync_project_background(project: Project):
-        """Sync a single project in the background."""
-        # avoid circular imports
-        from basic_memory.sync.sync_service import get_sync_service
-
-        logger.info(f"Starting background sync for project: {project.name}")
+    # Start indexing for all projects as background tasks (non-blocking)
+    async def index_project_background(project: Project):
+        """Index a single project in the background."""
+        logger.info(f"Starting background project index for project: {project.name}")
         try:
-            if project_index_runtime_factory is not None:
-                await run_initial_project_index(
-                    project,
-                    runtime_factory=project_index_runtime_factory,
-                )
-                logger.info(f"Background project index completed for project: {project.name}")
-                return
-
-            # Legacy SyncService remains available when event indexing is explicitly disabled.
-            from basic_memory.sync.sync_service import get_sync_service
-
-            # Create sync service
-            sync_service = await get_sync_service(project)
-
-            sync_dir = Path(project.path)
-            await sync_service.sync(sync_dir, project_name=project.name)
-            logger.info(f"Background sync completed successfully for project: {project.name}")
+            await run_initial_project_index(
+                project,
+                runtime_factory=project_index_runtime_factory,
+            )
+            logger.info(f"Background project index completed for project: {project.name}")
         except Exception as e:  # pragma: no cover
-            logger.error(f"Error in background sync for project {project.name}: {e}")
+            logger.error(f"Error in background project index for project {project.name}: {e}")
 
-    # Create background tasks for all project syncs (non-blocking)
-    sync_tasks = [
-        asyncio.create_task(sync_project_background(project)) for project in active_projects
+    # Create background tasks for all project indexes (non-blocking)
+    index_tasks = [
+        asyncio.create_task(index_project_background(project)) for project in active_projects
     ]
-    logger.info(f"Created {len(sync_tasks)} background sync tasks")
+    logger.info(f"Created {len(index_tasks)} background indexing tasks")
 
     # Don't await the tasks - let them run in background while we continue
 
@@ -235,19 +217,19 @@ async def initialize_app(
     This function handles all initialization steps:
     - Running database migrations
     - Reconciling projects from config.json with projects table
-    - Setting up file synchronization
+    - Setting up file indexing
     - Starting background migration for legacy project data
 
     Args:
         app_config: The Basic Memory project configuration
     """
     # Trigger: frontmatter enforcement is enabled while permalink generation is disabled
-    # Why: missing-frontmatter sync path needs canonical permalinks for deterministic indexing
+    # Why: missing-frontmatter indexing needs canonical permalinks for deterministic output
     # Outcome: log startup precedence so behavior is explicit to operators
     if app_config.ensure_frontmatter_on_sync and app_config.disable_permalinks:
         logger.warning(
             "Config precedence: ensure_frontmatter_on_sync=True overrides "
-            "disable_permalinks=True for markdown files missing frontmatter during sync; "
+            "disable_permalinks=True for markdown files missing frontmatter during indexing; "
             "permalinks will be written."
         )
 

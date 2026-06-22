@@ -193,7 +193,7 @@ class LocalWatchEventIndexStatusUpdate:
 
     path: ProjectPath
     status: str
-    synced_files_increment: int
+    indexed_files_increment: int
     error_count_increment: int
     error: str | None = None
     action: str = "index"
@@ -213,7 +213,7 @@ def plan_local_watch_event_index_status_update(
         return LocalWatchEventIndexStatusUpdate(
             path=project_prefix,
             status="error",
-            synced_files_increment=result.counts.processed,
+            indexed_files_increment=result.counts.processed,
             error_count_increment=result.counts.failed,
             error=(
                 f"event-index processed={result.counts.processed} "
@@ -224,7 +224,7 @@ def plan_local_watch_event_index_status_update(
     return LocalWatchEventIndexStatusUpdate(
         path=project_prefix,
         status="success",
-        synced_files_increment=result.counts.processed,
+        indexed_files_increment=result.counts.processed,
         error_count_increment=0,
     )
 

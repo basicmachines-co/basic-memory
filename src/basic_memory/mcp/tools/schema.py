@@ -197,8 +197,8 @@ def _no_schema_guidance(note_type: str, tool_name: str) -> str:
         f"- `field_name: type, description` — required field\n"
         f"- `field_name?: type, description` — optional field\n"
         f"- Supported types: `string`, `number`, `boolean`, `string[]`\n\n"
-        f"3. **Sync** — run `basic-memory sync` or wait for auto-sync to pick up "
-        f"the new schema note\n"
+        f"3. **Index** — run `basic-memory db reindex --search` or wait for the "
+        f"file watcher to pick up the new schema note\n"
         f'4. **Re-run** — call `{tool_name}("{note_type}")` again\n'
     )
 
@@ -314,7 +314,7 @@ async def schema_validate(
                 f"## Troubleshooting\n"
                 f"1. Ensure schema notes exist (type: schema) for the target note type\n"
                 f"2. Check that notes have the correct type in frontmatter\n"
-                f"3. Verify the project has been synced: `basic-memory status`\n"
+                f"3. Verify the project has been indexed: `basic-memory status`\n"
             )
 
 
@@ -437,7 +437,7 @@ async def schema_infer(
                 f"## Troubleshooting\n"
                 f"1. Ensure notes of type '{note_type}' exist in the project\n"
                 f'2. Try searching: `search_notes("{note_type}", note_types=["{note_type}"])`\n'
-                f"3. Verify the project has been synced: `basic-memory status`\n"
+                f"3. Verify the project has been indexed: `basic-memory status`\n"
             )
 
 
@@ -533,5 +533,5 @@ async def schema_diff(
                 f"## Troubleshooting\n"
                 f"1. Ensure a schema note exists for type '{note_type}'\n"
                 f"2. Ensure notes of type '{note_type}' exist in the project\n"
-                f"3. Verify the project has been synced: `basic-memory status`\n"
+                f"3. Verify the project has been indexed: `basic-memory status`\n"
             )

@@ -11,7 +11,6 @@ from basic_memory.config import ProjectEntry
 from basic_memory.models import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
-from basic_memory.sync import SyncService
 
 
 def _project_item(project: ProjectItem | None) -> ProjectItem:
@@ -357,28 +356,18 @@ async def test_v2_project_endpoints_use_id_not_name(
 
 
 @pytest.mark.asyncio
-async def test_project_sync_uses_event_indexer_not_sync_service(
+async def test_project_index_uses_event_indexer_not_sync_service(
     client: AsyncClient,
     test_project: Project,
     v2_projects_url,
-    monkeypatch: pytest.MonkeyPatch,
 ):
-    """Foreground project sync should return project-index fanout counts."""
-    sync_calls: list[str] = []
-    original_sync = SyncService.sync
-
-    async def record_sync(self, sync_directory, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        sync_calls.append(str(sync_directory))
-        return await original_sync(self, sync_directory, *args, **kwargs)
-
-    monkeypatch.setattr(SyncService, "sync", record_sync)
-
-    note_path = Path(test_project.path) / "incoming" / "project-sync.md"
+    """Foreground project index should return project-index fanout counts."""
+    note_path = Path(test_project.path) / "incoming" / "project-index.md"
     note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text("# Project Sync\n\nIndexed by project fanout.\n", encoding="utf-8")
+    note_path.write_text("# Project Index\n\nIndexed by project fanout.\n", encoding="utf-8")
 
     response = await client.post(
-        f"{v2_projects_url}/{test_project.external_id}/sync",
+        f"{v2_projects_url}/{test_project.external_id}/index",
         params={"run_in_background": False},
     )
 
@@ -389,7 +378,6 @@ async def test_project_sync_uses_event_indexer_not_sync_service(
     assert data["enqueued_batches"] == 1
     assert data["deleted_files"] == 0
     assert "new" not in data
-    assert sync_calls == []
 
 
 @pytest.mark.asyncio
@@ -397,18 +385,8 @@ async def test_project_status_uses_event_index_report_not_sync_service(
     client: AsyncClient,
     test_project: Project,
     v2_projects_url,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     """Project status should observe current project-index files without SyncService."""
-    scan_calls: list[str] = []
-    original_scan = SyncService.scan
-
-    async def record_scan(self, sync_directory, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        scan_calls.append(str(sync_directory))
-        return await original_scan(self, sync_directory, *args, **kwargs)
-
-    monkeypatch.setattr(SyncService, "scan", record_scan)
-
     note_path = Path(test_project.path) / "incoming" / "project-status.md"
     note_path.parent.mkdir(parents=True, exist_ok=True)
     note_path.write_text("# Project Status\n\nVisible in status report.\n", encoding="utf-8")
@@ -426,7 +404,6 @@ async def test_project_status_uses_event_index_report_not_sync_service(
         }
     ]
     assert "new" not in data
-    assert scan_calls == []
 
 
 @pytest.mark.asyncio

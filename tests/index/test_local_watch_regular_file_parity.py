@@ -10,11 +10,11 @@ from basic_memory.config import BasicMemoryConfig
 from basic_memory.index import (
     LocalProjectIndexRuntimeFactory,
     LocalWatchEventIndexRuntimeFactory,
+    WatchService,
     run_local_project_index_for_project,
 )
 from basic_memory.models.knowledge import Entity
 from basic_memory.schemas.search import SearchItemType
-from basic_memory.sync.watch_service import WatchService
 
 
 async def create_test_file(path: Path, content: str) -> None:
@@ -30,7 +30,6 @@ async def test_local_event_index_moves_regular_file_over_deleted_path(
     test_project,
     project_config,
     entity_repository,
-    monkeypatch,
 ) -> None:
     """Regular file move-with-delete parity should not keep the replaced target entity."""
     target_path = project_config.home / "doc.pdf"
@@ -44,14 +43,6 @@ async def test_local_event_index_moves_regular_file_over_deleted_path(
         force_full=True,
     )
     assert first.enqueued_files == 2
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index regular file move test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     async with db.scoped_session(session_maker) as session:
         target_before = await entity_repository.get_by_file_path(session, "doc.pdf")
@@ -104,7 +95,6 @@ async def test_local_event_index_resolves_regular_file_relation_and_writes_sourc
     test_project,
     project_config,
     entity_repository,
-    monkeypatch,
 ) -> None:
     """Regular-file relation parity should use the event-index path end to end."""
     asset_path = project_config.home / "asset.pdf"
@@ -120,14 +110,6 @@ tags: []
 
 - relates_to [[asset.pdf]]
 """,
-    )
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index regular file relation test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
     )
 
     watch_service = WatchService(
@@ -161,7 +143,7 @@ tags: []
     assert len(source_entity.outgoing_relations) == 1
     relation = source_entity.outgoing_relations[0]
     assert relation.to_id == target_entity.id
-    assert watch_service.state.synced_files == 2
+    assert watch_service.state.indexed_files == 2
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"
 
@@ -175,7 +157,6 @@ async def test_local_event_index_deletes_regular_file_relation_target_and_repair
     project_config,
     entity_repository,
     search_service,
-    monkeypatch,
 ) -> None:
     """Deleting a regular-file relation target should repair the surviving note search rows."""
     asset_path = project_config.home / "asset.pdf"
@@ -199,14 +180,6 @@ title: Source
         force_full=True,
     )
     assert first.enqueued_files == 2
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index relation delete parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     async with db.scoped_session(session_maker) as session:
         source_before = await entity_repository.get_by_file_path(session, "source.md")

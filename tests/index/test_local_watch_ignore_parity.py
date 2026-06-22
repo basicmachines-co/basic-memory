@@ -7,8 +7,7 @@ from watchfiles import Change
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.index import LocalWatchEventIndexRuntimeFactory
-from basic_memory.sync.watch_service import WatchService
+from basic_memory.index import LocalWatchEventIndexRuntimeFactory, WatchService
 
 
 async def create_test_file(path: Path, content: str) -> None:
@@ -24,7 +23,6 @@ async def test_local_event_index_respects_basic_memory_ignore_rules(
     test_project,
     project_config,
     entity_repository,
-    monkeypatch,
 ) -> None:
     """Local event-index should filter watcher batches through .bmignore/.gitignore."""
     await create_test_file(project_config.home / ".gitignore", "ignored/\n*.swp\n*~\n")
@@ -36,14 +34,6 @@ async def test_local_event_index_respects_basic_memory_ignore_rules(
     await create_test_file(ignored_dir_path, "# Skip\n")
     await create_test_file(swap_path, "swap")
     await create_test_file(backup_path, "backup")
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index ignore parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     watch_service = WatchService(
         app_config=app_config,
@@ -72,6 +62,6 @@ async def test_local_event_index_respects_basic_memory_ignore_rules(
     assert ignored_dir is None
     assert swap is None
     assert backup is None
-    assert watch_service.state.synced_files == 1
+    assert watch_service.state.indexed_files == 1
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"

@@ -141,7 +141,7 @@ async def run_doctor() -> None:
 
                 console.print("[green]OK[/green] API write created file")
 
-                # --- File -> DB: write markdown file directly, then sync ---
+                # --- File -> DB: write markdown file directly, then index ---
                 parser = EntityParser(project_path)
                 processor = MarkdownProcessor(parser)
                 manual_markdown = EntityMarkdown(
@@ -160,14 +160,14 @@ async def run_doctor() -> None:
                 await processor.write_file(manual_path, manual_markdown)
                 console.print("[green]OK[/green] Manual file written")
 
-                sync_data = await project_client.sync(
+                index_data = await project_client.index(
                     project_id, force_full=False, run_in_background=False
                 )
-                project_index_run = ProjectIndexRunResponse.model_validate(sync_data)
+                project_index_run = ProjectIndexRunResponse.model_validate(index_data)
                 if project_index_run.enqueued_files == 0:
                     raise ValueError("Project index did not enqueue any files")
 
-                console.print("[green]OK[/green] Sync indexed manual file")
+                console.print("[green]OK[/green] Project index processed manual file")
 
                 search_client = SearchClient(client, project_id)
                 search_query = SearchQuery(title=manual_note_title)
@@ -202,7 +202,7 @@ def doctor(
     ),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
-    """Run local consistency checks to verify file/database sync."""
+    """Run local consistency checks to verify file/database indexing."""
     # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
     from mcp.server.fastmcp.exceptions import ToolError
 

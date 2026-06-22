@@ -7,9 +7,8 @@ from watchfiles import Change
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.index import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index import LocalWatchEventIndexRuntimeFactory, WatchService
 from basic_memory.repository.note_content_repository import NoteContentRepository
-from basic_memory.sync.watch_service import WatchService
 
 
 async def create_test_file(path: Path, content: str) -> None:
@@ -40,7 +39,7 @@ async def test_local_event_index_empty_batches_do_not_build_runtime(
     await watch_service.handle_changes(test_project, set())
 
     assert watch_service.state.last_scan is not None
-    assert watch_service.state.synced_files == 0
+    assert watch_service.state.indexed_files == 0
     assert watch_service.state.error_count == 0
     assert watch_service.state.recent_events == []
 
@@ -53,7 +52,6 @@ async def test_local_event_index_handles_large_batch_of_file_adds(
     test_project,
     project_config,
     entity_repository,
-    monkeypatch,
 ) -> None:
     """Large watcher batches should index every file through the event-index path."""
     file_count = 50
@@ -71,14 +69,6 @@ Content for event batch note {index}.
 """,
         )
         changes.add((Change.added, str(path)))
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index large-batch parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     watch_service = WatchService(
         app_config=app_config,
@@ -100,7 +90,7 @@ Content for event batch note {index}.
                 indexed_count += 1
 
     assert indexed_count == file_count
-    assert watch_service.state.synced_files == file_count
+    assert watch_service.state.indexed_files == file_count
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"
 
@@ -113,7 +103,6 @@ async def test_local_event_index_handles_mixed_operations_batch(
     test_project,
     project_config,
     entity_repository,
-    monkeypatch,
 ) -> None:
     """Mixed add/modify/delete watcher batches should settle to current file state."""
     initial_paths: list[Path] = []
@@ -130,14 +119,6 @@ Initial content for note {index}.
 """,
         )
         initial_paths.append(path)
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index mixed-batch parity test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     watch_service = WatchService(
         app_config=app_config,
@@ -213,7 +194,7 @@ New content for note {index}.
     assert all(entity is not None for entity in modified_entities)
     assert all(entity is None for entity in deleted_entities)
     assert all(entity is not None for entity in new_entities)
-    assert watch_service.state.synced_files == 21
+    assert watch_service.state.indexed_files == 21
     assert watch_service.state.recent_events[0].status == "success"
     assert watch_service.state.recent_events[1].status == "success"
 
@@ -226,7 +207,6 @@ async def test_local_event_index_handles_rapid_atomic_writes_to_same_file(
     test_project,
     project_config,
     entity_repository,
-    monkeypatch,
 ) -> None:
     """Rapid atomic-write temp noise should settle to the current destination file."""
     tmp1_path = project_config.home / "document.1.tmp"
@@ -237,14 +217,6 @@ async def test_local_event_index_handles_rapid_atomic_writes_to_same_file(
 
     tmp1_path.replace(final_path)
     tmp2_path.replace(final_path)
-
-    async def fail_legacy_sync_service(_project):
-        raise AssertionError("event-index rapid atomic-write test must not build SyncService")
-
-    monkeypatch.setattr(
-        "basic_memory.sync.sync_service.get_sync_service",
-        fail_legacy_sync_service,
-    )
 
     watch_service = WatchService(
         app_config=app_config,
@@ -280,6 +252,6 @@ async def test_local_event_index_handles_rapid_atomic_writes_to_same_file(
     assert "# Second Version" in final_content.markdown_content
     assert tmp1_entity is None
     assert tmp2_entity is None
-    assert watch_service.state.synced_files == 1
+    assert watch_service.state.indexed_files == 1
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"
