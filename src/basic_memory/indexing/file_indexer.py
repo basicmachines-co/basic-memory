@@ -5,12 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
-from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
 from basic_memory import db
 from basic_memory.indexing.models import (
     FileIndexOperation,
@@ -62,7 +62,7 @@ class IndexMarkdownEntityRepository(Protocol):
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
-    ) -> Sequence[Row[Any]]: ...
+    ) -> Sequence[IndexedFileChecksumRow]: ...
 
 
 class IndexCurrentMarkdownFileIndexer(Protocol):

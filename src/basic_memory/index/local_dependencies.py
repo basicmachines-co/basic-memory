@@ -5,10 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from loguru import logger
-from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -21,6 +20,7 @@ from basic_memory.indexing import (
     FileIndexOperation,
     FileIndexResult,
     IndexFileBatchIndexer,
+    IndexedFileChecksumRow,
     IndexedFileChecksumRepository,
     IndexEntitySearchWriter,
     IndexFileExecutor,
@@ -42,7 +42,7 @@ from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
     note_content_repository_for_project,
 )
-from basic_memory.markdown import EntityParser, MarkdownProcessor
+from basic_memory.markdown import EntityMarkdown, EntityParser, MarkdownProcessor
 from basic_memory.models import Entity, Project
 from basic_memory.repository import (
     EntityRepository,
@@ -81,12 +81,12 @@ class LocalIndexEntityRepository(
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
-    ) -> Sequence[Row[Any]]: ...
+    ) -> Sequence[IndexedFileChecksumRow]: ...
 
     async def find_by_ids(
         self,
         session: AsyncSession,
-        ids: list[Any],
+        ids: list[int],
     ) -> Sequence[Entity]: ...
 
     async def find_by_checksums(
@@ -98,8 +98,8 @@ class LocalIndexEntityRepository(
     async def update(
         self,
         session: AsyncSession,
-        entity_id: Any,
-        entity_data: dict[str, Any] | Entity,
+        entity_id: int,
+        entity_data: dict[str, object] | Entity,
     ) -> Entity | None: ...
 
     async def delete_by_fields(
@@ -125,7 +125,7 @@ class LocalIndexEntityService(Protocol):
     async def resolve_permalink(
         self,
         file_path: Path | str,
-        markdown: Any = None,
+        markdown: EntityMarkdown | None = None,
         skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> str: ...

@@ -1,9 +1,18 @@
 """Tests for the project-index orchestration surface."""
 
+from collections.abc import Sequence
 from dataclasses import MISSING, fields
 from inspect import signature
+from typing import get_type_hints
 
 from basic_memory import index
+from basic_memory.index.local_dependencies import (
+    LocalIndexEntityRepository,
+    LocalIndexEntityService,
+)
+from basic_memory.indexing import IndexedFileChecksumRow
+from basic_memory.markdown import EntityMarkdown
+from basic_memory.models import Entity
 
 
 def test_index_package_exports_project_index_fanout_contracts() -> None:
@@ -74,3 +83,17 @@ def test_index_package_exports_storage_event_source_contracts() -> None:
     assert index.StorageEventName.__name__ == "StorageEventName"
     assert callable(index.storage_event_payload_from_input)
     assert callable(index.group_storage_events_by_bucket)
+
+
+def test_local_index_dependency_contracts_use_domain_types() -> None:
+    """Local index dependency protocols should expose behavior types, not broad Any."""
+    checksum_hints = get_type_hints(LocalIndexEntityRepository.get_by_file_paths)
+    find_hints = get_type_hints(LocalIndexEntityRepository.find_by_ids)
+    update_hints = get_type_hints(LocalIndexEntityRepository.update)
+    permalink_hints = get_type_hints(LocalIndexEntityService.resolve_permalink)
+
+    assert checksum_hints["return"] == Sequence[IndexedFileChecksumRow]
+    assert find_hints["ids"] == list[int]
+    assert update_hints["entity_id"] is int
+    assert update_hints["entity_data"] == dict[str, object] | Entity
+    assert permalink_hints["markdown"] == EntityMarkdown | None

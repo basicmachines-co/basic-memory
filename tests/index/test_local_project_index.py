@@ -8,10 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
-from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -37,6 +35,7 @@ from basic_memory.indexing import (
     FileIndexOperation,
     FileIndexResult,
     EmbeddingIndexTarget,
+    IndexedFileChecksumRow,
     IndexedEntity,
     IndexingBatchResult,
     IndexInputFile,
@@ -2205,13 +2204,13 @@ class RuntimeFactoryEntityRepository:
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
-    ) -> Sequence[Row[Any]]:
+    ) -> Sequence[IndexedFileChecksumRow]:
         return ()
 
     async def find_by_ids(
         self,
         session: AsyncSession,
-        ids: list[Any],
+        ids: list[int],
     ) -> Sequence[Entity]:
         return ()
 
@@ -2225,8 +2224,8 @@ class RuntimeFactoryEntityRepository:
     async def update(
         self,
         session: AsyncSession,
-        entity_id: Any,
-        entity_data: dict[str, Any] | Entity,
+        entity_id: int,
+        entity_data: dict[str, object] | Entity,
     ) -> Entity | None:
         return None
 

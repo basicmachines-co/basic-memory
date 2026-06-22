@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.markdown import EntityMarkdown
 from basic_memory.indexing import (
     ProjectIndexMaintenanceRunner,
     ProjectIndexMovedEntitySearchRefresher,
@@ -56,7 +57,7 @@ class LocalMoveEntityService(Protocol):
     async def resolve_permalink(
         self,
         file_path: Path | str,
-        markdown: object = None,
+        markdown: EntityMarkdown | None = None,
         skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> str: ...
