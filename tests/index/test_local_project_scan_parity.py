@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
-from basic_memory.index import local_project_index_file_paths
+import pytest
+
+from basic_memory.index import (
+    LocalProjectIndexObservedFileSource,
+    local_project_index_file_paths,
+)
+from basic_memory.services import FileService
 
 
 def test_local_project_index_file_paths_skips_unreadable_entries(
@@ -25,3 +31,27 @@ def test_local_project_index_file_paths_skips_unreadable_entries(
     monkeypatch.setattr(Path, "is_file", is_file_or_permission_error)
 
     assert local_project_index_file_paths(tmp_path, ignore_patterns=set()) == ("accessible.md",)
+
+
+@pytest.mark.asyncio
+async def test_local_project_index_observed_file_source_skips_files_missing_after_scan(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Files that disappear after discovery should not fail project observation."""
+    keep_path = tmp_path / "keep.md"
+    keep_path.write_text("# Keep\n", encoding="utf-8")
+
+    def discovered_paths(*args, **kwargs) -> tuple[str, ...]:
+        return ("missing.md", "keep.md")
+
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.local_project_index_file_paths",
+        discovered_paths,
+    )
+
+    observed = await LocalProjectIndexObservedFileSource(
+        FileService(tmp_path),
+    ).list_observed_index_files()
+
+    assert tuple(file.path for file in observed) == ("keep.md",)

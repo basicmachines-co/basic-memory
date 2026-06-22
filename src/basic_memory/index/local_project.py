@@ -12,7 +12,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.file_utils import compute_checksum
+from basic_memory.file_utils import FileError, compute_checksum
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
@@ -124,11 +124,15 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
         )
         observed_files: list[RuntimeObservedIndexFile] = []
         for file_path in file_paths:
-            metadata = await self.file_service.get_file_metadata(file_path)
+            try:
+                metadata = await self.file_service.get_file_metadata(file_path)
+                checksum = await self.file_service.compute_checksum(file_path)
+            except (OSError, FileError, FileOperationError):
+                continue
             observed_files.append(
                 RuntimeObservedIndexFile(
                     path=file_path,
-                    checksum=await self.file_service.compute_checksum(file_path),
+                    checksum=checksum,
                     size=metadata.size,
                 )
             )
