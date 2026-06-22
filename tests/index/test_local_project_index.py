@@ -45,6 +45,7 @@ from basic_memory.indexing import (
     RepositoryRelationResolutionRuntime,
     ResolvedRelationTarget,
     StoreProjectIndexMaintenanceRunner,
+    ProjectIndexObservedFileSource,
     UnresolvedRelation,
 )
 from basic_memory.models import Entity, Project
@@ -548,6 +549,106 @@ tags: []
     assert len(source_entity.outgoing_relations) == 1
     relation = source_entity.outgoing_relations[0]
     assert relation.to_id == target_entity.id
+
+
+@dataclass(slots=True)
+class MutatingObservedFileSource:
+    source: ProjectIndexObservedFileSource
+    file_path: Path
+    modified_content: str
+
+    async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
+        observed = await self.source.list_observed_index_files()
+        self.file_path.write_text(self.modified_content, encoding="utf-8")
+        return observed
+
+
+async def test_local_project_index_reads_current_file_when_file_changes_after_observation(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project indexing reads current bytes when a file changes after discovery."""
+    del config_manager
+
+    note_path = project_config.home / "changing.md"
+    note_path.write_text(
+        """---
+type: knowledge
+permalink: changing
+---
+# Knowledge File
+
+## Observations
+- [test] This is the observed content
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local changed-during-index parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    runtime_factory = LocalProjectIndexRuntimeFactory(batch_size=10)
+    runtime = await runtime_factory.runtime_for_project(test_project)
+    modified_content = """---
+type: knowledge
+permalink: changing
+---
+# Knowledge File
+
+## Observations
+- [test] This is the modified content
+"""
+    mutating_runtime = LocalProjectIndexRuntime(
+        observed_file_source=MutatingObservedFileSource(
+            source=runtime.observed_file_source,
+            file_path=note_path,
+            modified_content=modified_content,
+        ),
+        change_detector=runtime.change_detector,
+        maintenance_runner=runtime.maintenance_runner,
+        moved_entity_search_refresher=runtime.moved_entity_search_refresher,
+        batch_enqueuer=runtime.batch_enqueuer,
+        workflow_starter=runtime.workflow_starter,
+        fanout_failure_recorder=runtime.fanout_failure_recorder,
+        completion_relation_runtime=runtime.completion_relation_runtime,
+        batch_size=runtime.batch_size,
+        coordinator_job_id=runtime.coordinator_job_id,
+    )
+
+    result = await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            tenant_id=runtime_factory.tenant_id,
+            project=ProjectRuntimeReference.from_project(test_project),
+            workflow_id=WORKFLOW_ID,
+        ),
+        runtime=mutating_runtime,
+    )
+
+    assert result.enqueued_files == 1
+    assert result.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "changing.md")
+        note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "changing.md",
+        )
+
+    assert entity is not None
+    assert entity.checksum == sha256(modified_content.encode("utf-8")).hexdigest()
+    assert len(entity.observations) == 1
+    assert entity.observations[0].content == "This is the modified content"
+    assert note_content is not None
+    assert "This is the modified content" in note_content.markdown_content
 
 
 @dataclass(slots=True)

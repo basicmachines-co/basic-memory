@@ -161,6 +161,11 @@ local-project-index-regular-file-test:
         tests/index/test_local_project_index.py::test_local_project_index_moves_and_deletes_regular_file_entities \
         tests/index/test_local_project_index.py::test_local_project_index_resolves_regular_file_relations
 
+# Focused local project-index changed-during-index parity test.
+local-project-index-race-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_reads_current_file_when_file_changes_after_observation
+
 # Focused local project-index duplicate permalink parity test.
 local-project-index-permalink-conflict-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
