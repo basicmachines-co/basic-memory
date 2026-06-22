@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -153,6 +155,172 @@ async def test_local_project_index_skips_hidden_markdown_files(
         hidden_entity = await entity_repository.get_by_file_path(session, "concept/.hidden.md")
 
     assert hidden_entity is None
+
+
+async def test_local_project_index_repairs_null_checksum_entities(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Incomplete markdown entities are reindexed by the event project index."""
+    del config_manager
+
+    entity = Entity(
+        permalink=f"{test_project.permalink}/concept/incomplete",
+        title="Incomplete",
+        note_type="test",
+        file_path="concept/incomplete.md",
+        checksum=None,
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(session, entity)
+
+    incomplete_path = project_config.home / "concept" / "incomplete.md"
+    incomplete_path.parent.mkdir(parents=True, exist_ok=True)
+    incomplete_path.write_text(
+        """---
+type: knowledge
+id: concept/incomplete
+created: 2024-01-01
+modified: 2024-01-01
+---
+# Incomplete Entity
+
+## Observations
+- Testing cleanup
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local null-checksum parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert result.enqueued_files == 1
+    assert result.batch_results[0].file_results[0].status == IndexFileJobStatus.processed
+
+    async with db.scoped_session(session_maker) as session:
+        repaired = await entity_repository.get_by_file_path(
+            session,
+            "concept/incomplete.md",
+        )
+
+    assert repaired is not None
+    assert repaired.checksum is not None
+
+
+async def test_local_project_index_uses_file_mtime_for_new_markdown_entities(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """New markdown entities keep the observed file modification timestamp."""
+    del config_manager
+
+    note_path = project_config.home / "notes" / "timestamped.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Timestamped\n\nInitial content.\n", encoding="utf-8")
+    expected_mtime = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
+    os.utime(note_path, (expected_mtime, expected_mtime))
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local timestamp parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert result.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "notes/timestamped.md")
+
+    assert entity is not None
+    assert abs(entity.updated_at.timestamp() - expected_mtime) < 2
+    assert entity.mtime is not None
+    assert abs(entity.mtime - expected_mtime) < 2
+
+
+async def test_local_project_index_updates_entity_mtime_on_file_modification(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Modified markdown entities use the current file modification timestamp."""
+    del config_manager
+
+    note_path = project_config.home / "notes" / "timestamp-update.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Timestamp Update\n\nInitial content.\n", encoding="utf-8")
+    initial_mtime = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
+    os.utime(note_path, (initial_mtime, initial_mtime))
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local timestamp parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert first.enqueued_files == 1
+
+    note_path.write_text(
+        "# Timestamp Update\n\nModified content.\n\n## Observations\n- [test] Timestamp moved.\n",
+        encoding="utf-8",
+    )
+    modified_mtime = datetime(2024, 1, 2, 4, 5, 6, tzinfo=timezone.utc).timestamp()
+    os.utime(note_path, (modified_mtime, modified_mtime))
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "notes/timestamp-update.md")
+
+    assert entity is not None
+    assert entity.updated_at.timestamp() != initial_mtime
+    assert abs(entity.updated_at.timestamp() - modified_mtime) < 2
+    assert entity.mtime is not None
+    assert abs(entity.mtime - modified_mtime) < 2
+    assert len(entity.observations) == 1
+    assert entity.observations[0].content == "Timestamp moved."
 
 
 @dataclass(slots=True)

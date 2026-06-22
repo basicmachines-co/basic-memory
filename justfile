@@ -142,6 +142,17 @@ local-project-index-hidden-file-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py::test_local_project_index_skips_hidden_markdown_files
 
+# Focused local project-index null-checksum repair parity test.
+local-project-index-null-checksum-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_repairs_null_checksum_entities
+
+# Focused local project-index file timestamp parity tests.
+local-project-index-timestamp-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_uses_file_mtime_for_new_markdown_entities \
+        tests/index/test_local_project_index.py::test_local_project_index_updates_entity_mtime_on_file_modification
+
 # Focused local project-index duplicate permalink parity test.
 local-project-index-permalink-conflict-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
