@@ -151,7 +151,8 @@ local-project-index-frontmatter-policy-test:
 # Focused local project-index relation resolution parity test.
 local-project-index-relation-parity-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/index/test_local_project_index.py::test_local_project_index_resolves_order_dependent_relations_after_batches
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_order_dependent_relations_after_batches \
+        tests/index/test_local_project_index.py::test_local_project_index_deduplicates_relations_by_type
 
 # Focused per-file indexing runner/model tests.
 file-index-runner-test:

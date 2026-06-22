@@ -877,6 +877,82 @@ permalink: concept/entity-c
     assert {row.to_id for row in relation_search_rows} == {entity_a.id, entity_b.id, entity_c.id}
 
 
+async def test_local_project_index_deduplicates_relations_by_type(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Duplicate relation declarations collapse without losing distinct relation types."""
+    del config_manager
+
+    concept_dir = project_config.home / "concept"
+    concept_dir.mkdir(parents=True, exist_ok=True)
+    (concept_dir / "target.md").write_text(
+        """---
+type: knowledge
+permalink: concept/target
+---
+# Target Entity
+""",
+        encoding="utf-8",
+    )
+    (concept_dir / "duplicate_relations.md").write_text(
+        """---
+type: knowledge
+permalink: concept/duplicate-relations
+---
+# Test Duplicates
+
+## Relations
+- depends_on [[concept/target]]
+- depends_on [[concept/target]]
+- uses [[concept/target]]
+- uses [[concept/target]]
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local duplicate relation parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=1),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 2
+    assert result.enqueued_batches == 2
+
+    async with db.scoped_session(session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, "concept/duplicate_relations.md")
+        target = await entity_repository.get_by_file_path(session, "concept/target.md")
+        relation_search_rows = await search_service.repository.search(
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+
+    assert source is not None
+    assert target is not None
+    relation_counts: dict[str, int] = {}
+    for relation in source.outgoing_relations:
+        assert relation.to_id == target.id
+        relation_counts[relation.relation_type] = relation_counts.get(relation.relation_type, 0) + 1
+
+    assert relation_counts == {"depends_on": 1, "uses": 1}
+    assert len(relation_search_rows) == 2
+    assert {row.to_id for row in relation_search_rows} == {target.id}
+
+
 async def test_local_project_index_directory_delete_removes_notes_and_repairs_survivors(
     test_project: Project,
     project_config,
