@@ -1946,6 +1946,94 @@ new duplicate content
     assert "permalink: one-1" in new_note_content.markdown_content.splitlines()
 
 
+async def test_local_project_index_assigns_unique_permalinks_for_path_conflicts(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Path-derived permalink collisions should index as distinct notes."""
+    del config_manager
+
+    spaced_path = project_config.home / "basic memory bug.md"
+    hyphen_path = project_config.home / "basic-memory-bug.md"
+    spaced_path.write_text(
+        """---
+type: knowledge
+---
+# Basic Memory Bug
+
+This file has spaces in the name.
+""",
+        encoding="utf-8",
+    )
+    hyphen_path.write_text(
+        """---
+type: knowledge
+---
+# Basic Memory Bug Report
+
+This file has hyphens in the name.
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local path conflict parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 2
+
+    async with db.scoped_session(session_maker) as session:
+        spaced_entity = await entity_repository.get_by_file_path(session, "basic memory bug.md")
+        hyphen_entity = await entity_repository.get_by_file_path(session, "basic-memory-bug.md")
+        spaced_note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "basic memory bug.md",
+        )
+        hyphen_note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "basic-memory-bug.md",
+        )
+
+    assert spaced_entity is not None
+    assert hyphen_entity is not None
+    assert spaced_entity.permalink is not None
+    assert hyphen_entity.permalink is not None
+    assert spaced_entity.permalink != hyphen_entity.permalink
+    assert {
+        spaced_entity.permalink,
+        hyphen_entity.permalink,
+    } == {
+        f"{test_project.permalink}/basic-memory-bug",
+        f"{test_project.permalink}/basic-memory-bug-1",
+    }
+    assert spaced_note_content is not None
+    assert hyphen_note_content is not None
+    assert (
+        f"permalink: {spaced_entity.permalink}"
+        in spaced_path.read_text(encoding="utf-8").splitlines()
+    )
+    assert (
+        f"permalink: {hyphen_entity.permalink}"
+        in hyphen_path.read_text(encoding="utf-8").splitlines()
+    )
+    assert f"permalink: {spaced_entity.permalink}" in spaced_note_content.markdown_content
+    assert f"permalink: {hyphen_entity.permalink}" in hyphen_note_content.markdown_content
+
+
 async def test_local_project_index_does_not_add_frontmatter_when_disabled(
     test_project: Project,
     project_config,
