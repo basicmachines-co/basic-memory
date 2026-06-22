@@ -115,6 +115,46 @@ async def test_local_project_index_observed_file_source_returns_runtime_targets(
     )
 
 
+async def test_local_project_index_skips_hidden_markdown_files(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Hidden markdown files are filtered before project indexing."""
+    del config_manager
+
+    concept_dir = project_config.home / "concept"
+    concept_dir.mkdir(parents=True, exist_ok=True)
+    hidden_path = concept_dir / ".hidden.md"
+    hidden_path.write_text(
+        "# Hidden\n\nThis file should stay out of the index.\n", encoding="utf-8"
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local hidden-file parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert result.total_files == 0
+    assert result.enqueued_files == 0
+    async with db.scoped_session(session_maker) as session:
+        hidden_entity = await entity_repository.get_by_file_path(session, "concept/.hidden.md")
+
+    assert hidden_entity is None
+
+
 @dataclass(slots=True)
 class RecordingObservedFileSource:
     observed_files: tuple[RuntimeObservedIndexFile, ...]

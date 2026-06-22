@@ -137,6 +137,11 @@ local-project-index-directory-delete-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py::test_local_project_index_directory_delete_removes_notes_and_repairs_survivors
 
+# Focused local project-index hidden-file parity test.
+local-project-index-hidden-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_skips_hidden_markdown_files
+
 # Focused local project-index duplicate permalink parity test.
 local-project-index-permalink-conflict-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
