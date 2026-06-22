@@ -14,6 +14,7 @@ from basic_memory.indexing.file_index_checking import (
     StorageCurrentFileChecksumSource,
 )
 from basic_memory.indexing.file_index_planning import FileIndexDecisionStatus, FileIndexTarget
+from basic_memory.services.exceptions import FileOperationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,3 +215,14 @@ async def test_storage_current_file_checksum_source_loads_metadata_checksum() ->
     assert await source.load_current_file_checksum("note.md") == "etag-current"
     assert await source.load_current_file_checksum("missing.md") is None
     assert stub_source.calls == ["note.md", "missing.md"]
+
+
+@pytest.mark.asyncio
+async def test_storage_current_file_checksum_source_treats_file_errors_as_missing() -> None:
+    class VanishingMetadataSource:
+        async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
+            raise FileOperationError(f"file vanished: {file_path}")
+
+    source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
+
+    assert await source.load_current_file_checksum("vanished.md") is None

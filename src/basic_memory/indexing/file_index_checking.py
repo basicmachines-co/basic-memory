@@ -19,6 +19,7 @@ from basic_memory.indexing.file_index_planning import (
     plan_file_index_target_from_observed,
     plan_legacy_file_index_targets,
 )
+from basic_memory.services.exceptions import FileOperationError
 
 
 class IndexedFileChecksumSource(Protocol):
@@ -105,7 +106,10 @@ class StorageCurrentFileChecksumSource:
         file_path: FileIndexPath,
     ) -> FileIndexChecksum | None:
         """Return the current storage checksum for one file."""
-        current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
+        try:
+            current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
+        except FileOperationError:
+            return None
         return current_metadata.checksum if current_metadata is not None else None
 
 
