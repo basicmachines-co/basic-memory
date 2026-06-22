@@ -777,6 +777,119 @@ async def test_local_project_index_move_repairs_observation_search_permalinks(
     assert search_rows[0].file_path == "archive/observed.md"
 
 
+async def test_local_project_index_directory_delete_removes_notes_and_repairs_survivors(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Deleted local directories should use core delete orchestration without SyncService."""
+    del config_manager
+
+    archive_dir = project_config.home / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    target_path = archive_dir / "deleted-target.md"
+    other_path = archive_dir / "other.md"
+    source_path = project_config.home / "keeper.md"
+    target_path.write_text(
+        """---
+title: Deleted Target
+type: note
+---
+# Deleted Target
+""",
+        encoding="utf-8",
+    )
+    other_path.write_text("# Other\n\nThis note disappears with the directory.\n", encoding="utf-8")
+    source_path.write_text(
+        """---
+title: Keeper
+type: note
+---
+# Keeper
+
+- relates_to [[Deleted Target]]
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local directory delete parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 3
+
+    async with db.scoped_session(session_maker) as session:
+        source_before = await entity_repository.get_by_file_path(session, "keeper.md")
+        target_before = await entity_repository.get_by_file_path(
+            session, "archive/deleted-target.md"
+        )
+        other_before = await entity_repository.get_by_file_path(session, "archive/other.md")
+        target_note_content_before = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "archive/deleted-target.md",
+        )
+        assert source_before is not None
+        assert target_before is not None
+        assert other_before is not None
+        assert target_note_content_before is not None
+        assert len(source_before.outgoing_relations) == 1
+        relation_before = source_before.outgoing_relations[0]
+        assert relation_before.to_id == target_before.id
+        relation_permalink = relation_before.permalink
+        assert relation_permalink is not None
+        source_entity_id = source_before.id
+        target_entity_id = target_before.id
+        other_entity_id = other_before.id
+
+    target_path.unlink()
+    other_path.unlink()
+    archive_dir.rmdir()
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.deleted_files == 2
+    assert second.enqueued_files == 0
+    assert source_entity_id in second.relation_cleanup_entity_ids
+
+    async with db.scoped_session(session_maker) as session:
+        source_after = await entity_repository.get_by_file_path(session, "keeper.md")
+        deleted_target = await session.get(Entity, target_entity_id)
+        deleted_other = await session.get(Entity, other_entity_id)
+        target_note_content_after = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "archive/deleted-target.md",
+        )
+        stale_relation_rows = await search_service.repository.search(
+            permalink=relation_permalink,
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+
+    assert source_after is not None
+    assert source_after.id == source_entity_id
+    assert source_after.outgoing_relations == []
+    assert deleted_target is None
+    assert deleted_other is None
+    assert target_note_content_after is None
+    assert stale_relation_rows == []
+
+
 @dataclass(slots=True)
 class RecordingMarkdownFileIndexer:
     indexed_paths: list[str] = field(default_factory=list)

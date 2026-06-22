@@ -132,6 +132,11 @@ local-project-index-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py
 
+# Focused local project-index directory delete parity test.
+local-project-index-directory-delete-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_directory_delete_removes_notes_and_repairs_survivors
+
 # Focused per-file indexing runner/model tests.
 file-index-runner-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
