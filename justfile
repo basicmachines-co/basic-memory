@@ -181,6 +181,11 @@ local-project-index-permalink-conflict-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py::test_local_project_index_resolves_duplicate_permalink_update
 
+# Focused local project-index new duplicate permalink parity test.
+local-project-index-new-permalink-conflict-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_new_duplicate_permalink
+
 # Focused local project-index frontmatter policy parity tests.
 local-project-index-frontmatter-policy-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -223,7 +228,7 @@ local-project-index-startup-test:
         tests/services/test_initialization.py::test_initialize_file_sync_uses_legacy_sync_when_event_index_disabled
 
 # Focused project-wide indexing orchestration surface tests.
-project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-wikilink-stability-test local-project-index-startup-test
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-wikilink-stability-test local-project-index-startup-test
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:

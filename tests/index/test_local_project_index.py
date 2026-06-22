@@ -1857,6 +1857,95 @@ updated two content
     assert "permalink: two" in two_note_content.markdown_content
 
 
+async def test_local_project_index_resolves_new_duplicate_permalink(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """New notes with duplicate explicit permalinks should repair to a unique value."""
+    del config_manager
+
+    one_path = project_config.home / "one.md"
+    two_path = project_config.home / "two.md"
+    one_path.write_text(
+        """---
+permalink: one
+---
+
+original one content
+""",
+        encoding="utf-8",
+    )
+    two_path.write_text(
+        """---
+permalink: two
+---
+
+original two content
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local permalink conflict parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 2
+    assert "permalink: one" in one_path.read_text(encoding="utf-8")
+    assert "permalink: two" in two_path.read_text(encoding="utf-8")
+
+    new_path = project_config.home / "new.md"
+    new_path.write_text(
+        """---
+title: new.md
+type: note
+permalink: one
+tags: []
+---
+
+new duplicate content
+""",
+        encoding="utf-8",
+    )
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.enqueued_files == 1
+    repaired_content = new_path.read_text(encoding="utf-8")
+    assert "permalink: one-1" in repaired_content.splitlines()
+
+    async with db.scoped_session(session_maker) as session:
+        one_entity = await entity_repository.get_by_file_path(session, "one.md")
+        new_entity = await entity_repository.get_by_file_path(session, "new.md")
+        new_note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session,
+            "new.md",
+        )
+
+    assert one_entity is not None
+    assert one_entity.permalink == "one"
+    assert new_entity is not None
+    assert new_entity.permalink == "one-1"
+    assert new_note_content is not None
+    assert "new duplicate content" in new_note_content.markdown_content
+    assert "permalink: one-1" in new_note_content.markdown_content.splitlines()
+
+
 async def test_local_project_index_does_not_add_frontmatter_when_disabled(
     test_project: Project,
     project_config,
