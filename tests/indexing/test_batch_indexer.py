@@ -17,6 +17,7 @@ from basic_memory.indexing import (
     IndexInputFile,
     StorageIndexFileWriter,
 )
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import SyncFatalError
 
@@ -378,6 +379,61 @@ async def test_batch_indexer_resolves_relations_and_refreshes_search(
         {"entity_id": source.id},
     )
     assert relation_rows.scalar_one() == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_keeps_file_indexed_when_semantic_dependencies_are_missing(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    path = "notes/semantic.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            """
+            ---
+            title: Semantic
+            type: note
+            ---
+            # Semantic
+            """
+        ).strip(),
+    )
+
+    missing_semantic_dependencies = SemanticDependenciesMissingError(
+        "semantic dependencies unavailable"
+    )
+    index_entity_data = AsyncMock(side_effect=missing_semantic_dependencies)
+    monkeypatch.setattr(search_service, "index_entity_data", index_entity_data)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert len(result.indexed) == 1
+    assert result.indexed[0].path == path
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert entity.checksum == result.indexed[0].checksum
+    index_entity_data.assert_awaited_once()
 
 
 @pytest.mark.asyncio

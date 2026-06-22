@@ -27,6 +27,7 @@ from basic_memory.indexing.models import (
     IndexInputFile,
 )
 from basic_memory.models import Entity, Relation
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.services import EntityService
 from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -591,7 +592,17 @@ class BatchIndexer:
     async def _refresh_search_index(
         self, prepared: _PreparedEntity, entity: Entity
     ) -> IndexedEntity:
-        await self.search_service.index_entity_data(entity, content=prepared.search_content)
+        try:
+            await self.search_service.index_entity_data(entity, content=prepared.search_content)
+        except SemanticDependenciesMissingError as exc:
+            # Semantic search is optional infrastructure; missing provider deps must not undo
+            # the durable file/entity work that already completed.
+            logger.warning(
+                "Skipping semantic index refresh because dependencies are unavailable",
+                path=prepared.path,
+                entity_id=entity.id,
+                error=str(exc),
+            )
         return IndexedEntity(
             path=prepared.path,
             entity_id=entity.id,

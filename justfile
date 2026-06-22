@@ -196,6 +196,11 @@ file-index-batch-test:
         tests/indexing/test_file_batch_runner.py \
         tests/indexing/test_job_payloads.py
 
+# Focused batch-index semantic dependency parity test.
+file-index-semantic-dependency-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_batch_indexer.py::test_batch_indexer_keeps_file_indexed_when_semantic_dependencies_are_missing
+
 # Focused startup wiring for local project-index fanout.
 local-project-index-startup-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
@@ -259,7 +264,7 @@ event-index-parity-test:
         tests/index/test_storage_event_orchestration.py
 
 # Focused indexing contract suite for the cloud/core extraction loop.
-index-contract-test: file-index-runner-test file-index-batch-test project-index-contract-test event-index-contract-test
+index-contract-test: file-index-runner-test file-index-batch-test file-index-semantic-dependency-test project-index-contract-test event-index-contract-test
 
 # Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
 runtime-refactor-contract-test:
