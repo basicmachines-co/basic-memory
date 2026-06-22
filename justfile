@@ -153,6 +153,14 @@ local-project-index-timestamp-test:
         tests/index/test_local_project_index.py::test_local_project_index_uses_file_mtime_for_new_markdown_entities \
         tests/index/test_local_project_index.py::test_local_project_index_updates_entity_mtime_on_file_modification
 
+# Focused local project-index regular-file parity tests.
+local-project-index-regular-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_indexes_regular_files \
+        tests/index/test_local_project_index.py::test_local_project_index_updates_regular_file_checksum \
+        tests/index/test_local_project_index.py::test_local_project_index_moves_and_deletes_regular_file_entities \
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_regular_file_relations
+
 # Focused local project-index duplicate permalink parity test.
 local-project-index-permalink-conflict-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \

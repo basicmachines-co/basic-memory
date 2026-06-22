@@ -323,6 +323,233 @@ async def test_local_project_index_updates_entity_mtime_on_file_modification(
     assert entity.observations[0].content == "Timestamp moved."
 
 
+async def test_local_project_index_indexes_regular_files(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project indexing creates regular-file entities without SyncService."""
+    del config_manager
+
+    pdf_path = project_config.home / "doc.pdf"
+    image_path = project_config.home / "image.png"
+    pdf_path.write_bytes(b"pdf-ish")
+    image_path.write_bytes(b"png-ish")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local regular-file parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert result.enqueued_files == 2
+
+    async with db.scoped_session(session_maker) as session:
+        pdf_entity = await entity_repository.get_by_file_path(session, "doc.pdf")
+        image_entity = await entity_repository.get_by_file_path(session, "image.png")
+
+    assert pdf_entity is not None
+    assert pdf_entity.permalink is None
+    assert pdf_entity.content_type == "application/pdf"
+    assert pdf_entity.checksum == sha256(b"pdf-ish").hexdigest()
+    assert image_entity is not None
+    assert image_entity.permalink is None
+    assert image_entity.content_type == "image/png"
+    assert image_entity.checksum == sha256(b"png-ish").hexdigest()
+
+
+async def test_local_project_index_updates_regular_file_checksum(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project indexing updates regular-file checksums when file bytes change."""
+    del config_manager
+
+    pdf_path = project_config.home / "doc.pdf"
+    pdf_path.write_bytes(b"original")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local regular-file parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert first.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        before = await entity_repository.get_by_file_path(session, "doc.pdf")
+        assert before is not None
+        before_id = before.id
+        before_checksum = before.checksum
+
+    pdf_path.write_bytes(b"changed")
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        after = await entity_repository.get_by_file_path(session, "doc.pdf")
+
+    assert after is not None
+    assert after.id == before_id
+    assert after.checksum != before_checksum
+    assert after.checksum == sha256(b"changed").hexdigest()
+    assert after.size == len(b"changed")
+
+
+async def test_local_project_index_moves_and_deletes_regular_file_entities(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project indexing moves and deletes regular-file entities by storage state."""
+    del config_manager
+
+    pdf_path = project_config.home / "doc.pdf"
+    pdf_path.write_bytes(b"pdf-ish")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local regular-file parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert first.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        original = await entity_repository.get_by_file_path(session, "doc.pdf")
+        assert original is not None
+        original_id = original.id
+
+    moved_path = project_config.home / "moved_doc.pdf"
+    pdf_path.rename(moved_path)
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.moved_files == 1
+    assert second.enqueued_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        old_entity = await entity_repository.get_by_file_path(session, "doc.pdf")
+        moved_entity = await entity_repository.get_by_file_path(session, "moved_doc.pdf")
+
+    assert old_entity is None
+    assert moved_entity is not None
+    assert moved_entity.id == original_id
+    assert moved_entity.permalink is None
+    assert moved_entity.content_type == "application/pdf"
+
+    moved_path.unlink()
+
+    third = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert third.deleted_files == 1
+    assert third.enqueued_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        deleted = await session.get(Entity, original_id)
+
+    assert deleted is None
+
+
+async def test_local_project_index_resolves_regular_file_relations(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project indexing resolves markdown relations to regular-file entities."""
+    del config_manager
+
+    asset_path = project_config.home / "asset.pdf"
+    source_path = project_config.home / "note.md"
+    asset_path.write_bytes(b"pdf-ish")
+    source_path.write_text(
+        """---
+title: a note
+type: note
+tags: []
+---
+
+- relates_to [[asset.pdf]]
+""",
+        encoding="utf-8",
+    )
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local regular-file relation test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 2
+
+    expected_permalink = f"{test_project.permalink}/note"
+    assert f"permalink: {expected_permalink}" in source_path.read_text(encoding="utf-8")
+
+    async with db.scoped_session(session_maker) as session:
+        source_entity = await entity_repository.get_by_file_path(session, "note.md")
+        target_entity = await entity_repository.get_by_file_path(session, "asset.pdf")
+
+    assert source_entity is not None
+    assert source_entity.permalink == expected_permalink
+    assert target_entity is not None
+    assert target_entity.permalink is None
+    assert target_entity.content_type == "application/pdf"
+    assert len(source_entity.outgoing_relations) == 1
+    relation = source_entity.outgoing_relations[0]
+    assert relation.to_id == target_entity.id
+
+
 @dataclass(slots=True)
 class RecordingObservedFileSource:
     observed_files: tuple[RuntimeObservedIndexFile, ...]
