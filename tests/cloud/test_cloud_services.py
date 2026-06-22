@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -27,18 +28,26 @@ from basic_memory.runtime import (
 from basic_memory.schemas.base import Entity as EntitySchema
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import basic_memory.gateway.note_content_reads as note_content_reads
-import basic_memory.gateway.note_content_writes as note_content_writes
-from basic_memory.gateway.directory_deletes import (
+import basic_memory.cloud.note_content_reads as note_content_reads
+import basic_memory.cloud.note_content_writes as note_content_writes
+from basic_memory.cloud.directory_deletes import (
     DirectoryDeleteService,
     DirectoryDeleteServiceError,
     DirectoryDeleteSessionMaker,
 )
-from basic_memory.gateway.note_content_reads import NoteContentQueryService
-from basic_memory.gateway.note_content_writes import (
+from basic_memory.cloud.note_content_reads import NoteContentQueryService
+from basic_memory.cloud.note_content_writes import (
     NoteContentMutationService,
     NoteContentMutationServiceError,
 )
+
+
+def test_cloud_package_is_the_canonical_shared_cloud_surface() -> None:
+    cloud = import_module("basic_memory.cloud")
+
+    assert cloud.NoteContentQueryService is NoteContentQueryService
+    assert cloud.NoteContentMutationService is NoteContentMutationService
+    assert cloud.DirectoryDeleteService is DirectoryDeleteService
 
 
 class FakeSession:

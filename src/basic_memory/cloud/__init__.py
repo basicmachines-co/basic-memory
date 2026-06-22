@@ -1,26 +1,25 @@
-"""Temporary shared gateway service namespace.
+"""Shared cloud-runtime service namespace.
 
-This package collects route/CLI-facing domain services that are being moved out
-of Basic Memory Cloud. The name is intentionally transitional: the services
-should move to a clearer application/operations namespace once the local and
-cloud adapter boundaries settle.
+This package collects route/CLI-facing domain services shared by local Basic
+Memory and Basic Memory Cloud. Core owns the orchestration; runtimes provide
+storage, queue, session, and tenant adapters around these services.
 """
 
-from basic_memory.gateway.directory_deletes import (
+from basic_memory.cloud.directory_deletes import (
     DirectoryDeleteService,
     DirectoryDeleteServiceError,
     DirectoryDeleteSessionMaker,
     directory_delete_service_error_from_rejection,
 )
-from basic_memory.gateway.note_content_reads import (
+from basic_memory.cloud.note_content_reads import (
     NoteContentQueryService,
 )
-from basic_memory.gateway.note_content_writes import (
+from basic_memory.cloud.note_content_writes import (
     NoteContentMutationService,
     NoteContentMutationServiceError,
     note_content_mutation_error_from_rejection,
 )
-from basic_memory.gateway.project_deletes import (
+from basic_memory.cloud.project_deletes import (
     ProjectDeleteAcceptanceError,
     ProjectDeleteAcceptanceRequest,
     ProjectDeleteAcceptanceService,

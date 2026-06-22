@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from basic_memory.gateway.project_deletes import (
+from basic_memory.cloud.project_deletes import (
     ProjectDeleteAcceptanceError,
     ProjectDeleteAcceptanceRequest,
     ProjectDeleteAcceptanceService,
