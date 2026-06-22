@@ -142,6 +142,12 @@ local-project-index-permalink-conflict-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_project_index.py::test_local_project_index_resolves_duplicate_permalink_update
 
+# Focused local project-index frontmatter policy parity tests.
+local-project-index-frontmatter-policy-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_does_not_add_frontmatter_when_disabled \
+        tests/index/test_local_project_index.py::test_local_project_index_writes_frontmatter_when_enabled_even_if_permalinks_disabled
+
 # Focused per-file indexing runner/model tests.
 file-index-runner-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \

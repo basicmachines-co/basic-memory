@@ -979,6 +979,85 @@ updated two content
     assert "permalink: two" in two_note_content.markdown_content
 
 
+async def test_local_project_index_does_not_add_frontmatter_when_disabled(
+    test_project: Project,
+    project_config,
+    app_config,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Plain markdown files stay plain when missing-frontmatter rewrites are disabled."""
+    app_config.ensure_frontmatter_on_sync = False
+    config_manager.save_config(app_config)
+
+    plain_path = project_config.home / "plain.md"
+    plain_path.write_text("# Plain\n\nNo frontmatter should be created.\n", encoding="utf-8")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local frontmatter policy parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    assert result.enqueued_files == 1
+    indexed_content = plain_path.read_text(encoding="utf-8")
+    assert "permalink:" not in indexed_content
+    assert "type:" not in indexed_content
+
+
+async def test_local_project_index_writes_frontmatter_when_enabled_even_if_permalinks_disabled(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    app_config,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Missing-frontmatter project indexing writes identity metadata when configured."""
+    app_config.ensure_frontmatter_on_sync = True
+    app_config.disable_permalinks = True
+    config_manager.save_config(app_config)
+
+    note_path = project_config.home / "override.md"
+    note_path.write_text("# Override\n", encoding="utf-8")
+
+    async def fail_legacy_sync_service(_project):
+        raise AssertionError("local frontmatter policy parity test must not build SyncService")
+
+    monkeypatch.setattr(
+        "basic_memory.sync.sync_service.get_sync_service",
+        fail_legacy_sync_service,
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    expected_permalink = f"{test_project.permalink}/override"
+    assert result.enqueued_files == 1
+    indexed_content = note_path.read_text(encoding="utf-8")
+    assert "title: override" in indexed_content
+    assert "type: note" in indexed_content
+    assert f"permalink: {expected_permalink}" in indexed_content
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "override.md")
+
+    assert entity is not None
+    assert entity.permalink == expected_permalink
+
+
 @dataclass(slots=True)
 class RecordingMarkdownFileIndexer:
     indexed_paths: list[str] = field(default_factory=list)
