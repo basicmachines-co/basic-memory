@@ -21,14 +21,14 @@ from basic_memory.deps import (
     ProjectServiceDep,
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
-    ProjectIndexRunnerDep,
+    ProjectIndexCommandDep,
     ProjectIndexObserverDep,
-    ProjectIndexSchedulerDep,
     ProjectExternalIdPathDep,
+    ProjectIndexRouteRequest,
     SessionDep,
     SessionMakerDep,
 )
-from basic_memory.schemas import ProjectIndexRunResponse, ProjectIndexStatusResponse
+from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.project_info import (
@@ -233,38 +233,21 @@ async def synchronize_projects(
 
 @router.post("/{project_id}/index")
 async def index_project(
-    project_index_runner: ProjectIndexRunnerDep,
+    project_index_command: ProjectIndexCommandDep,
     project_config: ProjectConfigV2ExternalDep,
-    project_index_scheduler: ProjectIndexSchedulerDep,
     project_internal_id: ProjectExternalIdPathDep,
     force_full: bool = Query(False, description="Request a full project index run"),
     run_in_background: bool = Query(True, description="Run in background"),
 ):
     """Run project-wide indexing through the event-index coordinator."""
-    if run_in_background:
-        project_index_scheduler.schedule_project_index(
+    return await project_index_command.index_project(
+        ProjectIndexRouteRequest(
             project_id=project_internal_id,
+            project_name=project_config.name,
             force_full=force_full,
+            run_in_background=run_in_background,
         )
-        logger.info(
-            f"Filesystem indexing initiated for project: {project_config.name} "
-            f"(force_full={force_full})"
-        )
-
-        return {
-            "status": "index_started",
-            "message": f"Filesystem indexing initiated for project '{project_config.name}'",
-        }
-
-    result = await project_index_runner.index_project(
-        project_internal_id,
-        force_full=force_full,
     )
-    logger.info(
-        f"Filesystem indexing completed for project: {project_config.name} "
-        f"(force_full={force_full})"
-    )
-    return ProjectIndexRunResponse.from_result(result)
 
 
 @router.post("/{project_id}/status", response_model=ProjectIndexStatusResponse)

@@ -46,6 +46,7 @@ from basic_memory.index import (
 from basic_memory.indexing import BatchIndexer, IndexFileExecutor, StorageIndexFileWriter
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
+from basic_memory.schemas import ProjectIndexRunResponse
 from basic_memory.services import EntityService, ProjectService
 from basic_memory.services.context_service import ContextService
 from basic_memory.services.directory_service import DirectoryService
@@ -459,6 +460,34 @@ class ProjectIndexObserver(Protocol):
     async def observe_project(self, project_id: int) -> LocalProjectIndexObservation: ...
 
 
+class ProjectIndexScheduler(Protocol):
+    """Schedule background project indexing."""
+
+    def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexRouteRequest:
+    """Route-level project-index command input."""
+
+    project_id: int
+    project_name: str
+    force_full: bool
+    run_in_background: bool
+
+
+type ProjectIndexRouteResult = ProjectIndexRunResponse | dict[str, str]
+
+
+class ProjectIndexCommand(Protocol):
+    """Handle a project-index route request."""
+
+    async def index_project(
+        self,
+        request: ProjectIndexRouteRequest,
+    ) -> ProjectIndexRouteResult: ...
+
+
 async def get_project_index_runner(
     project_repository: ProjectRepositoryDep,
     session_maker: SessionMakerDep,
@@ -495,12 +524,6 @@ class EntityVectorSyncScheduler(Protocol):
     """Schedule out-of-band semantic vector refreshes for note mutations."""
 
     def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None: ...
-
-
-class ProjectIndexScheduler(Protocol):
-    """Schedule background project indexing."""
-
-    def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None: ...
 
 
 class SearchReindexScheduler(Protocol):
@@ -622,6 +645,57 @@ ProjectIndexSchedulerDep = Annotated[
 SearchReindexSchedulerDep = Annotated[
     SearchReindexScheduler,
     Depends(get_search_reindex_scheduler),
+]
+
+
+@dataclass(frozen=True, slots=True)
+class LocalProjectIndexCommand:
+    project_index_runner: ProjectIndexRunner
+    project_index_scheduler: ProjectIndexScheduler
+
+    async def index_project(
+        self,
+        request: ProjectIndexRouteRequest,
+    ) -> ProjectIndexRouteResult:
+        if request.run_in_background:
+            self.project_index_scheduler.schedule_project_index(
+                project_id=request.project_id,
+                force_full=request.force_full,
+            )
+            logger.info(
+                f"Filesystem indexing initiated for project: {request.project_name} "
+                f"(force_full={request.force_full})"
+            )
+
+            return {
+                "status": "index_started",
+                "message": (f"Filesystem indexing initiated for project '{request.project_name}'"),
+            }
+
+        result = await self.project_index_runner.index_project(
+            request.project_id,
+            force_full=request.force_full,
+        )
+        logger.info(
+            f"Filesystem indexing completed for project: {request.project_name} "
+            f"(force_full={request.force_full})"
+        )
+        return ProjectIndexRunResponse.from_result(result)
+
+
+async def get_project_index_command(
+    project_index_runner: ProjectIndexRunnerDep,
+    project_index_scheduler: ProjectIndexSchedulerDep,
+) -> ProjectIndexCommand:
+    return LocalProjectIndexCommand(
+        project_index_runner=project_index_runner,
+        project_index_scheduler=project_index_scheduler,
+    )
+
+
+ProjectIndexCommandDep = Annotated[
+    ProjectIndexCommand,
+    Depends(get_project_index_command),
 ]
 
 
