@@ -400,6 +400,11 @@ class WatchService:
             )
             return
 
+        if not changes:
+            self.state.last_scan = datetime.now()
+            await self.write_status()
+            return
+
         if self._event_index_runtime_factory is not None:
             await self._handle_changes_with_event_index(project, changes)
             return

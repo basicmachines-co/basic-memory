@@ -18,6 +18,34 @@ async def create_test_file(path: Path, content: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_event_index_empty_batches_do_not_build_runtime(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+) -> None:
+    """Empty watcher batches should remain a cheap no-op in the event-index path."""
+
+    class FailingEventIndexRuntimeFactory:
+        async def runtime_for_project(self, project):
+            raise AssertionError("empty event-index batches should not build runtime dependencies")
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=FailingEventIndexRuntimeFactory(),
+    )
+
+    await watch_service.handle_changes(test_project, set())
+
+    assert watch_service.state.last_scan is not None
+    assert watch_service.state.synced_files == 0
+    assert watch_service.state.error_count == 0
+    assert watch_service.state.recent_events == []
+
+
+@pytest.mark.asyncio
 async def test_local_event_index_handles_large_batch_of_file_adds(
     app_config: BasicMemoryConfig,
     project_repository,
