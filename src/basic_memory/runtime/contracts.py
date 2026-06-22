@@ -44,7 +44,6 @@ type RuntimeWorkflowStatus = str
 type RuntimeWorkflowPhase = str
 type RuntimeWorkflowProgress = str
 type RuntimeWorkflowResult = Mapping[str, object]
-type RuntimeSchedulerTaskPayload = Mapping[str, object]
 type RuntimeJobStatusType = Literal[
     "queued",
     "in_progress",
@@ -641,13 +640,6 @@ class RuntimeStorageEventSkipReason(StrEnum):
     project_root = "project_root"
     non_markdown = "non_markdown"
     unknown_event = "unknown_event"
-
-
-class RuntimeScheduledTaskName(StrEnum):
-    """Background task names that may be adapted by runtime providers."""
-
-    sync_entity_vectors = "sync_entity_vectors"
-    index_project = "index_project"
 
 
 class RuntimeStorageFileIndexMode(StrEnum):
@@ -1301,18 +1293,6 @@ class RuntimeScheduledVectorSyncTask:
     entity_id: RuntimeEntityId
     project_id: ProjectId
 
-    @classmethod
-    def from_payload(cls, payload: RuntimeSchedulerTaskPayload) -> Self:
-        entity_id = payload.get("entity_id")
-        project_id = payload.get("project_id")
-        if entity_id is None or project_id is None:
-            raise ValueError("sync_entity_vectors requires entity_id and project_id")
-        if isinstance(entity_id, bool) or not isinstance(entity_id, int):
-            raise TypeError("sync_entity_vectors entity_id must be an int")
-        if isinstance(project_id, bool) or not isinstance(project_id, int):
-            raise TypeError("sync_entity_vectors project_id must be an int")
-        return cls(entity_id=entity_id, project_id=project_id)
-
 
 @dataclass(frozen=True, slots=True)
 class RuntimeScheduledProjectIndexTask:
@@ -1320,35 +1300,6 @@ class RuntimeScheduledProjectIndexTask:
 
     project_id: ProjectId
     force_full: bool = False
-
-    @classmethod
-    def from_payload(cls, payload: RuntimeSchedulerTaskPayload) -> Self:
-        project_id = payload.get("project_id")
-        if project_id is None:
-            raise ValueError("index_project requires project_id")
-        if isinstance(project_id, bool) or not isinstance(project_id, int):
-            raise TypeError("index_project project_id must be an int")
-
-        force_full = payload.get("force_full", False)
-        if not isinstance(force_full, bool):
-            raise TypeError("index_project force_full must be a bool")
-
-        return cls(project_id=project_id, force_full=force_full)
-
-
-type RuntimeScheduledTask = RuntimeScheduledVectorSyncTask | RuntimeScheduledProjectIndexTask
-
-
-def runtime_scheduled_task_from_payload(
-    task_name: str,
-    payload: RuntimeSchedulerTaskPayload,
-) -> RuntimeScheduledTask | None:
-    """Return a typed runtime task for known scheduler names, or None."""
-    if task_name == RuntimeScheduledTaskName.sync_entity_vectors:
-        return RuntimeScheduledVectorSyncTask.from_payload(payload)
-    if task_name == RuntimeScheduledTaskName.index_project:
-        return RuntimeScheduledProjectIndexTask.from_payload(payload)
-    return None
 
 
 @dataclass(frozen=True, slots=True)

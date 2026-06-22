@@ -22,7 +22,7 @@ from basic_memory.deps import (
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
     ProjectIndexRunnerDep,
-    TaskSchedulerDep,
+    ProjectIndexSchedulerDep,
     ProjectExternalIdPathDep,
     SessionDep,
     SessionMakerDep,
@@ -234,15 +234,14 @@ async def synchronize_projects(
 async def index_project(
     project_index_runner: ProjectIndexRunnerDep,
     project_config: ProjectConfigV2ExternalDep,
-    task_scheduler: TaskSchedulerDep,
+    project_index_scheduler: ProjectIndexSchedulerDep,
     project_internal_id: ProjectExternalIdPathDep,
     force_full: bool = Query(False, description="Request a full project index run"),
     run_in_background: bool = Query(True, description="Run in background"),
 ):
     """Run project-wide indexing through the event-index coordinator."""
     if run_in_background:
-        task_scheduler.schedule(
-            "index_project",
+        project_index_scheduler.schedule_project_index(
             project_id=project_internal_id,
             force_full=force_full,
         )

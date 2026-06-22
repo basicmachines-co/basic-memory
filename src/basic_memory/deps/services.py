@@ -8,9 +8,9 @@ This module provides service-layer dependencies:
 """
 
 import asyncio
-import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Callable, Coroutine, Mapping, Protocol
+from typing import Annotated, Any, Coroutine, Protocol
 
 from fastapi import Depends
 from loguru import logger
@@ -461,12 +461,33 @@ ScheduledProjectIndexRunnerDep = Annotated[
 ]
 
 
-# --- Background Task Scheduler ---
+# --- Background Work Schedulers ---
 
 
-class TaskScheduler(Protocol):
-    def schedule(self, task_name: str, **payload: Any) -> None:
-        """Schedule a background task by name."""
+class EntityVectorSyncScheduler(Protocol):
+    """Schedule out-of-band semantic vector refreshes for note mutations."""
+
+    def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None: ...
+
+
+class ProjectIndexScheduler(Protocol):
+    """Schedule background project indexing."""
+
+    def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None: ...
+
+
+class SearchReindexScheduler(Protocol):
+    """Schedule a search-index rebuild for the active project."""
+
+    def schedule_search_reindex(self, *, project_id: int) -> None: ...
+
+
+class EntityVectorSyncSearchService(Protocol):
+    async def sync_entity_vectors(self, entity_id: int) -> object: ...
+
+
+class SearchReindexService(Protocol):
+    async def reindex_all(self) -> object: ...
 
 
 def _log_task_failure(completed: asyncio.Task) -> None:
@@ -480,76 +501,101 @@ def _log_task_failure(completed: asyncio.Task) -> None:
         logger.exception("Background task failed", error=str(exc))
 
 
-class LocalTaskScheduler:
-    """Default scheduler that runs tasks in-process via asyncio.create_task.
+def _schedule_background_coroutine(
+    coroutine: Coroutine[Any, Any, object],
+    *,
+    test_mode: bool,
+) -> None:
+    # Background tasks outlive pytest fixture cleanup and can race engine disposal.
+    # Focused tests call the scheduler classes directly with test_mode=False.
+    if test_mode:
+        coroutine.close()
+        return
 
-    In test mode (BASIC_MEMORY_ENV=test), tasks run as no-ops to avoid
-    background asyncio tasks racing against test teardown and causing
-    SQLite 'cannot commit transaction' errors.
-    """
+    task = asyncio.create_task(coroutine)
+    task.add_done_callback(_log_task_failure)
 
-    def __init__(
-        self,
-        handlers: Mapping[str, Callable[..., Coroutine[Any, Any, None]]],
-        test_mode: bool | None = None,
-    ) -> None:
-        self._handlers = handlers
-        self._test_mode = (
-            test_mode if test_mode is not None else os.environ.get("BASIC_MEMORY_ENV") == "test"
+
+@dataclass(frozen=True, slots=True)
+class LocalEntityVectorSyncScheduler:
+    search_service: EntityVectorSyncSearchService
+    test_mode: bool
+
+    def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None:
+        _ = project_id
+        _schedule_background_coroutine(
+            self.search_service.sync_entity_vectors(entity_id),
+            test_mode=self.test_mode,
         )
 
-    def schedule(self, task_name: str, **payload: Any) -> None:
-        handler = self._handlers.get(task_name)
-        # Trigger: task name is not registered
-        # Why: avoid silently dropping background work
-        # Outcome: fail fast to surface misconfiguration
-        if not handler:
-            raise ValueError(f"Unknown task name: {task_name}")
 
-        # Trigger: running inside pytest (BASIC_MEMORY_ENV=test)
-        # Why: background create_task() outlives test fixtures and races
-        #      against engine disposal, causing flaky SQLite errors
-        # Outcome: skip background scheduling; focused tests run the
-        #          index operation directly when they need to.
-        if self._test_mode:
-            return
+@dataclass(frozen=True, slots=True)
+class LocalProjectIndexScheduler:
+    project_index_runner: ScheduledProjectIndexRunner
+    test_mode: bool
 
-        task = asyncio.create_task(handler(**payload))
-        task.add_done_callback(_log_task_failure)
+    def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None:
+        _schedule_background_coroutine(
+            self.project_index_runner.index_project(project_id, force_full=force_full),
+            test_mode=self.test_mode,
+        )
 
 
-async def get_task_scheduler(
-    project_index_runner: ScheduledProjectIndexRunnerDep,
+@dataclass(frozen=True, slots=True)
+class LocalSearchReindexScheduler:
+    search_service: SearchReindexService
+    test_mode: bool
+
+    def schedule_search_reindex(self, *, project_id: int) -> None:
+        _ = project_id
+        _schedule_background_coroutine(
+            self.search_service.reindex_all(),
+            test_mode=self.test_mode,
+        )
+
+
+async def get_entity_vector_sync_scheduler(
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
-) -> TaskScheduler:
-    """Create a scheduler that maps task specs to coroutines."""
-
-    async def _sync_entity_vectors(entity_id: int, **_: Any) -> None:
-        await search_service.sync_entity_vectors(entity_id)
-
-    async def _index_project(
-        project_id: int | None = None, force_full: bool = False, **_: Any
-    ) -> None:
-        if project_id is None:
-            raise ValueError("index_project requires project_id")
-        await project_index_runner.index_project(project_id, force_full=force_full)
-
-    async def _reindex_project(**_: Any) -> None:
-        await search_service.reindex_all()
-
-    scheduler = LocalTaskScheduler(
-        {
-            "sync_entity_vectors": _sync_entity_vectors,
-            "index_project": _index_project,
-            "reindex_project": _reindex_project,
-        },
+) -> EntityVectorSyncScheduler:
+    return LocalEntityVectorSyncScheduler(
+        search_service=search_service,
         test_mode=app_config.is_test_env,
     )
-    return scheduler
 
 
-TaskSchedulerDep = Annotated[TaskScheduler, Depends(get_task_scheduler)]
+async def get_project_index_scheduler(
+    project_index_runner: ScheduledProjectIndexRunnerDep,
+    app_config: AppConfigDep,
+) -> ProjectIndexScheduler:
+    return LocalProjectIndexScheduler(
+        project_index_runner=project_index_runner,
+        test_mode=app_config.is_test_env,
+    )
+
+
+async def get_search_reindex_scheduler(
+    search_service: SearchServiceV2ExternalDep,
+    app_config: AppConfigDep,
+) -> SearchReindexScheduler:
+    return LocalSearchReindexScheduler(
+        search_service=search_service,
+        test_mode=app_config.is_test_env,
+    )
+
+
+EntityVectorSyncSchedulerDep = Annotated[
+    EntityVectorSyncScheduler,
+    Depends(get_entity_vector_sync_scheduler),
+]
+ProjectIndexSchedulerDep = Annotated[
+    ProjectIndexScheduler,
+    Depends(get_project_index_scheduler),
+]
+SearchReindexSchedulerDep = Annotated[
+    SearchReindexScheduler,
+    Depends(get_search_reindex_scheduler),
+]
 
 
 # --- Project Service ---

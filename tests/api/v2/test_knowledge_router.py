@@ -511,11 +511,11 @@ async def test_put_entity_with_fast_param_returns_fully_indexed_row(
 
 @pytest.mark.asyncio
 async def test_create_with_fast_param_does_not_schedule_reindex_task(
-    client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
+    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
     """Legacy fast=true should not resurrect the removed reindex note-write path."""
     app_config.semantic_search_enabled = False
-    start_count = len(task_scheduler_spy)
+    start_count = len(vector_sync_scheduler_spy)
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
         json={
@@ -526,16 +526,16 @@ async def test_create_with_fast_param_does_not_schedule_reindex_task(
         params={"fast": True},
     )
     assert response.status_code == 200
-    assert len(task_scheduler_spy) == start_count
+    assert len(vector_sync_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio
 async def test_create_schedules_vector_sync_when_semantic_enabled(
-    client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
+    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
     """Create should schedule vector sync when semantic mode is enabled."""
     app_config.semantic_search_enabled = True
-    start_count = len(task_scheduler_spy)
+    start_count = len(vector_sync_scheduler_spy)
 
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -549,19 +549,18 @@ async def test_create_schedules_vector_sync_when_semantic_enabled(
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    assert len(task_scheduler_spy) == start_count + 1
-    scheduled = task_scheduler_spy[-1]
-    assert scheduled["task_name"] == "sync_entity_vectors"
-    assert scheduled["payload"]["entity_id"] == created_entity.id
+    assert len(vector_sync_scheduler_spy) == start_count + 1
+    scheduled = vector_sync_scheduler_spy[-1]
+    assert scheduled["entity_id"] == created_entity.id
 
 
 @pytest.mark.asyncio
 async def test_create_skips_vector_sync_when_semantic_disabled(
-    client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
+    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
     """Create should not schedule vector sync when semantic mode is disabled."""
     app_config.semantic_search_enabled = False
-    start_count = len(task_scheduler_spy)
+    start_count = len(vector_sync_scheduler_spy)
 
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -573,7 +572,7 @@ async def test_create_skips_vector_sync_when_semantic_disabled(
         params={"fast": False},
     )
     assert response.status_code == 200
-    assert len(task_scheduler_spy) == start_count
+    assert len(vector_sync_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio

@@ -35,7 +35,7 @@ from basic_memory.deps import (
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
     IndexFileExecutorV2ExternalDep,
-    TaskSchedulerDep,
+    EntityVectorSyncSchedulerDep,
     SessionDep,
     SessionMakerDep,
 )
@@ -63,15 +63,14 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
 
 def _schedule_vector_sync_if_enabled(
     *,
-    task_scheduler,
+    vector_sync_scheduler,
     app_config,
     entity_id: int,
     project_id: int,
 ) -> None:
     """Schedule out-of-band vector sync only when semantic search is enabled."""
     if app_config.semantic_search_enabled:
-        task_scheduler.schedule(
-            "sync_entity_vectors",
+        vector_sync_scheduler.schedule_entity_vector_sync(
             entity_id=entity_id,
             project_id=project_id,
         )
@@ -494,7 +493,7 @@ async def create_entity(
     data: Entity,
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
-    task_scheduler: TaskSchedulerDep,
+    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     app_config: AppConfigDep,
 ) -> EntityResponseV2:
     """Create a new entity.
@@ -521,7 +520,7 @@ async def create_entity(
         entity = write_result.entity
         await search_service.index_entity(entity, content=write_result.search_content)
         _schedule_vector_sync_if_enabled(
-            task_scheduler=task_scheduler,
+            vector_sync_scheduler=vector_sync_scheduler,
             app_config=app_config,
             entity_id=entity.id,
             project_id=project_id,
@@ -548,7 +547,7 @@ async def update_entity_by_id(
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
-    task_scheduler: TaskSchedulerDep,
+    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     app_config: AppConfigDep,
     session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
@@ -601,7 +600,7 @@ async def update_entity_by_id(
 
         await search_service.index_entity(entity, content=write_result.search_content)
         _schedule_vector_sync_if_enabled(
-            task_scheduler=task_scheduler,
+            vector_sync_scheduler=vector_sync_scheduler,
             app_config=app_config,
             entity_id=entity.id,
             project_id=project_id,
@@ -623,7 +622,7 @@ async def edit_entity_by_id(
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
-    task_scheduler: TaskSchedulerDep,
+    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     app_config: AppConfigDep,
     session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
@@ -670,7 +669,7 @@ async def edit_entity_by_id(
             updated_entity = write_result.entity
             await search_service.index_entity(updated_entity, content=write_result.search_content)
             _schedule_vector_sync_if_enabled(
-                task_scheduler=task_scheduler,
+                vector_sync_scheduler=vector_sync_scheduler,
                 app_config=app_config,
                 entity_id=updated_entity.id,
                 project_id=project_id,
@@ -745,7 +744,7 @@ async def move_entity(
     project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
-    task_scheduler: TaskSchedulerDep,
+    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     session_maker: SessionMakerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
@@ -798,7 +797,7 @@ async def move_entity(
             if reindexed_entity:
                 await search_service.index_entity(reindexed_entity)
                 _schedule_vector_sync_if_enabled(
-                    task_scheduler=task_scheduler,
+                    vector_sync_scheduler=vector_sync_scheduler,
                     app_config=app_config,
                     entity_id=reindexed_entity.id,
                     project_id=project_id,
@@ -830,7 +829,7 @@ async def move_directory(
     project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
-    task_scheduler: TaskSchedulerDep,
+    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     session_maker: SessionMakerDep,
 ) -> DirectoryMoveResult:
     """Move all entities in a directory to a new location.
@@ -874,7 +873,7 @@ async def move_directory(
                 if entity:
                     await search_service.index_entity(entity)
                     _schedule_vector_sync_if_enabled(
-                        task_scheduler=task_scheduler,
+                        vector_sync_scheduler=vector_sync_scheduler,
                         app_config=app_config,
                         entity_id=entity.id,
                         project_id=project_id,

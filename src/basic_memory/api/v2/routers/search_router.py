@@ -18,7 +18,7 @@ from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetri
 from basic_memory.deps import (
     SearchServiceV2ExternalDep,
     EntityServiceV2ExternalDep,
-    TaskSchedulerDep,
+    SearchReindexSchedulerDep,
     ProjectExternalIdPathDep,
 )
 
@@ -137,7 +137,7 @@ async def search(
 
 @router.post("/search/reindex")
 async def reindex(
-    task_scheduler: TaskSchedulerDep,
+    search_reindex_scheduler: SearchReindexSchedulerDep,
     project_id: ProjectExternalIdPathDep,
 ):
     """Recreate and populate the search index for a project.
@@ -148,10 +148,10 @@ async def reindex(
 
     Args:
         project_id: Project external UUID from URL path
-        task_scheduler: Task scheduler for background work
+        search_reindex_scheduler: Search reindex scheduler for background work
 
     Returns:
         Status message indicating reindex has been initiated
     """
-    task_scheduler.schedule("reindex_project", project_id=project_id)
+    search_reindex_scheduler.schedule_search_reindex(project_id=project_id)
     return {"status": "ok", "message": "Reindex initiated"}

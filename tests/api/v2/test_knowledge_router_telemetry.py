@@ -81,8 +81,8 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
             assert content == "telemetry content"
             return None
 
-    class FakeTaskScheduler:
-        def schedule(self, *args, **kwargs):
+    class FakeVectorSyncScheduler:
+        def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
     result = await knowledge_router_module.create_entity(
@@ -96,7 +96,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         ),
         entity_service=cast(Any, FakeEntityService()),
         search_service=cast(Any, FakeSearchService()),
-        task_scheduler=FakeTaskScheduler(),
+        vector_sync_scheduler=FakeVectorSyncScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
     )
 
@@ -130,8 +130,8 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         async def get_by_external_id(self, session, external_id):
             return entity
 
-    class FakeTaskScheduler:
-        def schedule(self, *args, **kwargs):
+    class FakeVectorSyncScheduler:
+        def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
     response = Response()
@@ -149,7 +149,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         search_service=cast(Any, FakeSearchService()),
         entity_repository=cast(Any, FakeEntityRepository()),
         session_maker=cast(Any, object()),
-        task_scheduler=FakeTaskScheduler(),
+        vector_sync_scheduler=FakeVectorSyncScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )
@@ -184,8 +184,8 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         async def get_by_external_id(self, session, external_id):
             return entity
 
-    class FakeTaskScheduler:
-        def schedule(self, *args, **kwargs):
+    class FakeVectorSyncScheduler:
+        def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
     result = await knowledge_router_module.edit_entity_by_id(
@@ -195,7 +195,7 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         search_service=cast(Any, FakeSearchService()),
         entity_repository=cast(Any, FakeEntityRepository()),
         session_maker=cast(Any, object()),
-        task_scheduler=FakeTaskScheduler(),
+        vector_sync_scheduler=FakeVectorSyncScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )

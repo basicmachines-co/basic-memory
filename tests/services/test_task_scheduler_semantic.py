@@ -1,12 +1,14 @@
-"""Task scheduler tests for derived async work."""
+"""Typed scheduler tests for derived async work."""
 
 import asyncio
-from typing import Any, cast
 
 import pytest
 
-from basic_memory.config import BasicMemoryConfig
-from basic_memory.deps.services import get_task_scheduler
+from basic_memory.deps.services import (
+    LocalEntityVectorSyncScheduler,
+    LocalProjectIndexScheduler,
+    LocalSearchReindexScheduler,
+)
 
 
 class StubProjectIndexRunner:
@@ -30,49 +32,45 @@ class StubSearchService:
 
 
 @pytest.mark.asyncio
-async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
-    """Explicit sync_entity_vectors task should call SearchService sync method."""
-    project_index_runner = StubProjectIndexRunner()
+async def test_entity_vector_scheduler_maps_to_search_service():
+    """Entity vector scheduling should call the semantic vector sync method."""
     search_service = StubSearchService()
-    app_config = BasicMemoryConfig(
-        env="test",
-        projects={"test-project": str(tmp_path)},
-        default_project="test-project",
-        semantic_search_enabled=True,
-    )
 
-    scheduler = await get_task_scheduler(
-        project_index_runner=cast(Any, project_index_runner),
-        search_service=cast(Any, search_service),
-        app_config=app_config,
+    scheduler = LocalEntityVectorSyncScheduler(
+        search_service=search_service,
+        test_mode=False,
     )
-    # Enable background tasks for this test — uses stubs, no real DB race risk
-    cast(Any, scheduler)._test_mode = False
-    scheduler.schedule("sync_entity_vectors", entity_id=7)
+    scheduler.schedule_entity_vector_sync(entity_id=7, project_id=13)
     await asyncio.sleep(0.05)
 
     assert search_service.vector_synced == [7]
 
 
 @pytest.mark.asyncio
-async def test_index_project_task_maps_to_project_index_runner(tmp_path):
-    """Explicit index_project task should call the event-index project runner."""
+async def test_project_index_scheduler_maps_to_project_index_runner():
+    """Project index scheduling should call the event-index project runner."""
     project_index_runner = StubProjectIndexRunner()
-    search_service = StubSearchService()
-    app_config = BasicMemoryConfig(
-        env="test",
-        projects={"test-project": str(tmp_path)},
-        default_project="test-project",
-        semantic_search_enabled=True,
-    )
 
-    scheduler = await get_task_scheduler(
-        project_index_runner=cast(Any, project_index_runner),
-        search_service=cast(Any, search_service),
-        app_config=app_config,
+    scheduler = LocalProjectIndexScheduler(
+        project_index_runner=project_index_runner,
+        test_mode=False,
     )
-    cast(Any, scheduler)._test_mode = False
-    scheduler.schedule("index_project", project_id=13, force_full=True)
+    scheduler.schedule_project_index(project_id=13, force_full=True)
     await asyncio.sleep(0.05)
 
     assert project_index_runner.indexed == [(13, True)]
+
+
+@pytest.mark.asyncio
+async def test_search_reindex_scheduler_maps_to_search_service():
+    """Search reindex scheduling should rebuild the search index."""
+    search_service = StubSearchService()
+
+    scheduler = LocalSearchReindexScheduler(
+        search_service=search_service,
+        test_mode=False,
+    )
+    scheduler.schedule_search_reindex(project_id=13)
+    await asyncio.sleep(0.05)
+
+    assert search_service.reindexed_project is True
