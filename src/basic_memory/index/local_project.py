@@ -92,7 +92,15 @@ def local_project_index_file_paths(
     )
     file_paths: list[str] = []
 
-    for path in project_root.rglob("*"):
+    path_iterator = iter(project_root.rglob("*"))
+    while True:
+        try:
+            path = next(path_iterator)
+        except StopIteration:
+            break
+        except OSError:
+            break
+
         try:
             is_file = path.is_file()
         except OSError:

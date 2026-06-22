@@ -33,6 +33,25 @@ def test_local_project_index_file_paths_skips_unreadable_entries(
     assert local_project_index_file_paths(tmp_path, ignore_patterns=set()) == ("accessible.md",)
 
 
+def test_local_project_index_file_paths_keeps_discovered_files_when_walk_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A traversal error should not discard files discovered before the error."""
+    project_root = tmp_path.resolve()
+    accessible_path = project_root / "accessible.md"
+    accessible_path.write_text("# Accessible\n", encoding="utf-8")
+
+    def rglob_then_permission_error(path: Path, *args, **kwargs):
+        assert path == project_root
+        yield accessible_path
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(Path, "rglob", rglob_then_permission_error)
+
+    assert local_project_index_file_paths(project_root, ignore_patterns=set()) == ("accessible.md",)
+
+
 @pytest.mark.asyncio
 async def test_local_project_index_observed_file_source_skips_files_missing_after_scan(
     monkeypatch,
