@@ -267,19 +267,17 @@ project-index-contract-test: project-index-surface-test project-index-workflow-t
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
 local-event-index-regular-file-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/index/test_local_watch_regular_file_parity.py \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file
+        tests/index/test_local_watch_regular_file_parity.py
 
 # Focused local event-index relation cleanup parity test.
 local-event-index-relation-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/index/test_local_watch_regular_file_parity.py::test_local_event_index_deletes_regular_file_relation_target_and_repairs_search
 
-# Focused local event-index atomic-write relation parity test.
-local-event-index-atomic-relation-test:
+# Focused local event-index atomic-write parity test.
+local-event-index-atomic-write-test:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_updates_atomic_relations
+        tests/index/test_local_watch_stress_parity.py::test_local_event_index_handles_rapid_atomic_writes_to_same_file
 
 # Focused local filesystem event temp/backup filtering parity test.
 filesystem-event-temp-file-test:
@@ -292,7 +290,7 @@ local-event-index-stress-test:
         tests/index/test_local_watch_stress_parity.py
 
 # Focused event-based indexing contract tests for the cloud/core extraction loop.
-event-index-contract-test: storage-event-contract-test filesystem-event-temp-file-test local-event-index-atomic-relation-test local-event-index-stress-test
+event-index-contract-test: storage-event-contract-test filesystem-event-temp-file-test local-event-index-atomic-write-test local-event-index-stress-test
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
         tests/indexing/test_external_file_delete_runner.py \
         tests/index/test_filesystem_events.py \
@@ -301,28 +299,7 @@ event-index-contract-test: storage-event-contract-test filesystem-event-temp-fil
         tests/index/test_local_watch_regular_file_parity.py \
         tests/index/test_local_watch_orchestration.py \
         tests/index/test_repository_storage_event_project_resolution.py \
-        tests/sync/test_watch_service.py::test_handle_changes_can_route_through_event_index_runtime \
-        tests/sync/test_watch_service.py::test_handle_changes_with_event_index_runtime_records_failed_counts \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_markdown_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_updates_existing_markdown_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_coalesces_add_and_modify \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_multiple_files_once \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_treats_delete_add_same_path_as_update \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_handles_atomic_and_true_deletes \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_indexes_regular_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_regular_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_deletes_missing_markdown_file \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_skips_deleted_project \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_preserves_move_identity \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_collapses_rapid_move \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_skips_directory_rename_events \
-        tests/sync/test_watch_service.py::test_handle_changes_with_local_event_index_runtime_resolves_relations_after_index \
         tests/services/test_initialization.py::test_initialize_file_sync_wires_event_index_runtime_by_default
-
-# Legacy sync regression oracle while the new event-index path catches up.
-sync-regression-oracle-test:
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
-        tests/sync
 
 # Focused parity loop for local project scans and shared storage-event routing.
 event-index-parity-test:
