@@ -56,6 +56,8 @@ from typing import AsyncGenerator, Generator, Literal
 import pytest
 import pytest_asyncio
 from pathlib import Path
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -68,6 +70,7 @@ from testcontainers.postgres import PostgresContainer
 
 from httpx import AsyncClient, ASGITransport
 
+from basic_memory import db
 from basic_memory.config import (
     BasicMemoryConfig,
     ProjectConfig,
@@ -201,7 +204,22 @@ def _resolve_postgres_sync_url(postgres_container) -> str:
     return postgres_container.get_connection_url()
 
 
-async def _reset_postgres_integration_schema(engine) -> None:
+def _postgres_alembic_config(async_url: str) -> Config:
+    """Build Alembic config for stamping the shared Postgres integration schema."""
+    alembic_dir = Path(db.__file__).parent / "alembic"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(alembic_dir))
+    cfg.set_main_option(
+        "file_template",
+        "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s",
+    )
+    cfg.set_main_option("timezone", "UTC")
+    cfg.set_main_option("revision_environment", "false")
+    cfg.set_main_option("sqlalchemy.url", async_url)
+    return cfg
+
+
+async def _reset_postgres_integration_schema(engine: AsyncEngine, async_url: str) -> None:
     """Restore the shared Postgres integration schema to a clean baseline."""
     from basic_memory.models.search import (
         CREATE_POSTGRES_SEARCH_INDEX_FTS,
@@ -227,6 +245,13 @@ async def _reset_postgres_integration_schema(engine) -> None:
         await conn.execute(
             text(f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} RESTART IDENTITY CASCADE")
         )
+
+        alembic_version_exists = (
+            await conn.execute(text("SELECT to_regclass('public.alembic_version')"))
+        ).scalar() is not None
+
+    if not alembic_version_exists:
+        command.stamp(_postgres_alembic_config(async_url), "head")
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -273,7 +298,8 @@ async def engine_factory(
         # Why: one savepoint-backed connection is too brittle for that flow.
         # Outcome: reuse the engine, but reset rows/schema before each test and
         # let app code use normal transaction boundaries.
-        await _reset_postgres_integration_schema(postgres_engine)
+        async_url = postgres_engine.url.render_as_string(hide_password=False)
+        await _reset_postgres_integration_schema(postgres_engine, async_url)
 
         session_maker = async_sessionmaker(
             bind=postgres_engine,

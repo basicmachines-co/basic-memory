@@ -6,6 +6,7 @@ test config + dual-backend fixtures.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -270,11 +271,15 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
         _disable_test_env_short_circuit(monkeypatch)
         monkeypatch.setattr("basic_memory.index.WatchService", _FakeWatchService)
 
+        original_create_task = asyncio.create_task
         created_coroutines = []
 
         def capture_task(coro):
-            created_coroutines.append(coro)
-            return object()
+            coroutine_name = getattr(getattr(coro, "cr_code", None), "co_name", "")
+            if coroutine_name == "index_project_background":
+                created_coroutines.append(coro)
+                return object()
+            return original_create_task(coro)
 
         class RecordingProjectIndexRuntimeFactory:
             tenant_id = LOCAL_EVENT_INDEX_TENANT_ID
