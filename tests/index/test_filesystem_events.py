@@ -121,6 +121,31 @@ def test_temp_hidden_and_directory_changes_are_filtered_before_indexing(
     assert [event.object_key for event in events] == ["project/valid.md"]
 
 
+def test_outside_project_changes_are_filtered_before_indexing(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    outside_root = tmp_path / "outside"
+    project_root.mkdir()
+    outside_root.mkdir()
+    valid = project_root / "valid.md"
+    outside = outside_root / "outside.md"
+    valid.write_text("# Valid\n", encoding="utf-8")
+    outside.write_text("# Outside\n", encoding="utf-8")
+
+    events = local_storage_events_from_watchfiles_changes(
+        project_root=project_root,
+        project_prefix="project",
+        changes=(
+            (Change.added, str(outside)),
+            (Change.added, str(valid)),
+        ),
+        event_time="2026-06-20T12:00:00Z",
+    )
+
+    assert [event.object_key for event in events] == ["project/valid.md"]
+
+
 def test_editor_swap_and_backup_changes_are_filtered_before_indexing(
     tmp_path: Path,
 ) -> None:

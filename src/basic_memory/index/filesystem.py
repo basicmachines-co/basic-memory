@@ -93,7 +93,10 @@ def local_storage_event_input_from_watchfiles_change(
 ) -> StorageEventInput | None:
     """Normalize one watchfiles change into a storage-event input."""
     path = path.expanduser().resolve()
-    relative_path = path.relative_to(project_root).as_posix()
+    try:
+        relative_path = path.relative_to(project_root).as_posix()
+    except ValueError:
+        return None
     if local_relative_path_is_filtered(relative_path):
         return None
     if ignore_patterns is not None and should_ignore_path(path, project_root, ignore_patterns):
