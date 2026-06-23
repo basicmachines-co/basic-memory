@@ -108,10 +108,11 @@ class NoteContentQueryService:
         )
         if not repaired:
             return None
+        # The repair commits through a separate scoped session, so reopen the read to
+        # avoid stale snapshots in caller-owned transactions.
         return await self.get_note_entity_payload(
             project_external_id=project_external_id,
             entity_external_id=entity_external_id,
-            session=session,
         )
 
     async def get_note_resource(
@@ -163,10 +164,11 @@ class NoteContentQueryService:
         )
         if not repaired:
             return None
+        # The repair commits through a separate scoped session, so reopen the read to
+        # avoid stale snapshots in caller-owned transactions.
         return await self.get_note_resource(
             project_external_id=project_external_id,
             entity_external_id=entity_external_id,
-            session=session,
         )
 
     async def reconcile_note_content_from_file(

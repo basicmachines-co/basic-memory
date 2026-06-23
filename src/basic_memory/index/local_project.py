@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -135,7 +136,12 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
             try:
                 metadata = await self.file_service.get_file_metadata(file_path)
                 checksum = await self.file_service.compute_checksum(file_path)
-            except (OSError, FileError, FileOperationError):
+            except (OSError, FileError, FileOperationError) as exc:
+                logger.warning(
+                    "Skipping local index file that could not be observed",
+                    path=file_path,
+                    error=str(exc),
+                )
                 continue
             observed_files.append(
                 RuntimeObservedIndexFile(

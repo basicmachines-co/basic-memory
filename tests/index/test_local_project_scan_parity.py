@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import basic_memory.index.local_project as local_project
 from basic_memory.index import (
     LocalProjectIndexObservedFileSource,
     local_project_index_file_paths,
@@ -60,17 +61,25 @@ async def test_local_project_index_observed_file_source_skips_files_missing_afte
     """Files that disappear after discovery should not fail project observation."""
     keep_path = tmp_path / "keep.md"
     keep_path.write_text("# Keep\n", encoding="utf-8")
+    warnings: list[tuple[str, dict[str, object]]] = []
 
     def discovered_paths(*args, **kwargs) -> tuple[str, ...]:
         return ("missing.md", "keep.md")
+
+    def record_warning(message: str, **kwargs: object) -> None:
+        warnings.append((message, kwargs))
 
     monkeypatch.setattr(
         "basic_memory.index.local_project.local_project_index_file_paths",
         discovered_paths,
     )
+    monkeypatch.setattr(local_project.logger, "warning", record_warning)
 
     observed = await LocalProjectIndexObservedFileSource(
         FileService(tmp_path),
     ).list_observed_index_files()
 
     assert tuple(file.path for file in observed) == ("keep.md",)
+    assert warnings
+    assert warnings[0][0] == "Skipping local index file that could not be observed"
+    assert warnings[0][1]["path"] == "missing.md"

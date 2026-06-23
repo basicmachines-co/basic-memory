@@ -362,6 +362,80 @@ async def test_note_content_read_repair_uses_reader_behavior(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_note_content_read_repair_rereads_with_fresh_session(monkeypatch) -> None:
+    tenant_session_maker = _session_maker()
+    caller_session = cast(AsyncSession, object())
+    reader = cast(Any, object())
+    payload = cast(Any, SimpleNamespace(external_id="note-456"))
+    resource = cast(Any, SimpleNamespace(uri="memory://note-456"))
+    payload_sessions: list[AsyncSession | None] = []
+    resource_sessions: list[AsyncSession | None] = []
+
+    async def fake_get_note_entity_payload(
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        session: AsyncSession | None = None,
+    ):
+        assert project_external_id == "project-123"
+        assert entity_external_id == "note-456"
+        payload_sessions.append(session)
+        return None if len(payload_sessions) == 1 else payload
+
+    async def fake_get_note_resource(
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        session: AsyncSession | None = None,
+    ):
+        assert project_external_id == "project-123"
+        assert entity_external_id == "note-456"
+        resource_sessions.append(session)
+        return None if len(resource_sessions) == 1 else resource
+
+    async def fake_reconcile_note_content_from_file(
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        source: str,
+    ) -> bool:
+        assert project_external_id == "project-123"
+        assert entity_external_id == "note-456"
+        assert source == "read_repair"
+        return True
+
+    service = NoteContentQueryService(
+        session_maker=tenant_session_maker,
+        read_repair_file_reader=reader,
+    )
+    monkeypatch.setattr(service, "get_note_entity_payload", fake_get_note_entity_payload)
+    monkeypatch.setattr(service, "get_note_resource", fake_get_note_resource)
+    monkeypatch.setattr(
+        service,
+        "reconcile_note_content_from_file",
+        fake_reconcile_note_content_from_file,
+    )
+
+    assert (
+        await service.get_note_entity_payload_with_read_repair(
+            project_external_id="project-123",
+            entity_external_id="note-456",
+            session=caller_session,
+        )
+    ) is payload
+    assert (
+        await service.get_note_resource_with_read_repair(
+            project_external_id="project-123",
+            entity_external_id="note-456",
+            session=caller_session,
+        )
+    ) is resource
+
+    assert payload_sessions == [caller_session, None]
+    assert resource_sessions == [caller_session, None]
+
+
+@pytest.mark.asyncio
 async def test_note_content_mutation_service_delegates_create_to_core_runner(monkeypatch) -> None:
     tenant_session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker())
     dependencies = cast(AcceptedNoteMutationDependencies, object())
