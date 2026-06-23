@@ -10,6 +10,7 @@ from httpx import AsyncClient
 
 from basic_memory import db
 from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
+from basic_memory.file_utils import parse_frontmatter
 from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
@@ -545,6 +546,63 @@ async def test_update_entity_by_id(
     assert "Updated content via V2" in note_content.markdown_content
     assert "Original content" not in note_content.markdown_content
     assert note_content.file_write_status == "synced"
+
+
+@pytest.mark.asyncio
+async def test_update_entity_by_id_freshens_external_file_metadata_before_accepting(
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+):
+    """PUT reconciles direct file edits before preserving existing frontmatter."""
+    create_data = {
+        "title": "ExternalMetadata",
+        "directory": "test",
+        "content": "Original body",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    file_path = Path(test_project.path) / created_entity.file_path
+    external_content = file_path.read_text(encoding="utf-8")
+    external_content = external_content.replace(
+        "type: note\n",
+        "type: note\nstatus: blocked\npriority: high\n",
+    )
+    external_content = external_content.replace("Original body", "Externally edited body")
+    file_path.write_text(external_content, encoding="utf-8")
+
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json={
+            "title": "ExternalMetadata",
+            "directory": "test",
+            "content": "Updated through accepted note API",
+        },
+    )
+
+    assert response.status_code == 202
+    updated_entity = EntityResponseV2.model_validate(response.json())
+    assert updated_entity.content is not None
+    response_frontmatter = parse_frontmatter(updated_entity.content)
+    assert response_frontmatter["status"] == "blocked"
+    assert response_frontmatter["priority"] == "high"
+    assert "Updated through accepted note API" in updated_entity.content
+    assert "Externally edited body" not in updated_entity.content
+
+    file_content, _ = await file_service.read_file(created_entity.file_path)
+    file_frontmatter = parse_frontmatter(file_content)
+    assert file_frontmatter["status"] == "blocked"
+    assert file_frontmatter["priority"] == "high"
+
+    note_content = await _get_note_content(session_maker, test_project.id, updated_entity.id)
+    assert note_content is not None
+    accepted_frontmatter = parse_frontmatter(note_content.markdown_content)
+    assert accepted_frontmatter["status"] == "blocked"
+    assert accepted_frontmatter["priority"] == "high"
 
 
 @pytest.mark.asyncio
