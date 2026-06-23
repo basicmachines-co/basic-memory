@@ -12,9 +12,23 @@ from basic_memory.repository.accepted_note_search_repository import (
 )
 
 
+class _Dialect:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _Bind:
+    def __init__(self, dialect_name: str) -> None:
+        self.dialect = _Dialect(dialect_name)
+
+
 class _RecordingSession:
-    def __init__(self) -> None:
+    def __init__(self, *, dialect_name: str = "postgresql") -> None:
         self.executed: list[tuple[str, dict[str, Any]]] = []
+        self._bind = _Bind(dialect_name)
+
+    def get_bind(self) -> _Bind:
+        return self._bind
 
     async def execute(self, statement: Any, params: dict[str, Any]) -> None:
         self.executed.append((str(statement), params))
@@ -61,6 +75,30 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
         "updated_at": updated_at,
         "project_id": 7,
     }
+
+
+@pytest.mark.asyncio
+async def test_refresh_entity_uses_plain_insert_for_sqlite_virtual_table() -> None:
+    repository = AcceptedNoteSearchRepository(project_id=7)
+    session = _RecordingSession(dialect_name="sqlite")
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    row = build_accepted_note_search_row(
+        entity_id=42,
+        title="Project Plan",
+        note_type="decision",
+        entity_metadata=None,
+        permalink="main/project-plan",
+        file_path="notes/project-plan.md",
+        search_content="Main body",
+        created_at=now,
+        updated_at=now,
+        project_id=7,
+    )
+
+    await repository.refresh_entity(cast(AsyncSession, session), row)
+
+    insert_sql, _ = session.executed[1]
+    assert "ON CONFLICT" not in insert_sql
 
 
 @pytest.mark.asyncio

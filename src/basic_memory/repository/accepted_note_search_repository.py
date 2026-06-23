@@ -40,6 +40,47 @@ INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
     """
 )
 
+UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
+    """
+    INSERT INTO search_index (
+        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+        from_id, to_id, relation_type,
+        entity_id, category,
+        created_at, updated_at,
+        project_id
+    ) VALUES (
+        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type,
+        CAST(:metadata AS jsonb),
+        NULL, NULL, NULL,
+        :entity_id, NULL,
+        :created_at, :updated_at,
+        :project_id
+    )
+    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+        id = EXCLUDED.id,
+        title = EXCLUDED.title,
+        content_stems = EXCLUDED.content_stems,
+        content_snippet = EXCLUDED.content_snippet,
+        file_path = EXCLUDED.file_path,
+        type = EXCLUDED.type,
+        metadata = EXCLUDED.metadata,
+        from_id = EXCLUDED.from_id,
+        to_id = EXCLUDED.to_id,
+        relation_type = EXCLUDED.relation_type,
+        entity_id = EXCLUDED.entity_id,
+        category = EXCLUDED.category,
+        created_at = EXCLUDED.created_at,
+        updated_at = EXCLUDED.updated_at
+    """
+)
+
+
+def accepted_note_search_insert_statement(session: AsyncSession):
+    """Return the insert statement supported by the active search table backend."""
+    if session.get_bind().dialect.name == "sqlite":
+        return INSERT_ACCEPTED_NOTE_SEARCH_SQL
+    return UPSERT_ACCEPTED_NOTE_SEARCH_SQL
+
 
 def accepted_note_search_insert_params(
     row: AcceptedNoteSearchRow,
@@ -84,6 +125,6 @@ class AcceptedNoteSearchRepository:
             {"entity_id": row.entity_id, "project_id": row.project_id},
         )
         await session.execute(
-            INSERT_ACCEPTED_NOTE_SEARCH_SQL,
+            accepted_note_search_insert_statement(session),
             accepted_note_search_insert_params(row),
         )

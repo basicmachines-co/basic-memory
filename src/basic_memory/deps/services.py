@@ -327,23 +327,6 @@ NoteContentMutationServiceDep = Annotated[
 ]
 
 
-async def get_note_content_materialization_provider(
-    file_service: FileServiceV2ExternalDep,
-    session_maker: SessionMakerDep,
-) -> LocalNoteContentMaterializationProvider:
-    """Create the local inline materializer for accepted-note route writes."""
-    return LocalNoteContentMaterializationProvider(
-        session_maker=session_maker,
-        file_service=file_service,
-    )
-
-
-NoteContentMaterializationProviderDep = Annotated[
-    LocalNoteContentMaterializationProvider,
-    Depends(get_note_content_materialization_provider),
-]
-
-
 # --- Directory Delete Runtime ---
 
 
@@ -642,6 +625,28 @@ async def get_index_file_executor_v2_external(
 
 IndexFileExecutorV2ExternalDep = Annotated[
     IndexFileExecutor, Depends(get_index_file_executor_v2_external)
+]
+
+
+# --- Note Content Materialization ---
+
+
+async def get_note_content_materialization_provider(
+    file_service: FileServiceV2ExternalDep,
+    file_indexer: IndexFileExecutorV2ExternalDep,
+    session_maker: SessionMakerDep,
+) -> LocalNoteContentMaterializationProvider:
+    """Create the local inline materializer for accepted-note route writes."""
+    return LocalNoteContentMaterializationProvider(
+        session_maker=session_maker,
+        file_service=file_service,
+        file_indexer=file_indexer,
+    )
+
+
+NoteContentMaterializationProviderDep = Annotated[
+    LocalNoteContentMaterializationProvider,
+    Depends(get_note_content_materialization_provider),
 ]
 
 

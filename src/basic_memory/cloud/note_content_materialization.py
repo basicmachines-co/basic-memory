@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing import (
     ContentStoreNoteMaterializationFileWriter,
+    IndexFileExecutor,
     RepositoryNoteMaterializationPreflight,
     RepositoryNoteMaterializationPublisher,
     RepositoryNoteMaterializationStatusPublisher,
@@ -17,6 +19,7 @@ from basic_memory.indexing import (
 )
 from basic_memory.runtime import (
     RuntimeAcceptedNoteChange,
+    RuntimeAcceptedNoteResponse,
     RuntimeFileChecksum,
     RuntimeFileMetadataSource,
     RuntimeFilePath,
@@ -28,6 +31,19 @@ from basic_memory.runtime import (
 from basic_memory.services.file_service import FileService
 
 LOCAL_NOTE_CONTENT_TENANT_ID = UUID(int=0)
+
+
+def note_content_payload_file_path(
+    payload: RuntimeNoteContentResponsePayload,
+) -> RuntimeFilePath | None:
+    """Return the materialized file path carried by an accepted-note payload."""
+    if isinstance(payload, RuntimeAcceptedNoteResponse):
+        return payload.file_path
+    if isinstance(payload, Mapping):
+        file_path = payload.get("file_path")
+        if isinstance(file_path, str) and file_path:
+            return file_path
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +91,7 @@ class LocalNoteContentMaterializationProvider:
 
     session_maker: async_sessionmaker[AsyncSession]
     file_service: FileService
+    file_indexer: IndexFileExecutor | None = None
 
     async def materialize_write_change(
         self,
@@ -103,6 +120,12 @@ class LocalNoteContentMaterializationProvider:
             ),
             cleanup_enqueuer=cleanup_enqueuer,
         )
+        file_path = note_content_payload_file_path(accepted.payload)
+        if file_path is not None and self.file_indexer is not None:
+            await self.file_indexer.index_file(
+                file_path,
+                source="note-content-materialization",
+            )
         return accepted
 
     async def materialize_delete_change(
