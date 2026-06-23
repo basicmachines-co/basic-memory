@@ -9,7 +9,25 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.services.project_service import ProjectService
+
+
+class _ProjectRemovalEmbeddingProvider:
+    """Deterministic provider used only to initialize sqlite-vec test tables."""
+
+    model_name = "project-removal-test"
+    dimensions = 384
+
+    async def embed_query(self, text: str) -> list[float]:
+        _ = text
+        return [0.0] * self.dimensions
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0] * self.dimensions for _ in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
 
 
 @pytest.mark.asyncio
@@ -148,6 +166,23 @@ async def _table_exists(session_maker, table: str) -> bool:
         )
 
 
+async def _enable_sqlite_semantic_tables(search_repository) -> None:
+    """Initialize sqlite-vec tables for tests that assert semantic cleanup."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec embedding cleanup is SQLite-specific.")
+
+    try:
+        import sqlite_vec  # noqa: F401
+    except ImportError:
+        pytest.skip("sqlite-vec dependency is required for sqlite vector cleanup tests.")
+
+    search_repository._semantic_enabled = True
+    search_repository._embedding_provider = _ProjectRemovalEmbeddingProvider()
+    search_repository._vector_dimensions = search_repository._embedding_provider.dimensions
+    search_repository._vector_tables_initialized = False
+    await search_repository.init_search_index()
+
+
 @pytest.mark.asyncio
 async def test_remove_project_purges_search_rows(project_service: ProjectService):
     """Project deletion must sweep the derived search tables.
@@ -266,7 +301,10 @@ async def test_delete_returns_false_for_missing_project_id(project_service: Proj
 
 
 @pytest.mark.asyncio
-async def test_remove_project_purges_vector_embeddings(project_service: ProjectService):
+async def test_remove_project_purges_vector_embeddings(
+    project_service: ProjectService,
+    search_repository,
+):
     """Project deletion must also drop sqlite-vec embeddings keyed by chunk rowid.
 
     sqlite-vec stores vectors in a vec0 virtual table that has no cascade
@@ -277,11 +315,7 @@ async def test_remove_project_purges_vector_embeddings(project_service: ProjectS
     """
     test_project_name = f"test-vec-cleanup-{os.urandom(4).hex()}"
     session_maker = project_service.session_maker
-
-    # The embeddings table only exists once semantic search has initialized.
-    # Skipping when it's absent keeps this test honest on minimal CI DBs.
-    if not await _table_exists(session_maker, "search_vector_embeddings"):
-        pytest.skip("search_vector_embeddings is not present on this connection")
+    await _enable_sqlite_semantic_tables(search_repository)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         test_project_path = str(Path(temp_dir) / "test-vec-cleanup")

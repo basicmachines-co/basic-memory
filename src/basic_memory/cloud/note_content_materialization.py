@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,11 +18,14 @@ from basic_memory.indexing import (
     run_note_materialization,
 )
 from basic_memory.runtime import (
+    NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteResponse,
     RuntimeFileChecksum,
     RuntimeFileMetadataSource,
     RuntimeFilePath,
+    RuntimeNoteMaterializationResult,
+    RuntimeNoteMaterializationStatus,
     RuntimeNoteContentResponsePayload,
     RuntimeNoteFileDeleteJobRequest,
     plan_note_file_delete_job_request,
@@ -44,6 +47,42 @@ def note_content_payload_file_path(
         if isinstance(file_path, str) and file_path:
             return file_path
     return None
+
+
+def file_write_status_from_materialization_result(
+    result: RuntimeNoteMaterializationResult,
+) -> str:
+    """Return the response write marker for a terminal local materialization result."""
+    if result.status is RuntimeNoteMaterializationStatus.conflict:
+        return "external_change_detected"
+    return "failed"
+
+
+def note_content_payload_with_materialization_result(
+    payload: RuntimeNoteContentResponsePayload,
+    result: RuntimeNoteMaterializationResult,
+) -> RuntimeNoteContentResponsePayload:
+    """Expose a failed local materialization result in the accepted-note response payload."""
+    file_write_status = file_write_status_from_materialization_result(result)
+
+    if isinstance(payload, RuntimeAcceptedNoteResponse):
+        return replace(
+            payload,
+            file_write_status=file_write_status,
+            file_checksum=result.file_checksum
+            if result.file_checksum is not None
+            else payload.file_checksum,
+            last_materialization_error=result.reason,
+        )
+
+    updated_payload = dict(payload)
+    updated_payload["file_write_status"] = file_write_status
+    updated_payload["last_materialization_error"] = result.reason
+    if result.file_checksum is not None:
+        updated_payload["file_checksum"] = result.file_checksum
+    if file_write_status == "external_change_detected":
+        updated_payload["sync_error"] = NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR
+    return updated_payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +142,7 @@ class LocalNoteContentMaterializationProvider:
 
         storage = LocalNoteContentStorage(self.file_service)
         cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(storage)
-        await run_note_materialization(
+        result = await run_note_materialization(
             plan_note_materialization_job_request(
                 tenant_id=LOCAL_NOTE_CONTENT_TENANT_ID,
                 materialization=accepted.materialization,
@@ -120,6 +159,15 @@ class LocalNoteContentMaterializationProvider:
             ),
             cleanup_enqueuer=cleanup_enqueuer,
         )
+        if result.status is not RuntimeNoteMaterializationStatus.written:
+            return replace(
+                accepted,
+                payload=note_content_payload_with_materialization_result(
+                    accepted.payload,
+                    result,
+                ),
+            )
+
         file_path = note_content_payload_file_path(accepted.payload)
         if file_path is not None and self.file_indexer is not None:
             await self.file_indexer.index_file(
