@@ -230,7 +230,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             file_path,
             new=existing is None,
             index_search=True,
-            resolve_relations=False,
+            resolve_relations=True,
             refresh_unchanged_derived_state=existing is not None,
         )
         await self.note_content_reconciler.reconcile(

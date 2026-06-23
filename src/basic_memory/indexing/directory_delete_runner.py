@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, Protocol
 
-from sqlalchemy import delete, select
+from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models import Entity, NoteContent, Project
@@ -106,6 +106,7 @@ class DirectoryDeleteAcceptanceStore(Protocol):
         self,
         session: AsyncSession,
         *,
+        project_id: ProjectId,
         entity_ids: Sequence[int],
     ) -> None:
         """Delete the accepted entity rows."""
@@ -181,10 +182,20 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         self,
         session: AsyncSession,
         *,
+        project_id: ProjectId,
         entity_ids: Sequence[int],
     ) -> None:
         if not entity_ids:
             return
+        await session.execute(
+            text(
+                """
+                DELETE FROM search_index
+                WHERE project_id = :project_id AND entity_id IN :entity_ids
+                """
+            ).bindparams(bindparam("entity_ids", expanding=True)),
+            {"project_id": project_id, "entity_ids": tuple(entity_ids)},
+        )
         await session.execute(delete(Entity).where(Entity.id.in_(entity_ids)))
 
 
@@ -318,6 +329,7 @@ async def accept_directory_delete(
 
     await store.delete_directory_entities(
         session,
+        project_id=project_id,
         entity_ids=[snapshot.entity_id for snapshot in file_snapshots],
     )
     return DirectoryDeleteAcceptance(project_id=project_id, files=file_snapshots)

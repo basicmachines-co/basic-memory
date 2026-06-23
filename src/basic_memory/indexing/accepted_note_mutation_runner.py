@@ -45,7 +45,6 @@ from basic_memory.runtime import (
     accepted_note_file_path_conflicts,
     classify_accepted_note_write_conflict,
     normalize_note_move_destination_path,
-    plan_accepted_note_response_change,
     plan_accepted_note_write_change,
     runtime_content_type_is_markdown,
 )
@@ -413,6 +412,7 @@ async def run_accepted_note_delete(
         project_id=project.id,
         entity=entity,
         note_content=note_content,
+        repositories=dependencies.write_repositories,
     )
     return cast(AcceptedNoteMutationChange, accepted)
 
@@ -671,14 +671,9 @@ async def _run_accepted_note_move(
     )
     existing_file_path = entity.file_path
     if accepted_file_path == existing_file_path:
-        return cast(
-            AcceptedNoteMutationChange,
-            plan_accepted_note_response_change(
-                status_code=200,
-                entity=entity,
-                note_content=current_note_content,
-                fallback_source=request.source,
-            ),
+        reject_accepted_note_mutation(
+            AcceptedNoteMutationRejectKind.bad_request,
+            "Source and destination paths are the same.",
         )
 
     await reject_conflicting_accepted_note_file_path(

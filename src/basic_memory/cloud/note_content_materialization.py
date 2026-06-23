@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.indexing import (
     ContentStoreNoteMaterializationFileWriter,
     IndexFileExecutor,
@@ -30,7 +31,11 @@ from basic_memory.runtime import (
     RuntimeNoteFileDeleteJobRequest,
     plan_note_file_delete_job_request,
     plan_note_materialization_job_request,
+    plan_accepted_note_response,
 )
+from basic_memory.models import Entity
+from basic_memory.repository import EntityRepository, NoteContentRepository
+from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
 LOCAL_NOTE_CONTENT_TENANT_ID = UUID(int=0)
@@ -83,6 +88,59 @@ def note_content_payload_with_materialization_result(
     if file_write_status == "external_change_detected":
         updated_payload["sync_error"] = NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR
     return updated_payload
+
+
+def indexed_observation_payloads(entity: Entity) -> tuple[dict[str, object], ...]:
+    """Serialize loaded observation rows into the v2 response shape."""
+    return tuple(
+        ObservationResponse.model_validate(observation).model_dump(mode="json")
+        for observation in entity.observations
+    )
+
+
+def indexed_relation_payloads(entity: Entity) -> tuple[dict[str, object], ...]:
+    """Serialize loaded relation rows into the v2 response shape."""
+    return tuple(
+        RelationResponse.model_validate(relation).model_dump(mode="json")
+        for relation in entity.relations
+    )
+
+
+async def load_indexed_note_content_response_payload(
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: int,
+    entity_id: int,
+    fallback_source: str,
+) -> RuntimeAcceptedNoteResponse:
+    """Reload the local indexed entity graph after inline materialization/indexing."""
+    async with db.scoped_session(session_maker) as session:
+        entity = await EntityRepository(project_id=project_id).get_by_id(
+            session,
+            entity_id,
+            load_relations=True,
+        )
+        if entity is None:
+            raise RuntimeError(f"Indexed entity {entity_id} was not found after materialization")
+
+        note_content = await NoteContentRepository(project_id=project_id).get_by_entity_id(
+            session,
+            entity_id,
+        )
+        if note_content is None:
+            raise RuntimeError(
+                f"Indexed note_content for entity {entity_id} was not found after materialization"
+            )
+
+        return replace(
+            plan_accepted_note_response(
+                entity=entity,
+                note_content=note_content,
+                fallback_source=fallback_source,
+            ),
+            observations=indexed_observation_payloads(entity),
+            relations=indexed_relation_payloads(entity),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +231,16 @@ class LocalNoteContentMaterializationProvider:
             await self.file_indexer.index_file(
                 file_path,
                 source="note-content-materialization",
+            )
+            return replace(
+                accepted,
+                payload=await load_indexed_note_content_response_payload(
+                    session_maker=self.session_maker,
+                    project_id=accepted.materialization.project_id,
+                    entity_id=accepted.materialization.entity_id,
+                    fallback_source=accepted.materialization.source
+                    or "note-content-materialization",
+                ),
             )
         return accepted
 

@@ -128,3 +128,14 @@ class AcceptedNoteSearchRepository:
             accepted_note_search_insert_statement(session),
             accepted_note_search_insert_params(row),
         )
+
+    async def delete_entity(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        """Delete all accepted-note search rows for one entity."""
+        await session.execute(
+            DELETE_ACCEPTED_NOTE_SEARCH_SQL,
+            {"entity_id": entity_id, "project_id": self.project_id},
+        )

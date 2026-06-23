@@ -19,6 +19,8 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationActor,
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationMovePolicy,
+    AcceptedNoteMutationRejectKind,
+    AcceptedNoteMutationRejected,
     AcceptedNoteMoveMutation,
     AcceptedNoteUpdateMutation,
     run_accepted_note_create,
@@ -282,6 +284,7 @@ class _NoteContentAcceptRepository:
 class _SearchRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[AsyncSession, AcceptedNoteSearchRow]] = []
+        self.deleted_entity_ids: list[int] = []
 
     async def refresh_entity(
         self,
@@ -289,6 +292,14 @@ class _SearchRepository:
         row: AcceptedNoteSearchRow,
     ) -> None:
         self.calls.append((session, row))
+
+    async def delete_entity(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        _ = session
+        self.deleted_entity_ids.append(entity_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -673,6 +684,47 @@ async def test_run_accepted_note_move_uses_policy_and_carries_cleanup() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_accepted_note_move_rejects_same_file_path() -> None:
+    session = _MutationSession()
+    project = _project()
+    prepared = _prepared()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_move(
+            cast(AsyncSession, session),
+            request=AcceptedNoteMoveMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                destination_path="notes/accepted.md",
+                actor=AcceptedNoteMutationActor(user_profile_id=None),
+                source="mcp",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+            ),
+        )
+
+    assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.bad_request
+    assert exc_info.value.rejection.detail == "Source and destination paths are the same."
+
+
+@pytest.mark.asyncio
 async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> None:
     session = _MutationSession()
     project = _project()
@@ -705,6 +757,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     )
 
     assert session.deleted == [entity]
+    assert search_repository.deleted_entity_ids == [entity.id]
     assert change.status_code == 200
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"

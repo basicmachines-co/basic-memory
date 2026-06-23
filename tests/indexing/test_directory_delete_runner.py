@@ -68,8 +68,10 @@ class FakeDirectoryDeleteStore:
         self,
         session: AsyncSession,
         *,
+        project_id: int,
         entity_ids: Sequence[int],
     ) -> None:
+        assert project_id == self.project_id
         self.deleted_entity_ids.append(tuple(entity_ids))
 
 
@@ -98,8 +100,8 @@ class FakeExecuteSession:
         self.results = results
         self.queries: list[object] = []
 
-    async def execute(self, query: object) -> FakeExecuteResult:
-        self.queries.append(query)
+    async def execute(self, query: object, params: object | None = None) -> FakeExecuteResult:
+        self.queries.append((query, params))
         return self.results.pop(0)
 
 
@@ -298,6 +300,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                     ]
                 ),
                 FakeExecuteResult(),
+                FakeExecuteResult(),
             ]
         ),
     )
@@ -315,6 +318,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
     )
     await store.delete_directory_entities(
         session,
+        project_id=3,
         entity_ids=[7],
     )
 
@@ -328,4 +332,4 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
             size=42,
         )
     ]
-    assert len(fake_session.queries) == 3
+    assert len(fake_session.queries) == 4

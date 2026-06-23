@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,6 +33,17 @@ from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 
 AcceptedNoteChange = RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]
+
+
+class NoteContentMutationFreshener(Protocol):
+    """Refresh current runtime file state before mutating an existing note."""
+
+    async def freshen_note_content(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+    ) -> None: ...
 
 
 class NoteContentMutationServiceError(Exception):
@@ -85,9 +97,25 @@ class NoteContentMutationService:
         *,
         session_maker: async_sessionmaker[AsyncSession],
         mutation_dependencies: AcceptedNoteMutationDependencies,
+        content_freshener: NoteContentMutationFreshener | None = None,
     ) -> None:
         self.session_maker = session_maker
         self.mutation_dependencies = mutation_dependencies
+        self.content_freshener = content_freshener
+
+    async def freshen_existing_note_content(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+    ) -> None:
+        """Let the runtime converge observed file state before an existing-note mutation."""
+        if self.content_freshener is None:
+            return
+        await self.content_freshener.freshen_note_content(
+            project_external_id=project_external_id,
+            entity_external_id=entity_external_id,
+        )
 
     async def create_note(
         self,
@@ -132,6 +160,10 @@ class NoteContentMutationService:
     ) -> AcceptedNoteChange:
         """PUT a markdown note by creating or replacing accepted DB state."""
         try:
+            await self.freshen_existing_note_content(
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
             async with accepted_note_transaction(self.session_maker) as session:
                 return await run_accepted_note_update(
                     session,
@@ -164,6 +196,10 @@ class NoteContentMutationService:
     ) -> AcceptedNoteChange:
         """PATCH a markdown note using the latest accepted DB content as the base."""
         try:
+            await self.freshen_existing_note_content(
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
             async with accepted_note_transaction(self.session_maker) as session:
                 return await run_accepted_note_edit(
                     session,
@@ -196,6 +232,10 @@ class NoteContentMutationService:
     ) -> AcceptedNoteChange:
         """Move a note by accepting the new path before runtime materialization."""
         try:
+            await self.freshen_existing_note_content(
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
             async with accepted_note_transaction(self.session_maker) as session:
                 return await run_accepted_note_move(
                     session,
@@ -223,6 +263,10 @@ class NoteContentMutationService:
     ) -> AcceptedNoteChange:
         """DELETE the DB note and return the runtime follow-up change."""
         try:
+            await self.freshen_existing_note_content(
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
             async with accepted_note_transaction(self.session_maker) as session:
                 return await run_accepted_note_delete(
                     session,

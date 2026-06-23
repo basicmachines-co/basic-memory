@@ -30,6 +30,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     prepare_accepted_note_move,
     prepare_accepted_note_replace,
     refresh_accepted_note_search_index,
+    delete_accepted_note_search_index,
 )
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import AcceptedNoteContentWrite, NoteContentRepository
@@ -103,6 +104,7 @@ class _NoteContentRepository:
 class _SearchRepository:
     def __init__(self) -> None:
         self.calls: list[AcceptedNoteSearchRow] = []
+        self.deleted_entity_ids: list[int] = []
 
     async def refresh_entity(
         self,
@@ -110,6 +112,13 @@ class _SearchRepository:
         row: AcceptedNoteSearchRow,
     ) -> None:
         self.calls.append(row)
+
+    async def delete_entity(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        self.deleted_entity_ids.append(entity_id)
 
 
 def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
@@ -693,6 +702,21 @@ async def test_refresh_accepted_note_search_index_uses_repository_protocol() -> 
 
 
 @pytest.mark.asyncio
+async def test_delete_accepted_note_search_index_uses_repository_protocol() -> None:
+    session = cast(AsyncSession, object())
+    repository = _SearchRepository()
+
+    await delete_accepted_note_search_index(
+        session,
+        project_id=7,
+        entity_id=42,
+        repositories=_repository_provider(search_repository=repository),
+    )
+
+    assert repository.deleted_entity_ids == [42]
+
+
+@pytest.mark.asyncio
 async def test_persist_accepted_note_write_plans_content_and_refreshes_search() -> None:
     session = cast(AsyncSession, object())
     entity = _entity()
@@ -762,7 +786,11 @@ async def test_delete_accepted_note_entity_uses_session_protocol() -> None:
 async def test_delete_accepted_note_plans_missing_response_without_deleting() -> None:
     session = _DeleteSession()
 
-    accepted = await delete_accepted_note(session, project_id=7, entity=None)
+    accepted = await delete_accepted_note(
+        cast(AsyncSession, session),
+        project_id=7,
+        entity=None,
+    )
 
     assert session.deleted == []
     assert accepted.status_code == 200
@@ -778,14 +806,17 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
     entity.checksum = "entity-file-checksum"
     note_content = _note_content()
     note_content.file_checksum = "note-file-checksum"
+    search_repository = _SearchRepository()
 
     accepted = await delete_accepted_note(
-        session,
+        cast(AsyncSession, session),
         project_id=entity.project_id,
         entity=entity,
         note_content=note_content,
+        repositories=_repository_provider(search_repository=search_repository),
     )
 
+    assert search_repository.deleted_entity_ids == [entity.id]
     assert session.deleted == [entity]
     assert accepted.status_code == 200
     assert accepted.payload == {

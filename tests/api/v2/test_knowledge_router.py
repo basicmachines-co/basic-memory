@@ -420,7 +420,7 @@ async def test_create_entity_accepts_note_content_and_materializes_file(
     v2_project_url: str,
     session_maker,
 ):
-    """Create accepts markdown into note_content before local file materialization."""
+    """Create accepts markdown into note_content and materializes it locally."""
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
         json={
@@ -434,7 +434,7 @@ async def test_create_entity_accepts_note_content_and_materializes_file(
     entity = EntityResponseV2.model_validate(response.json())
     assert entity.content is not None
     assert entity.db_version == 1
-    assert entity.file_write_status == "pending"
+    assert entity.file_write_status == "synced"
 
     repository = NoteContentRepository(project_id=test_project.id)
     async with db.scoped_session(session_maker) as session:
@@ -448,10 +448,10 @@ async def test_create_entity_accepts_note_content_and_materializes_file(
 
 
 @pytest.mark.asyncio
-async def test_create_entity_returns_accepted_content_before_async_indexing(
+async def test_create_entity_returns_indexed_accepted_content(
     client: AsyncClient, file_service, v2_project_url
 ):
-    """Accepted-note creates return content before async indexing parses relations."""
+    """Accepted-note creates return materialized content with parsed graph rows."""
     data = {
         "title": "TestV2Complex",
         "directory": "test",
@@ -479,8 +479,11 @@ async def test_create_entity_returns_accepted_content_before_async_indexing(
     assert entity.content is not None
     assert "This is a test observation #tag1" in entity.content
     assert '"related to" [[OtherEntity]]' in entity.content
-    assert entity.observations == []
-    assert entity.relations == []
+    assert len(entity.observations) == 1
+    assert entity.observations[0].content == "This is a test observation #tag1"
+    assert len(entity.relations) == 1
+    assert entity.relations[0].relation_type == "related to"
+    assert entity.relations[0].to_name == "OtherEntity"
 
 
 @pytest.mark.asyncio
@@ -528,7 +531,7 @@ async def test_update_entity_by_id(
     assert updated_entity.content is not None
     assert "Updated content via V2" in updated_entity.content
     assert updated_entity.db_version == 2
-    assert updated_entity.file_write_status == "pending"
+    assert updated_entity.file_write_status == "synced"
 
     # Verify file was updated
     file_path = file_service.get_entity_path(updated_entity)
@@ -575,7 +578,7 @@ async def test_update_entity_by_id_does_not_duplicate(
 
 
 @pytest.mark.asyncio
-async def test_put_entity_with_fast_param_returns_accepted_content_before_async_indexing(
+async def test_put_entity_with_fast_param_returns_indexed_accepted_content(
     client: AsyncClient, v2_project_url, entity_repository, session_maker
 ):
     """PUT ignores the legacy fast param and returns accepted note_content."""
@@ -604,8 +607,11 @@ async def test_put_entity_with_fast_param_returns_accepted_content_before_async_
     assert created_entity.content is not None
     assert "This should be deferred" in created_entity.content
     assert "related_to [[AnotherEntity]]" in created_entity.content
-    assert created_entity.observations == []
-    assert created_entity.relations == []
+    assert len(created_entity.observations) == 1
+    assert created_entity.observations[0].content == "This should be deferred"
+    assert len(created_entity.relations) == 1
+    assert created_entity.relations[0].relation_type == "related_to"
+    assert created_entity.relations[0].to_name == "AnotherEntity"
 
     db_entity = await _get_entity_by_external_id(entity_repository, session_maker, external_id)
     assert db_entity is not None

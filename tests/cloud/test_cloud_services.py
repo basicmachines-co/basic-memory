@@ -112,9 +112,11 @@ class FakeDirectoryDeleteStore:
         self,
         session: AsyncSession,
         *,
+        project_id: int,
         entity_ids,
     ) -> None:
         assert session is not None
+        assert project_id == 3
         assert list(entity_ids) == [7]
 
 

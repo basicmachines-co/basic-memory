@@ -246,6 +246,12 @@ class AcceptedNoteSearchRowRepository(Protocol):
         row: AcceptedNoteSearchRow,
     ) -> None: ...
 
+    async def delete_entity(
+        self,
+        session: AsyncSession,
+        entity_id: RuntimeEntityId,
+    ) -> None: ...
+
 
 class AcceptedNoteWriteRepositories(Protocol):
     """Repository capability set needed by accepted-note DB-first writes."""
@@ -627,6 +633,19 @@ async def refresh_accepted_note_search_index(
     )
 
 
+async def delete_accepted_note_search_index(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    repositories: AcceptedNoteWriteRepositories | None = None,
+) -> None:
+    """Remove all search rows for an accepted-note entity inside the caller's transaction."""
+    write_repositories = repositories or build_default_accepted_note_write_repositories()
+    repository = write_repositories.search_repository(project_id)
+    await repository.delete_entity(session, entity_id)
+
+
 async def persist_accepted_note_write(
     session: AsyncSession,
     *,
@@ -682,11 +701,12 @@ async def delete_accepted_note_entity(
 
 
 async def delete_accepted_note(
-    session: AcceptedNoteDeleteSession,
+    session: AsyncSession,
     *,
     project_id: ProjectId,
     entity: AcceptedNoteDeleteEntitySource | None,
     note_content: RuntimeDeletedNoteFileChecksumSource | None = None,
+    repositories: AcceptedNoteWriteRepositories | None = None,
 ) -> RuntimeAcceptedNoteChange[dict[str, object]]:
     """Plan an accepted note delete and remove the entity when it exists."""
     accepted = plan_accepted_note_delete_change(
@@ -695,5 +715,11 @@ async def delete_accepted_note(
         note_content=note_content,
     )
     if entity is not None:
+        await delete_accepted_note_search_index(
+            session,
+            project_id=project_id,
+            entity_id=entity.id,
+            repositories=repositories,
+        )
         await session.delete(entity)
     return accepted

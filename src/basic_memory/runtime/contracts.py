@@ -2256,6 +2256,8 @@ class RuntimeAcceptedNoteResponse:
     last_source: str | None
     file_updated_at: datetime | None
     last_materialization_error: str | None
+    observations: tuple[Mapping[str, object], ...] = ()
+    relations: tuple[Mapping[str, object], ...] = ()
 
     @classmethod
     def from_entity(
@@ -2331,8 +2333,8 @@ class RuntimeAcceptedNoteResponse:
             "entity_metadata": (
                 dict(self.entity_metadata) if self.entity_metadata is not None else None
             ),
-            "observations": [],
-            "relations": [],
+            "observations": list(self.observations),
+            "relations": list(self.relations),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "created_by": self.created_by,

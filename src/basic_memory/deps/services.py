@@ -50,6 +50,7 @@ from basic_memory.index import (
     LocalProjectIndexObservation,
     LocalProjectIndexRunner,
     ProjectIndexCoordinatorResult,
+    build_local_index_project_dependencies,
     build_local_markdown_file_indexer,
 )
 from basic_memory.indexing import (
@@ -78,6 +79,7 @@ from basic_memory.runtime import (
     RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
     TenantId,
+    runtime_content_type_is_markdown,
 )
 from basic_memory.schemas import ProjectIndexRunResponse
 from basic_memory.services import EntityService, ProjectService
@@ -296,6 +298,57 @@ class LocalAcceptedNotePreparerFactory:
         )
 
 
+class LocalCurrentNoteProjectRepository(Protocol):
+    """Project lookup needed by the local note-content freshener."""
+
+    async def get_by_external_id(
+        self,
+        session: AsyncSession,
+        external_id: str,
+    ) -> Project | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalCurrentNoteContentFreshener:
+    """Converge directly-edited local markdown before accepted-note mutations."""
+
+    project_repository: LocalCurrentNoteProjectRepository
+    session_maker: async_sessionmaker[AsyncSession]
+
+    async def freshen_note_content(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+    ) -> None:
+        async with self.session_maker() as session:
+            project = await self.project_repository.get_by_external_id(
+                session,
+                project_external_id,
+            )
+            if project is None:
+                return
+
+            entity_repository = EntityRepository(project_id=project.id)
+            entity = await entity_repository.get_by_external_id(
+                session,
+                entity_external_id,
+                load_relations=False,
+            )
+            if entity is None or not runtime_content_type_is_markdown(entity):
+                return
+            file_path = entity.file_path
+
+        dependencies = await build_local_index_project_dependencies(project)
+        if not await dependencies.file_service.exists(file_path):
+            return
+
+        await dependencies.file_indexer.index_file(
+            file_path,
+            source="note-content-mutation-freshen",
+        )
+
+
 async def get_note_content_mutation_service(
     project_repository: ProjectRepositoryDep,
     session_maker: SessionMakerDep,
@@ -318,6 +371,10 @@ async def get_note_content_mutation_service(
                 disable_permalinks=app_config.disable_permalinks,
                 update_permalinks_on_move=app_config.update_permalinks_on_move,
             ),
+        ),
+        content_freshener=LocalCurrentNoteContentFreshener(
+            project_repository=project_repository,
+            session_maker=session_maker,
         ),
     )
 
