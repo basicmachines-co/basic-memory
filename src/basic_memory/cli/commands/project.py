@@ -495,6 +495,23 @@ def list_projects(
             generate_permalink(project_name): project_name for project_name in config.projects
         }
 
+        # Trigger: a project in config.projects was surfaced by neither query — the
+        #   cloud branch is skipped without credentials, and a cloud-mode project is
+        #   not returned by the local query.
+        # Why: without a fallback such a project is invisible in `bm project list`,
+        #   yet `bm project add` reads the DB and reports it already exists (#1003).
+        #   The two commands must agree on whether a configured project exists.
+        # Outcome: seed a local-keyed row from config so the project still renders;
+        #   the row-building logic below derives its display from the config entry.
+        # Constraint: only fill from config for the local-inclusive view. A pure
+        #   --cloud listing (no local_result) or a --workspace-filtered view is
+        #   deliberately scoped, so configured local projects must not leak into it.
+        if local_result is not None and not workspace_filter_requested:
+            seeded_permalinks = {permalink for _, permalink in row_names_by_key}
+            for permalink, project_name in configured_names_by_permalink.items():
+                if permalink not in seeded_permalinks:
+                    row_names_by_key[(None, permalink)] = project_name
+
         def _workspace_priority(row_key: tuple[str | None, str]) -> tuple[bool, int, str, str]:
             """Prefer the user's default/personal workspace when a project is duplicated."""
             workspace = cloud_workspaces_by_key.get(row_key)
