@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 
 from watchfiles.main import FileChange
 
@@ -38,6 +38,17 @@ class LocalWatchProjectSource(Protocol):
     def path(self) -> object: ...
 
 
+@runtime_checkable
+class LocalWatchProjectIdentitySource(Protocol):
+    """Optional stable project identity for local watcher storage prefixes."""
+
+    @property
+    def permalink(self) -> object | None: ...
+
+    @property
+    def name(self) -> object | None: ...
+
+
 def local_project_root(project: LocalWatchProjectSource) -> Path:
     """Return the resolved filesystem root for a local watcher project."""
     project_path = str(project.path).strip() if project.path else ""
@@ -48,6 +59,12 @@ def local_project_root(project: LocalWatchProjectSource) -> Path:
 
 def local_project_prefix(project: LocalWatchProjectSource) -> ProjectPath:
     """Return the storage-event prefix for a local watcher project."""
+    if isinstance(project, LocalWatchProjectIdentitySource):
+        for project_identity in (project.permalink, project.name):
+            project_prefix = str(project_identity).strip() if project_identity else ""
+            if project_prefix:
+                return project_prefix
+
     return local_project_root(project).name
 
 

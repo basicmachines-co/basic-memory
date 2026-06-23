@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import cast
 from uuid import UUID
 
@@ -154,8 +155,12 @@ class FakeProjectIndexSession:
     """Record repository maintenance statements without a real database."""
 
     results: list[FakeProjectIndexResult]
+    dialect_name: str = "sqlite"
     statements: list[object] = field(default_factory=list)
     params: list[object | None] = field(default_factory=list)
+
+    def get_bind(self) -> SimpleNamespace:
+        return SimpleNamespace(dialect=SimpleNamespace(name=self.dialect_name))
 
     async def execute(
         self,
@@ -776,7 +781,7 @@ async def test_repository_project_index_maintenance_store_deletes_replaced_move_
     assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
     assert "SELECT DISTINCT relation.from_id" in str(session.statements[2])
     assert "DELETE FROM search_index" in str(session.statements[3])
-    assert "DELETE FROM search_vector_chunks" in str(session.statements[4])
+    assert "sqlite_master" in str(session.statements[4])
     assert "DELETE FROM entity" in str(session.statements[5])
     assert "UPDATE entity" in str(session.statements[6])
     assert "UPDATE note_content" in str(session.statements[7])
@@ -907,8 +912,131 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
     assert "SELECT DISTINCT relation.from_id" in str(session.statements[1])
     assert "DELETE FROM search_index" in str(session.statements[2])
-    assert "DELETE FROM search_vector_chunks" in str(session.statements[3])
+    assert "sqlite_master" in str(session.statements[3])
     assert "DELETE FROM entity" in str(session.statements[4])
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_deletes_vector_embeddings_before_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md"},
+                ]
+            ),
+            FakeProjectIndexResult(scalar_values=[]),
+            FakeProjectIndexResult(),
+            FakeProjectIndexResult(
+                scalar_values=["search_vector_chunks", "search_vector_embeddings"]
+            ),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_workflow_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+    sqlite_vec_sessions: list[FakeProjectIndexSession] = []
+
+    async def fake_load_sqlite_vec_on_session(
+        loaded_session: FakeProjectIndexSession,
+    ) -> bool:
+        sqlite_vec_sessions.append(loaded_session)
+        return True
+
+    monkeypatch.setattr(
+        project_index_workflow_module,
+        "_load_sqlite_vec_on_session",
+        fake_load_sqlite_vec_on_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    result = await store.apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/a.md",),
+        )
+    )
+
+    assert result.deleted_entities == 1
+    assert sqlite_vec_sessions == [session]
+    statements = [str(statement) for statement in session.statements]
+    embedding_delete_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if "DELETE FROM search_vector_embeddings" in statement
+    )
+    chunk_delete_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if "DELETE FROM search_vector_chunks" in statement
+    )
+    assert embedding_delete_index < chunk_delete_index
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_skips_vector_cleanup_when_tables_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md"},
+                ]
+            ),
+            FakeProjectIndexResult(scalar_values=[]),
+            FakeProjectIndexResult(),
+            FakeProjectIndexResult(scalar_values=[]),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_workflow_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    result = await store.apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/a.md",),
+        )
+    )
+
+    assert result.deleted_entities == 1
+    statements = [str(statement) for statement in session.statements]
+    assert not any("DELETE FROM search_vector_chunks" in statement for statement in statements)
+    assert not any("DELETE FROM search_vector_embeddings" in statement for statement in statements)
 
 
 def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event() -> None:

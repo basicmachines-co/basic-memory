@@ -159,6 +159,47 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     assert [event.object_key for event in source.events()] == ["configured-project-root/notes/a.md"]
 
 
+def test_local_watch_request_uses_project_permalink_for_duplicate_leaf_roots(
+    tmp_path: Path,
+) -> None:
+    alpha_root = tmp_path / "alpha" / "notes"
+    beta_root = tmp_path / "beta" / "notes"
+    alpha_note = alpha_root / "a.md"
+    beta_note = beta_root / "b.md"
+    alpha_note.parent.mkdir(parents=True)
+    beta_note.parent.mkdir(parents=True)
+    alpha_note.write_text("# A\n", encoding="utf-8")
+    beta_note.write_text("# B\n", encoding="utf-8")
+    alpha = SimpleNamespace(
+        path=str(alpha_root),
+        name="Alpha Notes",
+        permalink="alpha-notes",
+    )
+    beta = SimpleNamespace(
+        path=str(beta_root),
+        name="Beta Notes",
+        permalink="beta-notes",
+    )
+
+    alpha_request = LocalWatchEventIndexRequest.from_project_changes(
+        project=alpha,
+        changes=((Change.added, str(alpha_note)),),
+    )
+    beta_request = LocalWatchEventIndexRequest.from_project_changes(
+        project=beta,
+        changes=((Change.added, str(beta_note)),),
+    )
+
+    assert alpha_request.project_prefix == "alpha-notes"
+    assert beta_request.project_prefix == "beta-notes"
+    assert [event.object_key for event in LocalWatchStorageEventSource(alpha_request).events()] == [
+        "alpha-notes/a.md"
+    ]
+    assert [event.object_key for event in LocalWatchStorageEventSource(beta_request).events()] == [
+        "beta-notes/b.md"
+    ]
+
+
 def test_local_watch_project_change_batches_route_changes_to_projects(tmp_path: Path) -> None:
     alpha_root = tmp_path / "alpha"
     beta_root = tmp_path / "beta"
