@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory import db
+from basic_memory import db, file_utils
 from basic_memory.indexing import (
     ContentStoreNoteMaterializationFileWriter,
     IndexFileExecutor,
@@ -157,7 +157,15 @@ class LocalNoteContentStorage:
         metadata: dict[str, str] | None = None,
     ) -> RuntimeFileChecksum:
         _ = metadata
-        return await self.file_service.write_file(path, content)
+        path_obj = self.file_service.base_path / path if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.file_service.base_path / path_obj
+
+        # Accepted-note materialization persists an already-accepted DB snapshot.
+        # Writing bytes keeps the materialized file checksum identical to the
+        # note_content checksum on Windows, where text mode would translate LF to CRLF.
+        await self.file_service.ensure_directory(full_path.parent)
+        await file_utils.write_file_atomic_bytes(full_path, content.encode("utf-8"))
+        return await self.file_service.compute_checksum(full_path)
 
     async def get_file_metadata(self, path: RuntimeFilePath) -> RuntimeFileMetadataSource:
         return await self.file_service.get_file_metadata(path)

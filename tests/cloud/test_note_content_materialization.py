@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.cloud.note_content_materialization as note_content_materialization
-from basic_memory.cloud.note_content_materialization import LocalNoteContentMaterializationProvider
+from basic_memory.cloud.note_content_materialization import (
+    LocalNoteContentMaterializationProvider,
+    LocalNoteContentStorage,
+)
 from basic_memory.indexing import FileIndexOperation, FileIndexResult
 from basic_memory.runtime import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
@@ -88,6 +92,18 @@ def local_materialization_provider(
         file_service=cast(FileService, object()),
         file_indexer=indexer,
     )
+
+
+@pytest.mark.asyncio
+async def test_local_note_content_storage_writes_accepted_markdown_bytes(tmp_path) -> None:
+    """Accepted-note materialization stores the same bytes the DB snapshot checksums."""
+    storage = LocalNoteContentStorage(FileService(tmp_path))
+    content = "# Accepted\n\nUses LF bytes.\n"
+
+    checksum = await storage.write_file("notes/accepted.md", content)
+
+    assert (tmp_path / "notes" / "accepted.md").read_bytes() == content.encode("utf-8")
+    assert checksum == sha256(content.encode("utf-8")).hexdigest()
 
 
 @pytest.mark.asyncio

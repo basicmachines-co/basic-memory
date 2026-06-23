@@ -92,8 +92,8 @@ async def test_local_project_index_observed_file_source_returns_runtime_targets(
     """Local project scans feed the same observed-file values as hosted storage."""
     (tmp_path / "notes").mkdir()
     note_path = tmp_path / "notes" / "a.md"
-    note_content = "# A\n"
-    note_path.write_text(note_content, encoding="utf-8")
+    note_content = b"# A\n"
+    note_path.write_bytes(note_content)
     regular_path = tmp_path / "notes" / "asset.pdf"
     regular_content = b"pdf-ish"
     regular_path.write_bytes(regular_content)
@@ -106,8 +106,8 @@ async def test_local_project_index_observed_file_source_returns_runtime_targets(
     assert observed == (
         RuntimeObservedIndexFile(
             path="notes/a.md",
-            checksum=sha256(note_content.encode("utf-8")).hexdigest(),
-            size=len(note_content.encode("utf-8")),
+            checksum=sha256(note_content).hexdigest(),
+            size=len(note_content),
         ),
         RuntimeObservedIndexFile(
             path="notes/asset.pdf",
@@ -494,7 +494,7 @@ class MutatingObservedFileSource:
 
     async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
         observed = await self.source.list_observed_index_files()
-        self.file_path.write_text(self.modified_content, encoding="utf-8")
+        self.file_path.write_bytes(self.modified_content.encode("utf-8"))
         return observed
 
 
@@ -1962,7 +1962,7 @@ async def test_local_project_index_indexes_thematic_break_content_without_frontm
     thematic_path = project_config.home / "notes" / "thematic-break.md"
     thematic_path.parent.mkdir(parents=True, exist_ok=True)
     original_content = "---\nBody content after a thematic break.\n"
-    thematic_path.write_text(original_content, encoding="utf-8")
+    thematic_path.write_bytes(original_content.encode("utf-8"))
 
     result = await run_local_project_index_for_project(
         test_project,

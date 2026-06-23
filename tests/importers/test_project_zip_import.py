@@ -91,6 +91,11 @@ def test_project_zip_import_plan_handles_empty_archives() -> None:
     ],
 )
 def test_project_zip_import_plan_rejects_unsafe_archive_paths(path: str) -> None:
+    if "\\" in path:
+        with pytest.raises(ProjectZipImportError, match="unsafe path"):
+            project_zip_import.validated_archive_path(path)
+        return
+
     with pytest.raises(ProjectZipImportError, match="unsafe path"):
         build_project_zip_import_plan(zip_bytes({path: b"bad"}))
 

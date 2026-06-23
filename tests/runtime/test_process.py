@@ -25,9 +25,12 @@ def test_runtime_process_rss_bytes_uses_darwin_rusage_units(
 ) -> None:
     proc_status = tmp_path / "missing-status"
     monkeypatch.setattr(
-        process_module.resource,
-        "getrusage",
-        lambda _who: SimpleNamespace(ru_maxrss=2048),
+        process_module,
+        "resource",
+        SimpleNamespace(
+            RUSAGE_SELF=0,
+            getrusage=lambda _who: SimpleNamespace(ru_maxrss=2048),
+        ),
     )
 
     assert (
@@ -45,9 +48,12 @@ def test_runtime_process_rss_bytes_converts_non_darwin_rusage_units(
 ) -> None:
     proc_status = tmp_path / "missing-status"
     monkeypatch.setattr(
-        process_module.resource,
-        "getrusage",
-        lambda _who: SimpleNamespace(ru_maxrss=2048),
+        process_module,
+        "resource",
+        SimpleNamespace(
+            RUSAGE_SELF=0,
+            getrusage=lambda _who: SimpleNamespace(ru_maxrss=2048),
+        ),
     )
 
     assert (

@@ -389,7 +389,8 @@ async def test_project_status_uses_event_index_report_not_sync_service(
     """Project status should observe current project-index files without SyncService."""
     note_path = Path(test_project.path) / "incoming" / "project-status.md"
     note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text("# Project Status\n\nVisible in status report.\n", encoding="utf-8")
+    note_content = "# Project Status\n\nVisible in status report.\n"
+    note_path.write_text(note_content, encoding="utf-8")
 
     response = await client.post(f"{v2_projects_url}/{test_project.external_id}/status")
 
@@ -400,7 +401,7 @@ async def test_project_status_uses_event_index_report_not_sync_service(
         {
             "path": "incoming/project-status.md",
             "checksum": data["observed_files"][0]["checksum"],
-            "size": len("# Project Status\n\nVisible in status report.\n".encode("utf-8")),
+            "size": note_path.stat().st_size,
         }
     ]
     assert "new" not in data
