@@ -1,8 +1,17 @@
 """Portable runtime process measurements."""
 
-import resource
 import sys
 from pathlib import Path
+from types import ModuleType
+
+import psutil
+
+try:
+    import resource as _resource
+except ModuleNotFoundError:  # pragma: no cover - exercised by Windows CI.
+    resource: ModuleType | None = None
+else:
+    resource = _resource
 
 
 def runtime_process_rss_bytes(
@@ -22,7 +31,13 @@ def runtime_process_rss_bytes(
     except OSError:
         pass
 
-    rss_units = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    if platform_name == "darwin":
-        return rss_units
-    return rss_units * 1024
+    if resource is not None:
+        rss_units = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        if platform_name == "darwin":
+            return rss_units
+        return rss_units * 1024
+
+    if psutil is None:
+        return 0
+
+    return int(psutil.Process().memory_info().rss)
