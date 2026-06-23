@@ -9,7 +9,6 @@ import pytest
 from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
-from basic_memory.utils import normalize_newlines
 from tests.mcp.conftest import ContextState, ctx
 
 
@@ -611,7 +610,7 @@ async def test_note_unicode_content(app, test_project):
 
     # Read back should preserve unicode
     result = await read_note("test/unicode-test", project=test_project.name)
-    assert normalize_newlines(content) in result
+    assert content in result
 
 
 @pytest.mark.asyncio

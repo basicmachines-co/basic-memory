@@ -10,7 +10,6 @@ from basic_memory import config as config_module
 from basic_memory.mcp.tools import write_note, read_note, delete_note
 from basic_memory.mcp.tools.write_note import _compose_workspace_project_route
 from basic_memory.repository.relation_repository import RelationRepository
-from basic_memory.utils import normalize_newlines
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +143,7 @@ async def test_write_note(app, test_project):
 
     # Try reading it back via permalink
     content = await read_note("test/test-note", project=test_project.name)
-    expected = normalize_newlines(
+    expected = (
         dedent("""
         ---
         title: Test Note
@@ -179,7 +178,7 @@ async def test_write_note_no_tags(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
     # Should be able to read it back
     content = await read_note("test/simple-note", project=test_project.name)
-    expected = normalize_newlines(
+    expected = (
         dedent("""
         ---
         title: Simple Note
@@ -241,9 +240,8 @@ async def test_write_note_update_existing(app, test_project):
     # Try reading it back
     content = await read_note("test/test-note", project=test_project.name)
     assert (
-        normalize_newlines(
-            dedent(
-                """
+        dedent(
+            """
         ---
         title: Test Note
         type: note
@@ -256,10 +254,9 @@ async def test_write_note_update_existing(app, test_project):
         # Test
         This is an updated note
         """
-            )
-            .format(permalink=f"{test_project.name}/test/test-note")
-            .strip()
         )
+        .format(permalink=f"{test_project.name}/test/test-note")
+        .strip()
         == content
     )
 
@@ -555,9 +552,8 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
     # Try reading it back via permalink
     content = await read_note("test/test-note", project=test_project.name)
     assert (
-        normalize_newlines(
-            dedent(
-                """
+        dedent(
+            """
             ---
             title: Test Note
             type: note
@@ -573,10 +569,9 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
 
             This is a test note
             """
-            )
-            .format(permalink=f"{test_project.name}/test/test-note")
-            .strip()
         )
+        .format(permalink=f"{test_project.name}/test/test-note")
+        .strip()
         in content
     )
 
@@ -711,7 +706,7 @@ async def test_write_note_with_custom_note_type(app, test_project):
 
     # Verify the note type is correctly set in the frontmatter
     content = await read_note("guides/test-guide", project=test_project.name)
-    expected = normalize_newlines(
+    expected = (
         dedent("""
         ---
         title: Test Guide
