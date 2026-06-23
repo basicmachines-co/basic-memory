@@ -50,7 +50,6 @@ from basic_memory.index import (
     LocalProjectIndexObservation,
     LocalProjectIndexRunner,
     ProjectIndexCoordinatorResult,
-    build_local_index_project_dependencies,
     build_local_markdown_file_indexer,
 )
 from basic_memory.indexing import (
@@ -298,21 +297,52 @@ class LocalAcceptedNotePreparerFactory:
         )
 
 
-class LocalCurrentNoteProjectRepository(Protocol):
-    """Project lookup needed by the local note-content freshener."""
+class LocalCurrentNoteEntity(Protocol):
+    """Entity fields needed to refresh current markdown before route mutation."""
+
+    file_path: str
+    content_type: str
+
+
+class LocalCurrentNoteEntityRepository(Protocol):
+    """Entity lookup needed by the local note-content freshener."""
 
     async def get_by_external_id(
         self,
         session: AsyncSession,
         external_id: str,
-    ) -> Project | None: ...
+        *,
+        load_relations: bool = True,
+    ) -> LocalCurrentNoteEntity | None: ...
+
+
+class LocalCurrentNoteFileService(Protocol):
+    """Current file-state access needed before mutating accepted note content."""
+
+    async def exists(
+        self,
+        path: RuntimeFilePath,
+    ) -> bool: ...
+
+
+class LocalCurrentNoteFileIndexer(Protocol):
+    """Single-file indexing capability used by the local note-content freshener."""
+
+    async def index_file(
+        self,
+        file_path: RuntimeFilePath,
+        *,
+        source: str,
+    ) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
 class LocalCurrentNoteContentFreshener:
     """Converge directly-edited local markdown before accepted-note mutations."""
 
-    project_repository: LocalCurrentNoteProjectRepository
+    entity_repository: LocalCurrentNoteEntityRepository
+    file_service: LocalCurrentNoteFileService
+    file_indexer: LocalCurrentNoteFileIndexer
     session_maker: async_sessionmaker[AsyncSession]
 
     async def freshen_note_content(
@@ -321,16 +351,10 @@ class LocalCurrentNoteContentFreshener:
         project_external_id: str,
         entity_external_id: str,
     ) -> None:
-        async with self.session_maker() as session:
-            project = await self.project_repository.get_by_external_id(
-                session,
-                project_external_id,
-            )
-            if project is None:
-                return
+        del project_external_id
 
-            entity_repository = EntityRepository(project_id=project.id)
-            entity = await entity_repository.get_by_external_id(
+        async with self.session_maker() as session:
+            entity = await self.entity_repository.get_by_external_id(
                 session,
                 entity_external_id,
                 load_relations=False,
@@ -339,49 +363,13 @@ class LocalCurrentNoteContentFreshener:
                 return
             file_path = entity.file_path
 
-        dependencies = await build_local_index_project_dependencies(project)
-        if not await dependencies.file_service.exists(file_path):
+        if not await self.file_service.exists(file_path):
             return
 
-        await dependencies.file_indexer.index_file(
+        await self.file_indexer.index_file(
             file_path,
             source="note-content-mutation-freshen",
         )
-
-
-async def get_note_content_mutation_service(
-    project_repository: ProjectRepositoryDep,
-    session_maker: SessionMakerDep,
-    app_config: AppConfigDep,
-) -> NoteContentMutationService:
-    """Create the local accepted-note mutation facade for API routes."""
-    accepted_note_repositories = build_default_accepted_note_repositories()
-    return NoteContentMutationService(
-        session_maker=session_maker,
-        mutation_dependencies=AcceptedNoteMutationDependencies(
-            project_repository=project_repository,
-            lookup_repositories=accepted_note_repositories,
-            preparer_factory=LocalAcceptedNotePreparerFactory(
-                session_maker=session_maker,
-                app_config=app_config,
-            ),
-            write_repositories=accepted_note_repositories,
-            clock=SystemAcceptedNoteMutationClock(),
-            move_policy=AcceptedNoteMutationMovePolicy(
-                disable_permalinks=app_config.disable_permalinks,
-                update_permalinks_on_move=app_config.update_permalinks_on_move,
-            ),
-        ),
-        content_freshener=LocalCurrentNoteContentFreshener(
-            project_repository=project_repository,
-            session_maker=session_maker,
-        ),
-    )
-
-
-NoteContentMutationServiceDep = Annotated[
-    NoteContentMutationService, Depends(get_note_content_mutation_service)
-]
 
 
 # --- Directory Delete Runtime ---
@@ -682,6 +670,49 @@ async def get_index_file_executor_v2_external(
 
 IndexFileExecutorV2ExternalDep = Annotated[
     IndexFileExecutor, Depends(get_index_file_executor_v2_external)
+]
+
+
+# --- Note Content Writes ---
+
+
+async def get_note_content_mutation_service(
+    project_repository: ProjectRepositoryDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+    file_indexer: IndexFileExecutorV2ExternalDep,
+    session_maker: SessionMakerDep,
+    app_config: AppConfigDep,
+) -> NoteContentMutationService:
+    """Create the local accepted-note mutation facade for API routes."""
+    accepted_note_repositories = build_default_accepted_note_repositories()
+    return NoteContentMutationService(
+        session_maker=session_maker,
+        mutation_dependencies=AcceptedNoteMutationDependencies(
+            project_repository=project_repository,
+            lookup_repositories=accepted_note_repositories,
+            preparer_factory=LocalAcceptedNotePreparerFactory(
+                session_maker=session_maker,
+                app_config=app_config,
+            ),
+            write_repositories=accepted_note_repositories,
+            clock=SystemAcceptedNoteMutationClock(),
+            move_policy=AcceptedNoteMutationMovePolicy(
+                disable_permalinks=app_config.disable_permalinks,
+                update_permalinks_on_move=app_config.update_permalinks_on_move,
+            ),
+        ),
+        content_freshener=LocalCurrentNoteContentFreshener(
+            entity_repository=entity_repository,
+            file_service=file_service,
+            file_indexer=file_indexer,
+            session_maker=session_maker,
+        ),
+    )
+
+
+NoteContentMutationServiceDep = Annotated[
+    NoteContentMutationService, Depends(get_note_content_mutation_service)
 ]
 
 
