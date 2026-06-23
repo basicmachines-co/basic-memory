@@ -40,11 +40,13 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2ExternalDep,
 )
 from basic_memory.cloud import (
+    DirectoryDeleteService,
     LocalNoteContentMaterializationProvider,
     NoteContentMutationService,
     NoteContentQueryService,
 )
 from basic_memory.index import (
+    LOCAL_EVENT_INDEX_TENANT_ID,
     LocalProjectIndexObservation,
     LocalProjectIndexRunner,
     ProjectIndexCoordinatorResult,
@@ -55,19 +57,31 @@ from basic_memory.indexing import (
     AcceptedNoteMutationMovePolicy,
     AcceptedNoteMutationPreparer,
     BatchIndexer,
+    DirectoryDeleteRuntime,
+    DirectoryFileDeleteEnqueueError,
     IndexFileExecutor,
+    RepositoryDirectoryDeleteAcceptanceStore,
     StorageIndexFileWriter,
     SystemAcceptedNoteMutationClock,
     build_default_accepted_note_repositories,
+    run_note_file_delete,
 )
+from basic_memory.file_utils import FileError
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.search_repository import create_search_repository
+from basic_memory.runtime import (
+    RuntimeFileChecksum,
+    RuntimeFilePath,
+    RuntimeNoteFileDeleteJobRequest,
+    TenantId,
+)
 from basic_memory.schemas import ProjectIndexRunResponse
 from basic_memory.services import EntityService, ProjectService
+from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.context_service import ContextService
 from basic_memory.services.directory_service import DirectoryService
 from basic_memory.services.file_service import FileService
@@ -328,6 +342,69 @@ NoteContentMaterializationProviderDep = Annotated[
     LocalNoteContentMaterializationProvider,
     Depends(get_note_content_materialization_provider),
 ]
+
+
+# --- Directory Delete Runtime ---
+
+
+async def get_runtime_tenant_id() -> TenantId:
+    """Return the runtime tenant id for local route-owned cleanup requests."""
+    return LOCAL_EVENT_INDEX_TENANT_ID
+
+
+RuntimeTenantIdDep = Annotated[TenantId, Depends(get_runtime_tenant_id)]
+
+
+@dataclass(frozen=True, slots=True)
+class LocalNoteFileDeleteStorage:
+    """Adapt local FileService to guarded materialized-note cleanup."""
+
+    file_service: FileService
+
+    async def exists(self, path: RuntimeFilePath) -> bool:
+        return await self.file_service.exists(path)
+
+    async def compute_checksum(self, path: RuntimeFilePath) -> RuntimeFileChecksum:
+        return await self.file_service.compute_checksum(path)
+
+    async def delete_file(self, path: RuntimeFilePath) -> None:
+        await self.file_service.delete_file(path)
+
+
+@dataclass(frozen=True, slots=True)
+class LocalDirectoryFileDeleteEnqueuer:
+    """Run accepted directory-delete file cleanup inline for the local runtime."""
+
+    file_service: FileService
+
+    async def enqueue_directory_file_delete(
+        self,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> None:
+        try:
+            await run_note_file_delete(
+                request,
+                storage=LocalNoteFileDeleteStorage(file_service=self.file_service),
+            )
+        except (FileError, FileOperationError, OSError) as exc:
+            raise DirectoryFileDeleteEnqueueError(str(exc)) from exc
+
+
+async def get_directory_delete_service(
+    session_maker: SessionMakerDep,
+    file_service: FileServiceV2ExternalDep,
+) -> DirectoryDeleteService:
+    """Create the route-level directory-delete service for the local runtime."""
+    return DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=LocalDirectoryFileDeleteEnqueuer(file_service=file_service),
+        ),
+    )
+
+
+DirectoryDeleteServiceDep = Annotated[DirectoryDeleteService, Depends(get_directory_delete_service)]
 
 
 # --- Link Resolver ---

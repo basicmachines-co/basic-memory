@@ -10,6 +10,8 @@ Key improvements:
 - Simplified caching strategies
 """
 
+from collections.abc import Mapping
+from hashlib import sha256
 import os
 import pathlib
 from typing import Annotated
@@ -19,7 +21,7 @@ from loguru import logger
 
 import logfire
 from basic_memory import db
-from basic_memory.cloud import NoteContentMutationServiceError
+from basic_memory.cloud import DirectoryDeleteServiceError, NoteContentMutationServiceError
 from basic_memory.ignore_utils import (
     IGNORED_PATH_REJECTION_DETAIL,
     load_gitignore_patterns,
@@ -33,6 +35,7 @@ from basic_memory.deps import (
     NoteContentMaterializationProviderDep,
     NoteContentMutationServiceDep,
     NoteContentQueryServiceDep,
+    DirectoryDeleteServiceDep,
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
     AppConfigDep,
@@ -41,10 +44,14 @@ from basic_memory.deps import (
     ProjectExternalIdPathDep,
     IndexFileExecutorV2ExternalDep,
     EntityVectorSyncSchedulerDep,
+    RuntimeTenantIdDep,
     SessionDep,
     SessionMakerDep,
 )
-from basic_memory.runtime import runtime_note_content_payload_as_dict
+from basic_memory.runtime import (
+    runtime_note_content_payload_as_dict,
+    runtime_note_content_payload_as_json_bytes,
+)
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.request import EditEntityRequest
@@ -61,7 +68,7 @@ from basic_memory.schemas.v2 import (
     OrphanEntitiesResponse,
     IndexFileRequest,
 )
-from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
+from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.utils import validate_project_path
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
@@ -90,6 +97,28 @@ def entity_response_from_note_content_payload(payload) -> EntityResponseV2:
 def delete_response_from_note_content_payload(payload) -> DeleteEntitiesResponse:
     """Serialize an accepted-note delete payload through the existing delete model."""
     return DeleteEntitiesResponse.model_validate(runtime_note_content_payload_as_dict(payload))
+
+
+def etag_for_response_body(body: bytes) -> str:
+    """Return a stable HTTP ETag for a runtime JSON response body."""
+    return f'"{sha256(body).hexdigest()}"'
+
+
+def runtime_json_response(
+    *,
+    status_code: int,
+    payload: Mapping[str, object],
+) -> Response:
+    """Serialize a runtime payload without dropping adapter-specific fields."""
+    response_body = runtime_note_content_payload_as_json_bytes(payload)
+    return Response(
+        status_code=status_code,
+        headers={
+            "content-type": "application/json",
+            "etag": etag_for_response_body(response_body),
+        },
+        content=response_body,
+    )
 
 
 ## Graph endpoint
@@ -899,24 +928,27 @@ async def move_directory(
 ## Delete directory endpoint
 
 
-@router.post("/delete-directory", response_model=DirectoryDeleteResult)
+@router.post("/delete-directory", response_class=Response)
 async def delete_directory(
     data: DeleteDirectoryRequestV2,
-    project_id: ProjectExternalIdPathDep,
-    entity_service: EntityServiceV2ExternalDep,
-) -> DirectoryDeleteResult:
+    runtime_tenant_id: RuntimeTenantIdDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
+    directory_delete_service: DirectoryDeleteServiceDep,
+) -> Response:
     """Delete all entities in a directory.
 
     V2 API uses project external_id in the URL path for stable references.
-    Deletes all files within a directory, updating database records and
-    removing files from the filesystem.
+    Deletes database records first, then delegates backing-file cleanup to the
+    active runtime.
 
     Args:
         project_id: Project external ID from URL path
         data: Delete request with directory path
 
     Returns:
-        DirectoryDeleteResult with counts and details of deleted files
+        JSON payload with counts and runtime file cleanup status
     """
     with logfire.span(
         "api.request.knowledge.delete_directory",
@@ -927,17 +959,20 @@ async def delete_directory(
         logger.info(f"API v2 request: delete_directory directory='{data.directory}'")
 
         try:
-            # Delete the directory using the service
-            result = await entity_service.delete_directory(
+            status_code, payload = await directory_delete_service.delete_directory(
+                tenant_id=runtime_tenant_id,
+                project_external_id=project_external_id,
                 directory=data.directory,
             )
-
             logger.info(
                 f"API v2 response: delete_directory "
-                f"total={result.total_files}, success={result.successful_deletes}, failed={result.failed_deletes}"
+                f"total={payload.get('total_files')}, "
+                f"success={payload.get('successful_deletes')}, "
+                f"failed={payload.get('failed_deletes')}, "
+                f"file_delete_status={payload.get('file_delete_status')}"
             )
-            return result
+            return runtime_json_response(status_code=status_code, payload=payload)
 
-        except Exception as e:
-            logger.error(f"Error deleting directory: {e}")
-            raise HTTPException(status_code=400, detail=str(e))
+        except DirectoryDeleteServiceError as error:
+            logger.error(f"Error deleting directory: {error.detail}")
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
