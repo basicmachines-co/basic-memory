@@ -53,7 +53,7 @@ async def test_resolve_identifier_by_permalink(
         "content": "Test content for resolve",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return id
@@ -143,7 +143,7 @@ async def test_resolve_identifier_no_fuzzy_match(client: AsyncClient, v2_project
         "content": "A test note",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     # Try to resolve "nonexistent" - should NOT fuzzy match to "link-test"
     resolve_data = {"identifier": "nonexistent"}
@@ -170,7 +170,7 @@ async def test_resolve_identifier_with_source_path_no_fuzzy_match(
         "content": "A nested test note",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     # Try to resolve "nonexistent" with source_path context
     # Should NOT fuzzy match to "link-test" in the same or nearby folder
@@ -195,7 +195,7 @@ async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url,
         "content": "Test content for get by ID",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id
@@ -228,7 +228,7 @@ async def test_get_entity_by_id_reads_accepted_note_content(
             "content": "Original file content",
         },
     )
-    assert create_response.status_code == 200
+    assert create_response.status_code == 202
     created = EntityResponseV2.model_validate(create_response.json())
 
     accepted_content = "# AcceptedKnowledge\n\nAccepted note_content body.\n"
@@ -270,7 +270,7 @@ async def test_get_entity_by_id_allows_long_relation_type(
             "content": "Source entity content",
         },
     )
-    assert source_response.status_code == 200
+    assert source_response.status_code == 202
     source_entity = EntityResponseV2.model_validate(source_response.json())
 
     target_response = await client.post(
@@ -281,7 +281,7 @@ async def test_get_entity_by_id_allows_long_relation_type(
             "content": "Target entity content",
         },
     )
-    assert target_response.status_code == 200
+    assert target_response.status_code == 202
     target_entity = EntityResponseV2.model_validate(target_response.json())
 
     long_relation_type = (
@@ -339,7 +339,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
         f"{v2_project_url}/knowledge/entities", json=data, params={"fast": False}
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     entity = EntityResponseV2.model_validate(response.json())
 
     # V2 endpoints must return id field
@@ -373,7 +373,7 @@ async def test_create_entity_conflict_returns_409(client: AsyncClient, v2_projec
         json=data,
         params={"fast": False},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -401,7 +401,7 @@ async def test_create_entity_returns_content(client: AsyncClient, file_service, 
         json=data,
         params={"fast": False},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     entity = EntityResponseV2.model_validate(response.json())
 
     # Content should always be populated with frontmatter
@@ -430,7 +430,7 @@ async def test_create_entity_accepts_note_content_and_materializes_file(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     entity = EntityResponseV2.model_validate(response.json())
     assert entity.content is not None
     assert entity.db_version == 1
@@ -468,7 +468,7 @@ async def test_create_entity_returns_accepted_content_before_async_indexing(
         f"{v2_project_url}/knowledge/entities", json=data, params={"fast": False}
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     entity = EntityResponseV2.model_validate(response.json())
 
     # V2 endpoints must return id field
@@ -500,7 +500,7 @@ async def test_update_entity_by_id(
         "content": "Original content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id
@@ -519,7 +519,7 @@ async def test_update_entity_by_id(
         params={"fast": False},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     updated_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 update must return external_id field
@@ -555,7 +555,7 @@ async def test_update_entity_by_id_does_not_duplicate(
         "content": "Original content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     update_data = {
@@ -567,7 +567,7 @@ async def test_update_entity_by_id_does_not_duplicate(
         f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
         json=update_data,
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     entities = await _find_all_entities(entity_repository, session_maker)
     assert len(entities) == 1
@@ -598,7 +598,7 @@ async def test_put_entity_with_fast_param_returns_accepted_content_before_async_
         params={"fast": True},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
     assert created_entity.external_id == external_id
     assert created_entity.content is not None
@@ -627,7 +627,7 @@ async def test_create_with_fast_param_does_not_schedule_reindex_task(
         },
         params={"fast": True},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert len(vector_sync_scheduler_spy) == start_count
 
 
@@ -648,7 +648,7 @@ async def test_create_schedules_vector_sync_when_semantic_enabled(
         },
         params={"fast": False},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     assert len(vector_sync_scheduler_spy) == start_count + 1
@@ -673,7 +673,7 @@ async def test_create_skips_vector_sync_when_semantic_disabled(
         },
         params={"fast": False},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert len(vector_sync_scheduler_spy) == start_count
 
 
@@ -694,7 +694,7 @@ async def test_edit_entity_by_id_append(
         "content": "# TestEdit\n\nOriginal content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id
@@ -712,7 +712,7 @@ async def test_edit_entity_by_id_append(
         params={"fast": False},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     edited_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 patch must return external_id field
@@ -752,7 +752,7 @@ async def test_edit_entity_by_id_find_replace(
         "content": "# TestFindReplace\n\nOld text that will be replaced",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id
@@ -770,7 +770,7 @@ async def test_edit_entity_by_id_find_replace(
         json=edit_data,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     edited_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 patch must return external_id field
@@ -808,7 +808,7 @@ async def test_delete_entity_by_id(
         "content": "Content to be deleted",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id
@@ -818,7 +818,7 @@ async def test_delete_entity_by_id(
     # Delete it by external_id
     response = await client.delete(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     delete_response = DeleteEntitiesResponse.model_validate(response.json())
     assert delete_response.deleted is True
 
@@ -837,8 +837,8 @@ async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url
     fake_uuid = "00000000-0000-0000-0000-000000000000"
     response = await client.delete(f"{v2_project_url}/knowledge/entities/{fake_uuid}")
 
-    # Delete is idempotent - returns 200 with deleted=False
-    assert response.status_code == 200
+    # Delete is idempotent - returns accepted with deleted=False
+    assert response.status_code == 202
     delete_response = DeleteEntitiesResponse.model_validate(response.json())
     assert delete_response.deleted is False
 
@@ -860,7 +860,7 @@ async def test_move_entity(
         "content": "Content to be moved",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id
@@ -875,7 +875,7 @@ async def test_move_entity(
         f"{v2_project_url}/knowledge/entities/{created_entity.external_id}/move", json=move_data
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     moved_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 move must return external_id field
@@ -919,7 +919,7 @@ async def test_entity_response_v2_has_api_version(
         "content": "Test content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
     # V2 create must return external_id and api_version
@@ -952,7 +952,7 @@ async def test_move_directory_v2_success(client: AsyncClient, v2_project_url):
                 "content": f"Content for document {i + 1}",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
 
     # Move the entire directory
     move_data = {
@@ -1019,7 +1019,7 @@ async def test_delete_directory_v2_success(client: AsyncClient, v2_project_url):
                 "content": f"Content for document {i + 1}",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
 
     # Verify notes exist
     created_entity = EntityResponseV2.model_validate(response.json())
@@ -1092,7 +1092,7 @@ async def test_delete_directory_v2_nested_structure(client: AsyncClient, v2_proj
                 "content": f"Content in {dir_path}",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
 
     # Delete the parent directory
     delete_data = {
@@ -1116,7 +1116,7 @@ async def test_entity_response_includes_user_tracking_fields(client: AsyncClient
         "content": "Test content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     body = response.json()
     # Fields should be present in the response (null for local/CLI usage)
@@ -1186,7 +1186,7 @@ async def test_index_file_already_indexed_is_idempotent(
         "content": "Already indexed content",
     }
     create_response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
-    assert create_response.status_code == 200
+    assert create_response.status_code == 202
     created = EntityResponseV2.model_validate(create_response.json())
 
     response = await client.post(

@@ -100,7 +100,7 @@ async def test_get_markdown_resource_reads_accepted_note_content(
             "content": "Original file content",
         },
     )
-    assert create_response.status_code == 200
+    assert create_response.status_code == 202
     created = create_response.json()
 
     accepted_content = "# AcceptedResource\n\nAccepted note_content body.\n"

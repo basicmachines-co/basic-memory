@@ -14,7 +14,7 @@ import os
 import pathlib
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, Path
+from fastapi import APIRouter, HTTPException, Response, Path, status
 from loguru import logger
 
 import logfire
@@ -519,7 +519,7 @@ async def get_entity_by_id(
 ## Create endpoints
 
 
-@router.post("/entities", response_model=EntityResponseV2)
+@router.post("/entities", response_model=EntityResponseV2, status_code=status.HTTP_202_ACCEPTED)
 async def create_entity(
     project_id: ProjectExternalIdPathDep,
     project_external_id: Annotated[
@@ -569,7 +569,7 @@ async def create_entity(
         )
 
         logger.info(
-            f"API v2 response: endpoint='create_entity' external_id={result.external_id}, title={result.title}, permalink={result.permalink}, status_code=201"
+            f"API v2 response: endpoint='create_entity' external_id={result.external_id}, title={result.title}, permalink={result.permalink}, status_code=202"
         )
         return result
 
@@ -577,7 +577,11 @@ async def create_entity(
 ## Update endpoints
 
 
-@router.put("/entities/{entity_id}", response_model=EntityResponseV2)
+@router.put(
+    "/entities/{entity_id}",
+    response_model=EntityResponseV2,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def update_entity_by_id(
     data: Entity,
     response: Response,
@@ -622,7 +626,7 @@ async def update_entity_by_id(
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
-        response.status_code = accepted.status_code
+        response.status_code = status.HTTP_202_ACCEPTED
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_vector_sync_if_enabled(
             vector_sync_scheduler=vector_sync_scheduler,
@@ -635,7 +639,11 @@ async def update_entity_by_id(
         return result
 
 
-@router.patch("/entities/{entity_id}", response_model=EntityResponseV2)
+@router.patch(
+    "/entities/{entity_id}",
+    response_model=EntityResponseV2,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def edit_entity_by_id(
     data: EditEntityRequest,
     project_id: ProjectExternalIdPathDep,
@@ -691,7 +699,7 @@ async def edit_entity_by_id(
         )
 
         logger.info(
-            f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=200"
+            f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=202"
         )
 
         return result
@@ -700,7 +708,11 @@ async def edit_entity_by_id(
 ## Delete endpoints
 
 
-@router.delete("/entities/{entity_id}", response_model=DeleteEntitiesResponse)
+@router.delete(
+    "/entities/{entity_id}",
+    response_model=DeleteEntitiesResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def delete_entity_by_id(
     project_id: ProjectExternalIdPathDep,
     project_external_id: Annotated[
@@ -747,7 +759,11 @@ async def delete_entity_by_id(
 ## Move endpoint
 
 
-@router.put("/entities/{entity_id}/move", response_model=EntityResponseV2)
+@router.put(
+    "/entities/{entity_id}/move",
+    response_model=EntityResponseV2,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def move_entity(
     data: MoveEntityRequestV2,
     project_id: ProjectExternalIdPathDep,
