@@ -252,6 +252,12 @@ class AcceptedNoteSearchRowRepository(Protocol):
         entity_id: RuntimeEntityId,
     ) -> None: ...
 
+    async def delete_entity_vectors(
+        self,
+        session: AsyncSession,
+        entity_id: RuntimeEntityId,
+    ) -> None: ...
+
 
 class AcceptedNoteWriteRepositories(Protocol):
     """Repository capability set needed by accepted-note DB-first writes."""
@@ -646,6 +652,19 @@ async def delete_accepted_note_search_index(
     await repository.delete_entity(session, entity_id)
 
 
+async def delete_accepted_note_vectors(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+    repositories: AcceptedNoteWriteRepositories | None = None,
+) -> None:
+    """Remove semantic vectors for an accepted-note entity inside the caller's transaction."""
+    write_repositories = repositories or build_default_accepted_note_write_repositories()
+    repository = write_repositories.search_repository(project_id)
+    await repository.delete_entity_vectors(session, entity_id)
+
+
 async def persist_accepted_note_write(
     session: AsyncSession,
     *,
@@ -716,6 +735,12 @@ async def delete_accepted_note(
     )
     if entity is not None:
         await delete_accepted_note_search_index(
+            session,
+            project_id=project_id,
+            entity_id=entity.id,
+            repositories=repositories,
+        )
+        await delete_accepted_note_vectors(
             session,
             project_id=project_id,
             entity_id=entity.id,

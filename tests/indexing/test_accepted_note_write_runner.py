@@ -102,9 +102,11 @@ class _NoteContentRepository:
 
 
 class _SearchRepository:
-    def __init__(self) -> None:
+    def __init__(self, events: list[tuple[str, int]] | None = None) -> None:
         self.calls: list[AcceptedNoteSearchRow] = []
         self.deleted_entity_ids: list[int] = []
+        self.deleted_vector_entity_ids: list[int] = []
+        self.events = events
 
     async def refresh_entity(
         self,
@@ -119,6 +121,17 @@ class _SearchRepository:
         entity_id: int,
     ) -> None:
         self.deleted_entity_ids.append(entity_id)
+        if self.events is not None:
+            self.events.append(("search", entity_id))
+
+    async def delete_entity_vectors(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        self.deleted_vector_entity_ids.append(entity_id)
+        if self.events is not None:
+            self.events.append(("vectors", entity_id))
 
 
 def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
@@ -145,11 +158,14 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
 
 
 class _DeleteSession:
-    def __init__(self) -> None:
+    def __init__(self, events: list[tuple[str, int]] | None = None) -> None:
         self.deleted: list[object] = []
+        self.events = events
 
     async def delete(self, entity: object) -> None:
         self.deleted.append(entity)
+        if self.events is not None:
+            self.events.append(("entity", cast(Entity, entity).id))
 
 
 class _CreatePreparer:
@@ -800,13 +816,14 @@ async def test_delete_accepted_note_plans_missing_response_without_deleting() ->
 
 @pytest.mark.asyncio
 async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
-    session = _DeleteSession()
+    events: list[tuple[str, int]] = []
+    session = _DeleteSession(events)
     entity = _entity()
     entity.external_id = "entity-42"
     entity.checksum = "entity-file-checksum"
     note_content = _note_content()
     note_content.file_checksum = "note-file-checksum"
-    search_repository = _SearchRepository()
+    search_repository = _SearchRepository(events)
 
     accepted = await delete_accepted_note(
         cast(AsyncSession, session),
@@ -817,7 +834,13 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
     )
 
     assert search_repository.deleted_entity_ids == [entity.id]
+    assert search_repository.deleted_vector_entity_ids == [entity.id]
     assert session.deleted == [entity]
+    assert events == [
+        ("search", entity.id),
+        ("vectors", entity.id),
+        ("entity", entity.id),
+    ]
     assert accepted.status_code == 200
     assert accepted.payload == {
         "deleted": True,

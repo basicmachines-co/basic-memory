@@ -28,6 +28,7 @@ from basic_memory.index.local_runtime import (
 )
 from basic_memory.indexing import (
     ChangeDetector,
+    EmbeddingBatchVectorSync,
     FileIndexChecker,
     IndexFileBatchJobResult,
     IndexFileBatchChecker,
@@ -165,6 +166,7 @@ class LocalProjectIndexRuntime:
     workflow_starter: ProjectIndexWorkflowStarter | None = None
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None = None
     completion_relation_runtime: RelationResolutionRuntime | None = None
+    embedding_vector_sync: EmbeddingBatchVectorSync | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
 
@@ -186,6 +188,16 @@ class LocalProjectIndexRuntimeProvider(Protocol):
     tenant_id: TenantId
 
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime: ...
+
+
+def local_project_embedding_vector_sync(
+    dependencies: LocalIndexProjectDependencies,
+) -> EmbeddingBatchVectorSync | None:
+    """Return the semantic vector sync backend when local config enables it."""
+    app_config = dependencies.entity_service.app_config
+    if app_config is None or not app_config.semantic_search_enabled:
+        return None
+    return dependencies.search_service
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +350,7 @@ class LocalProjectIndexRuntimeFactory:
                 link_resolver=dependencies.link_resolver,
                 entity_indexer=dependencies.search_service,
             ),
+            embedding_vector_sync=local_project_embedding_vector_sync(dependencies),
             batch_size=self.batch_size,
         )
 
@@ -416,6 +429,7 @@ async def run_local_project_index(
         batch_enqueuer=runtime.batch_enqueuer,
         fanout_failure_recorder=runtime.fanout_failure_recorder,
         batch_size=runtime.batch_size,
+        embedding_vector_sync=runtime.embedding_vector_sync,
     )
     if runtime.completion_relation_runtime is not None:
         await resolve_project_index_completion_relations(

@@ -322,6 +322,15 @@ index-contract-test: file-index-runner-test file-index-batch-test file-index-sem
 runtime-core-pytest *args:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov {{args}}
 
+# Focused PR #1002 Codex feedback regressions.
+pr-1002-feedback-test:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true LOGFIRE_IGNORE_NO_CONFIG=1 uv run pytest -p pytest_mock -q --no-cov \
+        tests/runtime/test_deleted_note_response.py \
+        tests/repository/test_accepted_note_search_repository.py \
+        tests/indexing/test_project_index_workflow.py \
+        tests/indexing/test_accepted_note_write_runner.py \
+        tests/indexing/test_directory_delete_runner.py
+
 runtime-core-fast-check-no-openai:
     OPENAI_API_KEY= just fast-check
 

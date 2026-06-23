@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basic_memory.indexing.project_index_workflow import delete_project_index_vector_rows
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.runtime import (
     RuntimeDirectoryFileSnapshot,
@@ -195,6 +196,11 @@ class RepositoryDirectoryDeleteAcceptanceStore:
                 """
             ).bindparams(bindparam("entity_ids", expanding=True)),
             {"project_id": project_id, "entity_ids": tuple(entity_ids)},
+        )
+        await delete_project_index_vector_rows(
+            session,
+            project_id=project_id,
+            entity_ids=tuple(entity_ids),
         )
         await session.execute(delete(Entity).where(Entity.id.in_(entity_ids)))
 

@@ -1017,9 +1017,8 @@ class RuntimeDeletedNoteReference:
                 field_name="title",
                 file_path=file_path,
             ),
-            permalink=required_runtime_deleted_note_text(
+            permalink=runtime_deleted_note_permalink(
                 entity.permalink,
-                field_name="permalink",
                 file_path=file_path,
             ),
         )
@@ -1106,6 +1105,21 @@ def required_runtime_deleted_note_text(
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"Deleted entity for {file_path} is missing {field_name}")
     return value.strip()
+
+
+def runtime_deleted_note_permalink(
+    value: object,
+    *,
+    file_path: RuntimeFilePath,
+) -> str:
+    """Return deleted-note permalink text, falling back to the file path."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+
+    fallback = str(file_path).strip()
+    if not fallback:
+        raise RuntimeError(f"Deleted entity for {file_path} is missing permalink")
+    return fallback
 
 
 def runtime_deleted_note_reference_for_entity(

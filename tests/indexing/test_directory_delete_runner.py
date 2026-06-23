@@ -1,9 +1,11 @@
 """Tests for portable directory-delete cleanup orchestration."""
 
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import cast
 from uuid import UUID
 
+import basic_memory.indexing.directory_delete_runner as directory_delete_runner_module
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,20 +78,35 @@ class FakeDirectoryDeleteStore:
 
 
 class FakeScalarResult:
-    def __init__(self, value: object | None) -> None:
+    def __init__(
+        self,
+        value: object | None,
+        values: list[object] | None = None,
+    ) -> None:
         self.value = value
+        self.values = values or ([] if value is None else [value])
 
     def one_or_none(self) -> object | None:
         return self.value
 
+    def __iter__(self):
+        return iter(self.values)
+
 
 class FakeExecuteResult:
-    def __init__(self, *, scalar_value: object | None = None, rows: list[object] | None = None):
+    def __init__(
+        self,
+        *,
+        scalar_value: object | None = None,
+        scalar_values: list[object] | None = None,
+        rows: list[object] | None = None,
+    ):
         self.scalar_value = scalar_value
+        self.scalar_values = scalar_values
         self.rows = rows or []
 
     def scalars(self) -> FakeScalarResult:
-        return FakeScalarResult(self.scalar_value)
+        return FakeScalarResult(self.scalar_value, self.scalar_values)
 
     def all(self) -> list[object]:
         return self.rows
@@ -98,7 +115,10 @@ class FakeExecuteResult:
 class FakeExecuteSession:
     def __init__(self, results: list[FakeExecuteResult]) -> None:
         self.results = results
-        self.queries: list[object] = []
+        self.queries: list[tuple[object, object | None]] = []
+
+    def get_bind(self) -> SimpleNamespace:
+        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     async def execute(self, query: object, params: object | None = None) -> FakeExecuteResult:
         self.queries.append((query, params))
@@ -300,6 +320,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                     ]
                 ),
                 FakeExecuteResult(),
+                FakeExecuteResult(scalar_values=[]),
                 FakeExecuteResult(),
             ]
         ),
@@ -332,4 +353,56 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
             size=42,
         )
     ]
-    assert len(fake_session.queries) == 4
+    assert len(fake_session.queries) == 5
+
+
+@pytest.mark.asyncio
+async def test_repository_directory_delete_store_clears_vectors_before_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = cast(
+        AsyncSession,
+        FakeExecuteSession(
+            [
+                FakeExecuteResult(),
+                FakeExecuteResult(),
+            ]
+        ),
+    )
+    fake_session = cast(FakeExecuteSession, session)
+    vector_calls: list[tuple[AsyncSession, int, tuple[int, ...], int]] = []
+
+    async def fake_delete_project_index_vector_rows(
+        cleanup_session: AsyncSession,
+        *,
+        project_id: int,
+        entity_ids: Sequence[int],
+    ) -> None:
+        vector_calls.append(
+            (
+                cleanup_session,
+                project_id,
+                tuple(entity_ids),
+                len(fake_session.queries),
+            )
+        )
+
+    monkeypatch.setattr(
+        directory_delete_runner_module,
+        "delete_project_index_vector_rows",
+        fake_delete_project_index_vector_rows,
+        raising=False,
+    )
+
+    store = RepositoryDirectoryDeleteAcceptanceStore()
+
+    await store.delete_directory_entities(
+        session,
+        project_id=3,
+        entity_ids=[7, 8],
+    )
+
+    assert vector_calls == [(session, 3, (7, 8), 1)]
+    statements = [str(query) for query, _ in fake_session.queries]
+    assert "DELETE FROM search_index" in statements[0]
+    assert "DELETE FROM entity" in statements[1]

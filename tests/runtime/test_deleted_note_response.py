@@ -60,14 +60,54 @@ def test_runtime_deleted_note_response_builds_missing_payload() -> None:
     assert RuntimeDeletedNoteResponse.missing().as_payload() == {"deleted": False}
 
 
-def test_runtime_deleted_note_response_rejects_missing_identity_fields() -> None:
-    with pytest.raises(RuntimeError, match="missing permalink"):
-        RuntimeDeletedNoteResponse.pending_file_delete(
-            entity=_DeletedEntity(
-                external_id="note-1",
+def test_runtime_deleted_note_response_uses_file_path_when_permalink_is_missing() -> None:
+    response = RuntimeDeletedNoteResponse.pending_file_delete(
+        entity=_DeletedEntity(
+            external_id="note-1",
+            title="Deleted Note",
+            permalink=" ",
+        ),
+        file_path="notes/deleted.md",
+    )
+
+    assert response.as_payload() == {
+        "deleted": True,
+        "external_id": "note-1",
+        "title": "Deleted Note",
+        "permalink": "notes/deleted.md",
+        "file_path": "notes/deleted.md",
+        "file_delete_status": "pending",
+    }
+
+
+@pytest.mark.parametrize(
+    ("entity", "message"),
+    [
+        (
+            _DeletedEntity(
+                external_id=None,
                 title="Deleted Note",
-                permalink=" ",
+                permalink="notes/deleted-note",
             ),
+            "missing external_id",
+        ),
+        (
+            _DeletedEntity(
+                external_id="note-1",
+                title=" ",
+                permalink="notes/deleted-note",
+            ),
+            "missing title",
+        ),
+    ],
+)
+def test_runtime_deleted_note_response_rejects_missing_identity_fields(
+    entity: _DeletedEntity,
+    message: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=message):
+        RuntimeDeletedNoteResponse.pending_file_delete(
+            entity=entity,
             file_path="notes/deleted.md",
         )
 

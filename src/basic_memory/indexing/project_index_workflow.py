@@ -17,6 +17,11 @@ from basic_memory.indexing.models import (
     project_index_file_outcome_from_job_result,
 )
 from basic_memory.indexing.change_planning import ChangeReport
+from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingBatchVectorSync,
+    EmbeddingIndexBatchJobRequest,
+    run_embedding_index_batch,
+)
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCompletion,
     ProjectIndexCounters,
@@ -1466,6 +1471,7 @@ async def run_project_index_coordinator(
     batch_enqueuer: ProjectIndexBatchEnqueuer,
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None,
     batch_size: int,
+    embedding_vector_sync: EmbeddingBatchVectorSync | None = None,
 ) -> ProjectIndexCoordinatorResult:
     """Run the storage-neutral project-index coordinator fan-out."""
     if not request.search:
@@ -1537,6 +1543,12 @@ async def run_project_index_coordinator(
             )
         raise
 
+    await sync_project_index_vector_targets(
+        request=request,
+        batch_results=batch_results,
+        embedding_vector_sync=embedding_vector_sync,
+    )
+
     return ProjectIndexCoordinatorResult(
         total_files=len(observed_files),
         enqueued_files=enqueued_files,
@@ -1548,6 +1560,34 @@ async def run_project_index_coordinator(
         ),
         batch_results=tuple(batch_results),
         completion=completion,
+    )
+
+
+async def sync_project_index_vector_targets(
+    *,
+    request: RuntimeProjectIndexJobRequest,
+    batch_results: Sequence[IndexFileBatchJobResult],
+    embedding_vector_sync: EmbeddingBatchVectorSync | None,
+) -> None:
+    """Refresh vectors produced by inline project-index batch execution."""
+    if not request.embeddings or embedding_vector_sync is None:
+        return
+
+    vector_targets = tuple(
+        target for batch_result in batch_results for target in batch_result.vector_targets
+    )
+    if not vector_targets:
+        return
+
+    await run_embedding_index_batch(
+        EmbeddingIndexBatchJobRequest(
+            tenant_id=request.tenant_id,
+            project_id=request.project.project_id,
+            project_path=request.project.project_path,
+            entities=vector_targets,
+            workflow_id=request.workflow_id,
+        ),
+        vector_sync=embedding_vector_sync,
     )
 
 

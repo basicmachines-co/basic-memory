@@ -2106,6 +2106,20 @@ class RuntimeFactorySearchIndex:
     async def index_entity(self, entity: Entity) -> None:
         return None
 
+    async def sync_entity_vectors_batch(
+        self,
+        entity_ids: list[int],
+    ) -> "RuntimeFactoryVectorBatchResult":
+        return RuntimeFactoryVectorBatchResult(entities_synced=len(entity_ids))
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeFactoryVectorBatchResult:
+    entities_synced: int
+    entities_skipped: int = 0
+    entities_failed: int = 0
+    entities_deferred: int = 0
+
 
 class RuntimeFactoryRelationRepository:
     async def find_unresolved_relations(

@@ -60,6 +60,7 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
     insert_sql, insert_params = session.executed[1]
     assert "DELETE FROM search_index" in delete_sql
     assert delete_params == {"entity_id": 42, "project_id": 7}
+    assert "CAST(:metadata AS jsonb)" in insert_sql
     assert "ON CONFLICT (permalink, project_id)" in insert_sql
     assert insert_params == {
         "id": 42,
@@ -99,6 +100,8 @@ async def test_refresh_entity_uses_plain_insert_for_sqlite_virtual_table() -> No
 
     insert_sql, _ = session.executed[1]
     assert "ON CONFLICT" not in insert_sql
+    assert "CAST(:metadata AS jsonb)" not in insert_sql
+    assert ":metadata" in insert_sql
 
 
 @pytest.mark.asyncio

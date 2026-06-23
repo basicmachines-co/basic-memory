@@ -285,6 +285,7 @@ class _SearchRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[AsyncSession, AcceptedNoteSearchRow]] = []
         self.deleted_entity_ids: list[int] = []
+        self.deleted_vector_entity_ids: list[int] = []
 
     async def refresh_entity(
         self,
@@ -300,6 +301,14 @@ class _SearchRepository:
     ) -> None:
         _ = session
         self.deleted_entity_ids.append(entity_id)
+
+    async def delete_entity_vectors(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        _ = session
+        self.deleted_vector_entity_ids.append(entity_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -758,6 +767,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
 
     assert session.deleted == [entity]
     assert search_repository.deleted_entity_ids == [entity.id]
+    assert search_repository.deleted_vector_entity_ids == [entity.id]
     assert change.status_code == 200
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"

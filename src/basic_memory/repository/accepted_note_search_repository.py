@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
+from basic_memory.indexing.project_index_workflow import delete_project_index_vector_rows
 
 type SearchIndexSqlValue = str | int | datetime | None
 type SearchIndexSqlParams = dict[str, SearchIndexSqlValue]
@@ -31,7 +32,7 @@ INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
         project_id
     ) VALUES (
         :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type,
-        CAST(:metadata AS jsonb),
+        :metadata,
         NULL, NULL, NULL,
         :entity_id, NULL,
         :created_at, :updated_at,
@@ -138,4 +139,16 @@ class AcceptedNoteSearchRepository:
         await session.execute(
             DELETE_ACCEPTED_NOTE_SEARCH_SQL,
             {"entity_id": entity_id, "project_id": self.project_id},
+        )
+
+    async def delete_entity_vectors(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        """Delete semantic vector rows for one accepted-note entity."""
+        await delete_project_index_vector_rows(
+            session,
+            project_id=self.project_id,
+            entity_ids=(entity_id,),
         )

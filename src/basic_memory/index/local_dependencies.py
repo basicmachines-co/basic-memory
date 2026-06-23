@@ -17,6 +17,7 @@ from basic_memory.indexing import (
     BatchIndexer,
     CurrentMaterializedNoteEntityRepository,
     DefaultIndexBatchRuntime,
+    EmbeddingIndexBatchSummary,
     FileIndexOperation,
     FileIndexResult,
     IndexFileBatchIndexer,
@@ -115,6 +116,11 @@ class LocalIndexSearchService(
     Protocol,
 ):
     """Search capabilities needed by local event/project indexing."""
+
+    async def sync_entity_vectors_batch(
+        self,
+        entity_ids: list[int],
+    ) -> EmbeddingIndexBatchSummary: ...
 
 
 class LocalIndexEntityService(Protocol):
