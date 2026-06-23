@@ -44,6 +44,7 @@ from basic_memory.deps import (
     ProjectExternalIdPathDep,
     IndexFileExecutorV2ExternalDep,
     EntityVectorSyncSchedulerDep,
+    RelationResolutionSchedulerDep,
     RuntimeTenantIdDep,
     SessionDep,
     SessionMakerDep,
@@ -74,19 +75,27 @@ from basic_memory.utils import validate_project_path
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
 
 
-def _schedule_vector_sync_if_enabled(
+def _schedule_post_write_followups(
     *,
     vector_sync_scheduler,
+    relation_resolution_scheduler,
     app_config,
     entity_id: int,
     project_id: int,
 ) -> None:
-    """Schedule out-of-band vector sync only when semantic search is enabled."""
+    """Schedule out-of-band follow-ups after an accepted note mutation.
+
+    Vector sync only runs when semantic search is enabled. Relation resolution
+    always runs so a newly written note back-resolves inbound forward references
+    that name it — parity with the watcher's relation repair, which the inline
+    write path does not otherwise trigger (#1015). Both are no-ops in test mode.
+    """
     if app_config.semantic_search_enabled:
         vector_sync_scheduler.schedule_entity_vector_sync(
             entity_id=entity_id,
             project_id=project_id,
         )
+    relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
 
 
 def entity_response_from_note_content_payload(payload) -> EntityResponseV2:
@@ -558,6 +567,7 @@ async def create_entity(
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
+    relation_resolution_scheduler: RelationResolutionSchedulerDep,
     app_config: AppConfigDep,
 ) -> EntityResponseV2:
     """Create a new entity.
@@ -590,8 +600,9 @@ async def create_entity(
 
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
-        _schedule_vector_sync_if_enabled(
+        _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
+            relation_resolution_scheduler=relation_resolution_scheduler,
             app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
@@ -621,6 +632,7 @@ async def update_entity_by_id(
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
+    relation_resolution_scheduler: RelationResolutionSchedulerDep,
     app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
@@ -657,8 +669,9 @@ async def update_entity_by_id(
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         response.status_code = status.HTTP_202_ACCEPTED
         result = entity_response_from_note_content_payload(accepted.payload)
-        _schedule_vector_sync_if_enabled(
+        _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
+            relation_resolution_scheduler=relation_resolution_scheduler,
             app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
@@ -682,6 +695,7 @@ async def edit_entity_by_id(
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
+    relation_resolution_scheduler: RelationResolutionSchedulerDep,
     app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
@@ -720,8 +734,9 @@ async def edit_entity_by_id(
 
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
-        _schedule_vector_sync_if_enabled(
+        _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
+            relation_resolution_scheduler=relation_resolution_scheduler,
             app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
@@ -803,6 +818,7 @@ async def move_entity(
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     app_config: AppConfigDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
+    relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Move an entity to a new file location.
@@ -841,8 +857,9 @@ async def move_entity(
 
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
-        _schedule_vector_sync_if_enabled(
+        _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
+            relation_resolution_scheduler=relation_resolution_scheduler,
             app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
@@ -865,6 +882,7 @@ async def move_directory(
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
+    relation_resolution_scheduler: RelationResolutionSchedulerDep,
     session_maker: SessionMakerDep,
 ) -> DirectoryMoveResult:
     """Move all entities in a directory to a new location.
@@ -907,8 +925,9 @@ async def move_directory(
                     )
                 if entity:
                     await search_service.index_entity(entity)
-                    _schedule_vector_sync_if_enabled(
+                    _schedule_post_write_followups(
                         vector_sync_scheduler=vector_sync_scheduler,
+                        relation_resolution_scheduler=relation_resolution_scheduler,
                         app_config=app_config,
                         entity_id=entity.id,
                         project_id=project_id,

@@ -14,6 +14,7 @@ from basic_memory.index.inline_operations import (
 from basic_memory.index.local_dependencies import (
     DefaultLocalIndexProjectDependencyProvider,
     LocalIndexProjectDependencyProvider,
+    LocalIndexSearchService,
 )
 from basic_memory.index.local_moves import (
     LocalProjectIndexMoveContentUpdater,
@@ -30,9 +31,9 @@ from basic_memory.indexing import (
     ExternalFileDeleteResult,
     FileIndexChecker,
     IndexFileJobResult,
+    IndexFileJobStatus,
     IndexFileRelationResolutionContext,
     IndexFileObjectMetadata,
-    OrphanSearchIndex,
     ProjectIndexMovedEntitySearchRefresher,
     RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
@@ -112,13 +113,21 @@ class LocalExternalFileDeleteObjects:
 
 @dataclass(frozen=True, slots=True)
 class LocalInlineStorageEventResultRecorder:
-    """Log inline local event-index results and clean search state after deletes."""
+    """Log inline local event-index results and run note follow-ups.
+
+    Runs the same post-index follow-ups the project-index path runs: forward
+    reference resolution and, when enabled, semantic vector embedding. Without
+    the embedding step, notes that arrive through the watcher (Obsidian, git
+    pull, cloud sync) are full-text searchable but silently absent from semantic
+    search until a manual reindex (#1016).
+    """
 
     tenant_id: TenantId
     project: ProjectRuntimeReference
-    search_service: OrphanSearchIndex[Entity]
+    search_service: LocalIndexSearchService
     relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
     relation_runtime: RelationResolutionRuntime
+    index_embeddings: bool
 
     async def index_file_completed(
         self,
@@ -132,6 +141,9 @@ class LocalInlineStorageEventResultRecorder:
             reason=result.reason,
             entity_id=result.entity_id,
         )
+
+        # --- Relation repair ---
+        # Back-resolve forward references now that this file is indexed.
         relation_request = plan_index_file_relation_resolution(
             IndexFileRelationResolutionContext(
                 tenant_id=self.tenant_id,
@@ -141,17 +153,33 @@ class LocalInlineStorageEventResultRecorder:
                 status=result.status,
             )
         )
-        if relation_request is None:
-            return
-        relation_result = await resolve_project_relations(self.relation_runtime)
-        logger.info(
-            "Local event-index relation repair completed",
-            project_id=relation_request.project_id,
-            project_path=relation_request.project_path,
-            resolved=relation_result.resolved,
-            remaining=relation_result.remaining,
-            passes=relation_result.passes,
-        )
+        if relation_request is not None:
+            relation_result = await resolve_project_relations(self.relation_runtime)
+            logger.info(
+                "Local event-index relation repair completed",
+                project_id=relation_request.project_id,
+                project_path=relation_request.project_path,
+                resolved=relation_result.resolved,
+                remaining=relation_result.remaining,
+                passes=relation_result.passes,
+            )
+
+        # --- Semantic embedding ---
+        # Trigger: a file was (re)indexed and semantic embeddings are enabled.
+        # Why: the watcher path indexes FTS + relations but, unlike the API
+        #   write path and reindex, never embeds — so externally edited notes
+        #   silently miss semantic search until a manual reindex (#1016).
+        # Outcome: refresh this entity's vector chunks inline.
+        if (
+            self.index_embeddings
+            and result.status == IndexFileJobStatus.processed
+            and result.entity_id is not None
+        ):
+            await self.search_service.sync_entity_vectors_batch([result.entity_id])
+            logger.info(
+                "Local event-index embedding completed",
+                entity_id=result.entity_id,
+            )
 
     async def delete_file_completed(
         self,
@@ -218,7 +246,9 @@ class LocalWatchEventIndexRuntimeFactory:
         DefaultLocalIndexProjectDependencyProvider()
     )
     tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
-    index_embeddings: bool = True
+    # Embedding requires semantic search to be configured, so default it off and
+    # let runtime construction opt in via semantic_search_enabled (#1016).
+    index_embeddings: bool = False
     move_batch_size: int = 100
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
@@ -279,6 +309,7 @@ class LocalWatchEventIndexRuntimeFactory:
                     link_resolver=dependencies.link_resolver,
                     entity_indexer=dependencies.search_service,
                 ),
+                index_embeddings=self.index_embeddings,
             ),
             index_embeddings=self.index_embeddings,
         )

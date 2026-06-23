@@ -114,7 +114,10 @@ class WatchService:
         self._ignore_patterns_cache: dict[Path, set[str]] = {}
         self._sorted_watch_filter_roots: tuple[Path, ...] | None = None
         self._event_index_runtime_factory = (
-            event_index_runtime_factory or LocalWatchEventIndexRuntimeFactory()
+            event_index_runtime_factory
+            or LocalWatchEventIndexRuntimeFactory(
+                index_embeddings=app_config.semantic_search_enabled,
+            )
         )
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)

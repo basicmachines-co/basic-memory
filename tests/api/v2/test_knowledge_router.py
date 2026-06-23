@@ -721,6 +721,34 @@ async def test_create_schedules_vector_sync_when_semantic_enabled(
 
 
 @pytest.mark.asyncio
+async def test_create_schedules_relation_resolution_regardless_of_semantic(
+    client: AsyncClient, v2_project_url, relation_resolution_scheduler_spy, app_config
+):
+    """Create should schedule forward-reference resolution even when semantic is off.
+
+    Regression for #1015: creating a note must back-resolve inbound forward
+    references that name it, matching the watcher's relation repair. Unlike
+    vector sync, this is not gated on semantic search.
+    """
+    app_config.semantic_search_enabled = False
+    start_count = len(relation_resolution_scheduler_spy)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "RelationResolutionTarget",
+            "directory": "test",
+            "content": "Content that may satisfy a dangling forward reference",
+        },
+        params={"fast": False},
+    )
+    assert response.status_code == 202
+
+    assert len(relation_resolution_scheduler_spy) == start_count + 1
+    assert relation_resolution_scheduler_spy[-1]["project_id"] is not None
+
+
+@pytest.mark.asyncio
 async def test_create_skips_vector_sync_when_semantic_disabled(
     client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):

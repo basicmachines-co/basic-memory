@@ -102,6 +102,10 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
+    class FakeRelationResolutionScheduler:
+        def schedule_relation_resolution(self, *args, **kwargs):
+            return None
+
     result = await knowledge_router_module.create_entity(
         project_id=123,
         project_external_id="project-123",
@@ -115,6 +119,7 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
+        relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
     )
 
@@ -143,6 +148,10 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
+    class FakeRelationResolutionScheduler:
+        def schedule_relation_resolution(self, *args, **kwargs):
+            return None
+
     response = Response()
     result = await knowledge_router_module.update_entity_by_id(
         data=Entity(
@@ -158,6 +167,7 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
+        relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )
@@ -187,6 +197,10 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
+    class FakeRelationResolutionScheduler:
+        def schedule_relation_resolution(self, *args, **kwargs):
+            return None
+
     result = await knowledge_router_module.edit_entity_by_id(
         data=EditEntityRequest(operation="append", content="edited telemetry content"),
         project_id=123,
@@ -194,6 +208,7 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
+        relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )

@@ -39,6 +39,11 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
+from basic_memory.indexing.relation_resolution import (
+    RelationResolutionRuntime,
+    RepositoryRelationResolutionRuntime,
+    resolve_project_relations,
+)
 from basic_memory.cloud import (
     DirectoryDeleteService,
     LocalNoteContentMaterializationProvider,
@@ -932,6 +937,59 @@ async def get_search_reindex_scheduler(
     )
 
 
+class RelationResolutionScheduler(Protocol):
+    """Schedule background forward-reference resolution after note mutations."""
+
+    def schedule_relation_resolution(self, *, project_id: int) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalRelationResolutionScheduler:
+    """Back-resolve dangling forward references off the request path.
+
+    The MCP/API write path inline-indexes the materialized note but never
+    back-resolves inbound `[[wikilinks]]` whose target the new note now
+    satisfies. The watcher's relation repair does this, but only for files it is
+    the first to index, so MCP writes (which pre-index the file) never trigger
+    it. Scheduling a project relation pass here gives MCP writes the same
+    back-resolution the watcher path already provides (#1015). No-op in test
+    mode, consistent with the other local schedulers.
+    """
+
+    relation_runtime: RelationResolutionRuntime
+    test_mode: bool
+
+    def schedule_relation_resolution(self, *, project_id: int) -> None:
+        _ = project_id  # runtime is already bound to the request's project
+        _schedule_background_coroutine(
+            resolve_project_relations(self.relation_runtime),
+            test_mode=self.test_mode,
+        )
+
+
+async def get_relation_resolution_scheduler(
+    session_maker: SessionMakerDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    relation_repository: RelationRepositoryV2ExternalDep,
+    link_resolver: LinkResolverV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+    app_config: AppConfigDep,
+) -> RelationResolutionScheduler:
+    # Build the project-scoped resolution runtime. It owns its own sessions via
+    # session_maker, so it is safe to run from a detached background task.
+    runtime = RepositoryRelationResolutionRuntime(
+        session_maker=session_maker,
+        relation_repository=relation_repository,
+        entity_repository=entity_repository,
+        link_resolver=link_resolver,
+        entity_indexer=search_service,
+    )
+    return LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        test_mode=app_config.is_test_env,
+    )
+
+
 EntityVectorSyncSchedulerDep = Annotated[
     EntityVectorSyncScheduler,
     Depends(get_entity_vector_sync_scheduler),
@@ -943,6 +1001,10 @@ ProjectIndexSchedulerDep = Annotated[
 SearchReindexSchedulerDep = Annotated[
     SearchReindexScheduler,
     Depends(get_search_reindex_scheduler),
+]
+RelationResolutionSchedulerDep = Annotated[
+    RelationResolutionScheduler,
+    Depends(get_relation_resolution_scheduler),
 ]
 
 

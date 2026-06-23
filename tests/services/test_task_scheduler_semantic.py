@@ -9,6 +9,7 @@ from basic_memory.index import ProjectIndexCoordinatorResult
 from basic_memory.deps.services import (
     LocalEntityVectorSyncScheduler,
     LocalProjectIndexScheduler,
+    LocalRelationResolutionScheduler,
     LocalSearchReindexScheduler,
 )
 
@@ -82,3 +83,45 @@ async def test_search_reindex_scheduler_maps_to_search_service():
     await asyncio.sleep(0.05)
 
     assert search_service.reindexed_project is True
+
+
+class StubRelationResolutionRuntime:
+    def __init__(self) -> None:
+        self.resolve_calls = 0
+
+    async def count_unresolved_relations(self) -> int:
+        return 0
+
+    async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
+        self.resolve_calls += 1
+        return set()
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_runs_project_resolution():
+    """Relation resolution scheduling should run a project resolution pass."""
+    runtime = StubRelationResolutionRuntime()
+
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        test_mode=False,
+    )
+    scheduler.schedule_relation_resolution(project_id=13)
+    await asyncio.sleep(0.05)
+
+    assert runtime.resolve_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_is_noop_in_test_mode():
+    """Test mode should suppress the background resolution pass entirely."""
+    runtime = StubRelationResolutionRuntime()
+
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        test_mode=True,
+    )
+    scheduler.schedule_relation_resolution(project_id=13)
+    await asyncio.sleep(0.05)
+
+    assert runtime.resolve_calls == 0

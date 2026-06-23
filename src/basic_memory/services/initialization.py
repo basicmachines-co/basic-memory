@@ -145,7 +145,9 @@ async def initialize_file_indexing(
     # duplicate watchers fighting over the same files.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
 
-    event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory()
+    event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
+        index_embeddings=app_config.semantic_search_enabled,
+    )
     project_index_runtime_factory = LocalProjectIndexRuntimeFactory()
 
     # Initialize watch service
