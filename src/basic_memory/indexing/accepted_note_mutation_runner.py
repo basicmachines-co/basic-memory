@@ -29,6 +29,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import NoteContentRepository
+from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.runtime import (
@@ -290,6 +291,14 @@ class AcceptedNoteMutationDependencies:
     write_repositories: AcceptedNoteWriteRepositories
     clock: AcceptedNoteMutationClock
     move_policy: AcceptedNoteMutationMovePolicy
+    # Trigger: local runtimes where the filesystem is the source of truth.
+    # Why: a DB-first create over a file that exists on disk but is not yet
+    #   indexed would commit new DB/search rows while the file keeps old content;
+    #   the next watcher pass then overwrites the DB with the stale file content,
+    #   silently losing the write. Cloud reconciles object storage during
+    #   materialization, so it keeps DB-first acceptance.
+    # Outcome: local creates reject the conflict up front (409) instead.
+    verify_storage_absent_on_create: bool = False
 
 
 def accepted_note_integrity_rejection(error: IntegrityError) -> AcceptedNoteMutationRejection:
@@ -451,9 +460,14 @@ async def _run_accepted_note_create(
         prepared_write = await prepare_accepted_note_create(
             preparer,
             request.data,
-            check_storage_exists=False,
+            check_storage_exists=dependencies.verify_storage_absent_on_create,
             session=session,
         )
+    except EntityAlreadyExistsError as error:
+        # An unindexed file already occupies this path (local source-of-truth
+        # runtimes only). Reject instead of committing DB state that the next
+        # watcher pass would overwrite with the stale file content.
+        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
     except (ParseError, ValueError) as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 

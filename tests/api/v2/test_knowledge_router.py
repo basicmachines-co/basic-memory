@@ -387,6 +387,39 @@ async def test_create_entity_conflict_returns_409(client: AsyncClient, v2_projec
 
 
 @pytest.mark.asyncio
+async def test_create_entity_rejects_existing_unindexed_file(
+    client: AsyncClient, v2_project_url, project_config
+):
+    """A create over a file that exists on disk but is not indexed returns 409.
+
+    Regression for the #1002 review: local creates must not commit DB/search
+    rows that diverge from on-disk content, which the next watcher pass would
+    restore (silently losing the write). The local runtime keeps the storage
+    existence check enabled, so the create is rejected up front.
+    """
+    file_path = project_config.home / "conflict" / "UnindexedNote.md"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    original = "---\ntitle: UnindexedNote\ntype: note\n---\n\nPre-existing on-disk content\n"
+    file_path.write_text(original, encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "UnindexedNote",
+            "directory": "conflict",
+            "note_type": "note",
+            "content_type": "text/markdown",
+            "content": "New content from the create request",
+        },
+        params={"fast": False},
+    )
+
+    assert response.status_code == 409
+    # The on-disk file must be untouched: no divergence, no silent overwrite.
+    assert file_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
 async def test_create_entity_returns_content(client: AsyncClient, file_service, v2_project_url):
     """Test creating an entity always returns file content with frontmatter."""
     data = {

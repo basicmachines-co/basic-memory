@@ -706,6 +706,10 @@ async def get_note_content_mutation_service(
                 disable_permalinks=app_config.disable_permalinks,
                 update_permalinks_on_move=app_config.update_permalinks_on_move,
             ),
+            # Local filesystem is the source of truth: reject a create when the
+            # target file already exists on disk but is not yet indexed (#1002
+            # review), rather than diverging DB/search from the file.
+            verify_storage_absent_on_create=True,
         ),
         content_freshener=LocalCurrentNoteContentFreshener(
             entity_repository=entity_repository,
