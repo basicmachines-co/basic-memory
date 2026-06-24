@@ -947,28 +947,55 @@ class RelationResolutionScheduler(Protocol):
     def schedule_relation_resolution(self, *, project_id: int) -> None: ...
 
 
+# Process-lifetime coalescing state: project ids with a relation-resolution
+# pass already pending or in flight. A burst of writes collapses to a single
+# offline pass instead of one whole-project relation scan per write — running a
+# scan per write made the write path heavier and piled up under concurrency
+# (see benchmarks/docs/write-load-benchmark.md).
+_pending_relation_resolution: set[int] = set()
+
+
 @dataclass(frozen=True, slots=True)
 class LocalRelationResolutionScheduler:
-    """Back-resolve dangling forward references off the request path.
+    """Back-resolve dangling forward references off the request path, coalesced.
 
     The MCP/API write path inline-indexes the materialized note but never
     back-resolves inbound `[[wikilinks]]` whose target the new note now
-    satisfies. The watcher's relation repair does this, but only for files it is
-    the first to index, so MCP writes (which pre-index the file) never trigger
-    it. Scheduling a project relation pass here gives MCP writes the same
-    back-resolution the watcher path already provides (#1015). No-op in test
-    mode, consistent with the other local schedulers.
+    satisfies (#1015). Resolution is a whole-project scan, so running it per
+    write is both wasteful and a real write-load cost. Instead each write only
+    enqueues: the first write of a burst schedules one debounced background pass
+    and every other write coalesces onto it (at most one pending pass per
+    project). The accept path stays light; reconciliation runs offline. No-op in
+    test mode, consistent with the other local schedulers.
     """
 
     relation_runtime: RelationResolutionRuntime
     test_mode: bool
+    debounce_seconds: float = 0.5
 
     def schedule_relation_resolution(self, *, project_id: int) -> None:
-        _ = project_id  # runtime is already bound to the request's project
+        # Early-return in test mode BEFORE touching the pending set: the
+        # background coroutine (which clears the set) never runs under test mode,
+        # so adding here would leak the project id forever.
+        if self.test_mode:
+            return
+        # Coalesce: a pass is already pending/running for this project, so this
+        # write is already covered — do not schedule another scan.
+        if project_id in _pending_relation_resolution:
+            return
+        _pending_relation_resolution.add(project_id)
         _schedule_background_coroutine(
-            resolve_project_relations(self.relation_runtime),
+            self._resolve_after_debounce(project_id),
             test_mode=self.test_mode,
         )
+
+    async def _resolve_after_debounce(self, project_id: int) -> None:
+        try:
+            # Debounce: let the burst settle so one pass covers all of it.
+            await asyncio.sleep(self.debounce_seconds)
+            await resolve_project_relations(self.relation_runtime)
+        finally:
+            _pending_relation_resolution.discard(project_id)
 
 
 async def get_relation_resolution_scheduler(

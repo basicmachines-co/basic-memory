@@ -99,22 +99,52 @@ class StubRelationResolutionRuntime:
 
 @pytest.mark.asyncio
 async def test_relation_resolution_scheduler_runs_project_resolution():
-    """Relation resolution scheduling should run a project resolution pass."""
+    """A single write schedules one debounced project resolution pass."""
+    from basic_memory.deps.services import _pending_relation_resolution
+
+    _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
         test_mode=False,
+        debounce_seconds=0.0,
     )
     scheduler.schedule_relation_resolution(project_id=13)
     await asyncio.sleep(0.05)
 
+    assert runtime.resolve_calls == 1
+    # The pending marker is cleared after the pass so later writes can schedule.
+    assert 13 not in _pending_relation_resolution
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_coalesces_a_burst():
+    """A burst of writes collapses to a single project resolution pass."""
+    from basic_memory.deps.services import _pending_relation_resolution
+
+    _pending_relation_resolution.clear()
+    runtime = StubRelationResolutionRuntime()
+
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        test_mode=False,
+        debounce_seconds=0.02,
+    )
+    for _ in range(10):
+        scheduler.schedule_relation_resolution(project_id=7)
+    await asyncio.sleep(0.1)
+
+    # Ten writes, one offline pass — not one whole-project scan per write.
     assert runtime.resolve_calls == 1
 
 
 @pytest.mark.asyncio
 async def test_relation_resolution_scheduler_is_noop_in_test_mode():
     """Test mode should suppress the background resolution pass entirely."""
+    from basic_memory.deps.services import _pending_relation_resolution
+
+    _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()
 
     scheduler = LocalRelationResolutionScheduler(
@@ -125,3 +155,5 @@ async def test_relation_resolution_scheduler_is_noop_in_test_mode():
     await asyncio.sleep(0.05)
 
     assert runtime.resolve_calls == 0
+    # Test mode must not leak a pending marker (it never runs the clearer).
+    assert 13 not in _pending_relation_resolution
