@@ -535,6 +535,21 @@ class BasicMemoryConfig(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
+    def migrate_legacy_sync_changes(cls, data: Any) -> Any:
+        """Honor the legacy ``sync_changes`` opt-out after its rename to ``index_changes``.
+
+        Existing configs that set ``"sync_changes": false`` to disable realtime
+        indexing must keep that behavior across the rename. ``extra="ignore"``
+        would otherwise drop the unknown key and fall back to the new default
+        (True), silently restarting the watcher for users who opted out.
+        The new field takes precedence when both are present.
+        """
+        if isinstance(data, dict) and "index_changes" not in data and "sync_changes" in data:
+            data["index_changes"] = data["sync_changes"]
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
     def migrate_legacy_projects(cls, data: Any) -> Any:
         """Migrate old-format config (Dict[str, str]) to new ProjectEntry format.
 
