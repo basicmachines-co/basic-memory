@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from uuid import UUID
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db, file_utils
@@ -39,6 +41,11 @@ from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
 LOCAL_NOTE_CONTENT_TENANT_ID = UUID(int=0)
+
+# Strong references to in-flight deferred materialization tasks. asyncio only
+# keeps weak references to tasks, so without this a fire-and-forget background
+# materialization could be garbage-collected mid-write.
+_pending_materializations: set[asyncio.Task[None]] = set()
 
 
 def note_content_payload_file_path(
@@ -197,15 +204,58 @@ class LocalNoteContentMaterializationProvider:
     session_maker: async_sessionmaker[AsyncSession]
     file_service: FileService
     file_indexer: IndexFileExecutor | None = None
+    test_mode: bool = False
 
     async def materialize_write_change(
         self,
         accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
-        """Write accepted note content to the local filesystem when needed."""
+        """Materialize an accepted note write OFF the accept path.
+
+        Cloud/local parity (DO NOT UNDO): cloud's materialize_write_change
+        enqueues a PGQ job and returns immediately, letting Tigris object storage
+        + indexing catch up asynchronously because S3 writes are slow. Locally we
+        mirror that with an in-process background task. The accept has already
+        persisted note_content (the write/read-through cache that serves reads);
+        here we only schedule writing the markdown file (the source of truth) and
+        indexing it. Writing + indexing the file is the heavy part of a write, so
+        doing it inline reintroduces a ~3x write-load regression
+        (benchmarks/docs/write-load-benchmark.md).
+
+        PARITY INVARIANT: production must defer. Test mode runs inline ONLY so
+        tests can assert file/search state synchronously — never make the
+        production path synchronous to "simplify" this.
+        """
         if accepted.materialization is None:
             return accepted
+        if self.test_mode:
+            return await self._materialize_write_now(accepted)
+        self._schedule_materialization(accepted)
+        return accepted
 
+    def _schedule_materialization(
+        self,
+        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
+    ) -> None:
+        task = asyncio.create_task(self._materialize_write_logged(accepted))
+        _pending_materializations.add(task)
+        task.add_done_callback(_pending_materializations.discard)
+
+    async def _materialize_write_logged(
+        self,
+        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
+    ) -> None:
+        try:
+            await self._materialize_write_now(accepted)
+        except Exception:  # pragma: no cover - defensive background guard
+            logger.exception("Local note materialization failed")
+
+    async def _materialize_write_now(
+        self,
+        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
+    ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
+        if accepted.materialization is None:  # pragma: no cover - guarded by caller
+            return accepted
         storage = LocalNoteContentStorage(self.file_service)
         cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(storage)
         result = await run_note_materialization(

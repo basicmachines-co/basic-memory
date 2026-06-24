@@ -89,6 +89,14 @@ def _schedule_post_write_followups(
     always runs so a newly written note back-resolves inbound forward references
     that name it — parity with the watcher's relation repair, which the inline
     write path does not otherwise trigger (#1015). Both are no-ops in test mode.
+
+    CLOUD/LOCAL PARITY (do not break): every follow-up here is a core *router
+    scheduler* that the runtime overrides via dependency injection — local runs
+    it in-process (debounced), cloud overrides each to enqueue a PGQ job. Cloud
+    must override BOTH get_entity_vector_sync_scheduler AND
+    get_relation_resolution_scheduler; if a new follow-up scheduler is added
+    here, cloud needs a matching override or it will run the local in-process
+    work on the cloud API server. See basic_memory_cloud api/deps/cloud_overrides.
     """
     if app_config.semantic_search_enabled:
         vector_sync_scheduler.schedule_entity_vector_sync(

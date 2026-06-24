@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
@@ -86,11 +87,16 @@ def accepted_materialization_change() -> RuntimeAcceptedNoteChange[
 
 def local_materialization_provider(
     indexer: RecordingFileIndexer,
+    *,
+    test_mode: bool = True,
 ) -> LocalNoteContentMaterializationProvider:
+    # test_mode=True keeps materialization inline so these tests can assert the
+    # result synchronously; production defers it to a background task.
     return LocalNoteContentMaterializationProvider(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_service=cast(FileService, object()),
         file_indexer=indexer,
+        test_mode=test_mode,
     )
 
 
@@ -153,3 +159,48 @@ async def test_local_materialization_returns_conflict_without_indexing(
     assert response_payload["last_materialization_error"] == "Refusing to overwrite notes/test.md"
     assert response_payload["file_checksum"] == "external-checksum"
     assert response_payload["sync_error"] == NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR
+
+
+@pytest.mark.asyncio
+async def test_local_materialization_defers_write_off_the_accept_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production (test_mode=False) returns the accepted DB state at once, writes async.
+
+    Cloud parity: the accept persists note_content and returns 202; the markdown
+    file (source of truth) and its index are written off the request path.
+    """
+    requests: list[RuntimeNoteMaterializationJobRequest] = []
+
+    async def fake_run_note_materialization(
+        request: RuntimeNoteMaterializationJobRequest,
+        **_: Any,
+    ) -> RuntimeNoteMaterializationResult:
+        requests.append(request)
+        return RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.conflict,
+            reason="deferred",
+            file_path="notes/test.md",
+            file_checksum="c",
+        )
+
+    monkeypatch.setattr(
+        note_content_materialization,
+        "run_note_materialization",
+        fake_run_note_materialization,
+    )
+    indexer = RecordingFileIndexer()
+    accepted = accepted_materialization_change()
+
+    result = await local_materialization_provider(
+        indexer, test_mode=False
+    ).materialize_write_change(accepted)
+
+    # Returned immediately with the accepted DB state — no inline write yet.
+    assert result is accepted
+    assert requests == []
+
+    # The write happens off the accept path; drain the background task to confirm.
+    await asyncio.gather(*list(note_content_materialization._pending_materializations))
+    assert len(requests) == 1
