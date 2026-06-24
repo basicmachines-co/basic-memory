@@ -361,11 +361,35 @@ without the shim. Full pooled run:
 | 32 | 1204 / 1001 | 4010 / 2021 | 12.6 / 21.9 |
 | 64 | 1642 / 2043 | 7346 / 2978 | 11.8 / 21.5 |
 
-Caveat: this run's **SQLite is anomalously slow** (C=1 p50 470ms vs ~100ms in the
-earlier clean pool run) — identical SQLite code, so machine load/variance from
-back-to-back container runs, not a regression. So the head-to-head is indicative,
-not definitive; the validated result is that pooling removes the Postgres
-collapse. A clean repeat (idle machine, 3×) would firm up the sqlite-vs-pg gap.
+Caveat: this single run's **SQLite was anomalously slow** (C=1 p50 470ms vs
+~100ms elsewhere) — machine load from back-to-back container runs. The 3× repeat
+below confirms it was noise.
+
+### 2026-06-24 — 3× repeat (variance bounds): on par at C=1, Postgres scales better
+
+Ran sqlite vs postgres 3× each, fresh DB per run, notes=100. mean [min-max]:
+
+| C | SQLite p99 ms | Postgres p99 ms | SQLite thru/s | Postgres thru/s |
+| --- | --- | --- | --- | --- |
+| 1 | 1310 [1063-1535] | 911 [653-1254] | 5.2 [4.5-6.4] | 6.1 [5.6-6.5] |
+| 8 | 3100 [2718-3642] | 1385 [908-2275] | 9.0 [8.3-9.8] | 14.2 [10.0-17.7] |
+| 32 | 5226 [4456-6077] | 2463 [2139-2818] | 12.8 [11.3-13.6] | 18.3 [14.9-21.7] |
+| 64 | 7487 [5483-10541] | 3488 [2952-4240] | 12.2 [8.6-14.2] | 20.5 [17.7-22.6] |
+
+(p50 — SQLite: 95/608/1497/2254 ms; Postgres: 117/492/1184/2300 ms at C=1/8/32/64.)
+
+Findings, now with bounds:
+- **Zero failed writes across all 24 cells.** Both backends are stable under load
+  with the worker pool + (for Postgres) connection pool. No collapse anywhere.
+- **The earlier SQLite "470ms" was noise** — clean SQLite C=1 p50 is ~95ms.
+- **On par at C=1** (sqlite 95 vs pg 117 ms p50; throughput ranges overlap).
+- **Postgres scales better at concurrency, and the ranges separate** — at C=64
+  Postgres throughput is ~20.5 vs SQLite ~12.2/s and p99 ~3.5s vs ~7.5s, with no
+  overlap at C=32/64. The MVCC + connection-pool advantage over SQLite's single
+  writer is real and reproducible (matches the hypothesis: roughly on par locally,
+  better headroom on Postgres) — once NullPool is replaced with a real pool.
+- SQLite C=64 is the noisiest cell (p99 5.5-10.5s) — single-writer contention is
+  the most load-sensitive, as expected.
 
 ## Open questions / next steps
 
