@@ -374,6 +374,41 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    # SQLite tuning. The index DB is a cache rebuildable from the markdown files
+    # (the source of truth), so durability *could* be traded for throughput — but
+    # benchmarks showed OFF buys nothing over the NORMAL default (WAL + NORMAL
+    # already skips the per-commit fsync), so the safe default stays.
+    sqlite_synchronous: Literal["OFF", "NORMAL", "FULL", "EXTRA"] = Field(
+        default="NORMAL",
+        description="SQLite `PRAGMA synchronous`. Default NORMAL — safe with WAL "
+        "(survives app crashes; only an OS crash/power loss can lose the last "
+        "transactions). OFF showed no measurable write-throughput gain in "
+        "benchmarks (WAL+NORMAL already avoids the per-commit fsync), so it is only "
+        "worth setting for callers that knowingly trade durability — the index DB "
+        "rebuilds from the markdown files via sync — e.g. a one-off bulk import.",
+    )
+    sqlite_mmap_size: int = Field(
+        default=268435456,  # 256 MB
+        description="SQLite `PRAGMA mmap_size` in bytes (0 disables memory-mapped "
+        "I/O). Speeds reads — including the lookups inside writes (link/permalink "
+        "resolution, FTS).",
+        ge=0,
+    )
+    sqlite_wal_autocheckpoint: int = Field(
+        default=1000,
+        description="SQLite `PRAGMA wal_autocheckpoint` in pages (0 disables "
+        "automatic checkpoints). Higher values checkpoint less often, reducing "
+        "writer stalls under sustained bursts at the cost of a larger WAL.",
+        ge=0,
+    )
+    sqlite_page_size: int = Field(
+        default=4096,
+        description="SQLite `PRAGMA page_size` in bytes (power of two, 512-65536). "
+        "Only takes effect on a freshly created database (or after VACUUM).",
+        ge=512,
+        le=65536,
+    )
+
     # Watch service configuration
     index_delay: int = Field(
         default=1000, description="Milliseconds to wait after changes before indexing", gt=0

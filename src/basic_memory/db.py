@@ -167,24 +167,55 @@ async def scoped_session(
         await factory.remove()
 
 
-def _configure_sqlite_connection(dbapi_conn, enable_wal: bool = True) -> None:
-    """Configure SQLite connection with WAL mode and optimizations.
+_SQLITE_SYNCHRONOUS = {"OFF", "NORMAL", "FULL", "EXTRA"}
+
+
+def _configure_sqlite_connection(
+    dbapi_conn,
+    enable_wal: bool = True,
+    *,
+    synchronous: str = "NORMAL",
+    mmap_size: int = 0,
+    wal_autocheckpoint: int = 1000,
+    page_size: int = 0,
+) -> None:
+    """Configure a SQLite connection with WAL mode and tunable performance PRAGMAs.
 
     Args:
         dbapi_conn: Database API connection object
         enable_wal: Whether to enable WAL mode (should be False for in-memory databases)
+        synchronous: PRAGMA synchronous level (OFF/NORMAL/FULL/EXTRA)
+        mmap_size: PRAGMA mmap_size bytes (0 = disabled)
+        wal_autocheckpoint: PRAGMA wal_autocheckpoint pages (0 = disabled; WAL only)
+        page_size: PRAGMA page_size bytes (0 = leave default; only affects new DBs)
     """
     cursor = dbapi_conn.cursor()
     try:
+        # page_size must be set before the database is written to take effect, so
+        # do it first; it is a no-op on an already-populated DB.
+        if page_size:
+            cursor.execute(f"PRAGMA page_size={int(page_size)}")
         # Enable WAL mode for better concurrency (not supported for in-memory databases)
         if enable_wal:
             cursor.execute("PRAGMA journal_mode=WAL")
         # Set busy timeout to handle locked databases
         cursor.execute("PRAGMA busy_timeout=10000")  # 10 seconds
-        # Optimize for performance
-        cursor.execute("PRAGMA synchronous=NORMAL")
+        # synchronous: OFF trades durability for write throughput. Safe here because
+        # the markdown files are the source of truth and the index DB rebuilds from
+        # them via sync — a crash means a re-sync, not data loss. Validate the token
+        # since it is interpolated into the PRAGMA.
+        sync = synchronous.upper() if synchronous.upper() in _SQLITE_SYNCHRONOUS else "NORMAL"
+        cursor.execute(f"PRAGMA synchronous={sync}")
         cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
         cursor.execute("PRAGMA temp_store=MEMORY")
+        # mmap_size: memory-map the DB for faster reads, including the lookups
+        # inside writes (link/permalink resolution, FTS).
+        if mmap_size:
+            cursor.execute(f"PRAGMA mmap_size={int(mmap_size)}")
+        # wal_autocheckpoint: checkpoint less often to avoid writer stalls under
+        # sustained write bursts (WAL only).
+        if enable_wal and wal_autocheckpoint:
+            cursor.execute(f"PRAGMA wal_autocheckpoint={int(wal_autocheckpoint)}")
         # Windows-specific optimizations
         if os.name == "nt":
             cursor.execute("PRAGMA locking_mode=NORMAL")  # Ensure normal locking on Windows
@@ -195,12 +226,15 @@ def _configure_sqlite_connection(dbapi_conn, enable_wal: bool = True) -> None:
         cursor.close()
 
 
-def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
+def _create_sqlite_engine(
+    db_url: str, db_type: DatabaseType, config: Optional[BasicMemoryConfig] = None
+) -> AsyncEngine:
     """Create SQLite async engine with appropriate configuration.
 
     Args:
         db_url: SQLite connection URL
         db_type: Database type (MEMORY or FILESYSTEM)
+        config: Optional config supplying the tunable SQLite PRAGMAs
 
     Returns:
         Configured async engine for SQLite
@@ -246,11 +280,24 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
     # Enable WAL mode for better concurrency and reliability
     # Note: WAL mode is not supported for in-memory databases
     enable_wal = db_type != DatabaseType.MEMORY
+    # Snapshot the tunable PRAGMAs once (config is process-stable) so the per-connect
+    # listener doesn't re-read config on every pooled connection.
+    synchronous = config.sqlite_synchronous if config else "NORMAL"
+    mmap_size = config.sqlite_mmap_size if config else 0
+    wal_autocheckpoint = config.sqlite_wal_autocheckpoint if config else 1000
+    page_size = config.sqlite_page_size if config else 0
 
     @event.listens_for(engine.sync_engine, "connect")
     def enable_wal_mode(dbapi_conn, connection_record):
-        """Enable WAL mode on each connection."""
-        _configure_sqlite_connection(dbapi_conn, enable_wal=enable_wal)
+        """Apply WAL + tunable PRAGMAs on each connection."""
+        _configure_sqlite_connection(
+            dbapi_conn,
+            enable_wal=enable_wal,
+            synchronous=synchronous,
+            mmap_size=mmap_size,
+            wal_autocheckpoint=wal_autocheckpoint,
+            page_size=page_size,
+        )
 
     return engine
 
@@ -336,7 +383,7 @@ def _create_engine_and_session(
     if db_type == DatabaseType.POSTGRES or config.database_backend == DatabaseBackend.POSTGRES:
         engine = _create_postgres_engine(db_url, config)
     else:
-        engine = _create_sqlite_engine(db_url, db_type)
+        engine = _create_sqlite_engine(db_url, db_type, config)
 
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_maker

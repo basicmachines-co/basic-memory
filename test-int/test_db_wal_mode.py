@@ -48,7 +48,8 @@ async def test_busy_timeout_configured(engine_factory, db_backend):
 
 @pytest.mark.asyncio
 async def test_synchronous_mode_configured(engine_factory, db_backend):
-    """Test that synchronous mode is set to NORMAL for performance."""
+    """Synchronous defaults to NORMAL — safe with WAL, and OFF showed no
+    measurable throughput gain in benchmarks. See config.sqlite_synchronous."""
     if db_backend == "postgres":
         pytest.skip("SQLite-specific test - PRAGMA commands not supported in Postgres")
 
@@ -58,8 +59,31 @@ async def test_synchronous_mode_configured(engine_factory, db_backend):
         result = await conn.execute(text("PRAGMA synchronous"))
         synchronous = _first_value(result.fetchone())
 
-        # Synchronous should be NORMAL (1)
+        # NORMAL (1) is the default.
         assert synchronous == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value,expected", [("OFF", 0), ("NORMAL", 1), ("FULL", 2)])
+async def test_sqlite_synchronous_follows_config(tmp_path, value, expected):
+    """_create_sqlite_engine applies the configured PRAGMA synchronous level."""
+    from basic_memory import db
+    from basic_memory.config import BasicMemoryConfig
+
+    config = BasicMemoryConfig(
+        projects={"main": {"path": str(tmp_path)}},
+        default_project="main",
+        sqlite_synchronous=value,
+    )
+    engine = db._create_sqlite_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'sync.db'}", db.DatabaseType.FILESYSTEM, config
+    )
+    try:
+        async with engine.connect() as conn:
+            got = _first_value((await conn.execute(text("PRAGMA synchronous"))).fetchone())
+        assert got == expected
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
