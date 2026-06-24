@@ -260,11 +260,6 @@ async def run(args: argparse.Namespace) -> int:
         assert database_url is not None
         env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
         env["BASIC_MEMORY_DATABASE_URL"] = database_url
-        # Local SQLite seeds a default project on startup; the Postgres backend
-        # (cloud-oriented project model) does not, so a fresh local Postgres has
-        # no default project and create_memory_project's default lookup raises.
-        # Name the default explicitly so the first project can be created.
-        env["BASIC_MEMORY_DEFAULT_PROJECT"] = project
     params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
     output_path = Path(args.output).resolve() if args.output else None
     if output_path and output_path.exists() and args.truncate:

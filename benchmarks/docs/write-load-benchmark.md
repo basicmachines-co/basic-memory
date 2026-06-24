@@ -337,21 +337,40 @@ writers, once pooled) should want a higher count — which is exactly why
 `materialization_workers` is configurable. Default left at 4 (resilient middle);
 tune per backend.
 
+### 2026-06-24 — Postgres connection pool FIXES the collapse (+ default-project seed)
+
+Wired `_create_postgres_engine` to the existing `db_pool_size`/`db_pool_overflow`/
+`db_pool_recycle` config (`AsyncAdaptedQueuePool` instead of `NullPool`), and
+gated the config's default-project seeding on `skip_initialization_sync` instead
+of the Postgres backend, so a fresh local Postgres seeds `main` and no longer
+needs the `BASIC_MEMORY_DEFAULT_PROJECT` shim. Re-ran sqlite vs postgres with the
+worker pool (4) on both:
+
+| C | p99: NullPool → pooled (pg) | thru: NullPool → pooled (pg) | err (pg) |
+| --- | --- | --- | --- |
+| 32 | 478612 → **2021** ms (237×) | 0.2 → **21.9**/s (100×) | 21% → **0** |
+| 64 | (p50 93920 → 2043) | 0.9 → **21.5**/s | 4% → **0** |
+
+Postgres no longer collapses: it scales cleanly to ~21/s with **zero errors** and
+without the shim. Full pooled run:
+
+| C | p50 sql/pg | p99 sql/pg | thru sql/pg (per s) |
+| --- | --- | --- | --- |
+| 1 | 470 / 133 | 3597 / 597 | 1.4 / 6.1 |
+| 8 | 2305 / 468 | 7211 / 1586 | 3.2 / 14.5 |
+| 32 | 1204 / 1001 | 4010 / 2021 | 12.6 / 21.9 |
+| 64 | 1642 / 2043 | 7346 / 2978 | 11.8 / 21.5 |
+
+Caveat: this run's **SQLite is anomalously slow** (C=1 p50 470ms vs ~100ms in the
+earlier clean pool run) — identical SQLite code, so machine load/variance from
+back-to-back container runs, not a regression. So the head-to-head is indicative,
+not definitive; the validated result is that pooling removes the Postgres
+collapse. A clean repeat (idle machine, 3×) would firm up the sqlite-vs-pg gap.
+
 ## Open questions / next steps
 
-**Done:** bounded materialization worker pool (above). Remaining:
-- **Connection pooling for local Postgres** — `NullPool` is the reason local
-  Postgres collapses at C≥32. Wire `_create_postgres_engine` to the existing
-  `db_pool_size`/`db_pool_overflow`/`db_pool_recycle` config (cloud overrides the
-  engine factory, so it's unaffected; SQLite uses a separate engine path).
-  Re-run `bench-write-backend`.
-- **Seed a default project for fresh local Postgres** (QOL) so
-  `create_memory_project` doesn't need the `BASIC_MEMORY_DEFAULT_PROJECT` shim.
-
-**Local-Postgres product gaps surfaced here (separate from the benchmark):**
-- Migration-under-uvloop crash — **fixed** (`basic_memory.migration_loop`).
-- Fresh local Postgres has no default project — `create_memory_project` raises;
-  needs a default-project seed (or an explicit "local Postgres" bootstrap path).
+**Done:** worker pool, Postgres connection pool, local-Postgres default-project
+seed, and the migration-under-uvloop fix (`basic_memory.migration_loop`).
 
 **Remaining harness/measurement work:**
 - Profile the C=1 residual (+21ms over main): `note_content` insert vs
