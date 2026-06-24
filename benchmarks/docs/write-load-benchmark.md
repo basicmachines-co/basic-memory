@@ -305,16 +305,48 @@ as configured.
    around in the harness with `BASIC_MEMORY_DEFAULT_PROJECT`; the product gap
    (local Postgres project bootstrap) is left as a finding.
 
+### 2026-06-24 — bounded materialization worker pool FIXES the wall
+
+Replaced fire-and-forget `asyncio.create_task` with a config-sized worker pool
+(`materialization_workers`, default 4; `_MaterializationWorkerPool`). Re-ran the
+C=128 sweep (notes=200):
+
+| C | no-pool p99 → pool p99 | no-pool thru → pool thru | errors |
+| --- | --- | --- | --- |
+| 64 | 121771 → **9870** ms (12×) | 1.5 → **11.9**/s (8×) | 2% → **0** |
+| 128 | 94954 → **11852** ms (8×) | 2.0 → **10.9**/s (5×) | 1.5% → **0** |
+
+Throughput now **scales and plateaus** at ~11/s (C=8 10.3 → C=128 10.9) instead
+of collapsing; p99 grows gracefully (2.6 → 12s); **zero errors** at every level;
+backlog drains fast (`time_to_searchable` 35-98ms). The pooled branch also
+**beats main** at high concurrency (main C=128: p50 16.2s / thru 4.6 / vs pool
+p50 4.5s / thru 10.9). Bounding the background work is what makes the async write
+path actually scale.
+
+**Worker-count tuning (notes=200, C=64/128):**
+
+| workers | thru/s (C=64 / C=128) | p99 ms (C=64 / C=128) |
+| --- | --- | --- |
+| 2 | **15.6 / 16.0** | **7263 / 10517** |
+| 4 | 11.9 / 10.9 | 9870 / 11852 |
+| 8 | 11.0 / 11.0 | 12307 / 13855 |
+
+**2 workers is the SQLite sweet spot** — the single writer is the bottleneck, so
+fewer workers thrash it less. More workers just contend. Postgres (concurrent
+writers, once pooled) should want a higher count — which is exactly why
+`materialization_workers` is configurable. Default left at 4 (resilient middle);
+tune per backend.
+
 ## Open questions / next steps
 
-**Top priority (both findings point here): bound the background work.**
-- **Bounded background materialization** — replace fire-and-forget
-  `asyncio.create_task` with a worker pool / semaphore that caps in-flight
-  materializations and applies backpressure. Then re-run the C=128 scaling sweep:
-  expect the p99/throughput collapse and the SQLite lock errors to disappear.
+**Done:** bounded materialization worker pool (above). Remaining:
 - **Connection pooling for local Postgres** — `NullPool` is the reason local
-  Postgres collapses at C≥32. Try `AsyncAdaptedQueuePool` (or document local
-  Postgres as cloud-only). Re-run `bench-write-backend`.
+  Postgres collapses at C≥32. Wire `_create_postgres_engine` to the existing
+  `db_pool_size`/`db_pool_overflow`/`db_pool_recycle` config (cloud overrides the
+  engine factory, so it's unaffected; SQLite uses a separate engine path).
+  Re-run `bench-write-backend`.
+- **Seed a default project for fresh local Postgres** (QOL) so
+  `create_memory_project` doesn't need the `BASIC_MEMORY_DEFAULT_PROJECT` shim.
 
 **Local-Postgres product gaps surfaced here (separate from the benchmark):**
 - Migration-under-uvloop crash — **fixed** (`basic_memory.migration_loop`).
