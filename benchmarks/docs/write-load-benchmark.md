@@ -400,23 +400,37 @@ can run a pooled local Postgres, giving a true apples-to-apples comparison.
 connection pool). All four cells run back-to-back in one session, interleaved per
 backend, notes=100. Zero write failures in all 16 cells.
 
-**SQLite — p50 / p99 / throughput, main → branch:**
+Each metric below has its own `main` and `branch` row, plus the branch's
+improvement (latency rows = main÷branch faster; throughput row = branch÷main
+higher). Concurrency runs across the columns.
 
-| C | p50 ms | p99 ms | thru/s |
-| --- | --- | --- | --- |
-| 1 | 224 → 119 | 1754 → 1430 | 3.4 → 4.8 |
-| 8 | 1210 → 645 | 4934 → 2980 | 4.9 → 9.3 |
-| 32 | 4944 → 1436 | 12807 → 4602 | 4.8 → 12.5 |
-| 64 | 7515 → 1885 | 13742 → 6656 | 5.6 → 10.3 |
+**SQLite — main (direct writes) vs branch (async writes)**
 
-**Postgres — p50 / p99 / throughput, main → branch:**
+| metric | C=1 | C=8 | C=32 | C=64 |
+| --- | --- | --- | --- | --- |
+| p50 main (ms) | 224 | 1210 | 4944 | 7515 |
+| p50 branch (ms) | 119 | 645 | 1436 | 1885 |
+| **p50: branch faster** | **1.9×** | **1.9×** | **3.4×** | **4.0×** |
+| p99 main (ms) | 1754 | 4934 | 12807 | 13742 |
+| p99 branch (ms) | 1430 | 2980 | 4602 | 6656 |
+| **p99: branch faster** | **1.2×** | **1.7×** | **2.8×** | **2.1×** |
+| throughput main (/s) | 3.4 | 4.9 | 4.8 | 5.6 |
+| throughput branch (/s) | 4.8 | 9.3 | 12.5 | 10.3 |
+| **throughput: branch higher** | **1.4×** | **1.9×** | **2.6×** | **1.8×** |
 
-| C | p50 ms | p99 ms | thru/s |
-| --- | --- | --- | --- |
-| 1 | 227 → 133 | 1299 → 743 | 3.5 → 5.7 |
-| 8 | 971 → 482 | 1782 → 1150 | 7.6 → 14.2 |
-| 32 | 2491 → 1323 | 3367 → 2682 | 10.8 → 18.2 |
-| 64 | 7002 → 2287 | 11292 → 3399 | 7.1 → 18.5 |
+**Postgres — main (direct writes) vs branch (async writes)**
+
+| metric | C=1 | C=8 | C=32 | C=64 |
+| --- | --- | --- | --- | --- |
+| p50 main (ms) | 227 | 971 | 2491 | 7002 |
+| p50 branch (ms) | 133 | 482 | 1323 | 2287 |
+| **p50: branch faster** | **1.7×** | **2.0×** | **1.9×** | **3.1×** |
+| p99 main (ms) | 1299 | 1782 | 3367 | 11292 |
+| p99 branch (ms) | 743 | 1150 | 2682 | 3399 |
+| **p99: branch faster** | **1.7×** | **1.5×** | **1.3×** | **3.3×** |
+| throughput main (/s) | 3.5 | 7.6 | 10.8 | 7.1 |
+| throughput branch (/s) | 5.7 | 14.2 | 18.2 | 18.5 |
+| **throughput: branch higher** | **1.6×** | **1.9×** | **1.7×** | **2.6×** |
 
 Conclusions:
 - **Branch (async) beats main (direct) on both backends, at every level** — ~3-4×
