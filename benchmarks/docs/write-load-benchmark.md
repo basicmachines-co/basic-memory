@@ -401,30 +401,32 @@ connection pool). All four cells run back-to-back in one session, interleaved pe
 backend, notes=100. Zero write failures in all 16 cells.
 
 Concurrency runs down the rows; each metric has a `main` column, a `branch`
-column, and the branch's improvement (latency = main÷branch faster; throughput =
-branch÷main higher). Latency in ms, throughput in writes/s.
+column, and the branch's improvement: **faster** = % lower latency
+`(main−branch)/main`; **higher** = % more throughput `(branch−main)/main`.
+Latency in ms, throughput in writes/s.
 
 **SQLite — main (direct writes) vs branch (async writes)**
 
 | C | p50 main | p50 branch | faster | p99 main | p99 branch | faster | thru main | thru branch | higher |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 224 | 119 | 1.9× | 1754 | 1430 | 1.2× | 3.4 | 4.8 | 1.4× |
-| 8 | 1210 | 645 | 1.9× | 4934 | 2980 | 1.7× | 4.9 | 9.3 | 1.9× |
-| 32 | 4944 | 1436 | 3.4× | 12807 | 4602 | 2.8× | 4.8 | 12.5 | 2.6× |
-| 64 | 7515 | 1885 | 4.0× | 13742 | 6656 | 2.1× | 5.6 | 10.3 | 1.8× |
+| 1 | 224 | 119 | 47% | 1754 | 1430 | 18% | 3.4 | 4.8 | +41% |
+| 8 | 1210 | 645 | 47% | 4934 | 2980 | 40% | 4.9 | 9.3 | +90% |
+| 32 | 4944 | 1436 | 71% | 12807 | 4602 | 64% | 4.8 | 12.5 | +160% |
+| 64 | 7515 | 1885 | 75% | 13742 | 6656 | 52% | 5.6 | 10.3 | +84% |
 
 **Postgres — main (direct writes) vs branch (async writes)**
 
 | C | p50 main | p50 branch | faster | p99 main | p99 branch | faster | thru main | thru branch | higher |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 227 | 133 | 1.7× | 1299 | 743 | 1.7× | 3.5 | 5.7 | 1.6× |
-| 8 | 971 | 482 | 2.0× | 1782 | 1150 | 1.5× | 7.6 | 14.2 | 1.9× |
-| 32 | 2491 | 1323 | 1.9× | 3367 | 2682 | 1.3× | 10.8 | 18.2 | 1.7× |
-| 64 | 7002 | 2287 | 3.1× | 11292 | 3399 | 3.3× | 7.1 | 18.5 | 2.6× |
+| 1 | 227 | 133 | 41% | 1299 | 743 | 43% | 3.5 | 5.7 | +63% |
+| 8 | 971 | 482 | 50% | 1782 | 1150 | 35% | 7.6 | 14.2 | +87% |
+| 32 | 2491 | 1323 | 47% | 3367 | 2682 | 20% | 10.8 | 18.2 | +69% |
+| 64 | 7002 | 2287 | 67% | 11292 | 3399 | 70% | 7.1 | 18.5 | +160% |
 
 Conclusions:
-- **Branch (async) beats main (direct) on both backends, at every level** — ~3-4×
-  lower p50, ~2-3× lower p99, ~2× throughput at C=64.
+- **Branch (async) beats main (direct) on both backends, at every level** — p50
+  ~47-75% faster on SQLite / ~41-67% on Postgres; p99 up to ~64%/70% faster;
+  throughput up to ~160% higher.
 - **main plateaus; branch scales.** main throughput tops out (~5/s SQLite, ~10/s
   Postgres) and on Postgres *drops* at C=64 (10.8→7.1); branch climbs and holds
   (10-18/s).
