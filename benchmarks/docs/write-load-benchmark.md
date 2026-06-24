@@ -472,6 +472,10 @@ controlled main-vs-branch 2×2, and `time_to_embedded_ms` (embedding keeps pace
 locally). The 3 enabling fixes are PR #1018 to main.
 
 **Remaining harness/measurement work:**
-- Stress the embedding stage harder (more notes, or a remote embedding provider)
-  to find where it *does* become the bottleneck; consider a bounded embed pool.
 - Decide whether to fold the driver into `bm-bench run write-load` (CLI subcommand).
+
+**Out of scope (by decision):** remote embedding providers. Local fastembed keeps
+pace with the write path (above), so it's the path we optimize for. A remote
+provider (network round-trips, small sync batch) would make embedding the
+bottleneck, but that's a caveat-emptor tradeoff a user opts into — not something
+the write path is tuned for, so no bounded embed pool is planned.
