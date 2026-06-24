@@ -126,7 +126,48 @@ measurable lag instead of accept latency).
 - A cosmetic "Process group termination failed … Operation not permitted" line
   prints on teardown (macOS sandbox); the run still completes.
 
+### 2026-06-24 — main vs branch (`codex/repository-explicit-sessions`, PR #1002)
+
+Same harness, same params (60 writes/level, C∈{1,4,8,16,32}, SQLite, semantic
+on). Branch venv installed from GitHub. **Single run each — directional, not
+statistically settled.**
+
+| C | accept p50 main→branch | throughput main→branch | verdict |
+| --- | --- | --- | --- |
+| 1 | 92 → 322 ms (+252%) | 4.8 → 2.2 /s (-54%) | branch slower |
+| 4 | 465 → 801 ms (+72%) | 5.5 → 3.9 /s (-29%) | branch slower |
+| 8 | 876 → 1488 ms (+70%) | 6.8 → 4.4 /s (-35%) | branch slower |
+| 16 | 1966 → 2781 ms (+41%) | 6.6 → 4.7 /s (-29%) | branch slower |
+| 32 | 2530 → 4135 ms (+63%) | 6.8 → 5.3 /s (-21%) | branch slower |
+
+**The async-accept hypothesis did NOT hold on local SQLite.** The accepted-note
+branch is consistently slower per accept and lower throughput at every level
+(0 errors on both). `time_to_searchable` stays small on both, so the deferred
+work is not what's showing up — the **accept path itself got heavier**.
+
+Leading hypotheses (to isolate next):
+1. **Per-write full-project relation resolution (#1015).** The branch schedules
+   `resolve_project_relations` (a *whole-project* unresolved-relation scan) as a
+   background task on **every** write. Under a 60-write burst that's 60 scans
+   over a growing relation set, all contending on the SQLite writer — likely the
+   dominant cost. The fix's own issue notes the resolver supports coalescing; we
+   scheduled it per-write **without debounce**. Strong suspect.
+2. **Accepted-note DB overhead.** DB-first accept persists an extra `note_content`
+   row (plus entity + search) per write — more writes per accept = longer SQLite
+   write-lock hold = more contention under concurrency.
+3. **The "offline queue" win is cloud-specific (PGQ).** Locally there is no
+   durable queue; materialization runs inline and the schedulers are in-process
+   asyncio tasks. So the throughput benefit the hypothesis assumed may simply not
+   exist on the local SQLite runtime — it would show on Postgres + PGQ.
+
+This is a useful result: the benchmark immediately surfaced a probable
+write-load regression in the new path (and specifically in the per-write
+relation-resolution scheduling added for #1015).
+
 ## Open questions / next steps
+
+- **Isolate #1015's contribution**: re-run the branch with per-write relation
+  resolution disabled / debounced, to see how much of the gap it owns.
 
 - Add `time_to_embedded_ms` (install fastembed + sqlite-vec; peek `search_vector_chunks`).
 - Add a "writes-during-drain" probe (fire writes while the backlog drains; do they stay fast?).
