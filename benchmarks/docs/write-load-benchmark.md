@@ -391,14 +391,52 @@ Findings, now with bounds:
 - SQLite C=64 is the noisiest cell (p99 5.5-10.5s) — single-writer contention is
   the most load-sensitive, as expected.
 
+### 2026-06-24 — controlled 2×2: main (direct writes) vs branch (async writes)
+
+The three enabling/pool fixes were cherry-picked onto `main` (PR #1018) so `main`
+can run a pooled local Postgres, giving a true apples-to-apples comparison.
+`main` here = main's **direct/inline** write path (pre-#1002) + the 3 fixes;
+`branch` = the #1002 **async** path (deferred materialization + worker pool +
+connection pool). All four cells run back-to-back in one session, interleaved per
+backend, notes=100. Zero write failures in all 16 cells.
+
+**SQLite — p50 / p99 / throughput, main → branch:**
+
+| C | p50 ms | p99 ms | thru/s |
+| --- | --- | --- | --- |
+| 1 | 224 → 119 | 1754 → 1430 | 3.4 → 4.8 |
+| 8 | 1210 → 645 | 4934 → 2980 | 4.9 → 9.3 |
+| 32 | 4944 → 1436 | 12807 → 4602 | 4.8 → 12.5 |
+| 64 | 7515 → 1885 | 13742 → 6656 | 5.6 → 10.3 |
+
+**Postgres — p50 / p99 / throughput, main → branch:**
+
+| C | p50 ms | p99 ms | thru/s |
+| --- | --- | --- | --- |
+| 1 | 227 → 133 | 1299 → 743 | 3.5 → 5.7 |
+| 8 | 971 → 482 | 1782 → 1150 | 7.6 → 14.2 |
+| 32 | 2491 → 1323 | 3367 → 2682 | 10.8 → 18.2 |
+| 64 | 7002 → 2287 | 11292 → 3399 | 7.1 → 18.5 |
+
+Conclusions:
+- **Branch (async) beats main (direct) on both backends, at every level** — ~3-4×
+  lower p50, ~2-3× lower p99, ~2× throughput at C=64.
+- **main plateaus; branch scales.** main throughput tops out (~5/s SQLite, ~10/s
+  Postgres) and on Postgres *drops* at C=64 (10.8→7.1); branch climbs and holds
+  (10-18/s).
+- **Postgres > SQLite for both, gap wider for the branch** (branch C=64: 18.5 vs
+  10.3 /s) — the async pool exploits concurrent writers SQLite's single writer
+  can't offer.
+- **Supersedes the earlier "+21ms at C=1" note** — that was a cross-run artifact;
+  in a controlled interleaved run the branch is faster at C=1 too (it defers the
+  file write off the accept).
+
 ## Open questions / next steps
 
 **Done:** worker pool, Postgres connection pool, local-Postgres default-project
-seed, and the migration-under-uvloop fix (`basic_memory.migration_loop`).
+seed, the migration-under-uvloop fix (`basic_memory.migration_loop`), and the
+controlled main-vs-branch 2×2 (above). The 3 enabling fixes are PR #1018 to main.
 
 **Remaining harness/measurement work:**
-- Profile the C=1 residual (+21ms over main): `note_content` insert vs
-  mutation-runner layers vs extra DB round-trips.
-- Repeat runs (3×) for variance bounds (single-machine noise is visible across runs).
 - Add `time_to_embedded_ms` (fastembed + sqlite-vec; peek `search_vector_chunks`).
 - Decide whether to fold the driver into `bm-bench run write-load` (CLI subcommand).
