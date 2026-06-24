@@ -1,0 +1,6 @@
+{
+  "dataset_id": "locomo",
+  "source_url": "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json",
+  "citation": "LoCoMo (ACL 2024, Snap Research)",
+  "license_note": "Check upstream dataset terms before redistributing snapshots."
+}
