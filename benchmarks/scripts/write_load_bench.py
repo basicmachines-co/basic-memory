@@ -21,6 +21,7 @@ import asyncio
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -235,14 +236,45 @@ async def searchable_count(session: ClientSession, project: str, level: int) -> 
     return len(results) if isinstance(results, list) else 0
 
 
+def embedded_count(db_path: Path, level: int) -> int:
+    """Count distinct embedded entities for a burst level (SQLite vector store).
+
+    The embedding (vector-sync) follow-up is the heaviest background stage
+    (fastembed runs an ONNX model per note); this lets the driver measure how
+    long after a write a note becomes *semantically* searchable, the same way
+    searchable_count tracks FTS. `search_vector_chunks` is a regular table
+    (entity_id, project_id) so a plain read-only sqlite3 connection can read it;
+    join to `entity` and filter by path so only THIS benchmark's notes count
+    (other local projects in the shared app DB don't inflate it). Returns 0 when
+    the DB/table isn't there yet (semantic disabled, or not initialized).
+    """
+    if not db_path.exists():
+        return 0
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = con.execute(
+                "SELECT COUNT(DISTINCT v.entity_id) FROM search_vector_chunks v "
+                "JOIN entity e ON e.id = v.entity_id WHERE e.file_path LIKE ?",
+                (f"load/c{level}/%",),
+            ).fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return 0
+
+
 async def run(args: argparse.Namespace) -> int:
     scratch = Path(args.scratch).resolve()
     config_dir = scratch / "config"
     project_dir = scratch / "project"
-    for path in (config_dir, project_dir):
+    main_home = scratch / "main-home"
+    for path in (config_dir, project_dir, main_home):
         if path.exists():
             shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
+    db_path = config_dir / "memory.db"  # SQLite app DB (for the embedding peek)
 
     # --- Backend selection ---
     # Trigger: --backend postgres. Why: compare the async write path on SQLite
@@ -256,6 +288,10 @@ async def run(args: argparse.Namespace) -> int:
 
     project = "writeload"
     env = _isolated_env(config_dir)
+    # Isolate the auto-seeded "main" project to an empty dir so the index +
+    # embedding pipeline only processes THIS benchmark's notes — not the user's
+    # real ~/basic-memory — keeping time_to_embedded (and the workers) clean.
+    env["BASIC_MEMORY_HOME"] = str(main_home)
     if args.backend == "postgres":
         assert database_url is not None
         env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
@@ -289,6 +325,22 @@ async def run(args: argparse.Namespace) -> int:
 
             await poll_until(warmup_ready, timeout_s=args.drain_timeout)
 
+            # Wait for the warmup notes to EMBED so the fastembed model is loaded
+            # before we measure time_to_embedded. The short timeout doubles as a
+            # semantic-enabled probe: if nothing embeds, skip the stage rather
+            # than hang every level on a 0-count poll. SQLite only — the peek
+            # reads the local sqlite-vec table; Postgres stores vectors elsewhere.
+            embedded_enabled = False
+            if args.backend == "sqlite":
+
+                async def warmup_embedded() -> bool:
+                    return embedded_count(db_path, 0) >= args.warmup
+
+                warm_embed_ms = await poll_until(
+                    warmup_embedded, timeout_s=min(args.drain_timeout, 120.0)
+                )
+                embedded_enabled = warm_embed_ms is not None
+
             for level in levels:
                 wall_start = time.perf_counter()
                 latencies, errors = await write_burst(
@@ -312,6 +364,16 @@ async def run(args: argparse.Namespace) -> int:
                 materialized_ms = await poll_until(files_ready, timeout_s=args.drain_timeout)
                 searchable_ms = await poll_until(search_ready, timeout_s=args.drain_timeout)
 
+                # Embedding (vector-sync) drain — only when the warmup probe
+                # confirmed embeddings land (semantic on, SQLite backend).
+                embedded_ms = None
+                if embedded_enabled:
+
+                    async def embedded_ready() -> bool:
+                        return embedded_count(db_path, level) >= args.notes
+
+                    embedded_ms = await poll_until(embedded_ready, timeout_s=args.drain_timeout)
+
                 record = {
                     "benchmark": f"write-load c={level}",
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -330,6 +392,9 @@ async def run(args: argparse.Namespace) -> int:
                         else -1.0,
                         "time_to_searchable_ms": round(searchable_ms, 1)
                         if searchable_ms is not None
+                        else -1.0,
+                        "time_to_embedded_ms": round(embedded_ms, 1)
+                        if embedded_ms is not None
                         else -1.0,
                     },
                 }
