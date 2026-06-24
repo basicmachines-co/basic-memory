@@ -164,10 +164,45 @@ This is a useful result: the benchmark immediately surfaced a probable
 write-load regression in the new path (and specifically in the per-write
 relation-resolution scheduling added for #1015).
 
+### 2026-06-24 — coalescing fix did NOT close the gap (hypothesis falsified)
+
+Pushed `perf(core): coalesce per-write relation resolution` (7ecb672c) so a
+burst collapses to one debounced offline pass, reinstalled the branch venv, and
+re-ran. The gap is essentially unchanged (within run noise):
+
+| C | branch p50 before → after fix | main p50 | still worse |
+| --- | --- | --- | --- |
+| 1 | 322 → 294 ms | 92 | +220% |
+| 8 | 1488 → 1563 ms | 876 | +78% |
+| 32 | 4135 → 4663 ms | 2530 | +84% |
+
+**Why it didn't help:** the relation passes were always **background** (async
+tasks) — they add system/DB load but do not sit on the synchronous accept
+latency we measure. The tell is **C=1**: with zero concurrency/contention the
+branch is still ~3× slower per write (92 → 294 ms). That is the **synchronous
+accept path itself** being heavier, not the follow-ups.
+
+**Revised conclusion:** the local write regression is in the accepted-note
+accept path, not the schedulers. Locally the path pays for **both** the DB-first
+accept (extra `note_content` row + mutation-runner machinery) **and** inline
+materialization — whereas the cloud design's win is to *skip* inline
+materialization and defer it to a PGQ queue. That queue benefit does not exist on
+the local SQLite runtime, so the refactor is net heavier for local writes.
+
+The coalescing change is still worth keeping (it removes genuinely redundant
+whole-project scans and lowers background DB contention) but it is not the fix
+for accept latency. This is the benchmark working as intended — it tested a fix
+and showed it did not address the measured cost.
+
 ## Open questions / next steps
 
-- **Isolate #1015's contribution**: re-run the branch with per-write relation
-  resolution disabled / debounced, to see how much of the gap it owns.
+- **Profile the synchronous accept path** (C=1, single write): where do the
+  ~200ms over main go? Candidates: the extra `note_content` insert, the
+  mutation-runner/preparer layers, extra DB round-trips, checksum/permalink work.
+- Product call: is a slower *local* write an acceptable tradeoff for the cloud
+  architecture, or does the local accept path need a lighter route (e.g. skip the
+  note_content round-trip when materializing inline anyway)?
+- Repeat runs (3x) for variance bounds.
 
 - Add `time_to_embedded_ms` (install fastembed + sqlite-vec; peek `search_vector_chunks`).
 - Add a "writes-during-drain" probe (fire writes while the backlog drains; do they stay fast?).
