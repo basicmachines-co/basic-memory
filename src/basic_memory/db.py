@@ -265,12 +265,28 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
     Returns:
         Configured async engine for Postgres
     """
-    # Use NullPool connection issues.
-    # Assume connection pooler like PgBouncer handles connection pooling.
+    # Connection pooling for direct (local / self-hosted) Postgres.
+    #
+    # Trigger: this is the default engine factory. The cloud overrides
+    # get_engine_factory with its own pooled engine (basic_memory_cloud
+    # tenant_engine_pool), so this path serves the LOCAL runtime — which has no
+    # PgBouncer in front of Postgres.
+    # Why: NullPool (a fresh connection per request) was assumed safe because a
+    # pooler would sit in front, but locally there is none. Under concurrent
+    # writes — plus each background materialization opening its own connection —
+    # that stormed max_connections and collapsed (p99 478s, 21% write failures at
+    # C=32; benchmarks/docs/write-load-benchmark.md).
+    # Outcome: a real pool bounds in-use connections to db_pool_size (+
+    # db_pool_overflow under load) and recycles them (Neon scale-to-zero).
+    # statement_cache_size=0 stays so the engine also works behind a PgBouncer
+    # transaction-mode pooler if a user runs one.
     engine = create_async_engine(
         db_url,
         echo=False,
-        poolclass=NullPool,  # No pooling - fresh connection per request
+        poolclass=AsyncAdaptedQueuePool,
+        pool_size=config.db_pool_size,
+        max_overflow=config.db_pool_overflow,
+        pool_recycle=config.db_pool_recycle,
         connect_args={
             # Disable statement cache to avoid issues with prepared statements on reconnect
             "statement_cache_size": 0,
@@ -285,7 +301,10 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
             },
         },
     )
-    logger.debug("Created Postgres engine with NullPool (no connection pooling)")
+    logger.debug(
+        "Created Postgres engine with QueuePool "
+        f"(pool_size={config.db_pool_size}, max_overflow={config.db_pool_overflow})"
+    )
 
     return engine
 
