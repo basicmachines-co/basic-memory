@@ -190,6 +190,9 @@ async def test_local_materialization_defers_write_off_the_accept_path(
         "run_note_materialization",
         fake_run_note_materialization,
     )
+    # Isolate the module-global pool so its workers don't outlive this test loop.
+    pool = note_content_materialization._MaterializationWorkerPool()
+    monkeypatch.setattr(note_content_materialization, "_materialization_pool", pool)
     indexer = RecordingFileIndexer()
     accepted = accepted_materialization_change()
 
@@ -201,6 +204,36 @@ async def test_local_materialization_defers_write_off_the_accept_path(
     assert result is accepted
     assert requests == []
 
-    # The write happens off the accept path; drain the background task to confirm.
-    await asyncio.gather(*list(note_content_materialization._pending_materializations))
+    # The write happens off the accept path via the bounded pool; drain to confirm.
+    await pool.join()
     assert len(requests) == 1
+    await pool.aclose()
+
+
+@pytest.mark.asyncio
+async def test_materialization_pool_bounds_concurrency_and_drains() -> None:
+    """Failsafe: the pool runs at most `workers` materializations at once.
+
+    This bound is the whole point — unbounded create_task let every deferred
+    write run concurrently and collapsed the tail under load.
+    """
+    pool = note_content_materialization._MaterializationWorkerPool()
+    in_flight = 0
+    peak = 0
+    done = 0
+
+    async def work() -> None:
+        nonlocal in_flight, peak, done
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        done += 1
+
+    for _ in range(20):
+        pool.submit(work(), workers=3)
+    await pool.join()
+
+    assert done == 20  # every submitted materialization ran
+    assert peak <= 3  # never more than `workers` in flight at once
+    await pool.aclose()

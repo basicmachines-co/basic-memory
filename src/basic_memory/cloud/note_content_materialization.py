@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Coroutine, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, replace
+from typing import Any
 from uuid import UUID
 
 from loguru import logger
@@ -42,10 +44,75 @@ from basic_memory.services.file_service import FileService
 
 LOCAL_NOTE_CONTENT_TENANT_ID = UUID(int=0)
 
-# Strong references to in-flight deferred materialization tasks. asyncio only
-# keeps weak references to tasks, so without this a fire-and-forget background
-# materialization could be garbage-collected mid-write.
-_pending_materializations: set[asyncio.Task[None]] = set()
+
+class _MaterializationWorkerPool:
+    """Bounded in-process worker pool that drains queued note materializations.
+
+    Mirrors the cloud's PGQ worker model locally: the accept enqueues a
+    materialization and returns; a fixed number of workers pull from the queue
+    and run them. Bounding concurrency to `workers` is the point — fire-and-forget
+    `create_task` let every deferred file write + index run at once, and at high
+    write load they contended en masse for the single SQLite writer and the event
+    loop, collapsing the tail (p99) and throughput
+    (benchmarks/docs/write-load-benchmark.md). With N workers only N
+    materializations are in flight; the rest wait in the queue and drain over
+    time, so the accept path stays light AND the writer isn't thrashed.
+    """
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[Coroutine[Any, Any, object]] | None = None
+        self._workers: list[asyncio.Task[None]] = []
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def submit(self, work: Coroutine[Any, Any, object], *, workers: int) -> None:
+        self._ensure_workers(workers)
+        assert self._queue is not None
+        self._queue.put_nowait(work)
+
+    def _ensure_workers(self, workers: int) -> None:
+        # Trigger: first submit, or submit on a different event loop than the one
+        # the workers were bound to (e.g. a fresh per-test loop).
+        # Why: workers are long-lived tasks bound to one loop; reusing a queue
+        # whose workers live on a dead loop would hang. Outcome: (re)create the
+        # queue + `workers` worker tasks on the current running loop. Orphaned
+        # workers on a closed loop are already dead, so dropping them is safe.
+        loop = asyncio.get_running_loop()
+        if self._queue is not None and self._loop is loop:
+            return
+        self._loop = loop
+        self._queue = asyncio.Queue()
+        self._workers = [asyncio.create_task(self._run()) for _ in range(max(1, workers))]
+
+    async def _run(self) -> None:
+        assert self._queue is not None
+        while True:
+            work = await self._queue.get()
+            try:
+                await work
+            except Exception:  # pragma: no cover - defensive worker guard
+                logger.exception("Local note materialization failed")
+            finally:
+                self._queue.task_done()
+
+    async def join(self) -> None:
+        """Block until every queued materialization has completed (tests)."""
+        if self._queue is not None:
+            await self._queue.join()
+
+    async def aclose(self) -> None:
+        """Cancel workers and reset the pool (clean test teardown / shutdown)."""
+        workers = self._workers
+        self._workers = []
+        self._queue = None
+        self._loop = None
+        for worker in workers:
+            worker.cancel()
+        for worker in workers:
+            with suppress(asyncio.CancelledError):
+                await worker
+
+
+_materialization_pool = _MaterializationWorkerPool()
 
 
 def note_content_payload_file_path(
@@ -205,6 +272,7 @@ class LocalNoteContentMaterializationProvider:
     file_service: FileService
     file_indexer: IndexFileExecutor | None = None
     test_mode: bool = False
+    materialization_workers: int = 4
 
     async def materialize_write_change(
         self,
@@ -237,18 +305,12 @@ class LocalNoteContentMaterializationProvider:
         self,
         accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     ) -> None:
-        task = asyncio.create_task(self._materialize_write_logged(accepted))
-        _pending_materializations.add(task)
-        task.add_done_callback(_pending_materializations.discard)
-
-    async def _materialize_write_logged(
-        self,
-        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
-    ) -> None:
-        try:
-            await self._materialize_write_now(accepted)
-        except Exception:  # pragma: no cover - defensive background guard
-            logger.exception("Local note materialization failed")
+        # Hand the materialization to the bounded worker pool instead of spawning
+        # an unbounded task per write — see _MaterializationWorkerPool for why.
+        _materialization_pool.submit(
+            self._materialize_write_now(accepted),
+            workers=self.materialization_workers,
+        )
 
     async def _materialize_write_now(
         self,

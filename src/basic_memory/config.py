@@ -364,6 +364,16 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    # Background materialization (local runtime)
+    materialization_workers: int = Field(
+        default=4,
+        description="Number of in-process workers that materialize accepted note "
+        "writes (write the markdown file + index it) off the accept path. Bounds "
+        "concurrent materializations so they don't contend en masse for the DB "
+        "writer under high write load (local runtime; cloud uses PGQ workers).",
+        gt=0,
+    )
+
     # Watch service configuration
     index_delay: int = Field(
         default=1000, description="Milliseconds to wait after changes before indexing", gt=0

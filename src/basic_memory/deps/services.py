@@ -745,6 +745,7 @@ async def get_note_content_materialization_provider(
         file_service=file_service,
         file_indexer=file_indexer,
         test_mode=app_config.is_test_env,
+        materialization_workers=app_config.materialization_workers,
     )
 
 
