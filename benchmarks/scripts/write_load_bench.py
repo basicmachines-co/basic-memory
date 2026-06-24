@@ -21,9 +21,7 @@ import asyncio
 import json
 import os
 import shutil
-import statistics
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,6 +110,34 @@ def _isolated_env(config_dir: Path) -> dict[str, str]:
     return env
 
 
+def _start_postgres():
+    """Start a throwaway Postgres testcontainer for a --backend postgres run.
+
+    Deferred import on purpose: testcontainers (and its Ryuk reaper image) are
+    only needed for the Postgres comparison, so the default SQLite path runs
+    without it installed. The recipe adds it via `uv run --with`.
+    """
+    from testcontainers.postgres import PostgresContainer
+
+    container = PostgresContainer("postgres:16-alpine")
+    container.start()
+    return container
+
+
+def _asyncpg_url(container) -> str:
+    """Normalize the testcontainer's connection URL to a SQLAlchemy asyncpg URL.
+
+    testcontainers may emit psycopg2/psycopg/bare-postgresql URLs depending on
+    version; basic-memory's Postgres backend expects `postgresql+asyncpg://`.
+    """
+    url = container.get_connection_url()
+    for sync_driver in ("postgresql+psycopg2", "postgresql+psycopg", "postgresql"):
+        prefix = sync_driver + "://"
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix) :]
+    return url
+
+
 def _result_payload(result: CallToolResult) -> dict:
     structured = result.structuredContent
     if isinstance(structured, dict):
@@ -173,9 +199,7 @@ async def write_burst(
     return latencies, errors
 
 
-async def poll_until(
-    predicate, *, timeout_s: float, interval_s: float = 0.1
-) -> float | None:
+async def poll_until(predicate, *, timeout_s: float, interval_s: float = 0.1) -> float | None:
     """Return ms elapsed when predicate() is true, or None on timeout."""
     start = time.perf_counter()
     delay = interval_s
@@ -218,7 +242,21 @@ async def run(args: argparse.Namespace) -> int:
             shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
 
+    # --- Backend selection ---
+    # Trigger: --backend postgres. Why: compare the async write path on SQLite
+    # (single-writer lock) vs Postgres (MVCC, concurrent writers). Outcome: the
+    # bm server connects to a throwaway Postgres testcontainer instead of the
+    # scoped SQLite file; the workload is otherwise identical.
+    pg_container = (
+        _start_postgres() if args.backend == "postgres" and not args.database_url else None
+    )
+    database_url = args.database_url or (_asyncpg_url(pg_container) if pg_container else None)
+
     env = _isolated_env(config_dir)
+    if args.backend == "postgres":
+        assert database_url is not None
+        env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
+        env["BASIC_MEMORY_DATABASE_URL"] = database_url
     params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
     output_path = Path(args.output).resolve() if args.output else None
     if output_path and output_path.exists() and args.truncate:
@@ -242,9 +280,7 @@ async def run(args: argparse.Namespace) -> int:
             # Warmup: pay one-time costs (embedding-model download/load, index
             # init, cache warm) OUTSIDE measurement. Wait for the warmup writes
             # to become searchable so the model is fully loaded before level 1.
-            await write_burst(
-                session, project=project, level=0, count=args.warmup, concurrency=1
-            )
+            await write_burst(session, project=project, level=0, count=args.warmup, concurrency=1)
 
             async def warmup_ready() -> bool:
                 return await searchable_count(session, project, 0) >= args.warmup
@@ -297,6 +333,10 @@ async def run(args: argparse.Namespace) -> int:
                 }
                 emit(output_path, record)
 
+    if pg_container is not None:
+        # Error paths (e.g. project-create failure) fall back to testcontainers'
+        # Ryuk reaper, which removes the container when this process exits.
+        pg_container.stop()
     return 0
 
 
@@ -312,6 +352,18 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=5, help="Warmup writes (not measured)")
     parser.add_argument(
         "--concurrency", default="1,4,8,16,32", help="Comma-separated concurrency levels"
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("sqlite", "postgres"),
+        default="sqlite",
+        help="DB backend the bm server runs against (postgres needs Docker + testcontainers)",
+    )
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="Postgres URL (postgresql+asyncpg://...). If omitted with --backend postgres, "
+        "a throwaway Postgres testcontainer is started for the run.",
     )
     parser.add_argument(
         "--scratch", default=".scratch/write-load", help="Scratch dir for config + project"

@@ -243,7 +243,7 @@ bench-venv ref:
     echo "installed $(".venvs/$slug/bin/basic-memory" --version) into .venvs/$slug"
 
 # Run the write-load concurrency sweep against a ref's venv -> .scratch/<slug>.jsonl
-bench-write-load ref notes="60" concurrency="1,4,8,16,32":
+bench-write-load ref notes="60" concurrency="1,4,8,16,32" drain="120":
     #!/usr/bin/env bash
     set -euo pipefail
     slug=$(echo "{{ref}}" | tr '/:' '__')
@@ -252,7 +252,34 @@ bench-write-load ref notes="60" concurrency="1,4,8,16,32":
       --bm-command "$(pwd)/.venvs/$slug/bin/basic-memory" \
       --label "{{ref}}" --notes {{notes}} --concurrency "{{concurrency}}" --warmup 8 \
       --scratch ".scratch/write-load-$slug" \
-      --output ".scratch/write-load-$slug.jsonl" --truncate
+      --output ".scratch/write-load-$slug.jsonl" --truncate \
+      --drain-timeout {{drain}}
+
+# Scaling sweep: push concurrency high to find where SQLite's single-writer lock
+# chokes inline writes (main) while async writes (branch) keep scaling.
+bench-write-scale ref notes="200" concurrency="1,2,4,8,16,32,64,128" drain="300":
+    just bench-write-load "{{ref}}" "{{notes}}" "{{concurrency}}" "{{drain}}"
+
+# Compare ONE ref's write path on SQLite vs Postgres (async writes on both).
+# Postgres runs in a throwaway testcontainer (needs Docker). -> markdown table.
+bench-write-backend ref="codex/repository-explicit-sessions" notes="150" concurrency="1,8,32,64" drain="300":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slug=$(echo "{{ref}}" | tr '/:' '__')
+    test -x ".venvs/$slug/bin/basic-memory" || { echo "no venv for {{ref}}; run: just bench-venv {{ref}}"; exit 1; }
+    for backend in sqlite postgres; do
+      echo "=== $backend ==="
+      uv run --no-project --with 'mcp>=1.23.1' --with 'testcontainers[postgres]>=4.0.0' \
+        python scripts/write_load_bench.py \
+        --bm-command "$(pwd)/.venvs/$slug/bin/basic-memory" \
+        --backend "$backend" --label "$backend" \
+        --notes {{notes}} --concurrency "{{concurrency}}" --warmup 8 \
+        --scratch ".scratch/backend-$backend" \
+        --output ".scratch/backend-$backend.jsonl" --truncate \
+        --drain-timeout {{drain}}
+    done
+    uv run --no-project python ../test-int/compare_search_benchmarks.py \
+      ".scratch/backend-sqlite.jsonl" ".scratch/backend-postgres.jsonl" --format markdown
 
 # Diff two refs' write-load JSONL outputs (markdown table for PRs)
 bench-write-compare refA refB:
