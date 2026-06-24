@@ -229,5 +229,46 @@ bench-publish run_dir destination="benchmarks/results/public":
 bench-compare baseline candidate provider="bm-local" metric="recall_at_5":
     uv run bm-bench compare "{{baseline}}" "{{candidate}}" --provider "{{provider}}" --metric "{{metric}}"
 
+# --- Write-path load benchmark (per-ref venv; see docs/write-load-benchmark.md) ---
+
+# Build (or refresh) a venv with basic-memory@<ref> installed from GitHub.
+# ref may be a branch, tag, or SHA. Slashes are slugified for the venv dir.
+bench-venv ref:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slug=$(echo "{{ref}}" | tr '/:' '__')
+    uv venv ".venvs/$slug" --python 3.12
+    uv pip install --python ".venvs/$slug/bin/python" \
+      "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@{{ref}}"
+    echo "installed $(".venvs/$slug/bin/basic-memory" --version) into .venvs/$slug"
+
+# Run the write-load concurrency sweep against a ref's venv -> .scratch/<slug>.jsonl
+bench-write-load ref notes="60" concurrency="1,4,8,16,32":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slug=$(echo "{{ref}}" | tr '/:' '__')
+    test -x ".venvs/$slug/bin/basic-memory" || { echo "no venv for {{ref}}; run: just bench-venv {{ref}}"; exit 1; }
+    uv run --no-project --with 'mcp>=1.23.1' python scripts/write_load_bench.py \
+      --bm-command "$(pwd)/.venvs/$slug/bin/basic-memory" \
+      --label "{{ref}}" --notes {{notes}} --concurrency "{{concurrency}}" --warmup 8 \
+      --scratch ".scratch/write-load-$slug" \
+      --output ".scratch/write-load-$slug.jsonl" --truncate
+
+# Diff two refs' write-load JSONL outputs (markdown table for PRs)
+bench-write-compare refA refB:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slugA=$(echo "{{refA}}" | tr '/:' '__'); slugB=$(echo "{{refB}}" | tr '/:' '__')
+    uv run --no-project python ../test-int/compare_search_benchmarks.py \
+      ".scratch/write-load-$slugA.jsonl" ".scratch/write-load-$slugB.jsonl" --format markdown
+
+# One-shot: build both venvs, run both sweeps, print the comparison
+bench-write-matrix refA="main" refB="codex/repository-explicit-sessions":
+    just bench-venv "{{refA}}"
+    just bench-venv "{{refB}}"
+    just bench-write-load "{{refA}}"
+    just bench-write-load "{{refB}}"
+    just bench-write-compare "{{refA}}" "{{refB}}"
+
 default:
     @just --list

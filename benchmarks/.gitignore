@@ -23,3 +23,5 @@ benchmarks/.mem0-qdrant/
 benchmarks/datasets/convomem/
 benchmarks/.bm-homes/
 .supermemory/
+.venvs/
+.scratch/
