@@ -119,7 +119,9 @@ def _start_postgres():
     """
     from testcontainers.postgres import PostgresContainer
 
-    container = PostgresContainer("postgres:16-alpine")
+    # pgvector image (matches test-int/conftest.py): Postgres search-index init
+    # runs CREATE EXTENSION vector, which the stock postgres image lacks.
+    container = PostgresContainer("pgvector/pgvector:pg16")
     container.start()
     return container
 
@@ -252,18 +254,23 @@ async def run(args: argparse.Namespace) -> int:
     )
     database_url = args.database_url or (_asyncpg_url(pg_container) if pg_container else None)
 
+    project = "writeload"
     env = _isolated_env(config_dir)
     if args.backend == "postgres":
         assert database_url is not None
         env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
         env["BASIC_MEMORY_DATABASE_URL"] = database_url
+        # Local SQLite seeds a default project on startup; the Postgres backend
+        # (cloud-oriented project model) does not, so a fresh local Postgres has
+        # no default project and create_memory_project's default lookup raises.
+        # Name the default explicitly so the first project can be created.
+        env["BASIC_MEMORY_DEFAULT_PROJECT"] = project
     params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
     output_path = Path(args.output).resolve() if args.output else None
     if output_path and output_path.exists() and args.truncate:
         output_path.unlink()
 
     levels = [int(c) for c in args.concurrency.split(",") if c.strip()]
-    project = "writeload"
 
     async with stdio_client(params) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:

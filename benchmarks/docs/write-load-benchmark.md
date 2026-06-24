@@ -221,21 +221,109 @@ cloud-architecture tax, small in absolute terms and the price of one read model
 + parity. `time_to_searchable` rises under load (index is now async: ~0.5s at
 C=32), the expected "DB is the cache, file+index catch up" tradeoff.
 
-Conclusion: the accepted-note refactor is a **net win for concurrent local
-writes** once materialization is deferred, and a small per-write cost at very low
-concurrency. Methodology + harness proven end to end.
+Conclusion (moderate concurrency): the accepted-note refactor is a **net win for
+concurrent local writes** once materialization is deferred, and a small per-write
+cost at very low concurrency. **But see the high-concurrency caveat below** — the
+deferral has no backpressure, so the picture changes under heavy sustained load.
+
+### 2026-06-24 — high-concurrency scaling: the async deferral hits an unbounded-queue wall
+
+Pushed concurrency to 128 (notes=200) to find where SQLite's single writer
+chokes. The deferral helps the **median** at every level, but the **tail and
+throughput regress under heavy sustained load** because the fire-and-forget
+background materializations form an *unbounded* queue with no backpressure.
+
+| C | branch p50 (ms) | branch p99 (ms) | throughput /s | err rate |
+| --- | --- | --- | --- | --- |
+| 1 | 113 | 1249 | 5.5 | 0.000 |
+| 16 | 2718 | 7991 | 5.0 | 0.000 |
+| 32 | 4803 | 16362 | 5.1 | 0.000 |
+| 64 | 5201 | **121771** | **1.5** | **0.020** |
+| 128 | 5737 | **94954** | **2.0** | **0.015** |
+
+vs main at C=64: p50 9616 / p99 19130 / 5.5 thru / 0 err. The branch's **median
+is far better** (5.2s vs 9.6s) but its **p99 is 6× worse** (122s vs 19s),
+throughput collapses (1.5 vs 5.5/s), and it starts failing writes (SQLite
+"database is locked"). Main's synchronous accept is self-throttling, so its tail
+stays bounded.
+
+**Mechanism:** every accept schedules `asyncio.create_task(materialize)`. The
+accept returns fast, but the background tasks pile up unbounded and contend with
+incoming accepts for the **single SQLite writer** and the **single event loop**.
+Past ~C=64 the backlog starves the request handler → tail explosion + lock
+errors. The deferral *reorders* work; on one SQLite it does **not** add capacity.
+
+The collapse is load-/depth-dependent: a lighter run (notes=100) reached C=64
+with no errors and rising throughput, while notes=200 collapsed at C=64 — bigger
+sustained bursts → deeper backlog → worse tail.
+
+**Implication:** the real scaling fix is **bounded** background materialization —
+a worker pool / semaphore that caps in-flight materializations and applies
+backpressure (the accept slows instead of the backlog growing unbounded). That
+bounds the tail and keeps throughput from collapsing. Next experiment.
+
+### 2026-06-24 — SQLite vs Postgres (async writes, local): Postgres collapses on NullPool
+
+Ran the branch's async write path on SQLite vs a local Postgres (pgvector
+testcontainer), notes=100. Two local-Postgres bugs had to be cleared first (see
+below); after that:
+
+| C | p50 ms (sql / pg) | p99 ms (sql / pg) | thru/s (sql / pg) | err (sql / pg) |
+| --- | --- | --- | --- | --- |
+| 1 | 121 / 548 | 1686 / 1361 | 4.1 / 1.7 | 0 / 0 |
+| 8 | 1063 / 3336 | 3900 / 5002 | 5.9 / 2.3 | 0 / 0 |
+| 32 | 2037 / **9045** | 10335 / **478612** | 6.6 / **0.2** | 0 / **0.21** |
+| 64 | 1846 / **93920** | 7570 / 101470 | 10.6 / **0.9** | 0 / 0.04 |
+
+Result is the **opposite of "on par"**: local Postgres is ~4× slower at C=1
+(round-trips vs in-process SQLite) and **collapses** at C≥32 — p99 of 478s,
+0.2/s throughput, 21% write failures, and the materialization backlog never
+drains within 300s.
+
+**Cause:** `db._create_postgres_engine` uses `poolclass=NullPool` — a fresh
+connection per request (fine for cloud's per-tenant, low-local-concurrency
+model). Under concurrent local writes — plus each background materialization
+opening its own connection — that's a connection storm against the default
+`max_connections=100`: 25 writes failed in the Postgres phase. MVCC's
+concurrent-writer advantage is completely swamped by connection churn.
+
+**Implication (mirrors the SQLite finding):** the write path needs **resource
+bounds** on both axes — bounded background materialization concurrency *and*
+connection pooling for Postgres. A pooled, co-located cloud Postgres would look
+very different; local NullPool Postgres is not a viable high-concurrency backend
+as configured.
+
+**Local-Postgres bugs found via this benchmark:**
+1. *Startup migration crash under uvloop* — `alembic/env.py` applied
+   `nest_asyncio` under the uvloop policy; the resulting "this event loop is
+   already running" string evaded the thread-based fallback, crashing `bm mcp`
+   against Postgres on startup. **Fixed** in `fix(core): run local Postgres
+   startup migrations under uvloop` (`basic_memory.migration_loop`, 6 unit tests).
+2. *No default project for a fresh local Postgres* — `create_memory_project`'s
+   default lookup raises because the Postgres path uses a cloud-style config
+   manager that seeds no default and nothing seeds a DB default locally. Worked
+   around in the harness with `BASIC_MEMORY_DEFAULT_PROJECT`; the product gap
+   (local Postgres project bootstrap) is left as a finding.
 
 ## Open questions / next steps
 
-- **Profile the synchronous accept path** (C=1, single write): where do the
-  ~200ms over main go? Candidates: the extra `note_content` insert, the
-  mutation-runner/preparer layers, extra DB round-trips, checksum/permalink work.
-- Product call: is a slower *local* write an acceptable tradeoff for the cloud
-  architecture, or does the local accept path need a lighter route (e.g. skip the
-  note_content round-trip when materializing inline anyway)?
-- Repeat runs (3x) for variance bounds.
+**Top priority (both findings point here): bound the background work.**
+- **Bounded background materialization** — replace fire-and-forget
+  `asyncio.create_task` with a worker pool / semaphore that caps in-flight
+  materializations and applies backpressure. Then re-run the C=128 scaling sweep:
+  expect the p99/throughput collapse and the SQLite lock errors to disappear.
+- **Connection pooling for local Postgres** — `NullPool` is the reason local
+  Postgres collapses at C≥32. Try `AsyncAdaptedQueuePool` (or document local
+  Postgres as cloud-only). Re-run `bench-write-backend`.
 
-- Add `time_to_embedded_ms` (install fastembed + sqlite-vec; peek `search_vector_chunks`).
-- Add a "writes-during-drain" probe (fire writes while the backlog drains; do they stay fast?).
-- Add Postgres backend (cloud-relevant concurrency headroom).
-- Decide whether to fold the driver into `bm-bench run write-load` (CLI subcommand) vs keep standalone.
+**Local-Postgres product gaps surfaced here (separate from the benchmark):**
+- Migration-under-uvloop crash — **fixed** (`basic_memory.migration_loop`).
+- Fresh local Postgres has no default project — `create_memory_project` raises;
+  needs a default-project seed (or an explicit "local Postgres" bootstrap path).
+
+**Remaining harness/measurement work:**
+- Profile the C=1 residual (+21ms over main): `note_content` insert vs
+  mutation-runner layers vs extra DB round-trips.
+- Repeat runs (3×) for variance bounds (single-machine noise is visible across runs).
+- Add `time_to_embedded_ms` (fastembed + sqlite-vec; peek `search_vector_chunks`).
+- Decide whether to fold the driver into `bm-bench run write-load` (CLI subcommand).
