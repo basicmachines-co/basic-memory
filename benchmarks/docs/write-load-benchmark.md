@@ -60,10 +60,16 @@ prove or disprove:
 | `accept_throughput_per_sec` | notes accepted / wall-clock at concurrency C | higher |
 | `accept_error_rate` | failed/timed-out writes / total | lower |
 | `time_to_materialized_ms` | after the burst, until all N files exist on disk | lower |
-| `time_to_searchable_ms` | after the burst, until all N notes are FTS-searchable | lower |
+| `time_to_searchable_ms` | after materialized, until all N notes are FTS-searchable | lower |
+| `time_to_embedded_ms` | after searchable, until all N notes are vector-embedded | lower |
 
-`time_to_embedded_ms` (semantic) is a planned follow-up (requires fastembed +
-sqlite-vec in the venv and a DB/vector peek).
+The three drain metrics are measured **sequentially** (each poll starts when the
+prior stage is ready), so `time_to_searchable`/`time_to_embedded` are the
+*incremental* lag a stage adds beyond the previous one — a small value means that
+stage keeps pace; a growing value means it's becoming the bottleneck.
+`time_to_embedded_ms` is SQLite-only (peeks `search_vector_chunks`); it needs
+fastembed + sqlite-vec in the venv (the warmup probes for this and skips the
+stage if semantic is off).
 
 ## Concurrency sweep
 
@@ -437,12 +443,35 @@ Conclusions:
   in a controlled interleaved run the branch is faster at C=1 too (it defers the
   file write off the accept).
 
+### 2026-06-24 — embedding keeps pace; materialization is the dominant stage
+
+Added `time_to_embedded_ms` (branch, SQLite, notes=100). Embedding is the
+heaviest background follow-up (fastembed ONNX per note), so it was the prime
+suspect for the *next* backlog after materialization — but it isn't:
+
+| C | t_materialized | t_searchable | t_embedded |
+| --- | --- | --- | --- |
+| 1 | 1325 ms | 22 ms | 1 ms |
+| 8 | 6095 ms | 48 ms | 1 ms |
+| 32 | 8126 ms | 47 ms | 2 ms |
+| 64 | 9108 ms | 42 ms | 3 ms |
+
+`time_to_embedded` stays ~1-3ms while `time_to_materialized` climbs to ~9s — each
+note embeds right after it's indexed and finishes well within the materialization
+drain. So **materialization (file write + index) is the dominant async stage**,
+which is exactly what the worker pool bounds; the local embedding pipeline keeps
+up and needs no separate throttling yet. Caveat: this is the *local* fastembed
+model — a remote embedding provider (network round-trips, small sync batch) would
+likely flip this and make embedding the bottleneck.
+
 ## Open questions / next steps
 
 **Done:** worker pool, Postgres connection pool, local-Postgres default-project
-seed, the migration-under-uvloop fix (`basic_memory.migration_loop`), and the
-controlled main-vs-branch 2×2 (above). The 3 enabling fixes are PR #1018 to main.
+seed, the migration-under-uvloop fix (`basic_memory.migration_loop`), the
+controlled main-vs-branch 2×2, and `time_to_embedded_ms` (embedding keeps pace
+locally). The 3 enabling fixes are PR #1018 to main.
 
 **Remaining harness/measurement work:**
-- Add `time_to_embedded_ms` (fastembed + sqlite-vec; peek `search_vector_chunks`).
+- Stress the embedding stage harder (more notes, or a remote embedding provider)
+  to find where it *does* become the bottleneck; consider a bounded embed pool.
 - Decide whether to fold the driver into `bm-bench run write-load` (CLI subcommand).
