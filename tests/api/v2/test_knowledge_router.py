@@ -420,6 +420,36 @@ async def test_create_entity_rejects_existing_unindexed_file(
 
 
 @pytest.mark.asyncio
+async def test_put_create_rejects_existing_unindexed_file(
+    client: AsyncClient, v2_project_url, project_config
+):
+    """PUT-as-create over an unindexed on-disk file returns 409 (#1002 review).
+
+    The create branch of PUT (entity_id not in the DB) must apply the same
+    storage check as POST so it cannot commit DB/search state that diverges
+    from the file on disk.
+    """
+    file_path = project_config.home / "conflict" / "PutUnindexed.md"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    original = "---\ntitle: PutUnindexed\ntype: note\n---\n\nPre-existing on-disk content\n"
+    file_path.write_text(original, encoding="utf-8")
+
+    new_external_id = "abcdef00-0000-4000-8000-000000000000"
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{new_external_id}",
+        json={
+            "title": "PutUnindexed",
+            "directory": "conflict",
+            "content": "New content via PUT",
+        },
+        params={"fast": False},
+    )
+
+    assert response.status_code == 409
+    assert file_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
 async def test_create_entity_returns_content(client: AsyncClient, file_service, v2_project_url):
     """Test creating an entity always returns file content with frontmatter."""
     data = {

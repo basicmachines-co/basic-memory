@@ -541,6 +541,7 @@ async def _run_accepted_note_update(
         prepared_write = await prepare_create_or_reject(
             preparer,
             request.data,
+            check_storage_exists=dependencies.verify_storage_absent_on_create,
             session=session,
         )
         entity = await create_accepted_pending_entity(
@@ -869,6 +870,7 @@ async def prepare_create_or_reject(
     preparer: AcceptedNoteCreatePreparer,
     data: EntitySchema,
     *,
+    check_storage_exists: bool,
     session: AsyncSession,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a new accepted note or raise a typed mutation rejection."""
@@ -876,9 +878,13 @@ async def prepare_create_or_reject(
         return await prepare_accepted_note_create(
             preparer,
             data,
-            check_storage_exists=False,
+            check_storage_exists=check_storage_exists,
             session=session,
         )
+    except EntityAlreadyExistsError as error:
+        # PUT-as-create over an unindexed on-disk file (local source-of-truth
+        # runtimes). Reject rather than committing divergent DB state.
+        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
     except (ParseError, ValueError) as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
