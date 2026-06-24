@@ -748,9 +748,14 @@ class BasicMemoryConfig(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
-        # Skip project initialization in cloud mode - projects are discovered from DB
-        if self.database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
-            return  # pragma: no cover
+        # Skip default-project seeding only for stateless/cloud deployments, where
+        # projects are discovered from the database per tenant (for_cloud_tenant
+        # sets skip_initialization_sync=True). Gating on the *backend* was wrong:
+        # a LOCAL Postgres backend still needs a default project seeded like SQLite,
+        # so a fresh local Postgres had no default project and create_memory_project
+        # raised "No default project configured" (benchmarks write-load doc).
+        if self.skip_initialization_sync:
+            return
 
         # Trigger: no projects configured (fresh install or empty config)
         # Why: every config needs at least one project to be functional
