@@ -91,6 +91,31 @@ class TestBasicMemoryConfig:
         assert Path(config.projects["other"].path) == other_path
         assert config.default_project == "other"
 
+    def test_model_post_init_seeds_default_for_local_postgres(self, config_home, monkeypatch):
+        """A LOCAL Postgres backend still seeds a default project, like SQLite.
+
+        The seeding skip is for stateless/cloud (skip_initialization_sync), not the
+        Postgres backend — otherwise a fresh local Postgres has no default project
+        and create_memory_project raises "No default project configured".
+        """
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+
+        config = BasicMemoryConfig(database_backend="postgres")
+
+        assert "main" in config.projects
+        assert config.default_project == "main"
+
+    def test_model_post_init_skips_seeding_for_stateless_deployments(
+        self, config_home, monkeypatch
+    ):
+        """Stateless/cloud configs discover projects from the DB, so seed nothing."""
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+
+        config = BasicMemoryConfig(database_backend="postgres", skip_initialization_sync=True)
+
+        assert config.projects == {}
+        assert config.default_project is None
+
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""
         relative_path = "relative/memory/path"
