@@ -464,12 +464,46 @@ up and needs no separate throttling yet. Caveat: this is the *local* fastembed
 model — a remote embedding provider (network round-trips, small sync batch) would
 likely flip this and make embedding the bottleneck.
 
+### 2026-06-24 — SQLite PRAGMA tuning: no measurable gain (we're at the work limit)
+
+Made the SQLite PRAGMAs tunable (`sqlite_synchronous`, `sqlite_mmap_size`,
+`sqlite_wal_autocheckpoint`, `sqlite_page_size`) and swept them. 3× at C=32,
+notes=100:
+
+| config | throughput/s (mean [min-max]) | accept p50 |
+| --- | --- | --- |
+| baseline (synchronous=NORMAL) | 17.6 [12.5-23.1] | 985 ms |
+| synchronous=OFF | 18.6 [8.8-28.4] | 1382 ms |
+| OFF + mmap=256MB | 19.4 [9.5-24.9] | 954 ms |
+
+Means trend up ~10% but the ranges overlap almost entirely (±50% run-to-run
+variance), so there's **no reliable gain**:
+- **`synchronous=OFF` buys nothing** — WAL + NORMAL already skips the per-commit
+  fsync, so OFF only saves checkpoint fsyncs, which don't bind here. Default kept
+  at **NORMAL** (durable for free); OFF stays as a knob for callers that knowingly
+  trade durability (the DB rebuilds from files via sync).
+- **`mmap`/`wal_autocheckpoint`/`page_size`**: no measurable effect at this workload.
+- **Group-commit** (batch materializations into one transaction) was considered
+  and **skipped**: it needs restructuring the per-note materialize→write→publish→
+  index stack onto a shared transaction (hairy), and with no per-commit fsync to
+  save its payoff is small.
+
+**Conclusion — the practical SQLite ceiling here is *work*, not the engine.** At
+~17-19 notes/s we're far below SQLite's raw write speed; we are not commit-,
+fsync-, or read-IO-bound, so no PRAGMA helps. The cost per note is the markdown
+parse → entity/observation/relation upserts → FTS index → file write → and the
+watcher's `refresh_unchanged_derived_state` re-index of already-materialized files
+(intentional, constrained by permalink resolution). Further speed would come from
+reducing that per-note work, not from database tuning.
+
 ## Open questions / next steps
 
 **Done:** worker pool, Postgres connection pool, local-Postgres default-project
 seed, the migration-under-uvloop fix (`basic_memory.migration_loop`), the
-controlled main-vs-branch 2×2, and `time_to_embedded_ms` (embedding keeps pace
-locally). The 3 enabling fixes are PR #1018 to main.
+controlled main-vs-branch 2×2, `time_to_embedded_ms` (embedding keeps pace
+locally), and the SQLite PRAGMA sweep (no gain; we're at the per-note-work limit).
+The 3 enabling fixes are PR #1018 to main; the PRAGMA knobs + worker pool are on
+the #1002 branch.
 
 **Remaining harness/measurement work:**
 - Decide whether to fold the driver into `bm-bench run write-load` (CLI subcommand).
