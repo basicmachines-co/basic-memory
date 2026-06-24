@@ -194,6 +194,37 @@ whole-project scans and lowers background DB contention) but it is not the fix
 for accept latency. This is the benchmark working as intended — it tested a fix
 and showed it did not address the measured cost.
 
+### 2026-06-24 — deferring materialization recovered (and flipped) the result
+
+Pushed `perf(core): defer local note materialization off the accept path`
+(696d71b1): local `materialize_write_change` now schedules the file write +
+index as a background task (parity with cloud's PGQ enqueue) and returns the
+accepted note_content state at once. Reinstalled the branch venv, re-ran.
+
+| C | branch p50 before→after defer | main p50 | branch vs main | throughput (branch vs main) |
+| --- | --- | --- | --- | --- |
+| 1 | 322 → 113 ms | 92 | +23% slower | 3.5 vs 4.8 |
+| 4 | 801 → 647 ms | 465 | +39% slower | 5.3 vs 5.5 |
+| 8 | 1488 → 903 ms | 876 | ~parity | 6.7 vs 6.8 |
+| 16 | 2781 → 1072 ms | 1966 | **45% faster** | **7.2 vs 6.6** |
+| 32 | 4135 → 1938 ms | 2530 | **23% faster** | **7.6 vs 6.8** |
+
+**The hypothesis now holds.** Deferring the file write + index off the accept
+path cut branch accept p50 by ~50-60% at C≥16 and made throughput **scale with
+concurrency** (3.5 → 7.6/s) instead of plateauing like main's synchronous path
+(~6.7/s). Crossover ~C=8 — below it main's lighter per-write path is marginally
+faster, above it the deferred accept wins on both latency and throughput.
+
+Residual: at C=1 the branch is still ~+21ms (113 vs 92) — the intrinsic DB-first
+accept overhead (extra `note_content` row + mutation-runner machinery), the
+cloud-architecture tax, small in absolute terms and the price of one read model
++ parity. `time_to_searchable` rises under load (index is now async: ~0.5s at
+C=32), the expected "DB is the cache, file+index catch up" tradeoff.
+
+Conclusion: the accepted-note refactor is a **net win for concurrent local
+writes** once materialization is deferred, and a small per-write cost at very low
+concurrency. Methodology + harness proven end to end.
+
 ## Open questions / next steps
 
 - **Profile the synchronous accept path** (C=1, single write): where do the
