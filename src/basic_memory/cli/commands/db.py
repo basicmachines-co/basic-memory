@@ -373,10 +373,12 @@ async def _reindex(
                     proj,
                     runtime_factory=LocalProjectIndexRuntimeFactory(),
                     force_full=full,
-                    # Search-only reindex must not collect vector targets or call the
-                    # embedding provider; the explicit embeddings block below handles
-                    # vectors when requested.
-                    embeddings=embeddings,
+                    # The full-text search rebuild must never embed: the explicit
+                    # embeddings phase below owns vector (re)builds. Passing the CLI
+                    # flag here would double-embed on a full reindex — the inline
+                    # project-index sync, then reindex_vectors discarding and
+                    # rebuilding it — so callers pay the embedding cost twice.
+                    embeddings=False,
                 )
                 console.print(
                     "  [dim]project index: "

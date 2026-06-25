@@ -320,3 +320,80 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
     assert vector_reindex_calls[0]["force_full"] is True
     assert callable(vector_reindex_calls[0]["progress_callback"])
     assert any("full rebuild" in line for line in printed_lines)
+
+
+@pytest.mark.asyncio
+async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
+    """A full reindex (search + embeddings) must embed once: the FTS rebuild runs
+    with embeddings=False so only the explicit vector phase calls the provider."""
+    app_config = _stub_app_config()
+    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    vector_reindex_calls: list[dict[str, object]] = []
+    project_index = AsyncMock(
+        return_value=SimpleNamespace(
+            total_files=1, enqueued_files=1, enqueued_batches=1, deleted_files=0
+        )
+    )
+
+    class StubProjectRepository:
+        async def get_active_projects(self, session):
+            return [project]
+
+    class StubSearchService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+            vector_reindex_calls.append({"force_full": force_full})
+            return {"total_entities": 1, "embedded": 1, "skipped": 0, "errors": 0}
+
+    class SilentProgress:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> bool:
+            return False
+
+        def add_task(self, *args, **kwargs) -> int:
+            return 1
+
+        def update(self, *args, **kwargs) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.reconcile_projects_with_config", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.db.get_or_create_db", AsyncMock(return_value=(None, session_maker))
+    )
+    monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
+    monkeypatch.setattr("basic_memory.index.run_local_project_index_for_project", project_index)
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository.create_search_repository",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr("basic_memory.repository.EntityRepository", lambda *a, **k: object())
+    monkeypatch.setattr(
+        "basic_memory.markdown.entity_parser.EntityParser", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(
+        "basic_memory.markdown.markdown_processor.MarkdownProcessor", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.file_service.FileService", lambda *a, **k: object()
+    )
+    monkeypatch.setattr("basic_memory.services.search_service.SearchService", StubSearchService)
+    monkeypatch.setattr(db_cmd, "Progress", SilentProgress)
+    monkeypatch.setattr(db_cmd.console, "print", lambda message="", *a, **k: None)
+
+    await db_cmd._reindex(app_config, search=True, embeddings=True, full=True, project="foo")
+
+    # FTS rebuild ran without embeddings; only the explicit phase embedded (once).
+    project_index.assert_awaited_once()
+    assert project_index.await_args.kwargs["embeddings"] is False
+    assert len(vector_reindex_calls) == 1
+    assert vector_reindex_calls[0]["force_full"] is True
