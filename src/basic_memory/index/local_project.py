@@ -380,14 +380,21 @@ async def run_local_project_index_for_project(
     *,
     runtime_factory: LocalProjectIndexRuntimeProvider,
     force_full: bool = False,
+    embeddings: bool = True,
 ) -> ProjectIndexCoordinatorResult:
-    """Run local project indexing for one project through the core fanout runtime."""
+    """Run local project indexing for one project through the core fanout runtime.
+
+    ``embeddings`` threads the caller's choice into the request so a search-only
+    reindex (``bm reindex --search``) does not collect vector targets or call the
+    embedding provider; it defaults to True for all other callers.
+    """
     return await run_local_project_index(
         RuntimeProjectIndexJobRequest(
             tenant_id=runtime_factory.tenant_id,
             project=ProjectRuntimeReference.from_project(project),
             workflow_id=uuid4(),
             force_full=force_full,
+            embeddings=embeddings,
         ),
         runtime=await runtime_factory.runtime_for_project(project),
     )

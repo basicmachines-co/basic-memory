@@ -373,6 +373,10 @@ async def _reindex(
                     proj,
                     runtime_factory=LocalProjectIndexRuntimeFactory(),
                     force_full=full,
+                    # Search-only reindex must not collect vector targets or call the
+                    # embedding provider; the explicit embeddings block below handles
+                    # vectors when requested.
+                    embeddings=embeddings,
                 )
                 console.print(
                     "  [dim]project index: "

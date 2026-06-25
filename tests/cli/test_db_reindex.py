@@ -217,6 +217,8 @@ async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     assert index_call is not None
     assert index_call.args[0] == project
     assert index_call.kwargs["force_full"] is True
+    # Search-only reindex must not run the embedding provider via the project index.
+    assert index_call.kwargs["embeddings"] is False
     assert any("project index" in line for line in printed_lines)
     assert any("3 observed, 2 indexed, 1 deleted" in line for line in printed_lines)
 
