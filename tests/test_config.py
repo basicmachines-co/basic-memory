@@ -149,6 +149,29 @@ class TestBasicMemoryConfig:
         assert config.projects == {}
         assert config.default_project is None
 
+    def test_local_postgres_creates_project_directories(self, config_home, tmp_path):
+        """Local Postgres creates its project directories like SQLite — the
+        ensure_project_paths_exists skip is gated on skip_initialization_sync."""
+        proj = tmp_path / "pg-project"
+        BasicMemoryConfig(
+            database_backend="postgres",
+            skip_initialization_sync=False,
+            projects={"main": {"path": str(proj)}},
+            default_project="main",
+        )
+        assert proj.exists()
+
+    def test_stateless_postgres_skips_project_directories(self, config_home, tmp_path):
+        """Stateless/cloud deployments don't touch the local filesystem."""
+        proj = tmp_path / "cloud-project"
+        BasicMemoryConfig(
+            database_backend="postgres",
+            skip_initialization_sync=True,
+            projects={"main": {"path": str(proj)}},
+            default_project="main",
+        )
+        assert not proj.exists()
+
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""
         relative_path = "relative/memory/path"
