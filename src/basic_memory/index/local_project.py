@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,27 +95,43 @@ def local_project_index_file_paths(
     )
     file_paths: list[str] = []
 
-    path_iterator = iter(project_root.rglob("*"))
+    # os.walk lets us prune ignored/hidden directories *before* descending —
+    # rglob("*") would stat every file inside node_modules/.venv/.git first — and
+    # does not follow symlinked directories (followlinks=False). Symlinked files
+    # are skipped explicitly so the batch reader never reads outside the project
+    # boundary. This restores the pre-refactor scanner's no-follow + dir-pruning.
+    walker = os.walk(project_root, followlinks=False)
     while True:
         try:
-            path = next(path_iterator)
+            dirpath, dirnames, filenames = next(walker)
         except StopIteration:
             break
         except OSError:
+            # A traversal error must not discard files discovered before it.
             break
 
-        try:
-            is_file = path.is_file()
-        except OSError:
-            continue
-        if not is_file:
-            continue
-        relative_path = path.relative_to(project_root).as_posix()
-        if local_relative_path_is_filtered(relative_path):
-            continue
-        if should_ignore_path(path, project_root, active_ignore_patterns):
-            continue
-        file_paths.append(relative_path)
+        root_path = Path(dirpath)
+        # Prune in place so os.walk never descends into ignored/hidden directories.
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not name.startswith(".")
+            and not should_ignore_path(root_path / name, project_root, active_ignore_patterns)
+        ]
+
+        for name in filenames:
+            path = root_path / name
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+            except OSError:
+                continue
+            relative_path = path.relative_to(project_root).as_posix()
+            if local_relative_path_is_filtered(relative_path):
+                continue
+            if should_ignore_path(path, project_root, active_ignore_patterns):
+                continue
+            file_paths.append(relative_path)
 
     return tuple(sorted(file_paths))
 

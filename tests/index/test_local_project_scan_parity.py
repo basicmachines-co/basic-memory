@@ -43,14 +43,59 @@ def test_local_project_index_file_paths_keeps_discovered_files_when_walk_fails(
     accessible_path = project_root / "accessible.md"
     accessible_path.write_text("# Accessible\n", encoding="utf-8")
 
-    def rglob_then_permission_error(path: Path, *args, **kwargs):
-        assert path == project_root
-        yield accessible_path
+    def walk_then_permission_error(top, *args, **kwargs):
+        yield (str(project_root), [], ["accessible.md"])
         raise PermissionError("permission denied")
 
-    monkeypatch.setattr(Path, "rglob", rglob_then_permission_error)
+    monkeypatch.setattr(local_project.os, "walk", walk_then_permission_error)
 
     assert local_project_index_file_paths(project_root, ignore_patterns=set()) == ("accessible.md",)
+
+
+def test_local_project_index_file_paths_prunes_ignored_directories(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Ignored/hidden directories are pruned before descent, not just filtered."""
+    project_root = tmp_path.resolve()
+    (project_root / "keep.md").write_text("# keep\n", encoding="utf-8")
+    node_modules = project_root / "node_modules"
+    node_modules.mkdir()
+    (node_modules / "huge.md").write_text("# huge\n", encoding="utf-8")
+    hidden = project_root / ".hidden"
+    hidden.mkdir()
+    (hidden / "secret.md").write_text("# secret\n", encoding="utf-8")
+
+    visited: list[str] = []
+    original_is_file = Path.is_file
+
+    def recording_is_file(path: Path) -> bool:
+        visited.append(str(path))
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", recording_is_file)
+
+    result = local_project_index_file_paths(project_root, ignore_patterns={"node_modules"})
+
+    assert result == ("keep.md",)
+    # Pruning means the walker never descended into (or stat'd) the ignored dirs.
+    assert not any("node_modules" in path for path in visited)
+    assert not any(".hidden" in path for path in visited)
+
+
+def test_local_project_index_file_paths_skips_symlinked_files(tmp_path: Path) -> None:
+    """Symlinked files must not be indexed (their target may be outside the project)."""
+    project_root = (tmp_path / "project").resolve()
+    project_root.mkdir()
+    (project_root / "keep.md").write_text("# keep\n", encoding="utf-8")
+    target = tmp_path / "outside.md"
+    target.write_text("# secret\n", encoding="utf-8")
+    try:
+        (project_root / "linked.md").symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform")
+
+    assert local_project_index_file_paths(project_root, ignore_patterns=set()) == ("keep.md",)
 
 
 @pytest.mark.asyncio
