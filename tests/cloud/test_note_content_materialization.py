@@ -277,6 +277,7 @@ async def test_local_materialization_schedules_relation_resolution_after_index(
 
     await provider.materialize_write_change(accepted)
 
+    assert accepted.materialization is not None
     assert scheduled == [accepted.materialization.project_id]
 
 

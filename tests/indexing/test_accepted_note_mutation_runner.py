@@ -166,6 +166,14 @@ class _CreatePreparer:
         self.move_calls.append((entity, current_content, destination_path, session))
         return self.prepared_move
 
+    async def verify_move_destination_absent(
+        self,
+        *,
+        source_file_path: str,
+        destination_file_path: str,
+    ) -> None:
+        return None
+
 
 class _PreparerFactory:
     def __init__(self, preparer: _CreatePreparer) -> None:

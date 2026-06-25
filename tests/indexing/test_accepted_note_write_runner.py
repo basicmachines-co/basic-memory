@@ -251,6 +251,14 @@ class _MovePreparer:
         self.calls.append((entity, current_content, destination_path, session))
         return self.prepared
 
+    async def verify_move_destination_absent(
+        self,
+        *,
+        source_file_path: str,
+        destination_file_path: str,
+    ) -> None:
+        return None
+
 
 def _unexpected_pending_entity_repository(_project_id: int) -> _PendingEntityRepository:
     raise AssertionError("pending entity repository was not expected")

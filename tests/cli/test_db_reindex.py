@@ -394,6 +394,8 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
 
     # FTS rebuild ran without embeddings; only the explicit phase embedded (once).
     project_index.assert_awaited_once()
-    assert project_index.await_args.kwargs["embeddings"] is False
+    index_call = project_index.await_args
+    assert index_call is not None
+    assert index_call.kwargs["embeddings"] is False
     assert len(vector_reindex_calls) == 1
     assert vector_reindex_calls[0]["force_full"] is True
