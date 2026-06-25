@@ -648,6 +648,30 @@ class BasicMemoryConfig(BaseSettings):
             or os.getenv("PYTEST_CURRENT_TEST") is not None
         )
 
+    @property
+    def cloud_mode(self) -> bool:
+        """Whether this process runs as a cloud deployment.
+
+        In-repo cloud containers build BasicMemoryConfig via ConfigManager (not
+        for_cloud_tenant), so they signal cloud mode through the environment
+        rather than skip_initialization_sync. Mirrors the detection in setup_logging.
+        """
+        return os.getenv("BASIC_MEMORY_CLOUD_MODE", "").lower() in ("1", "true")
+
+    @property
+    def skip_local_initialization(self) -> bool:
+        """Whether to skip local project seeding / reconciliation / path creation.
+
+        True for any cloud or stateless deployment: for_cloud_tenant sets
+        skip_initialization_sync, while in-repo cloud containers set
+        BASIC_MEMORY_CLOUD_MODE. A LOCAL Postgres install matches neither, so it
+        still initializes like SQLite. Gating these paths on the Postgres *backend*
+        caught local Postgres (wrong); gating only on skip_initialization_sync
+        missed BASIC_MEMORY_CLOUD_MODE deployments, letting reconcile delete tenant
+        project rows (also wrong).
+        """
+        return self.skip_initialization_sync or self.cloud_mode
+
     def get_project_mode(self, project_name: str) -> ProjectMode:
         """Get the routing mode for a project.
 
@@ -735,13 +759,12 @@ class BasicMemoryConfig(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
-        # Skip default-project seeding only for stateless/cloud deployments, where
-        # projects are discovered from the database per tenant (for_cloud_tenant
-        # sets skip_initialization_sync=True). Gating on the *backend* was wrong:
-        # a LOCAL Postgres backend still needs a default project seeded like SQLite,
-        # so a fresh local Postgres had no default project and create_memory_project
-        # raised "No default project configured" (benchmarks write-load doc).
-        if self.skip_initialization_sync:
+        # Skip default-project seeding only for cloud/stateless deployments, where
+        # projects are discovered from the database per tenant. See
+        # skip_local_initialization for why this is not gated on the Postgres
+        # backend (caught local Postgres) nor on skip_initialization_sync alone
+        # (missed BASIC_MEMORY_CLOUD_MODE deployments).
+        if self.skip_local_initialization:
             return
 
         # Trigger: no projects configured (fresh install or empty config)
@@ -806,13 +829,14 @@ class BasicMemoryConfig(BaseSettings):
     def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
         """Ensure project paths exist.
 
-        Skips path creation for stateless/cloud deployments (skip_initialization_sync),
-        whose tenants don't use local filesystem paths. A local Postgres install
-        still needs its project directories created like SQLite, so gate on the
-        marker, not the backend — otherwise the seeded default's directory is never
-        created and the sync/watch path hits a non-existent directory.
+        Skips path creation for cloud/stateless deployments, whose tenants don't
+        use local filesystem paths. A local Postgres install still needs its
+        project directories created like SQLite, so gate on
+        skip_local_initialization, not the backend — otherwise the seeded default's
+        directory is never created and the sync/watch path hits a non-existent
+        directory.
         """
-        if self.skip_initialization_sync:
+        if self.skip_local_initialization:
             return self
 
         for name, entry in self.projects.items():

@@ -191,17 +191,17 @@ async def initialize_app(
             "permalinks will be written."
         )
 
-    # Trigger: stateless/cloud deployment (skip_initialization_sync, set by
-    # BasicMemoryConfig.for_cloud_tenant).
+    # Trigger: cloud/stateless deployment (skip_local_initialization — either
+    # for_cloud_tenant's skip_initialization_sync or BASIC_MEMORY_CLOUD_MODE).
     # Why: cloud manages its own schema and per-tenant projects from the database.
-    # Gating on the Postgres *backend* was wrong — a LOCAL Postgres install still
-    # needs initialization, otherwise reconcile_projects_with_config never runs and
-    # the seeded default project gets no row in the projects table, so
-    # /v2/projects/resolve rejects the default and MCP calls are unusable.
-    # Outcome: skip only for actual stateless/cloud deployments.
-    if app_config.skip_initialization_sync:
+    # Running reconcile_projects_with_config there would delete tenant project rows
+    # absent from local config. Gating on the Postgres *backend* was wrong (it
+    # caught a LOCAL Postgres install, which still needs the seeded default
+    # reconciled into a projects row, else /v2/projects/resolve rejects it).
+    # Outcome: skip only for actual cloud/stateless deployments.
+    if app_config.skip_local_initialization:
         logger.info(
-            "Skipping local initialization - stateless/cloud deployment manages its own schema"
+            "Skipping local initialization - cloud/stateless deployment manages its own schema"
         )
         return
 
@@ -221,16 +221,16 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
     This is a wrapper for the async initialize_app function that can be
     called from synchronous code like CLI entry points.
 
-    No-op for stateless/cloud deployments (skip_initialization_sync). A LOCAL
-    Postgres install still needs initialization, so gate on the marker, not the
-    backend — matching initialize_app.
+    No-op for cloud/stateless deployments (skip_local_initialization). A LOCAL
+    Postgres install still needs initialization, so gate on that, not the backend —
+    matching initialize_app.
 
     Args:
         app_config: The Basic Memory project configuration
     """
-    if app_config.skip_initialization_sync:
+    if app_config.skip_local_initialization:
         logger.info(
-            "Skipping local initialization - stateless/cloud deployment manages its own schema"
+            "Skipping local initialization - cloud/stateless deployment manages its own schema"
         )
         return
 
