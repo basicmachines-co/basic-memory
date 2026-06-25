@@ -806,11 +806,13 @@ class BasicMemoryConfig(BaseSettings):
     def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
         """Ensure project paths exist.
 
-        Skips path creation when using Postgres backend (cloud mode) since
-        cloud tenants don't use local filesystem paths.
+        Skips path creation for stateless/cloud deployments (skip_initialization_sync),
+        whose tenants don't use local filesystem paths. A local Postgres install
+        still needs its project directories created like SQLite, so gate on the
+        marker, not the backend — otherwise the seeded default's directory is never
+        created and the sync/watch path hits a non-existent directory.
         """
-        # Skip path creation for cloud mode - no local filesystem
-        if self.database_backend == DatabaseBackend.POSTGRES:
+        if self.skip_initialization_sync:
             return self
 
         for name, entry in self.projects.items():
