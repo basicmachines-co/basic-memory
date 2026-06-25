@@ -34,6 +34,7 @@ async def test_initialize_app_runs_for_local_postgres(app_config, monkeypatch):
     """
     app_config.database_backend = DatabaseBackend.POSTGRES
     app_config.skip_initialization_sync = False
+    monkeypatch.delenv("BASIC_MEMORY_CLOUD_MODE", raising=False)
 
     calls: list[str] = []
 
@@ -49,6 +50,31 @@ async def test_initialize_app_runs_for_local_postgres(app_config, monkeypatch):
     await initialize_app(app_config)
 
     assert calls == ["initialize_database", "reconcile_projects_with_config"]
+
+
+@pytest.mark.asyncio
+async def test_initialize_app_noop_in_cloud_mode(app_config, monkeypatch):
+    """BASIC_MEMORY_CLOUD_MODE deployments (Postgres, skip_initialization_sync=False)
+    must still skip — running reconcile_projects_with_config there would delete
+    tenant project rows absent from local config."""
+    app_config.database_backend = DatabaseBackend.POSTGRES
+    app_config.skip_initialization_sync = False
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "1")
+
+    calls: list[str] = []
+
+    async def fake_initialize_database(cfg):
+        calls.append("initialize_database")
+
+    async def fake_reconcile(cfg):
+        calls.append("reconcile_projects_with_config")
+
+    monkeypatch.setattr(initialization, "initialize_database", fake_initialize_database)
+    monkeypatch.setattr(initialization, "reconcile_projects_with_config", fake_reconcile)
+
+    await initialize_app(app_config)
+
+    assert calls == []
 
 
 def test_ensure_initialization_runs_for_local_postgres(app_config, monkeypatch):

@@ -132,6 +132,7 @@ class TestBasicMemoryConfig:
         and create_memory_project raises "No default project configured".
         """
         monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        monkeypatch.delenv("BASIC_MEMORY_CLOUD_MODE", raising=False)
 
         config = BasicMemoryConfig(database_backend="postgres")
 
@@ -146,6 +147,20 @@ class TestBasicMemoryConfig:
 
         config = BasicMemoryConfig(database_backend="postgres", skip_initialization_sync=True)
 
+        assert config.projects == {}
+        assert config.default_project is None
+
+    def test_model_post_init_skips_seeding_in_cloud_mode(self, config_home, monkeypatch):
+        """BASIC_MEMORY_CLOUD_MODE deployments build config via ConfigManager, not
+        for_cloud_tenant, so skip_initialization_sync is false — they must still skip
+        seeding (and reconcile) so cloud startup can't delete tenant project rows."""
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "1")
+
+        config = BasicMemoryConfig(database_backend="postgres", skip_initialization_sync=False)
+
+        assert config.cloud_mode is True
+        assert config.skip_local_initialization is True
         assert config.projects == {}
         assert config.default_project is None
 
