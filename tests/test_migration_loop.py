@@ -9,6 +9,8 @@ so the logic lives in basic_memory.migration_loop where it can be covered.
 import asyncio
 import sys
 
+import pytest
+
 from basic_memory import migration_loop
 
 
@@ -28,6 +30,7 @@ def test_is_running_loop_error_rejects_unrelated_runtime_error():
     assert migration_loop.is_running_loop_error(err) is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="uvloop is not available on Windows")
 def test_running_on_uvloop_true_when_policy_is_uvloop(monkeypatch):
     import uvloop
 
