@@ -51,6 +51,28 @@ async def test_initialize_app_runs_for_local_postgres(app_config, monkeypatch):
     assert calls == ["initialize_database", "reconcile_projects_with_config"]
 
 
+def test_ensure_initialization_runs_for_local_postgres(app_config, monkeypatch):
+    """The sync CLI entrypoint must initialize for local Postgres, not skip — it
+    runs initialize_app instead of returning early on the Postgres backend."""
+    app_config.database_backend = DatabaseBackend.POSTGRES
+    app_config.skip_initialization_sync = False
+
+    called: list[object] = []
+
+    async def fake_initialize_app(cfg):
+        called.append(cfg)
+
+    async def fake_shutdown_db():
+        pass
+
+    monkeypatch.setattr(initialization, "initialize_app", fake_initialize_app)
+    monkeypatch.setattr(initialization.db, "shutdown_db", fake_shutdown_db)
+
+    ensure_initialization(app_config)
+
+    assert called == [app_config]
+
+
 @pytest.mark.asyncio
 async def test_initialize_file_indexing_skips_in_test_env(app_config):
     # app_config fixture uses env="test"
