@@ -191,13 +191,18 @@ async def initialize_app(
             "permalinks will be written."
         )
 
-    # Trigger: database backend is Postgres (cloud deployment)
-    # Why: cloud deployments manage their own projects and migrations via the cloud platform.
-    # The local MCP server always uses SQLite and needs initialization even when
-    # projects are configured for cloud routing.
-    # Outcome: skip initialization only for actual cloud Postgres deployments.
-    if app_config.database_backend == DatabaseBackend.POSTGRES:
-        logger.info("Skipping local initialization - Postgres backend manages its own schema")
+    # Trigger: stateless/cloud deployment (skip_initialization_sync, set by
+    # BasicMemoryConfig.for_cloud_tenant).
+    # Why: cloud manages its own schema and per-tenant projects from the database.
+    # Gating on the Postgres *backend* was wrong — a LOCAL Postgres install still
+    # needs initialization, otherwise reconcile_projects_with_config never runs and
+    # the seeded default project gets no row in the projects table, so
+    # /v2/projects/resolve rejects the default and MCP calls are unusable.
+    # Outcome: skip only for actual stateless/cloud deployments.
+    if app_config.skip_initialization_sync:
+        logger.info(
+            "Skipping local initialization - stateless/cloud deployment manages its own schema"
+        )
         return
 
     logger.info("Initializing app...")
