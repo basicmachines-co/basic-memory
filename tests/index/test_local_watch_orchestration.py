@@ -241,6 +241,35 @@ def test_local_watch_project_change_batches_route_changes_to_projects(tmp_path: 
     )
 
 
+def test_local_watch_project_change_batches_route_nested_to_deepest(tmp_path: Path) -> None:
+    """A change under a nested child routes to the child even when the parent
+    (which also contains the path) is listed first — repository order is arbitrary."""
+    parent_root = tmp_path / "parent"
+    child_root = parent_root / "child"
+    child_root.mkdir(parents=True)
+    child_note = child_root / "notes" / "c.md"
+    child_note.parent.mkdir(parents=True, exist_ok=True)
+    child_note.write_text("# Note\n", encoding="utf-8")
+    parent = SimpleNamespace(path=str(parent_root))
+    child = SimpleNamespace(path=str(child_root))
+
+    batches = local_watch_project_change_batches(
+        projects=(parent, child),  # parent first — the failing order before the fix
+        changes=((Change.added, str(child_note)),),
+        ignore_patterns_by_project_root={
+            parent_root.resolve(): set(),
+            child_root.resolve(): set(),
+        },
+    )
+
+    assert batches == (
+        LocalWatchProjectChangeBatch(
+            project=child,
+            changes=((Change.added, str(child_note)),),
+        ),
+    )
+
+
 def test_local_watch_project_change_batches_apply_project_ignore_patterns(tmp_path: Path) -> None:
     project_root = tmp_path / "local-project"
     project_root.mkdir()

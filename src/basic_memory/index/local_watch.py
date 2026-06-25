@@ -129,10 +129,18 @@ def local_watch_project_change_batches(
     routed_changes: list[tuple[LocalWatchProjectT, list[FileChange]]] = [
         (project, []) for project, _project_root in project_roots
     ]
+    # Match deepest-first so a change under a nested child routes to the child, not
+    # a parent that also contains it. Repository order is arbitrary (no ORDER BY),
+    # so a parent listed first would otherwise steal every child file via the break.
+    roots_deepest_first = sorted(
+        enumerate(project_roots),
+        key=lambda item: len(item[1][1].parts),
+        reverse=True,
+    )
 
     for change, path in changes:
         file_path = Path(path).expanduser().resolve()
-        for index, (_project, project_root) in enumerate(project_roots):
+        for index, (_project, project_root) in roots_deepest_first:
             if not local_watch_path_is_under_project(project_root=project_root, path=file_path):
                 continue
 
