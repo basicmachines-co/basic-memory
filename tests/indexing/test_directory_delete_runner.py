@@ -22,6 +22,7 @@ from basic_memory.indexing.directory_delete_runner import (
 )
 from basic_memory.runtime import (
     RuntimeDirectoryFileSnapshot,
+    RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,
 )
 
@@ -168,6 +169,25 @@ def test_directory_delete_result_serializes_pending_deleted_files() -> None:
     }
 
 
+def test_directory_delete_result_serializes_skipped_files_as_failures() -> None:
+    # A guarded cleanup that left a file on disk must be reported as failed, not
+    # folded into successful_deletes (the file would otherwise reappear silently).
+    result = DirectoryDeleteAcceptedResult.pending(
+        deleted_files=("notes/a.md", "notes/b.md"),
+        skipped_files=("notes/b.md",),
+        skip_reasons=("file changed before delete: notes/b.md",),
+    )
+
+    assert result.to_response_payload() == {
+        "total_files": 2,
+        "successful_deletes": 1,
+        "failed_deletes": 1,
+        "deleted_files": ["notes/a.md", "notes/b.md"],
+        "errors": ["file changed before delete: notes/b.md"],
+        "file_delete_status": "pending",
+    }
+
+
 def test_directory_delete_result_serializes_failed_enqueue_error() -> None:
     result = DirectoryDeleteAcceptedResult.failed(
         deleted_files=("notes/a.md",),
@@ -257,6 +277,8 @@ async def test_run_directory_delete_accepts_rows_and_queues_cleanup() -> None:
     )
     assert store.loaded_directories == ["notes"]
     assert store.deleted_entity_ids == [(7, 8)]
+    # No guarded skips here, so the payload still reports a clean success.
+    assert result.to_response_payload()["failed_deletes"] == 0
     assert enqueuer.requests == [
         RuntimeNoteFileDeleteJobRequest(
             tenant_id=tenant_id,
@@ -273,6 +295,41 @@ async def test_run_directory_delete_accepts_rows_and_queues_cleanup() -> None:
             file_checksum=None,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_directory_delete_reports_skipped_guarded_cleanup() -> None:
+    """A guarded inline delete that skips a file (checksum changed) must surface as
+    a failed delete with the reason, not a silent success that strands the file."""
+    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+    files = [directory_snapshot(entity_id=7, file_path="notes/a.md")]
+    store = FakeDirectoryDeleteStore(project_id=3, files=files)
+
+    class SkippingEnqueuer:
+        async def enqueue_directory_file_delete(
+            self,
+            request: RuntimeNoteFileDeleteJobRequest,
+        ) -> RuntimeFileDeleteResult:
+            return RuntimeFileDeleteResult.no_accepted_checksum(
+                file_path=request.file_path,
+                entity_id=request.entity_id,
+            )
+
+    result = await run_directory_delete(
+        AsyncSession(),
+        request=DirectoryDeleteAcceptanceRequest(
+            tenant_id=tenant_id,
+            project_external_id="project-123",
+            directory="/notes/",
+        ),
+        runtime=DirectoryDeleteRuntime(store=store, file_delete_enqueuer=SkippingEnqueuer()),
+    )
+
+    assert result.skipped_files == ("notes/a.md",)
+    payload = result.to_response_payload()
+    assert payload["successful_deletes"] == 0
+    assert payload["failed_deletes"] == 1
+    assert payload["errors"] == ["no accepted file checksum for notes/a.md"]
 
 
 @pytest.mark.asyncio

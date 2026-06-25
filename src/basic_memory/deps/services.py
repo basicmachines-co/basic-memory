@@ -80,6 +80,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.runtime import (
     RuntimeFileChecksum,
+    RuntimeFileDeleteResult,
     RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
     TenantId,
@@ -413,9 +414,11 @@ class LocalDirectoryFileDeleteEnqueuer:
     async def enqueue_directory_file_delete(
         self,
         request: RuntimeNoteFileDeleteJobRequest,
-    ) -> None:
+    ) -> RuntimeFileDeleteResult | None:
+        # Local cleanup runs inline, so return the guarded delete result; a skipped
+        # delete (file changed before cleanup) must not be reported as a success.
         try:
-            await run_note_file_delete(
+            return await run_note_file_delete(
                 request,
                 storage=LocalNoteFileDeleteStorage(file_service=self.file_service),
             )

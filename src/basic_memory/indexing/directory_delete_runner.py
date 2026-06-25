@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory.indexing.project_index_workflow import delete_project_index_vector_rows
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.runtime import (
+    RuntimeDeleteStatus,
     RuntimeDirectoryFileSnapshot,
+    RuntimeFileDeleteResult,
     RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
     TenantId,
@@ -225,6 +227,11 @@ class DirectoryDeleteAcceptedResult:
     deleted_files: tuple[RuntimeFilePath, ...]
     file_delete_status: DirectoryDeleteFileStatus
     error: str | None = None
+    # Files whose guarded cleanup was skipped (checksum changed / no accepted
+    # checksum) and therefore remain on disk despite the DB row being deleted.
+    # "missing" results count as successful (the file is already gone).
+    skipped_files: tuple[RuntimeFilePath, ...] = ()
+    skip_reasons: tuple[str, ...] = ()
 
     @classmethod
     def complete(cls) -> "DirectoryDeleteAcceptedResult":
@@ -236,9 +243,16 @@ class DirectoryDeleteAcceptedResult:
         cls,
         *,
         deleted_files: Sequence[RuntimeFilePath],
+        skipped_files: Sequence[RuntimeFilePath] = (),
+        skip_reasons: Sequence[str] = (),
     ) -> "DirectoryDeleteAcceptedResult":
         """Return the response after DB rows were deleted and cleanup was queued."""
-        return cls(deleted_files=tuple(deleted_files), file_delete_status="pending")
+        return cls(
+            deleted_files=tuple(deleted_files),
+            file_delete_status="pending",
+            skipped_files=tuple(skipped_files),
+            skip_reasons=tuple(skip_reasons),
+        )
 
     @classmethod
     def failed(
@@ -255,13 +269,19 @@ class DirectoryDeleteAcceptedResult:
         )
 
     def to_response_payload(self) -> dict[str, object]:
-        """Serialize to the current Basic Memory directory-delete response contract."""
+        """Serialize to the current Basic Memory directory-delete response contract.
+
+        A guarded cleanup that left files on disk (skipped_files) is reported as
+        failed_deletes with reasons, not folded into successful_deletes — otherwise
+        callers see a clean success while stale files remain and later reappear.
+        """
+        skipped = len(self.skipped_files)
         payload: dict[str, object] = {
             "total_files": len(self.deleted_files),
-            "successful_deletes": len(self.deleted_files),
-            "failed_deletes": 0,
+            "successful_deletes": len(self.deleted_files) - skipped,
+            "failed_deletes": skipped,
             "deleted_files": list(self.deleted_files),
-            "errors": [],
+            "errors": list(self.skip_reasons),
             "file_delete_status": self.file_delete_status,
         }
         if self.error is not None:
@@ -270,12 +290,16 @@ class DirectoryDeleteAcceptedResult:
 
 
 class DirectoryFileDeleteEnqueuer(Protocol):
-    """Capability that queues cleanup for one accepted directory-delete file."""
+    """Capability that queues cleanup for one accepted directory-delete file.
+
+    Returns the guarded delete result when cleanup runs inline (local runtime),
+    or None when the work is queued for later (cloud runtime, outcome deferred).
+    """
 
     async def enqueue_directory_file_delete(
         self,
         request: RuntimeNoteFileDeleteJobRequest,
-    ) -> None: ...
+    ) -> RuntimeFileDeleteResult | None: ...
 
 
 async def enqueue_directory_file_delete_jobs(
@@ -284,10 +308,15 @@ async def enqueue_directory_file_delete_jobs(
     project_id: ProjectId,
     files: Sequence[RuntimeDirectoryFileSnapshot],
     enqueuer: DirectoryFileDeleteEnqueuer,
-) -> None:
-    """Queue guarded cleanup jobs for files accepted by a directory delete."""
+) -> list[RuntimeFileDeleteResult]:
+    """Queue guarded cleanup jobs for files accepted by a directory delete.
+
+    Returns the inline cleanup results (local runtime); deferred/queued cleanups
+    (cloud runtime) contribute nothing here.
+    """
+    results: list[RuntimeFileDeleteResult] = []
     for file_snapshot in files:
-        await enqueuer.enqueue_directory_file_delete(
+        result = await enqueuer.enqueue_directory_file_delete(
             plan_note_file_delete_job_request(
                 tenant_id=tenant_id,
                 file_delete=file_snapshot.to_pending_note_file_delete(
@@ -295,6 +324,9 @@ async def enqueue_directory_file_delete_jobs(
                 ),
             )
         )
+        if result is not None:
+            results.append(result)
+    return results
 
 
 async def accept_directory_delete(
@@ -352,7 +384,7 @@ async def finish_directory_delete_acceptance(
         return DirectoryDeleteAcceptedResult.complete()
 
     try:
-        await enqueue_directory_file_delete_jobs(
+        file_results = await enqueue_directory_file_delete_jobs(
             tenant_id=request.tenant_id,
             project_id=accepted.project_id,
             files=accepted.files,
@@ -364,7 +396,14 @@ async def finish_directory_delete_acceptance(
             error=str(exc),
         )
 
-    return DirectoryDeleteAcceptedResult.pending(deleted_files=accepted.deleted_files)
+    # A guarded delete that skipped a file (checksum changed) left it on disk even
+    # though its DB row is gone; surface those instead of reporting a clean success.
+    skipped = [r for r in file_results if r.status == RuntimeDeleteStatus.skipped]
+    return DirectoryDeleteAcceptedResult.pending(
+        deleted_files=accepted.deleted_files,
+        skipped_files=tuple(r.file_path for r in skipped),
+        skip_reasons=tuple(r.reason for r in skipped),
+    )
 
 
 async def run_directory_delete(
