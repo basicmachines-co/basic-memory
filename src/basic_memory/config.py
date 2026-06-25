@@ -580,17 +580,22 @@ class BasicMemoryConfig(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_sync_changes(cls, data: Any) -> Any:
-        """Honor the legacy ``sync_changes`` opt-out after its rename to ``index_changes``.
+    def migrate_legacy_sync_fields(cls, data: Any) -> Any:
+        """Honor legacy ``sync_changes``/``sync_delay`` after their rename to
+        ``index_changes``/``index_delay``.
 
-        Existing configs that set ``"sync_changes": false`` to disable realtime
-        indexing must keep that behavior across the rename. ``extra="ignore"``
-        would otherwise drop the unknown key and fall back to the new default
-        (True), silently restarting the watcher for users who opted out.
+        Existing configs that set ``"sync_changes": false`` (disable realtime
+        indexing) or a custom ``"sync_delay"`` debounce must keep that behavior
+        across the rename. ``extra="ignore"`` would otherwise drop the unknown
+        keys and fall back to the new defaults (True / 1000ms), silently
+        restarting the watcher or speeding up indexing for users who tuned it.
         The new field takes precedence when both are present.
         """
-        if isinstance(data, dict) and "index_changes" not in data and "sync_changes" in data:
-            data["index_changes"] = data["sync_changes"]
+        if isinstance(data, dict):
+            if "index_changes" not in data and "sync_changes" in data:
+                data["index_changes"] = data["sync_changes"]
+            if "index_delay" not in data and "sync_delay" in data:
+                data["index_delay"] = data["sync_delay"]
         return data
 
     @model_validator(mode="before")
