@@ -60,8 +60,9 @@ class ApiContainer:
         Watching is enabled when:
         - index_changes is True in config
         - Not in test mode (tests manage their own watcher lifecycle)
+        - Not in cloud mode (cloud handles storage events differently)
         """
-        return self.config.index_changes and not self.mode.is_test
+        return self.config.index_changes and not self.mode.is_test and not self.mode.is_cloud
 
     @property
     def watch_skip_reason(self) -> str | None:  # pragma: no cover
@@ -71,6 +72,8 @@ class ApiContainer:
         """
         if self.mode.is_test:
             return "Test environment detected"
+        if self.mode.is_cloud:
+            return "Cloud mode enabled"
         if not self.config.index_changes:
             return "Local file watching disabled"
         return None
