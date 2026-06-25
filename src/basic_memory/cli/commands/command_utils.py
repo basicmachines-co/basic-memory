@@ -32,11 +32,17 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     # Deferred: basic_memory.db pulls SQLAlchemy + Alembic, which must not load
     # at CLI import time — only when a command actually runs (#886).
     from basic_memory import db
+    from basic_memory.cloud.note_content_materialization import drain_pending_materializations
 
     async def _with_cleanup() -> T:
         try:
             return await coro
         finally:
+            # Drain queued source-of-truth file writes before the loop closes:
+            # local writes accept and materialize off the request path, so a
+            # one-shot client would otherwise exit before the markdown file is
+            # written (the API already reported the note accepted).
+            await drain_pending_materializations()
             await db.shutdown_db()
 
     return asyncio.run(_with_cleanup())

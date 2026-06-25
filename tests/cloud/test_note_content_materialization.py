@@ -211,6 +211,24 @@ async def test_local_materialization_defers_write_off_the_accept_path(
 
 
 @pytest.mark.asyncio
+async def test_drain_pending_materializations_waits_for_queued_work(monkeypatch) -> None:
+    """One-shot clients must drain queued file writes before the loop closes, or the
+    source-of-truth markdown file is lost even though the API reported it accepted."""
+    pool = note_content_materialization._MaterializationWorkerPool()
+    monkeypatch.setattr(note_content_materialization, "_materialization_pool", pool)
+    ran = asyncio.Event()
+
+    async def work() -> None:
+        ran.set()
+
+    pool.submit(work(), workers=1)
+    await note_content_materialization.drain_pending_materializations()
+
+    assert ran.is_set()
+    await pool.aclose()
+
+
+@pytest.mark.asyncio
 async def test_materialization_pool_bounds_concurrency_and_drains() -> None:
     """Failsafe: the pool runs at most `workers` materializations at once.
 
