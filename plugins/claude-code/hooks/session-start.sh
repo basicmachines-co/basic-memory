@@ -76,25 +76,52 @@ cwd = payload.get("cwd") or os.getcwd()
 
 
 # --- Load plugin config from .claude settings (local overrides committed) ---
-# Precedence: settings.local.json (per-user) wins over settings.json (team).
-# `found` is True if either file declared a basicMemory block at all — its
-# presence is the first-run sentinel (setup writing it stops the nudge below).
+# Precedence (lowest to highest): the user-level ~/.claude/settings.json, then
+# the project's .claude/settings.json and .claude/settings.local.json. A single
+# user-level basicMemory block can cover every project without running setup per
+# repo; any project can still pin its own mapping, which wins. We mirror Claude
+# Code's real sources: user level is settings.json only (there is no user-level
+# settings.local.json), local settings are project-scoped. Because the hook cwd
+# can be a repo subdirectory, we walk ancestors to the nearest .claude config so
+# a project-root mapping is honoured instead of skipped. `found` is True if any
+# file declared a basicMemory block — its presence is the first-run sentinel
+# (setup writing it stops the nudge below).
+def _read_block(path):
+    try:
+        with open(path) as fh:
+            block = json.load(fh).get("basicMemory")
+    except Exception:
+        return None
+    return block if isinstance(block, dict) else None
+
+
+def _project_dir(directory):
+    # Nearest ancestor (including directory) holding a .claude settings file.
+    d = os.path.abspath(directory)
+    while True:
+        for name in ("settings.json", "settings.local.json"):
+            if os.path.isfile(os.path.join(d, ".claude", name)):
+                return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return os.path.abspath(directory)
+        d = parent
+
+
 def load_settings(directory):
     merged = {}
     found = False
-    for name in ("settings.json", "settings.local.json"):
-        path = os.path.join(directory, ".claude", name)
-        try:
-            with open(path) as fh:
-                data = json.load(fh)
-        except FileNotFoundError:
-            continue
-        except Exception:
-            continue
-        block = data.get("basicMemory")
-        if isinstance(block, dict):
-            found = True
-            merged.update(block)
+    home = os.path.expanduser("~")
+    sources = [(home, ("settings.json",))]
+    project = _project_dir(directory)  # already absolute
+    if project != home:
+        sources.append((project, ("settings.json", "settings.local.json")))
+    for d, names in sources:
+        for name in names:
+            block = _read_block(os.path.join(d, ".claude", name))
+            if block is not None:
+                found = True
+                merged.update(block)
     return merged, found
 
 

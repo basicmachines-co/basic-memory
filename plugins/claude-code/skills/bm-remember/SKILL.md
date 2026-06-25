@@ -10,8 +10,10 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
 
 ## Steps
 
-1. **Resolve config.** Read `.claude/settings.json` (and `.claude/settings.local.json`
-   if it exists) and look for the `basicMemory` block:
+1. **Resolve config.** Read the `basicMemory` block with the same precedence the
+   hooks use: user-level `~/.claude/settings.json` as the base, then the project's
+   `.claude/settings.json` and `.claude/settings.local.json` override it per key. A
+   user-level block alone is enough; a project can still pin its own values:
    - `rememberFolder` — folder for quick captures (default: `bm-remember`)
    - `primaryProject` — project to write to (default: omit the `project` argument so
      Basic Memory uses its default project)
