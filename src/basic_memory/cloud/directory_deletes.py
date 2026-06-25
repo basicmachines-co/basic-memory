@@ -10,8 +10,9 @@ from contextlib import AbstractAsyncContextManager
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.indexing import (
     DirectoryDeleteAcceptanceRequest,
     DirectoryDeleteRejected,
@@ -54,7 +55,7 @@ class DirectoryDeleteService:
     def __init__(
         self,
         *,
-        session_maker: DirectoryDeleteSessionMaker,
+        session_maker: async_sessionmaker[AsyncSession],
         runtime: DirectoryDeleteRuntime,
     ) -> None:
         self.session_maker = session_maker
@@ -74,13 +75,16 @@ class DirectoryDeleteService:
             directory=directory,
         )
         try:
-            async with self.session_maker() as session:
-                async with session.begin():
-                    accepted = await accept_directory_delete(
-                        session,
-                        request=request,
-                        store=self.runtime.store,
-                    )
+            # scoped_session enables `PRAGMA foreign_keys=ON` for SQLite; this bulk
+            # delete issues a Core DELETE on entity and relies on ON DELETE CASCADE
+            # for note_content/observations/relations, which a raw session_maker()
+            # connection (foreign_keys OFF by default) would leave orphaned.
+            async with db.scoped_session(self.session_maker) as session:
+                accepted = await accept_directory_delete(
+                    session,
+                    request=request,
+                    store=self.runtime.store,
+                )
         except DirectoryDeleteRejected as error:
             raise directory_delete_service_error_from_rejection(error.rejection) from error
 

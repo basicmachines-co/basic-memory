@@ -38,7 +38,6 @@ import basic_memory.cloud.note_content_writes as note_content_writes
 from basic_memory.cloud.directory_deletes import (
     DirectoryDeleteService,
     DirectoryDeleteServiceError,
-    DirectoryDeleteSessionMaker,
 )
 from basic_memory.cloud.note_content_reads import NoteContentQueryService
 from basic_memory.cloud.note_content_writes import (
@@ -635,10 +634,14 @@ def test_rejection_kinds_own_route_status_behavior() -> None:
 
 
 @pytest.mark.asyncio
-async def test_directory_delete_service_uses_injected_runtime_and_session_maker() -> None:
+async def test_directory_delete_service_uses_injected_runtime_and_session_maker(
+    session_maker,
+) -> None:
     enqueuer = FakeDirectoryFileDeleteEnqueuer()
+    # Real session_maker so scoped_session can enable SQLite FK cascades; the fake
+    # store ignores the session and returns canned snapshots.
     service = DirectoryDeleteService(
-        session_maker=cast(DirectoryDeleteSessionMaker, FakeSessionMaker()),
+        session_maker=session_maker,
         runtime=DirectoryDeleteRuntime(
             store=FakeDirectoryDeleteStore(),
             file_delete_enqueuer=enqueuer,
