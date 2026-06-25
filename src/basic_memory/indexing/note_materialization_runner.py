@@ -49,6 +49,7 @@ from basic_memory.runtime import (
     plan_prepared_note_write,
     write_prepared_note_to_content_store,
 )
+from basic_memory.file_utils import FileError
 from basic_memory.models import Entity, NoteContent
 from basic_memory.services.exceptions import FileOperationError
 
@@ -623,7 +624,11 @@ async def run_note_materialization(
             file_path=exc.file_path,
             file_checksum=exc.actual_checksum,
         )
-    except FileOperationError as exc:
+    # Any other storage failure (atomic write -> FileWriteError, checksum ->
+    # FileError, post-write stat -> OSError) must also flip the note out of the
+    # "writing" preflight state, or reads/status report an in-progress write that
+    # never completes. FileError/OSError do not subclass FileOperationError.
+    except (FileOperationError, FileError, OSError) as exc:
         await status_publisher.publish_note_materialization_status(
             request,
             NoteMaterializationStatusPublication(

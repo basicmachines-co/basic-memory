@@ -36,6 +36,7 @@ from basic_memory.runtime import (
     RuntimeWrittenFileState,
     plan_prepared_note_write,
 )
+from basic_memory.file_utils import FileError
 from basic_memory.services.exceptions import FileOperationError
 
 
@@ -57,7 +58,7 @@ class FakeWriter:
         self,
         written_file: RuntimeWrittenFileState | None = None,
         *,
-        error: RuntimeFileConflictError | FileOperationError | None = None,
+        error: RuntimeFileConflictError | FileOperationError | FileError | OSError | None = None,
     ) -> None:
         self.written_file = written_file
         self.error = error
@@ -846,6 +847,50 @@ async def test_run_note_materialization_records_file_operation_failure_then_rera
                 file_write_status="failed",
                 attempted_at=prepared.attempted_at,
                 error_message="storage unavailable",
+            ),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        FileError("checksum failed"),
+        OSError("stat failed"),
+    ],
+)
+async def test_run_note_materialization_marks_other_storage_errors_failed(error) -> None:
+    """Storage errors that are not RuntimeFileConflictError/FileOperationError
+    (FileError from atomic write/checksum, OSError from the post-write stat) must
+    still flip the note out of the 'writing' preflight state, not leave it stuck."""
+    request = materialization_request()
+    prepared = prepared_write(request)
+    status_publisher = FakeStatusPublisher()
+
+    with pytest.raises(type(error)):
+        await run_note_materialization(
+            request,
+            preflight=FakePreflight(NoteMaterializationPreflightResult.prepared(prepared)),
+            writer=FakeWriter(error=error),
+            publisher=FakePublisher(
+                RuntimeNoteMaterializationResult(
+                    entity_id=42,
+                    status=RuntimeNoteMaterializationStatus.written,
+                    reason="should not be used",
+                )
+            ),
+            status_publisher=status_publisher,
+            cleanup_enqueuer=FakeCleanupEnqueuer(),
+        )
+
+    assert status_publisher.calls == [
+        (
+            request,
+            NoteMaterializationStatusPublication(
+                file_write_status="failed",
+                attempted_at=prepared.attempted_at,
+                error_message=str(error),
             ),
         )
     ]
