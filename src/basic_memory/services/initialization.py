@@ -13,7 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Project
 from basic_memory.repository import (
     ProjectRepository,
@@ -221,13 +221,17 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
     This is a wrapper for the async initialize_app function that can be
     called from synchronous code like CLI entry points.
 
-    No-op if database backend is Postgres (cloud deployment manages its own schema).
+    No-op for stateless/cloud deployments (skip_initialization_sync). A LOCAL
+    Postgres install still needs initialization, so gate on the marker, not the
+    backend — matching initialize_app.
 
     Args:
         app_config: The Basic Memory project configuration
     """
-    if app_config.database_backend == DatabaseBackend.POSTGRES:
-        logger.info("Skipping local initialization - Postgres backend manages its own schema")
+    if app_config.skip_initialization_sync:
+        logger.info(
+            "Skipping local initialization - stateless/cloud deployment manages its own schema"
+        )
         return
 
     async def _init_and_cleanup():
