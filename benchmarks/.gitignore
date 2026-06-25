@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.idea/
+
+# Generated benchmark outputs
+benchmarks/runs/
+benchmarks/results/public/
+benchmarks/generated/
+benchmarks/logs/
+
+# Downloaded datasets (source distribution may be restricted)
+benchmarks/datasets/locomo/locomo10.json
+benchmarks/datasets/locomo/locomo10.provenance.json
+.env
+benchmarks/bm-home/
+benchmarks/datasets/longmemeval/longmemeval_s.json
+benchmarks/datasets/longmemeval/longmemeval_s.provenance.json
+benchmarks/datasets/locomo-audit/
+benchmarks/.mem0-qdrant/
+benchmarks/datasets/convomem/
+benchmarks/.bm-homes/
+.supermemory/
+.venvs/
+.scratch/

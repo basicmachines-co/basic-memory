@@ -1,0 +1,46 @@
+name: benchmark-nightly
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: extractions/setup-just@v2
+
+      - name: Install dependencies
+        run: uv sync --group dev --extra judge
+
+      - name: Fetch LoCoMo
+        run: just bench-fetch-locomo
+
+      - name: Convert LoCoMo
+        run: just bench-convert-locomo
+
+      - name: Run retrieval benchmark
+        run: |
+          uv run bm-bench run retrieval \
+            --providers bm-local,bm-cloud,mem0-local \
+            --dataset-id locomo \
+            --dataset-path benchmarks/datasets/locomo/locomo10.json \
+            --corpus-dir benchmarks/generated/locomo/docs \
+            --queries-path benchmarks/generated/locomo/queries.json \
+            --allow-provider-skip
+
+      - name: Run judge benchmark (best effort)
+        run: |
+          LATEST_RUN=$(ls -1t benchmarks/runs | head -n1)
+          uv run bm-bench run judge --run-dir "benchmarks/runs/${LATEST_RUN}" || true
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-nightly-artifacts
+          path: benchmarks/runs

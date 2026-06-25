@@ -1,0 +1,38 @@
+[
+  {
+    "id": "synthetic-q001",
+    "query": "How are refresh tokens handled?",
+    "category": "single_hop",
+    "category_id": 1,
+    "ground_truth": ["auth-memory"],
+    "expected_answer": "rotating refresh tokens",
+    "metadata": {"dataset_id": "synthetic"}
+  },
+  {
+    "id": "synthetic-q002",
+    "query": "How does note change detection trigger indexing?",
+    "category": "multi_hop",
+    "category_id": 2,
+    "ground_truth": ["sync-memory"],
+    "expected_answer": "reindexes changed notes",
+    "metadata": {"dataset_id": "synthetic"}
+  },
+  {
+    "id": "synthetic-q003",
+    "query": "How does the assistant construct context?",
+    "category": "open_domain",
+    "category_id": 4,
+    "ground_truth": ["agent-memory"],
+    "expected_answer": "graph traversal plus search",
+    "metadata": {"dataset_id": "synthetic"}
+  },
+  {
+    "id": "synthetic-q004",
+    "query": "What color was the moonlight in the transcript?",
+    "category": "adversarial",
+    "category_id": 5,
+    "ground_truth": [],
+    "expected_answer": "",
+    "metadata": {"dataset_id": "synthetic"}
+  }
+]

@@ -1,0 +1,32 @@
+name: benchmark-smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: extractions/setup-just@v2
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run smoke benchmark
+        run: just bench-smoke
+
+      - name: Validate latest artifacts
+        run: |
+          LATEST_RUN=$(ls -1t benchmarks/runs | head -n1)
+          uv run bm-bench validate-artifacts --run-dir "benchmarks/runs/${LATEST_RUN}"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-smoke-artifacts
+          path: benchmarks/runs

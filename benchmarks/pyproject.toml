@@ -1,0 +1,57 @@
+[project]
+name = "basic-memory-benchmarks"
+version = "0.1.0"
+description = "Reproducible benchmark suite for Basic Memory and competitor memory systems"
+readme = "README.md"
+authors = [
+    { name = "Basic Machines", email = "hello@basic-machines.co" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "basic-memory>=0.20.2",
+    "httpx>=0.28.0",
+    "mcp>=1.23.1",
+    "mem0ai[nlp]==2.0.5",
+    "pydantic>=2.12.0",
+    "python-frontmatter>=1.1.0",
+    "rich>=13.9.4",
+    "typer>=0.16.1",
+]
+
+[project.optional-dependencies]
+judge = [
+    "pydantic-evals>=0.4.0",
+]
+
+[project.scripts]
+bm-bench = "basic_memory_benchmarks.cli:main"
+basic-memory-benchmarks = "basic_memory_benchmarks.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.2.0",
+    "ruff>=0.13.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
+testpaths = ["tests", "test-int"]
+markers = [
+    "integration: Integration tests",
+    "slow: Slow tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pyright]
+include = ["src", "tests", "test-int"]
+pythonVersion = "3.12"
