@@ -23,7 +23,6 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     NoteContentQueryServiceDep,
     SearchServiceV2ExternalDep,
-    SessionDep,
     SessionMakerDep,
 )
 from basic_memory.models.knowledge import Entity as EntityModel
@@ -43,7 +42,7 @@ async def get_resource_content(
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
-    session: SessionDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
 ) -> Response:
@@ -70,26 +69,33 @@ async def get_resource_content(
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
 
-        note_resource = await note_content_query_service.get_note_resource_with_read_repair(
-            project_external_id=project_id,
-            entity_external_id=entity_id,
-            session=session,
-        )
-        if note_resource is not None:
-            return Response(
-                content=note_resource.content,
-                media_type=note_resource.content_type,
+        # Keep the DB session open only for the lookups; close it before the
+        # filesystem I/O below so large/slow resource reads don't pin a pooled
+        # connection (and an open read transaction on Postgres) for their duration.
+        async with db.scoped_session(session_maker) as session:
+            note_resource = await note_content_query_service.get_note_resource_with_read_repair(
+                project_external_id=project_id,
+                entity_external_id=entity_id,
+                session=session,
             )
+            if note_resource is not None:
+                return Response(
+                    content=note_resource.content,
+                    media_type=note_resource.content_type,
+                )
 
-        with logfire.span(
-            "api.resource.get_content.load_entity",
-            domain="resource",
-            action="get_content",
-            phase="load_entity",
-        ):
-            entity = await entity_repository.get_by_external_id(session, entity_id)
-        if not entity:
-            raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+            with logfire.span(
+                "api.resource.get_content.load_entity",
+                domain="resource",
+                action="get_content",
+                phase="load_entity",
+            ):
+                entity = await entity_repository.get_by_external_id(session, entity_id)
+            if not entity:
+                raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+            # Copy the scalar columns needed for file I/O so the session can close.
+            entity_file_path = entity.file_path
+            entity_db_id = entity.id
 
         with logfire.span(
             "api.resource.get_content.validate_path",
@@ -98,9 +104,9 @@ async def get_resource_content(
             phase="validate_path",
         ):
             project_path = PathLib(config.home)
-            if not validate_project_path(entity.file_path, project_path):
+            if not validate_project_path(entity_file_path, project_path):
                 logger.error(  # pragma: no cover
-                    f"Invalid file path in entity {entity.id}: {entity.file_path}"
+                    f"Invalid file path in entity {entity_db_id}: {entity_file_path}"
                 )
                 raise HTTPException(  # pragma: no cover
                     status_code=500,
@@ -113,10 +119,10 @@ async def get_resource_content(
             action="get_content",
             phase="ensure_exists",
         ):
-            if not await file_service.exists(entity.file_path):
+            if not await file_service.exists(entity_file_path):
                 raise HTTPException(  # pragma: no cover
                     status_code=404,
-                    detail=f"File not found: {entity.file_path}",
+                    detail=f"File not found: {entity_file_path}",
                 )
 
         with logfire.span(
@@ -125,8 +131,8 @@ async def get_resource_content(
             action="get_content",
             phase="read_content",
         ):
-            content = await file_service.read_file_bytes(entity.file_path)
-            content_type = file_service.content_type(entity.file_path)
+            content = await file_service.read_file_bytes(entity_file_path)
+            content_type = file_service.content_type(entity_file_path)
 
         return Response(content=content, media_type=content_type)
 
