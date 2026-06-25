@@ -328,18 +328,28 @@ def plan_written_note_materialization_publish(
     current_file_path: RuntimeFilePath | None,
 ) -> NoteMaterializationPublishPlan:
     """Plan DB publication after storage accepts a materialized note file."""
-    result_kwargs = {
-        "entity_id": request.entity_id,
-        "file_path": written_file.file_path,
-        "file_checksum": written_file.file_checksum,
-    }
+    def _result(
+        status: RuntimeNoteMaterializationStatus,
+        reason: str,
+        *,
+        written_file_orphaned: bool = False,
+    ) -> RuntimeNoteMaterializationResult:
+        return RuntimeNoteMaterializationResult(
+            entity_id=request.entity_id,
+            status=status,
+            reason=reason,
+            file_path=written_file.file_path,
+            file_checksum=written_file.file_checksum,
+            written_file_orphaned=written_file_orphaned,
+        )
+
     if current_note_content is None:
         return NoteMaterializationPublishPlan(
             action=NoteMaterializationPublishAction.missing_note_content,
-            result=RuntimeNoteMaterializationResult(
-                status=RuntimeNoteMaterializationStatus.missing,
-                reason=f"note state disappeared after file write: {request.entity_id}",
-                **result_kwargs,
+            result=_result(
+                RuntimeNoteMaterializationStatus.missing,
+                f"note state disappeared after file write: {request.entity_id}",
+                written_file_orphaned=True,
             ),
         )
 
@@ -349,10 +359,10 @@ def plan_written_note_materialization_publish(
     if current_file_path != prepared_write.file_path:
         return NoteMaterializationPublishPlan(
             action=NoteMaterializationPublishAction.stale_file_path,
-            result=RuntimeNoteMaterializationResult(
-                status=RuntimeNoteMaterializationStatus.stale,
-                reason=f"note path changed before file publish: {request.entity_id}",
-                **result_kwargs,
+            result=_result(
+                RuntimeNoteMaterializationStatus.stale,
+                f"note path changed before file publish: {request.entity_id}",
+                written_file_orphaned=True,
             ),
         )
 
@@ -371,22 +381,18 @@ def plan_written_note_materialization_publish(
     if not note_content_matches_materialization_request(current_note_content, request):
         return NoteMaterializationPublishPlan(
             action=NoteMaterializationPublishAction.stale_db_version,
-            result=RuntimeNoteMaterializationResult(
-                status=RuntimeNoteMaterializationStatus.stale,
-                reason=(
-                    f"file written but newer accepted note remains pending: {request.entity_id}"
-                ),
-                **result_kwargs,
+            result=_result(
+                RuntimeNoteMaterializationStatus.stale,
+                f"file written but newer accepted note remains pending: {request.entity_id}",
             ),
             note_content_update=note_content_update,
         )
 
     return NoteMaterializationPublishPlan(
         action=NoteMaterializationPublishAction.current,
-        result=RuntimeNoteMaterializationResult(
-            status=RuntimeNoteMaterializationStatus.written,
-            reason=f"note file written: {written_file.file_path}",
-            **result_kwargs,
+        result=_result(
+            RuntimeNoteMaterializationStatus.written,
+            f"note file written: {written_file.file_path}",
         ),
         note_content_update=note_content_update,
     )
@@ -606,6 +612,15 @@ async def run_note_materialization(
                 tenant_id=request.tenant_id,
                 cleanup_file=cleanup_file_from_prepared_write(request, prepared_write),
             )
+        elif result.written_file_orphaned:
+            # Written to disk but the note moved/disappeared before publish, so the
+            # DB no longer owns this path; clean up the just-written file or the
+            # watcher/project index re-imports it as a duplicate note.
+            await enqueue_cleanup_file(
+                cleanup_enqueuer,
+                tenant_id=request.tenant_id,
+                cleanup_file=cleanup_file_for_orphaned_write(request, written_file),
+            )
         return result
     except RuntimeFileConflictError as exc:
         await status_publisher.publish_note_materialization_status(
@@ -652,6 +667,24 @@ def cleanup_file_from_prepared_write(
         entity_id=request.entity_id,
         file_path=prepared_write.cleanup_file_path,
         file_checksum=prepared_write.cleanup_file_checksum,
+    )
+
+
+def cleanup_file_for_orphaned_write(
+    request: RuntimeNoteMaterializationJobRequest,
+    written_file: RuntimeWrittenFileState,
+) -> RuntimePendingNoteFileDelete:
+    """Cleanup target for a file written to disk that the DB no longer owns.
+
+    The note moved or disappeared before publish, so the just-written file is
+    orphaned. The delete is checksum-guarded against the bytes we just wrote, so it
+    no-ops if anything else has since changed the file.
+    """
+    return RuntimePendingNoteFileDelete(
+        project_id=request.project_id,
+        entity_id=request.entity_id,
+        file_path=written_file.file_path,
+        file_checksum=written_file.file_checksum,
     )
 
 

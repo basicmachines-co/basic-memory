@@ -1620,6 +1620,11 @@ class RuntimeNoteMaterializationResult:
     reason: str
     file_path: RuntimeFilePath | None = None
     file_checksum: RuntimeFileChecksum | None = None
+    # True when the file was written to disk but the DB no longer owns that path
+    # (the note moved or disappeared before publish), so the just-written file is
+    # orphaned and must be cleaned up. Distinct from stale_db_version, where the
+    # same path will be re-materialized by a newer pending version.
+    written_file_orphaned: bool = False
 
 
 @dataclass(frozen=True, slots=True)

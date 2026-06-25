@@ -618,6 +618,7 @@ def test_plan_written_note_materialization_publish_handles_missing_note_content(
         reason="note state disappeared after file write: 42",
         file_path="notes/a.md",
         file_checksum="new-file-sum",
+        written_file_orphaned=True,
     )
 
 
@@ -636,6 +637,8 @@ def test_plan_written_note_materialization_publish_handles_moved_note() -> None:
     assert plan.note_content_update is None
     assert plan.result.status is RuntimeNoteMaterializationStatus.stale
     assert plan.result.reason == "note path changed before file publish: 42"
+    # The file was written at the old path the DB no longer owns -> orphaned.
+    assert plan.result.written_file_orphaned is True
 
 
 def test_plan_written_note_materialization_publish_records_stale_written_file() -> None:
@@ -768,6 +771,107 @@ async def test_run_note_materialization_terminal_result_can_enqueue_cleanup() ->
             file_checksum="old-cleanup-sum",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_note_materialization_cleans_orphaned_file_on_stale_path() -> None:
+    """A file written but no longer DB-owned (note moved before publish) is cleaned
+    up so the watcher/index won't re-import it as a duplicate note."""
+    request = materialization_request()
+    prepared = prepared_write(request)
+    result = RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.stale,
+        reason="note path changed before file publish: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+        written_file_orphaned=True,
+    )
+    cleanup = FakeCleanupEnqueuer()
+
+    actual = await run_note_materialization(
+        request,
+        preflight=FakePreflight(NoteMaterializationPreflightResult.prepared(prepared)),
+        writer=FakeWriter(written_file()),
+        publisher=FakePublisher(result),
+        status_publisher=FakeStatusPublisher(),
+        cleanup_enqueuer=cleanup,
+    )
+
+    assert actual == result
+    # The just-written file (not the prepared "old" file) is cleaned up.
+    assert cleanup.requests == [
+        RuntimeNoteFileDeleteJobRequest(
+            tenant_id=request.tenant_id,
+            project_id=request.project_id,
+            entity_id=request.entity_id,
+            file_path="notes/a.md",
+            file_checksum="new-file-sum",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_note_materialization_cleans_orphaned_file_on_missing_note() -> None:
+    """Same cleanup when the note disappeared after the file write."""
+    request = materialization_request()
+    prepared = prepared_write(request)
+    result = RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.missing,
+        reason="note state disappeared after file write: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+        written_file_orphaned=True,
+    )
+    cleanup = FakeCleanupEnqueuer()
+
+    await run_note_materialization(
+        request,
+        preflight=FakePreflight(NoteMaterializationPreflightResult.prepared(prepared)),
+        writer=FakeWriter(written_file()),
+        publisher=FakePublisher(result),
+        status_publisher=FakeStatusPublisher(),
+        cleanup_enqueuer=cleanup,
+    )
+
+    assert cleanup.requests == [
+        RuntimeNoteFileDeleteJobRequest(
+            tenant_id=request.tenant_id,
+            project_id=request.project_id,
+            entity_id=request.entity_id,
+            file_path="notes/a.md",
+            file_checksum="new-file-sum",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_note_materialization_keeps_file_on_stale_db_version() -> None:
+    """A stale-db-version result must NOT clean up: the same path is re-materialized
+    by the newer pending accepted version."""
+    request = materialization_request()
+    prepared = prepared_write(request)
+    result = RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.stale,
+        reason="file written but newer accepted note remains pending: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+        written_file_orphaned=False,
+    )
+    cleanup = FakeCleanupEnqueuer()
+
+    await run_note_materialization(
+        request,
+        preflight=FakePreflight(NoteMaterializationPreflightResult.prepared(prepared)),
+        writer=FakeWriter(written_file()),
+        publisher=FakePublisher(result),
+        status_publisher=FakeStatusPublisher(),
+        cleanup_enqueuer=cleanup,
+    )
+
+    assert cleanup.requests == []
 
 
 @pytest.mark.asyncio
