@@ -822,6 +822,30 @@ class EntityService(BaseService[EntityModel]):
             permalink=permalink,
         )
 
+    async def verify_move_destination_absent(
+        self,
+        *,
+        source_file_path: str,
+        destination_file_path: str,
+    ) -> None:
+        """Reject a local move onto a destination that exists on disk but is unindexed.
+
+        Mirrors the create/PUT storage-existence guard: committing the move would
+        point DB/search at an unchanged file and leave the source to be reindexed as
+        a duplicate. A case-only rename or shared storage target (same physical file)
+        is allowed. Cloud is DB-first and opts out via verify_storage_absent_on_create.
+        """
+        source = Path(source_file_path)
+        destination = Path(normalize_note_move_destination_path(destination_file_path).file_path)
+        if (
+            source != destination
+            and await self.file_service.exists(destination)
+            and not self._paths_share_storage_target(source, destination)
+        ):
+            raise EntityAlreadyExistsError(
+                f"file already exists at destination path: {destination.as_posix()}"
+            )
+
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:
         """Create new entity or update existing one.
         Returns: (entity, is_new) where is_new is True if a new entity was created

@@ -1054,6 +1054,40 @@ async def test_move_entity(
 
 
 @pytest.mark.asyncio
+async def test_move_entity_rejects_existing_unindexed_destination(
+    client: AsyncClient, v2_project_url, project_config
+):
+    """A move onto a file that exists on disk but is not indexed returns 409.
+
+    Regression for the #1002 review: local moves must apply the same storage guard
+    as creates, or DB/search would point at an unchanged destination file while the
+    source is left on disk to be reindexed as a duplicate.
+    """
+    create = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "MoveSource", "directory": "src", "content": "Source content"},
+        params={"fast": False},
+    )
+    assert create.status_code == 202
+    source_external_id = EntityResponseV2.model_validate(create.json()).external_id
+
+    # An unindexed file already occupies the move destination.
+    destination = project_config.home / "dest" / "Existing.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    original = "---\ntitle: Existing\ntype: note\n---\n\nPre-existing on-disk content\n"
+    destination.write_text(original, encoding="utf-8")
+
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{source_external_id}/move",
+        json={"destination_path": "dest/Existing.md"},
+    )
+
+    assert response.status_code == 409
+    # The on-disk destination must be untouched (no overwrite, no DB/search pointing at it).
+    assert destination.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
 async def test_v2_endpoints_use_project_id_not_name(client: AsyncClient, test_project: Project):
     """Verify v2 endpoints require project external_id UUID, not name."""
     # Try using project name instead of external_id - should fail

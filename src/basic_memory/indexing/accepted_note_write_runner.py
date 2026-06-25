@@ -171,6 +171,13 @@ class AcceptedNoteMovePreparer(Protocol):
         session: AsyncSession | None = ...,
     ) -> AcceptedPreparedMoveSource: ...
 
+    async def verify_move_destination_absent(
+        self,
+        *,
+        source_file_path: str,
+        destination_file_path: str,
+    ) -> None: ...
+
 
 class AcceptedNoteContentEntitySource(Protocol):
     """Entity identity required to accept one note_content snapshot."""

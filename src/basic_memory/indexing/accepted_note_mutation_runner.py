@@ -699,14 +699,21 @@ async def _run_accepted_note_move(
         dependencies=dependencies,
     )
     should_update_permalink = dependencies.move_policy.should_update_permalink(entity)
-    preparer = (
-        dependencies.preparer_factory.create_note_preparer(project)
-        if should_update_permalink
-        else None
-    )
+    preparer = dependencies.preparer_factory.create_note_preparer(project)
+    # Local source-of-truth guard: reject a move onto a destination file that exists
+    # on disk but is not indexed (mirrors the create/PUT storage check) before
+    # committing DB/search to the new path. Cloud is DB-first (flag is False).
+    if dependencies.verify_storage_absent_on_create:
+        try:
+            await preparer.verify_move_destination_absent(
+                source_file_path=entity.file_path,
+                destination_file_path=accepted_file_path,
+            )
+        except EntityAlreadyExistsError as error:
+            reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
     try:
         prepared_move = await prepare_accepted_note_move(
-            preparer,
+            preparer if should_update_permalink else None,
             session,
             entity=entity,
             current_note_content=current_note_content,
