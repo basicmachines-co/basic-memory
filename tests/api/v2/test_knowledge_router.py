@@ -807,7 +807,11 @@ async def test_create_schedules_relation_resolution_regardless_of_semantic(
     )
     assert response.status_code == 202
 
-    assert len(relation_resolution_scheduler_spy) == start_count + 1
+    # Relation resolution is scheduled by the eager router follow-up AND again by
+    # the materializer once the deferred index lands (so a pass runs after the new
+    # rows exist); the scheduler coalesces/re-arms them. The #1015 regression is
+    # that it runs at all when semantic search is off.
+    assert len(relation_resolution_scheduler_spy) >= start_count + 1
     assert relation_resolution_scheduler_spy[-1]["project_id"] is not None
 
 

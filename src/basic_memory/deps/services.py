@@ -728,36 +728,6 @@ NoteContentMutationServiceDep = Annotated[
 ]
 
 
-# --- Note Content Materialization ---
-
-
-async def get_note_content_materialization_provider(
-    file_service: FileServiceV2ExternalDep,
-    file_indexer: IndexFileExecutorV2ExternalDep,
-    session_maker: SessionMakerDep,
-    app_config: AppConfigDep,
-) -> LocalNoteContentMaterializationProvider:
-    """Create the local materializer for accepted-note route writes.
-
-    test_mode keeps materialization inline so tests can assert file/search state
-    synchronously; production defers the file write + index off the accept path
-    for cloud parity (see LocalNoteContentMaterializationProvider).
-    """
-    return LocalNoteContentMaterializationProvider(
-        session_maker=session_maker,
-        file_service=file_service,
-        file_indexer=file_indexer,
-        test_mode=app_config.is_test_env,
-        materialization_workers=app_config.materialization_workers,
-    )
-
-
-NoteContentMaterializationProviderDep = Annotated[
-    LocalNoteContentMaterializationProvider,
-    Depends(get_note_content_materialization_provider),
-]
-
-
 # --- Project Indexing ---
 
 
@@ -1063,6 +1033,43 @@ SearchReindexSchedulerDep = Annotated[
 RelationResolutionSchedulerDep = Annotated[
     RelationResolutionScheduler,
     Depends(get_relation_resolution_scheduler),
+]
+
+
+# --- Note Content Materialization ---
+# Defined after the relation-resolution scheduler so the local materializer can
+# trigger a relation pass once the deferred index finishes: the router schedules an
+# eager pass right after enqueue, but that pass can run before the queued
+# index_file inserts the new entity/relation rows, leaving inbound forward
+# references unresolved until an unrelated later write.
+
+
+async def get_note_content_materialization_provider(
+    file_service: FileServiceV2ExternalDep,
+    file_indexer: IndexFileExecutorV2ExternalDep,
+    session_maker: SessionMakerDep,
+    app_config: AppConfigDep,
+    relation_resolution_scheduler: RelationResolutionSchedulerDep,
+) -> LocalNoteContentMaterializationProvider:
+    """Create the local materializer for accepted-note route writes.
+
+    test_mode keeps materialization inline so tests can assert file/search state
+    synchronously; production defers the file write + index off the accept path
+    for cloud parity (see LocalNoteContentMaterializationProvider).
+    """
+    return LocalNoteContentMaterializationProvider(
+        session_maker=session_maker,
+        file_service=file_service,
+        file_indexer=file_indexer,
+        test_mode=app_config.is_test_env,
+        materialization_workers=app_config.materialization_workers,
+        relation_resolution_scheduler=relation_resolution_scheduler,
+    )
+
+
+NoteContentMaterializationProviderDep = Annotated[
+    LocalNoteContentMaterializationProvider,
+    Depends(get_note_content_materialization_provider),
 ]
 
 

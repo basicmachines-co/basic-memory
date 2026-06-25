@@ -229,6 +229,58 @@ async def test_drain_pending_materializations_waits_for_queued_work(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_local_materialization_schedules_relation_resolution_after_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the deferred index inserts the new note's rows, the materializer must
+    back-resolve inbound forward references (#1002 review) — the eager router pass
+    can run before the index lands."""
+    accepted = accepted_materialization_change()
+
+    async def fake_run_note_materialization(
+        request: RuntimeNoteMaterializationJobRequest,
+        **_: Any,
+    ) -> RuntimeNoteMaterializationResult:
+        return RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.written,
+            reason="written",
+        )
+
+    async def fake_load_indexed(**_: Any):
+        return accepted.payload
+
+    monkeypatch.setattr(
+        note_content_materialization,
+        "run_note_materialization",
+        fake_run_note_materialization,
+    )
+    monkeypatch.setattr(
+        note_content_materialization,
+        "load_indexed_note_content_response_payload",
+        fake_load_indexed,
+    )
+
+    scheduled: list[int] = []
+
+    class RecordingScheduler:
+        def schedule_relation_resolution(self, *, project_id: int) -> None:
+            scheduled.append(project_id)
+
+    provider = LocalNoteContentMaterializationProvider(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        file_service=cast(FileService, object()),
+        file_indexer=RecordingFileIndexer(),
+        test_mode=True,
+        relation_resolution_scheduler=RecordingScheduler(),
+    )
+
+    await provider.materialize_write_change(accepted)
+
+    assert scheduled == [accepted.materialization.project_id]
+
+
+@pytest.mark.asyncio
 async def test_materialization_pool_bounds_concurrency_and_drains() -> None:
     """Failsafe: the pool runs at most `workers` materializations at once.
 

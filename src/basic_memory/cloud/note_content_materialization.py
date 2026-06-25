@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Coroutine, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from loguru import logger
@@ -276,6 +276,12 @@ class InlineNoteFileDeleteEnqueuer:
         await run_note_file_delete(request, storage=self.storage)
 
 
+class RelationResolutionScheduling(Protocol):
+    """Capability to back-resolve forward references after a write is indexed."""
+
+    def schedule_relation_resolution(self, *, project_id: int) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class LocalNoteContentMaterializationProvider:
     """Run accepted-note materialization inline for the local runtime."""
@@ -285,6 +291,7 @@ class LocalNoteContentMaterializationProvider:
     file_indexer: IndexFileExecutor | None = None
     test_mode: bool = False
     materialization_workers: int = 4
+    relation_resolution_scheduler: RelationResolutionScheduling | None = None
 
     async def materialize_write_change(
         self,
@@ -364,6 +371,15 @@ class LocalNoteContentMaterializationProvider:
                 file_path,
                 source="note-content-materialization",
             )
+            # The deferred index has now inserted this note's entity/relation rows,
+            # so back-resolve inbound forward references. The router schedules an
+            # eager pass right after enqueue, but under load that pass can scan
+            # before this index lands; scheduling here (coalesced/re-armed by the
+            # resolution scheduler) guarantees a pass runs after indexing (#1002).
+            if self.relation_resolution_scheduler is not None:
+                self.relation_resolution_scheduler.schedule_relation_resolution(
+                    project_id=accepted.materialization.project_id,
+                )
             return replace(
                 accepted,
                 payload=await load_indexed_note_content_response_payload(
