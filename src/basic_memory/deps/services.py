@@ -964,6 +964,11 @@ class RelationResolutionScheduler(Protocol):
 # scan per write made the write path heavier and piled up under concurrency
 # (see benchmarks/docs/write-load-benchmark.md).
 _pending_relation_resolution: set[int] = set()
+# Project ids whose forward references arrived while a pass was already scanning.
+# The scan resolves whatever is unresolved when it reads the table, so a write that
+# commits during the scan (after that read) would otherwise be missed until an
+# unrelated later trigger. This dirty bit forces exactly one follow-up pass.
+_dirty_relation_resolution: set[int] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -990,9 +995,11 @@ class LocalRelationResolutionScheduler:
         # so adding here would leak the project id forever.
         if self.test_mode:
             return
-        # Coalesce: a pass is already pending/running for this project, so this
-        # write is already covered — do not schedule another scan.
+        # Coalesce: a pass is already pending/running for this project. Mark it
+        # dirty so a scan that has already read the table re-runs once more and
+        # picks up this write's rows, instead of dropping it (#1002 review).
         if project_id in _pending_relation_resolution:
+            _dirty_relation_resolution.add(project_id)
             return
         _pending_relation_resolution.add(project_id)
         _schedule_background_coroutine(
@@ -1004,9 +1011,18 @@ class LocalRelationResolutionScheduler:
         try:
             # Debounce: let the burst settle so one pass covers all of it.
             await asyncio.sleep(self.debounce_seconds)
+            # Writes up to here are covered by the scan we are about to run, so only
+            # writes that land DURING the scan should force a re-run.
+            _dirty_relation_resolution.discard(project_id)
             await resolve_project_relations(self.relation_runtime)
         finally:
+            rerun = project_id in _dirty_relation_resolution
+            _dirty_relation_resolution.discard(project_id)
             _pending_relation_resolution.discard(project_id)
+        # Re-arm outside the in-flight window (pending now cleared) so a write that
+        # raced the scan gets its own pass. Bounded to one extra pass per burst.
+        if rerun:
+            self.schedule_relation_resolution(project_id=project_id)
 
 
 async def get_relation_resolution_scheduler(

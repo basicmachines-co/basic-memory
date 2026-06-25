@@ -140,6 +140,50 @@ async def test_relation_resolution_scheduler_coalesces_a_burst():
 
 
 @pytest.mark.asyncio
+async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
+    """A write that commits while a pass is scanning must trigger a follow-up pass,
+    not be dropped by coalescing (the scan already read the unresolved rows)."""
+    from basic_memory.deps.services import (
+        _dirty_relation_resolution,
+        _pending_relation_resolution,
+    )
+
+    _pending_relation_resolution.clear()
+    _dirty_relation_resolution.clear()
+
+    class WriteDuringScanRuntime:
+        def __init__(self) -> None:
+            self.resolve_calls = 0
+            self.scheduler: LocalRelationResolutionScheduler | None = None
+
+        async def count_unresolved_relations(self) -> int:
+            return 0
+
+        async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
+            self.resolve_calls += 1
+            if self.resolve_calls == 1:
+                # A new write lands while the first scan is running.
+                assert self.scheduler is not None
+                self.scheduler.schedule_relation_resolution(project_id=21)
+            return set()
+
+    runtime = WriteDuringScanRuntime()
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        test_mode=False,
+        debounce_seconds=0.0,
+    )
+    runtime.scheduler = scheduler
+
+    scheduler.schedule_relation_resolution(project_id=21)
+    await asyncio.sleep(0.05)
+
+    assert runtime.resolve_calls == 2
+    assert 21 not in _pending_relation_resolution
+    assert 21 not in _dirty_relation_resolution
+
+
+@pytest.mark.asyncio
 async def test_relation_resolution_scheduler_is_noop_in_test_mode():
     """Test mode should suppress the background resolution pass entirely."""
     from basic_memory.deps.services import _pending_relation_resolution
