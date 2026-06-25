@@ -83,6 +83,15 @@ def test_local_project_index_file_paths_prunes_ignored_directories(
     assert not any(".hidden" in path for path in visited)
 
 
+def test_local_project_index_file_paths_aborts_when_root_unreadable(tmp_path: Path) -> None:
+    """A missing/unmounted project root must raise, not return an empty snapshot —
+    the coordinator would otherwise classify every indexed entity as deleted."""
+    missing_root = tmp_path / "missing-root"
+
+    with pytest.raises(OSError):
+        local_project_index_file_paths(missing_root, ignore_patterns=set())
+
+
 def test_local_project_index_file_paths_skips_symlinked_files(tmp_path: Path) -> None:
     """Symlinked files must not be indexed (their target may be outside the project)."""
     project_root = (tmp_path / "project").resolve()

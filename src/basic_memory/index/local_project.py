@@ -100,14 +100,26 @@ def local_project_index_file_paths(
     # does not follow symlinked directories (followlinks=False). Symlinked files
     # are skipped explicitly so the batch reader never reads outside the project
     # boundary. This restores the pre-refactor scanner's no-follow + dir-pruning.
-    walker = os.walk(project_root, followlinks=False)
+    def _scan_error(error: OSError) -> None:
+        # Abort only if the project root itself is unreadable (missing/unmounted):
+        # returning an empty snapshot would make the coordinator treat every indexed
+        # entity as deleted. A failure deeper in the tree just prunes that subtree.
+        if error.filename is not None and Path(error.filename) == project_root:
+            raise error
+        logger.warning("Skipping unreadable directory during project scan", path=error.filename)
+
+    walker = os.walk(project_root, followlinks=False, onerror=_scan_error)
     while True:
         try:
             dirpath, dirnames, filenames = next(walker)
         except StopIteration:
             break
         except OSError:
-            # A traversal error must not discard files discovered before it.
+            # The root scan failed (onerror re-raised). Never return an empty,
+            # delete-everything snapshot; files discovered before a deeper traversal
+            # error are kept.
+            if not file_paths:
+                raise
             break
 
         root_path = Path(dirpath)
