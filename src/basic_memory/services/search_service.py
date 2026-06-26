@@ -23,48 +23,13 @@ from basic_memory.repository.search_repository import (
     SearchRepository,
     VectorSyncBatchResult,
 )
+from basic_memory.repository.search_repository_base import relaxed_query_words
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.services import FileService
 
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
 # We use 6000 characters to leave headroom for other indexed columns and overhead.
 MAX_CONTENT_STEMS_SIZE = 6000
-
-# Common glue words used to relax natural-language FTS queries after strict misses.
-FTS_RELAXED_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "how",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "our",
-    "the",
-    "their",
-    "this",
-    "to",
-    "was",
-    "we",
-    "what",
-    "when",
-    "where",
-    "who",
-    "why",
-    "with",
-    "you",
-    "your",
-}
 
 
 @dataclass(frozen=True)
@@ -240,6 +205,7 @@ class SearchService:
         search_text: str | None,
         limit: int,
         offset: int,
+        allow_relaxed: bool = False,
         session: AsyncSession | None = None,
     ) -> List[SearchIndexRow]:
         return await self.repository.search(
@@ -256,6 +222,7 @@ class SearchService:
             min_similarity=prepared.min_similarity,
             limit=limit,
             offset=offset,
+            allow_relaxed=allow_relaxed,
             session=session,
         )
 
@@ -264,6 +231,7 @@ class SearchService:
         prepared: _PreparedSearchQuery,
         *,
         search_text: str | None,
+        allow_relaxed: bool = False,
     ) -> int:
         return await self.repository.count(
             search_text=search_text,
@@ -277,6 +245,7 @@ class SearchService:
             metadata_filters=prepared.metadata_filters,
             retrieval_mode=prepared.retrieval_mode,
             min_similarity=prepared.min_similarity,
+            allow_relaxed=allow_relaxed,
         )
 
     async def search(
@@ -312,47 +281,23 @@ class SearchService:
             offset=offset,
         ):
             logger.trace(f"Searching with query: {query}")
+            # Repository backends own relaxed FTS rendering because SQLite and
+            # Postgres use different prefix syntax. Passing a service-built
+            # boolean OR string would be treated as explicit boolean input and
+            # lose the prefix matching that rescues compound CJK tokens.
+            allow_relaxed = self._is_relaxed_fts_fallback_eligible(
+                query, strict_search_text, prepared.retrieval_mode
+            )
             results = await self._search_repository(
                 prepared,
                 search_text=strict_search_text,
                 limit=limit,
                 offset=offset,
+                allow_relaxed=allow_relaxed,
                 session=session,
             )
 
-        # Trigger: strict FTS with plain multi-term text returned no results.
-        # Why: natural-language queries often include stopwords that over-constrain implicit AND.
-        # Outcome: retry once with relaxed OR terms while preserving explicit boolean intent.
-        if results:
-            return results
-        if not self._is_relaxed_fts_fallback_eligible(
-            query, strict_search_text, prepared.retrieval_mode
-        ):
-            return results
-
-        assert strict_search_text is not None
-        relaxed_search_text = self._build_relaxed_fts_query(strict_search_text)
-        if relaxed_search_text == strict_search_text:
-            return results
-
-        logger.debug(
-            "Strict FTS returned 0 results; retrying relaxed FTS query "
-            f"strict='{strict_search_text}' relaxed='{relaxed_search_text}'"
-        )
-        with logfire.span(
-            "search.relaxed_fts_retry",
-            retrieval_mode=prepared.retrieval_mode.value,
-            token_count=len(self._tokenize_fts_text(strict_search_text)),
-            limit=limit,
-            offset=offset,
-        ):
-            return await self._search_repository(
-                prepared,
-                search_text=relaxed_search_text,
-                limit=limit,
-                offset=offset,
-                session=session,
-            )
+        return results
 
     async def count(self, query: SearchQuery) -> int:
         """Count all indexed rows matching a query."""
@@ -372,50 +317,14 @@ class SearchService:
             has_query=has_query,
             has_filters=has_filters,
         ):
-            total = await self._count_repository(prepared, search_text=strict_search_text)
-
-        if total > 0:
-            return total
-        if not self._is_relaxed_fts_fallback_eligible(
-            query, strict_search_text, prepared.retrieval_mode
-        ):
-            return total
-
-        assert strict_search_text is not None
-        relaxed_search_text = self._build_relaxed_fts_query(strict_search_text)
-        if relaxed_search_text == strict_search_text:
-            return total
-
-        with logfire.span(
-            "search.count.relaxed_fts_retry",
-            retrieval_mode=prepared.retrieval_mode.value,
-            token_count=len(self._tokenize_fts_text(strict_search_text)),
-        ):
-            return await self._count_repository(prepared, search_text=relaxed_search_text)
-
-    @staticmethod
-    def _tokenize_fts_text(search_text: str) -> list[str]:
-        """Tokenize text into alphanumeric terms for relaxed FTS fallback."""
-        return re.findall(r"[A-Za-z0-9]+", search_text.lower())
-
-    @classmethod
-    def _build_relaxed_fts_query(cls, search_text: str) -> str:
-        """Build a less strict OR query from natural-language input."""
-        normalized_terms = cls._tokenize_fts_text(search_text)
-        if not normalized_terms:
-            return search_text
-
-        deduped_terms: list[str] = []
-        seen_terms: set[str] = set()
-        for term in normalized_terms:
-            if term in seen_terms:
-                continue
-            seen_terms.add(term)
-            deduped_terms.append(term)
-
-        pruned_terms = [term for term in deduped_terms if term not in FTS_RELAXED_STOPWORDS]
-        relaxed_terms = pruned_terms or deduped_terms
-        return " OR ".join(relaxed_terms)
+            allow_relaxed = self._is_relaxed_fts_fallback_eligible(
+                query, strict_search_text, prepared.retrieval_mode
+            )
+            return await self._count_repository(
+                prepared,
+                search_text=strict_search_text,
+                allow_relaxed=allow_relaxed,
+            )
 
     @classmethod
     def _is_relaxed_fts_fallback_eligible(
@@ -433,18 +342,12 @@ class SearchService:
             return False
         if query.has_boolean_operators():
             return False
-        tokens = cls._tokenize_fts_text(search_text)
-        # Trigger: query has only one or two terms (e.g., link titles like "New Feature").
-        # Why: OR-relaxing short queries can over-broaden and produce false positives.
-        # Outcome: require at least three tokens before enabling relaxed fallback.
-        if len(tokens) < 3:
-            return False
-        # Trigger: query contains explicit numeric identifiers (e.g., "root note 1").
-        # Why: OR-relaxing identifier-like queries can over-broaden and create false positives.
-        # Outcome: preserve strict matching for these targeted queries.
-        if any(token.isdigit() for token in tokens):
-            return False
-        return True
+        # Trigger: query has too few safe relaxed terms, explicit numeric identifiers,
+        # or only terms that would over-broaden under OR.
+        # Why: the shared helper preserves the old English guard while allowing
+        # whitespace-separated CJK terms that ASCII tokenization cannot see.
+        # Outcome: retry only when there is a backend-safe relaxed OR query.
+        return relaxed_query_words(search_text) is not None
 
     @staticmethod
     def _generate_variants(text: str) -> Set[str]:

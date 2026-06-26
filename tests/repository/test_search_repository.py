@@ -1149,10 +1149,36 @@ async def test_relaxed_query_drops_stopwords(search_repository):
     """Relaxation keys on content-bearing terms in each backend's syntax."""
     if is_postgres_backend(search_repository):
         relaxed = search_repository._relaxed_tsquery_text("When did Melanie paint a sunrise?")
-        assert relaxed == "Melanie:* | paint:* | sunrise:*"
+        assert relaxed == "melanie:* | paint:* | sunrise:*"
     else:
         relaxed = search_repository._relaxed_fts_text("When did Melanie paint a sunrise?")
-        assert relaxed == "Melanie* OR paint* OR sunrise*"
+        assert relaxed == "melanie* OR paint* OR sunrise*"
+
+
+@pytest.mark.asyncio
+async def test_relaxed_query_preserves_punctuated_ascii_token_pieces(search_repository):
+    """Hyphenated and slashed ASCII terms should relax using their regex token pieces."""
+    if is_postgres_backend(search_repository):
+        relaxed = search_repository._relaxed_tsquery_text("client-side state management")
+        assert relaxed == "client:* | side:* | state:* | management:*"
+        slashed = search_repository._relaxed_tsquery_text("foo/bar baz qux")
+        assert slashed == "foo:* | bar:* | baz:* | qux:*"
+    else:
+        relaxed = search_repository._relaxed_fts_text("client-side state management")
+        assert relaxed == "client* OR side* OR state* OR management*"
+        slashed = search_repository._relaxed_fts_text("foo/bar baz qux")
+        assert slashed == "foo* OR bar* OR baz* OR qux*"
+
+
+@pytest.mark.asyncio
+async def test_relaxed_query_supports_whitespace_separated_cjk_terms(search_repository):
+    """CJK terms separated by spaces should relax even when ASCII tokenization finds none."""
+    if is_postgres_backend(search_repository):
+        relaxed = search_repository._relaxed_tsquery_text("季度 报告")
+        assert relaxed == "季度:* | 报告:*"
+    else:
+        relaxed = search_repository._relaxed_fts_text("季度 报告")
+        assert relaxed == "季度* OR 报告*"
 
 
 @pytest.mark.asyncio
@@ -1205,3 +1231,34 @@ async def test_multiword_query_relaxes_to_or_when_strict_misses(search_repositor
         search_text="Did Melanie go hiking at sunrise?", allow_relaxed=True
     )
     assert any(r.entity_id == search_entity.id for r in results)
+
+
+@pytest.mark.asyncio
+async def test_cjk_compound_query_relaxes_with_backend_prefix_terms(
+    search_repository, search_entity
+):
+    """Whitespace-separated CJK terms should match indexed CJK compounds when relaxed."""
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="季度报告总结",
+        content_snippet="季度报告总结已经完成。",
+        content_stems="季度报告总结已经完成",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+    )
+    await search_repository.index_item(row)
+
+    strict = await search_repository.search(search_text="季度 报告")
+    assert strict == []
+
+    results = await search_repository.search(search_text="季度 报告", allow_relaxed=True)
+    assert any(r.entity_id == search_entity.id for r in results)
+
+    total = await search_repository.count(search_text="季度 报告", allow_relaxed=True)
+    assert total == 1
