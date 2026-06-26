@@ -542,11 +542,9 @@ async def test_boolean_operators_detection(search_service):
 
 
 @pytest.mark.asyncio
-async def test_plain_multiterm_fts_retries_with_relaxed_or_when_strict_empty(
-    search_service, monkeypatch
-):
-    """Plain multi-term FTS should retry with relaxed OR query after strict no-results."""
-    call_texts: list[str | None] = []
+async def test_plain_multiterm_fts_enables_repository_relaxed_fallback(search_service, monkeypatch):
+    """Plain multi-term FTS should let the repository render relaxed backend syntax."""
+    calls: list[dict] = []
 
     now = datetime.now().astimezone()
     fallback_row = SearchIndexRow(
@@ -563,10 +561,8 @@ async def test_plain_multiterm_fts_retries_with_relaxed_or_when_strict_empty(
     )
 
     async def fake_search(**kwargs):
-        call_texts.append(kwargs.get("search_text"))
-        if len(call_texts) == 1:
-            return []
-        return [fallback_row]
+        calls.append(kwargs)
+        return [fallback_row] if kwargs.get("allow_relaxed") else []
 
     monkeypatch.setattr(search_service.repository, "search", fake_search)
 
@@ -575,16 +571,69 @@ async def test_plain_multiterm_fts_retries_with_relaxed_or_when_strict_empty(
     )
 
     assert len(results) == 1
-    assert call_texts[0] == "fundraising venture capital"
-    assert call_texts[1] == "fundraising OR venture OR capital"
-    assert len(call_texts) == 2
+    assert len(calls) == 1
+    assert calls[0]["search_text"] == "fundraising venture capital"
+    assert calls[0]["allow_relaxed"] is True
 
 
 @pytest.mark.asyncio
-async def test_relaxed_query_prunes_stopwords(search_service):
-    """Relaxed query should remove stopwords and keep high-signal terms."""
-    relaxed = search_service._build_relaxed_fts_query("who are our main competitors and partners?")
-    assert relaxed == "main OR competitors OR partners"
+async def test_plain_cjk_multiterm_fts_enables_repository_relaxed_fallback(
+    search_service, monkeypatch
+):
+    """Whitespace-separated CJK terms need backend prefix relaxed rendering."""
+    calls: list[dict] = []
+
+    now = datetime.now().astimezone()
+    fallback_row = SearchIndexRow(
+        project_id=1,
+        id=1,
+        type=SearchItemType.ENTITY.value,
+        file_path="test/cjk-fallback.md",
+        created_at=now,
+        updated_at=now,
+        permalink="test/cjk-fallback",
+        metadata={"note_type": "note"},
+        title="CJK Fallback Match",
+        score=1.0,
+    )
+
+    async def fake_search(**kwargs):
+        calls.append(kwargs)
+        return [fallback_row] if kwargs.get("allow_relaxed") else []
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    results = await search_service.search(
+        SearchQuery(text="季度 报告", retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert len(results) == 1
+    assert len(calls) == 1
+    assert calls[0]["search_text"] == "季度 报告"
+    assert calls[0]["allow_relaxed"] is True
+
+
+@pytest.mark.asyncio
+async def test_plain_cjk_multiterm_count_enables_repository_relaxed_fallback(
+    search_service, monkeypatch
+):
+    """Count should use the same backend relaxed fallback as search."""
+    calls: list[dict] = []
+
+    async def fake_count(**kwargs):
+        calls.append(kwargs)
+        return 1 if kwargs.get("allow_relaxed") else 0
+
+    monkeypatch.setattr(search_service.repository, "count", fake_count)
+
+    total = await search_service.count(
+        SearchQuery(text="季度 报告", retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert total == 1
+    assert len(calls) == 1
+    assert calls[0]["search_text"] == "季度 报告"
+    assert calls[0]["allow_relaxed"] is True
 
 
 @pytest.mark.asyncio

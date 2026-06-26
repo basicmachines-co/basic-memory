@@ -45,9 +45,31 @@ _SQLITE_MAX_PREPARE_WINDOW = 8
 # that displace genuine results from the ranking window.
 RELAXATION_STOPWORDS = frozenset(
     "a an and are as at be but by did do does for from had has have how i in is it of on "
-    "or that the their they this to was we were what when where which who whom whose why "
+    "or our that the their they this to was we were what when where which who whom whose why "
     "will with you your".split()
 )
+RELAXATION_CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+RELAXATION_ASCII_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
+RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
+
+
+def _dedupe_relaxation_words(words: list[str]) -> list[str]:
+    """Preserve first-seen relaxed terms while removing duplicates case-insensitively."""
+    deduped_terms: list[str] = []
+    seen_terms: set[str] = set()
+    for word in words:
+        key = word.lower()
+        if key in seen_terms:
+            continue
+        seen_terms.add(key)
+        deduped_terms.append(word)
+    return deduped_terms
+
+
+def _split_relaxation_words(search_text: str) -> list[str]:
+    """Split whitespace-delimited relaxed terms, preserving CJK words."""
+    words = [word.strip(RELAXATION_EDGE_PUNCTUATION) for word in search_text.split()]
+    return [word for word in words if word]
 
 
 def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
@@ -62,6 +84,8 @@ def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
     - fewer than three alphanumeric tokens (short queries like "New Feature"
       over-broaden under OR — and in hybrid the relaxed FTS-only rows normalize
       to 1.0 and can outrank the vector result the user wanted);
+    - CJK terms separated by whitespace can relax with two or more terms because
+      the ASCII token gate would otherwise suppress the fallback entirely;
     - any pure-digit token ("root note 1", "SPEC 16") — identifier-like queries
       over-broaden and create false positives under OR.
     """
@@ -72,16 +96,24 @@ def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
         return None
     # Eligibility checks run on raw alphanumeric tokens (parity with the
     # service), before stopword filtering.
-    tokens = re.findall(r"[A-Za-z0-9]+", stripped.lower())
+    cjk_words = _split_relaxation_words(stripped)
+    has_cjk_term = any(RELAXATION_CJK_PATTERN.search(word) for word in cjk_words)
+
+    if has_cjk_term:
+        if len(cjk_words) < 2 or any(word.isdigit() for word in cjk_words):
+            return None
+        pruned_words = [
+            word
+            for word in cjk_words
+            if word.isalnum() and word.lower() not in RELAXATION_STOPWORDS
+        ]
+        return _dedupe_relaxation_words(pruned_words or cjk_words) or None
+
+    tokens = RELAXATION_ASCII_TOKEN_PATTERN.findall(stripped.lower())
     if len(tokens) < 3 or any(token.isdigit() for token in tokens):
         return None
-    words = [word.strip("?!.,;:") for word in stripped.split()]
-    words = [
-        word
-        for word in words
-        if word and word.isalnum() and word.lower() not in RELAXATION_STOPWORDS
-    ]
-    return words or None
+    pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
+    return _dedupe_relaxation_words(pruned_words or tokens) or None
 
 
 # Entity, observation, and relation rows in search_index carry ids from independent
@@ -312,6 +344,7 @@ class SearchRepositoryBase(ABC):
         metadata_filters: Optional[Dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
+        allow_relaxed: bool = False,
     ) -> int:
         """Count results when a backend-specific COUNT query is available."""
         if retrieval_mode != SearchRetrievalMode.FTS:

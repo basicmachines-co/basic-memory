@@ -1121,6 +1121,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
+        allow_relaxed: bool = False,
     ) -> int:
         """Count indexed content matching the SQLite FTS query."""
         if retrieval_mode != SearchRetrievalMode.FTS:
@@ -1154,7 +1155,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         try:
             async with db.scoped_session(self.session_maker) as session:
                 result = await session.execute(text(sql), params)
-                return int(result.scalar_one())
+                total = int(result.scalar_one())
+                relaxed = (
+                    self._relaxed_fts_text(search_text) if allow_relaxed and total == 0 else None
+                )
+                if relaxed and params.get("text"):
+                    params["text"] = relaxed
+                    result = await session.execute(text(sql), params)
+                    total = int(result.scalar_one())
+                return total
         except Exception as e:
             if self._is_fts5_syntax_error(e):  # pragma: no cover
                 logger.warning(f"FTS5 syntax error for search term: {search_text}, error: {e}")
