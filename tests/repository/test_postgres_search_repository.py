@@ -1020,7 +1020,7 @@ async def test_postgres_question_punctuation_and_relaxation(session_maker, test_
 
     # Relaxation drops stopwords and OR-joins content terms.
     relaxed = repo._relaxed_tsquery_text("When did Melanie paint a sunrise?")
-    assert relaxed == "Melanie:* | paint:* | sunrise:*"
+    assert relaxed == "melanie:* | paint:* | sunrise:*"
 
     # User intent is not second-guessed.
     assert repo._relaxed_tsquery_text("alpha AND beta") is None
