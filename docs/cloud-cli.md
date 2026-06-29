@@ -32,7 +32,7 @@ The transfer commands fall into two groups:
 Before using Basic Memory Cloud, you need:
 
 - **Active Subscription**: An active Basic Memory Cloud subscription is required to access cloud features
-- **Subscribe**: Visit [https://basicmemory.com/subscribe](https://basicmemory.com/subscribe) to sign up
+- **Subscribe**: Visit [https://basicmemory.com/pricing](https://basicmemory.com/pricing) to sign up
 - **Optional**: Cloud is optional. Local-first open-source usage continues without cloud.
 - **OSS Discount**: Use code `{{OSS_DISCOUNT_CODE}}` for 20% off for 3 months.
 
