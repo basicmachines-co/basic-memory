@@ -34,7 +34,12 @@ else
     exit 0
 fi
 
-BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
+# Resolve the hook script's own directory so the inline Python can find the
+# shared envelope module (plugins/shared/). __file__ is '<stdin>' inside a
+# heredoc, so the Python code can't locate itself — we pass the real path.
+hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+BM_HOOK_INPUT="$input" BM_BIN="$BM" BM_HOOK_DIR="$hook_dir" python3 <<'PY' 2>/dev/null || exit 0
 import json
 import os
 import re
@@ -42,6 +47,28 @@ import shlex
 import subprocess
 import sys
 from datetime import datetime
+
+# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# Trigger: this hook wants to stamp provenance and idempotency on the checkpoint.
+# Why: the envelope normalizes hook events so downstream consumers (recall,
+#      consolidation, memory routines) can trace where each note came from.
+# Constraint: __file__ is '<stdin>' inside a bash heredoc, so the hook script's
+#             real directory is passed in via the BM_HOOK_DIR environment variable.
+_hook_dir = os.environ.get("BM_HOOK_DIR", "")
+if _hook_dir:
+    _shared_dir = os.path.join(_hook_dir, "..", "..", "shared")
+    sys.path.insert(0, os.path.normpath(_shared_dir))
+try:
+    from harness_envelope import (
+        COMPACTION_IMMINENT,
+        append_to_event_log,
+        create_envelope,
+        to_frontmatter_fields,
+        to_provenance_observations,
+    )
+    _HAS_ENVELOPE = True
+except ImportError:
+    _HAS_ENVELOPE = False
 
 # May be a single binary ("basic-memory") or a multi-token launcher
 # ("uvx basic-memory"); split so it prepends cleanly onto the write command.
@@ -81,6 +108,9 @@ def load_settings(directory):
 cfg = load_settings(cwd)
 primary_project = (cfg.get("primaryProject") or "").strip()
 capture_folder = (cfg.get("captureFolder") or "sessions").strip()
+capture_events = bool(cfg.get("captureEvents", False))
+redact_keys = cfg.get("redactKeys") or []
+redact_paths = cfg.get("redactPaths") or []
 
 # Trigger: no project pinned for this Claude Code project.
 # Why: a checkpoint must land somewhere intentional. Writing to the default graph
@@ -182,6 +212,32 @@ frontmatter = [
 ]
 if session_id:
     frontmatter.append(f"claude_session_id: {session_id}")
+
+# --- Harness envelope: stamp provenance and idempotency onto the checkpoint ---
+# Trigger: the shared envelope module is available (always, unless the shared/
+#          directory is missing). Why: provenance makes each checkpoint traceable
+#          to its source hook, session, and exact event. Idempotency prevents
+#          duplicate notes when the hook fires more than once in the same minute.
+envelope = None
+if _HAS_ENVELOPE:
+    try:
+        envelope = create_envelope(
+            event_type=COMPACTION_IMMINENT,
+            source="claude-code",
+            session_id=session_id or "unknown",
+            cwd=cwd,
+            project_hint=primary_project,
+            hook_name="PreCompact",
+            timestamp=iso,
+            payload_summary={"opening": clip(opening, 200)} if opening else {},
+            redact_keys=redact_keys,
+            redact_paths=redact_paths,
+        )
+        for key, value in to_frontmatter_fields(envelope).items():
+            frontmatter.append(f"{key}: {value}")
+    except Exception:
+        pass  # envelope creation failure is non-fatal
+
 frontmatter += ["capture: extractive", "---"]
 
 body = [
@@ -205,6 +261,18 @@ body += [
     f"- [context] Session opened with: {clip(opening, 200)}" if opening else "- [context] Session checkpointed before compaction",
     "- [next_step] Review this checkpoint and continue where the thread left off",
 ]
+
+# --- Append envelope provenance observations ---
+# These stamp the note with its producer source so downstream consumers can
+# trace provenance without storing the full raw event.
+if _HAS_ENVELOPE and envelope:
+    body += to_provenance_observations(envelope)
+
+# --- Log the event locally for coalescing ---
+# Trigger: captureEvents is enabled. Why: the local event log feeds future
+# memory routines (SPEC-61) without requiring the note to carry every detail.
+if _HAS_ENVELOPE and envelope and capture_events:
+    append_to_event_log(envelope, cwd)
 
 content = "\n".join(frontmatter + body)
 

@@ -623,3 +623,135 @@ Docs done 2026-05-28; dogfood is the remaining (human) step.
 - **Subagent memory bundling** — explore `memory: project|user` on dedicated BM subagents.
 - **Statusline** — small visible presence (active project, last write).
 - **`/basic-memory:bm-promote`** — review auto-memory MEMORY.md, graduate observations into BM with proper schema.
+
+## 14. Harness WAL — event capture as producer envelopes
+
+**Status:** v0 shipped (issue [#997](https://github.com/basicmachines-co/basic-memory/issues/997))
+**Related:** SPEC-55 (Agent Memory Pipeline — Producer Framework), SPEC-61 (Event-Driven Memory Routines)
+
+### 14.1 What it is
+
+A shared, opt-in "harness WAL" path that normalizes supported hook events into
+Basic Memory **producer envelopes** — a structured event record that stamps each
+checkpoint with its source, session, hook, and an idempotency key. This is the
+producer side of SPEC-55; it feeds SPEC-61 memory routines without turning Basic
+Memory into an agent runtime.
+
+### 14.2 The envelope schema
+
+```python
+@dataclass(frozen=True)
+class HarnessEnvelope:
+    event_type: str           # "session_started", "compaction_imminent", "session_ended"
+    source: str               # "claude-code" or "codex"
+    session_id: str           # harness session identifier
+    turn_id: str | None       # turn identifier when available (Codex)
+    timestamp: str            # ISO 8601
+    cwd: str                  # working directory
+    project_hint: str         # basicMemory.primaryProject
+    hook_name: str            # "SessionStart", "PreCompact"
+    idempotency_key: str      # sha256(source:session_id:hook:timestamp_minute)[:16]
+    payload_summary: dict     # safe, redacted payload excerpt
+```
+
+The module lives at `plugins/shared/harness_envelope.py` — stdlib-only, no install
+step. Both plugins import it via `sys.path.insert`.
+
+### 14.3 V0 event types
+
+V0 captures only events exposed through existing hooks:
+
+| Event                  | Hook          | Plugin       | What it does                                   |
+| ---------------------- | ------------- | ------------ | ---------------------------------------------- |
+| `session_started`      | SessionStart  | Both         | Logs to local event log (read-only hook)       |
+| `compaction_imminent`  | PreCompact    | Both         | Stamps provenance onto the SessionNote/CodexSession |
+| `session_ended`        | (future)      | (future)     | Defined but not captured in v0                 |
+
+Events like `tool_called`, `file_changed`, `test_ran` require `PostToolUse` hooks
+that don't currently exist — deferred to v1.
+
+### 14.4 What gets stamped on checkpoints
+
+PreCompact checkpoints gain two additions:
+
+1. **Frontmatter fields** — `envelope_source`, `envelope_event`, `envelope_hook`,
+   `idempotency_key` (and `envelope_turn_id` when available). These make checkpoints
+   queryable by source and dedup-safe.
+
+2. **Provenance observations** — appended to the `## Observations` section:
+   ```markdown
+   - [source] claude-code/abc-123-def
+   - [hook] PreCompact
+   - [event] compaction_imminent at 2026-06-13T16:48:00+00:00
+   - [idempotency] b7ff76ee5df8cc0a
+   ```
+
+### 14.5 Local event log
+
+When `captureEvents: true` is set, both SessionStart and PreCompact append a JSONL
+record to `<cwd>/.basic-memory/events.jsonl`. This log:
+
+- Is append-only (no reads during hook execution)
+- Is capped at 1000 lines (configurable via `eventRetention`); oldest half rotates out
+- Feeds future SPEC-61 memory routines (nightly coalescing, session summaries)
+- Never blocks the hook — write failures are silently swallowed
+
+### 14.6 Configuration
+
+New keys in `basicMemory` (both `.claude/settings.json` and `.codex/basic-memory.json`):
+
+| Key              | Type       | Default | Description                                    |
+| ---------------- | ---------- | ------- | ---------------------------------------------- |
+| `captureEvents`  | `boolean`  | `false` | Opt-in for local event log (events.jsonl)      |
+| `redactKeys`     | `string[]` | `[]`    | Extra key patterns to redact from payloads     |
+| `redactPaths`    | `string[]` | `[]`    | Extra path prefixes to redact                  |
+| `eventRetention` | `number`   | `1000`  | Max lines in the local event log before rotation |
+
+### 14.7 Privacy and redaction
+
+The envelope module applies layered redaction before any payload summary is stored:
+
+1. **Key-pattern deny list** — keys matching `SECRET`, `TOKEN`, `KEY`, `PASSWORD`,
+   `CREDENTIAL`, `AUTH` (case-insensitive) are replaced with `[REDACTED]`
+2. **Secret-value detection** — values matching `[A-Za-z0-9_]+=.{20,}` (environment
+   secret pattern) are replaced with `[REDACTED]`
+3. **Path deny list** — values starting with `~/.ssh/`, `~/.aws/`, `~/.gnupg/` are
+   replaced with `[REDACTED_PATH]`. Extended via `redactPaths` config.
+4. **Truncation** — any single value over 500 chars is truncated
+
+Constraints from the issue:
+- Capture is opt-in (tied to plugin installation + `captureEvents` config)
+- Never captures hidden chain-of-thought or private model reasoning
+- Prefers summaries and metadata over raw transcript dumps
+- Fails fast on missing project mapping (no `primaryProject` → no capture)
+
+### 14.8 Idempotency
+
+The `idempotency_key` is a 16-char hex string derived from
+`sha256(source:session_id:hook:timestamp_minute)`. Minute granularity means:
+
+- Repeated hooks within the same minute for the same session produce the same key
+- A hook one minute later produces a distinct key (new event)
+- No persistent state is required for dedup
+
+The key is written into the note's frontmatter so downstream consumers can detect
+and skip duplicates.
+
+### 14.9 ToolLedger schema (forward compatibility)
+
+Both plugins ship a `schemas/tool-ledger.md` picoschema defining the ToolLedger
+note type. V0 does not produce ToolLedger notes — the schema exists so that when
+`PostToolUse` hooks become available (v1), the note shape is already defined and
+schema validation works immediately.
+
+### 14.10 Forward compatibility
+
+- **SPEC-55 Producer Framework** — the envelope shape aligns with SPEC-55's producer
+  envelope contract. When the Producer SDK lands, the shared module becomes a thin
+  adapter over the SDK rather than a standalone implementation.
+- **SPEC-61 Memory Routines** — the local event log (`events.jsonl`) is the input
+  feed for event-driven routines. The nightly coalescing routine reads the log,
+  groups events by session, and produces enriched artifacts.
+- **SPEC-56 Consolidation** — provenance observations enable consolidation to trace
+  which sessions produced which notes, supporting the dream-mode merge.
+

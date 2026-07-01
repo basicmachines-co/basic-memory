@@ -11,6 +11,25 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# Trigger: this hook wants to stamp provenance and idempotency on the checkpoint.
+# Why: the envelope normalizes hook events so downstream consumers (recall,
+#      consolidation, memory routines) can trace where each note came from.
+_shared_dir = str(Path(__file__).resolve().parent.parent.parent / "shared")
+sys.path.insert(0, _shared_dir)
+try:
+    from harness_envelope import (
+        COMPACTION_IMMINENT,
+        append_to_event_log,
+        create_envelope,
+        to_frontmatter_fields,
+        to_provenance_observations,
+    )
+
+    _HAS_ENVELOPE = True
+except ImportError:
+    _HAS_ENVELOPE = False
+
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -131,6 +150,9 @@ def main() -> int:
     cfg = load_config(cwd)
     primary_project = str(cfg.get("primaryProject") or "").strip()
     capture_folder = str(cfg.get("captureFolder") or "codex-sessions").strip()
+    capture_events = bool(cfg.get("captureEvents", False))
+    redact_keys = cfg.get("redactKeys") or []
+    redact_paths_cfg = cfg.get("redactPaths") or []
 
     if not primary_project:
         return 0
@@ -167,6 +189,38 @@ def main() -> int:
         frontmatter.append(f"trigger: {trigger}")
     if model:
         frontmatter.append(f"model: {model}")
+
+    # --- Harness envelope: stamp provenance and idempotency onto the checkpoint ---
+    # Trigger: the shared envelope module is available (always, unless the shared/
+    #          directory is missing). Why: provenance makes each checkpoint traceable
+    #          to its source hook, session, and exact event. Idempotency prevents
+    #          duplicate notes when the hook fires more than once in the same minute.
+    envelope = None
+    if _HAS_ENVELOPE:
+        try:
+            envelope = create_envelope(
+                event_type=COMPACTION_IMMINENT,
+                source="codex",
+                session_id=session_id or "unknown",
+                cwd=str(cwd),
+                project_hint=primary_project,
+                hook_name="PreCompact",
+                turn_id=turn_id or None,
+                timestamp=iso,
+                payload_summary={
+                    "opening": clip(opening, 200),
+                    "trigger": trigger,
+                }
+                if opening
+                else {"trigger": trigger},
+                redact_keys=redact_keys,
+                redact_paths=redact_paths_cfg,
+            )
+            for key, value in to_frontmatter_fields(envelope).items():
+                frontmatter.append(f"{key}: {value}")
+        except Exception:
+            pass  # envelope creation failure is non-fatal
+
     frontmatter += ["capture: extractive", "---"]
 
     body = [
@@ -197,6 +251,18 @@ def main() -> int:
         "- [next_step] Re-read this checkpoint, inspect the current worktree, and "
         "continue from the latest user request",
     ]
+
+    # --- Append envelope provenance observations ---
+    # These stamp the note with its producer source so downstream consumers can
+    # trace provenance without storing the full raw event.
+    if _HAS_ENVELOPE and envelope:
+        body += to_provenance_observations(envelope)
+
+    # --- Log the event locally for coalescing ---
+    # Trigger: captureEvents is enabled. Why: the local event log feeds future
+    # memory routines (SPEC-61) without requiring the note to carry every detail.
+    if _HAS_ENVELOPE and envelope and capture_events:
+        append_to_event_log(envelope, str(cwd))
 
     content = "\n".join(frontmatter + body)
     project_flag = "--project-id" if UUID_RE.match(primary_project) else "--project"

@@ -11,6 +11,22 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# SessionStart is read-only (no note writes), so the envelope is only used for
+# local event logging when captureEvents is enabled.
+_shared_dir = str(Path(__file__).resolve().parent.parent.parent / "shared")
+sys.path.insert(0, _shared_dir)
+try:
+    from harness_envelope import (
+        SESSION_STARTED,
+        append_to_event_log,
+        create_envelope,
+    )
+
+    _HAS_ENVELOPE = True
+except ImportError:
+    _HAS_ENVELOPE = False
+
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -141,6 +157,7 @@ def main() -> int:
     capture_folder = str(cfg.get("captureFolder") or "codex-sessions").strip()
     placement = str(cfg.get("placementConventions") or "").strip()
     focus = str(cfg.get("focus") or "").strip()
+    capture_events = bool(cfg.get("captureEvents", False))
     shared_refs, shared_capped = shared_project_refs(cfg, primary_project)
 
     active_tasks = ["--type", "task", "--status", "active"]
@@ -230,6 +247,28 @@ def main() -> int:
     ]
 
     print("\n".join(lines))
+
+    # --- Log the session_started event locally (opt-in) ---
+    # Trigger: captureEvents is enabled and the envelope module is available.
+    # Why: the local event log records session starts for later coalescing by
+    #      memory routines (SPEC-61). This is separate from the brief printed
+    #      above — it's durable metadata, not context for the current session.
+    # Outcome: a JSONL line is appended to <cwd>/.basic-memory/events.jsonl.
+    if _HAS_ENVELOPE and capture_events and primary_project:
+        try:
+            session_id = payload.get("session_id") or ""
+            envelope = create_envelope(
+                event_type=SESSION_STARTED,
+                source="codex",
+                session_id=session_id or "unknown",
+                cwd=str(cwd),
+                project_hint=primary_project,
+                hook_name="SessionStart",
+            )
+            append_to_event_log(envelope, str(cwd))
+        except Exception:
+            pass  # event logging failure is non-fatal
+
     return 0
 
 
