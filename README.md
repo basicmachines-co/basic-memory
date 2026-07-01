@@ -479,7 +479,7 @@ multi-word ones.
 
 Bare `- [[Target]]` and prose `- Worth checking out [[Target]]` index as
 `links_to`. Full reference in the
-[docs](https://docs.basicmemory.com/getting-started/note-formatting/?utm_source=github&utm_medium=referral&utm_campaign=readme).
+[docs](https://docs.basicmemory.com/concepts/knowledge-format?utm_source=github&utm_medium=referral&utm_campaign=readme).
 
 ## MCP tools
 
@@ -525,7 +525,7 @@ basic-memory import memory-json
 
 Routing flags (`--local` / `--cloud`) force a target when you're in mixed
 mode. Full CLI reference in the
-[docs](https://docs.basicmemory.com/guides/cli-reference/?utm_source=github&utm_medium=referral&utm_campaign=readme).
+[docs](https://docs.basicmemory.com/reference/cli-reference?utm_source=github&utm_medium=referral&utm_campaign=readme).
 
 ## Auto-updates
 

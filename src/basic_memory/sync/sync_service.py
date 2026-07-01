@@ -763,8 +763,17 @@ class SyncService:
 
         with logfire.span("sync.project.select_scan_strategy", force_full=force_full):
             # Step 1: Quick file count
+            # Wrapped in try/except so SyncFatalError (raised when the project root
+            # is inaccessible) propagates to the abort handler below.
             logger.debug("Counting files in directory")
-            current_count = await self._quick_count_files(directory)
+            try:
+                current_count = await self._quick_count_files(directory)
+            except SyncFatalError:
+                logger.error(
+                    f"Project root inaccessible during file count, aborting sync to preserve index. "
+                    f"Grant read access to '{directory}' and retry."
+                )
+                return report
             logger.debug(f"Found {current_count} files in directory")
 
             # Step 2: Determine scan strategy based on watermark and file count
@@ -806,7 +815,16 @@ class SyncService:
                 scan_coro = self._scan_directory_full(directory)
 
         with logfire.span("sync.project.filesystem_scan", scan_type=scan_type):
-            file_paths_to_scan = await scan_coro
+            try:
+                file_paths_to_scan = await scan_coro
+            except SyncFatalError:
+                # Root directory inaccessible; abort reconciliation to preserve index
+                logger.error(
+                    f"Project root inaccessible, aborting sync to preserve index. "
+                    f"Project watermarks and entities are unchanged. "
+                    f"Grant read access to '{directory}' and retry."
+                )
+                return report
             if scan_type == "incremental":
                 logger.debug(
                     f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
@@ -1578,10 +1596,19 @@ class SyncService:
                 f"This will slow down watermark detection!"
             )
             # Fallback: count using scan_directory
-            count = 0
-            async for _ in self.scan_directory(directory):
-                count += 1
-            return count
+            try:
+                count = 0
+                async for _ in self.scan_directory(directory):
+                    count += 1
+                return count
+            except PermissionError:
+                # PermissionError on the root means the scan will also fail.
+                # Propagate as SyncFatalError so scan() aborts rather than
+                # representing the inaccessible root as an empty successful scan
+                # (which would trigger full_deletions and wipe the index).
+                raise SyncFatalError(
+                    f"Cannot count files in project root '{directory}': permission denied."
+                ) from None
 
         return count
 
@@ -1695,8 +1722,12 @@ class SyncService:
         try:
             entries = await aiofiles.os.scandir(directory)
         except PermissionError:
-            logger.warning(f"Permission denied scanning directory: {directory}")
-            return
+            logger.error(f"Permission denied scanning directory: {directory}")
+            raise SyncFatalError(
+                f"Cannot scan project root '{directory}': permission denied. "
+                "Sync aborted to prevent destructive index reconciliation. "
+                "Grant read access to the project directory and retry."
+            ) from None
 
         results = []
         subdirs = []

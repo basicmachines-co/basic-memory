@@ -1702,10 +1702,19 @@ async def test_scan_directory_empty_directory(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_handles_permission_error(
+async def test_scan_directory_raises_on_permission_error(
     sync_service: SyncService, project_config: ProjectConfig
 ):
-    """Test that streaming scan handles permission errors gracefully."""
+    """Test that scan_directory raises SyncFatalError on PermissionError (fixes GH#1007).
+
+    Before the fix, PermissionError on any directory level was caught, logged, and
+    silently suppressed. This allowed a root-level PermissionError to represent itself
+    as an empty scan and trigger destructive index reconciliation (full_deletions).
+
+    After the fix, scan_directory raises SyncFatalError whenever it cannot read
+    a directory, whether at the root level or a subdirectory. Callers must handle
+    this exception to abort reconciliation gracefully.
+    """
     import sys
 
     # Skip on Windows - permission handling is different
@@ -1726,15 +1735,14 @@ async def test_scan_directory_handles_permission_error(
     restricted_dir.chmod(0o000)
 
     try:
-        # Scan should handle permission error and continue
-        results = []
-        async for file_path, stat_info in sync_service.scan_directory(project_dir):
-            rel_path = Path(file_path).relative_to(project_dir).as_posix()
-            results.append(rel_path)
+        # Scan must raise SyncFatalError when a subdirectory is inaccessible
+        from basic_memory.services.exceptions import SyncFatalError
 
-        # Should have found accessible file but not restricted one
-        assert "accessible.md" in results
-        assert "restricted/secret.md" not in results
+        with pytest.raises(SyncFatalError):
+            results = []
+            async for file_path, stat_info in sync_service.scan_directory(project_dir):
+                rel_path = Path(file_path).relative_to(project_dir).as_posix()
+                results.append(rel_path)
 
     finally:
         # Restore permissions for cleanup
@@ -1892,3 +1900,100 @@ type: note
         assert "semantic_test.md" not in sync_service._file_failures
     finally:
         search_service_mock.index_entity = original_index
+
+
+@pytest.mark.asyncio
+async def test_sync_aborts_and_preserves_index_when_root_dir_inaccessible(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    entity_service: EntityService,
+):
+    """Regression test for GH#1007: PermissionError on root must not delete the index.
+
+    When scan_directory() raises SyncFatalError (triggered by PermissionError on
+    the project root), the sync must abort immediately without marking any entities
+    as deleted and without updating scan watermarks.
+
+    Before the fix, scan_directory() caught PermissionError, logged a warning,
+    and returned an empty iterator. The calling code then saw file_count=0,
+    selected the full_deletions strategy, and deleted every indexed entity.
+    """
+    from basic_memory.services.exceptions import SyncFatalError
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+    project = await sync_service.project_repository.find_by_id(
+        sync_service.entity_repository.project_id
+    )
+    assert project is not None
+
+    # Set watermarks so sync would normally run full_deletions on low count
+    await sync_service.project_repository.update(
+        project.id,
+        {"last_file_count": 5, "last_scan_timestamp": 1000.0},
+    )
+
+    # Index some entities
+    for i in range(3):
+        await create_test_file(project_dir / f"note-{i}.md", f"# Note {i}\nContent {i}")
+
+    await sync_service.sync(project_dir)
+
+    # Verify entities exist
+    all_entities = await entity_service.repository.find_all()
+    assert len(all_entities) == 3, "Setup: expected 3 indexed entities"
+
+    # Two patches are needed because _quick_count_files is called twice in the sync
+    # pipeline: once in scan() to select the strategy, and once in sync() to update
+    # watermarks.  scan_directory is called in _scan_directory_full (the scan strategy
+    # path that triggers full_deletions when count=0).
+    #
+    # Strategy: patch _quick_count_files to return 0 (triggers full_deletions path),
+    # and patch scan_directory to raise PermissionError (which propagates as
+    # SyncFatalError and makes scan() return early, before watermarks are updated).
+    original_qcf = sync_service._quick_count_files
+    original_sd = sync_service.scan_directory
+
+    call_count = [0]  # Track calls so first=0 (triggers full_deletions), second=3 (real count)
+
+    async def qcf_returns_zero_then_three(directory):
+        c = call_count[0]
+        call_count[0] += 1
+        if c == 0:
+            return 0  # First call in scan(): 0 < last_file_count(5) -> full_deletions
+        return 3  # Second call in sync() update_watermark: real file count
+
+    async def scan_dir_denied(path):
+        # Raise SyncFatalError directly because this mock bypasses the real
+        # scan_directory() which does the PermissionError -> SyncFatalError wrapping.
+        if str(path) == str(project_dir):
+            raise SyncFatalError(
+                f"Cannot scan project root '{path}': permission denied. "
+                "Sync aborted to prevent destructive index reconciliation."
+            )
+        async for result in original_sd(path):
+            yield result
+
+    with patch.object(sync_service, "_quick_count_files", qcf_returns_zero_then_three), \
+         patch.object(sync_service, "scan_directory", scan_dir_denied):
+        report = await sync_service.sync(project_dir)
+
+    # Sync should have returned early with no deletions
+    assert report.deleted == set(), (
+        f"PermissionError on root must not delete entities. "
+        f"Found deleted: {report.deleted!r}"
+    )
+
+    # Watermarks must NOT have been updated (sync aborted before watermark step)
+    updated_project = await sync_service.project_repository.find_by_id(project.id)
+    assert updated_project is not None
+    assert updated_project.last_file_count == 3, (
+        f"last_file_count should be updated to real file count (3), got {updated_project.last_file_count}"
+    )
+
+    # All entities must still exist in the database
+    remaining = await entity_service.repository.find_all()
+    assert len(remaining) == 3, (
+        f"All 3 entities must be preserved. Found {len(remaining)}: "
+        f"{[e.file_path for e in remaining]}"
+    )
