@@ -41,6 +41,7 @@ from basic_memory.cloud.directory_deletes import (
 )
 from basic_memory.cloud.note_content_reads import NoteContentQueryService
 from basic_memory.cloud.note_content_writes import (
+    NoteContentMutationActorContext,
     NoteContentMutationService,
     NoteContentMutationServiceError,
 )
@@ -480,6 +481,74 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
     assert request.actor.kind == "mcp_client"
     assert request.actor.name == "Claude Code"
     assert received_dependencies is dependencies
+
+
+@pytest.mark.asyncio
+async def test_note_content_mutation_service_uses_injected_actor_resolver(monkeypatch) -> None:
+    """A runtime adapter can replace route-passed actor values with its own
+    request-derived identity without subclassing the service."""
+    tenant_session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker())
+    dependencies = cast(AcceptedNoteMutationDependencies, object())
+    resolved_profile_id = uuid4()
+    data = EntitySchema(title="Created", directory="notes", content="# Created")
+    calls: list[AcceptedNoteCreateMutation] = []
+    resolver_calls: list[tuple[str, NoteContentMutationActorContext]] = []
+
+    async def fake_runner(
+        repository_session: AsyncSession,
+        *,
+        request: AcceptedNoteCreateMutation,
+        dependencies: AcceptedNoteMutationDependencies,
+    ):
+        calls.append(request)
+        return SimpleNamespace(status_code=201, payload={"ok": True})
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
+
+    class RequestDerivedResolver:
+        def resolve_mutation_actor(
+            self,
+            *,
+            mutation_kind: str,
+            requested: NoteContentMutationActorContext,
+        ) -> NoteContentMutationActorContext:
+            resolver_calls.append((mutation_kind, requested))
+            return NoteContentMutationActorContext(
+                user_profile_id=resolved_profile_id,
+                source="web",
+                actor_kind="mcp_client",
+                actor_name="Resolved Actor",
+            )
+
+    service = NoteContentMutationService(
+        session_maker=tenant_session_maker,
+        mutation_dependencies=dependencies,
+        actor_resolver=RequestDerivedResolver(),
+    )
+
+    await service.create_note(
+        project_external_id="project-123",
+        data=data,
+        user_profile_id=None,
+        source="api",
+    )
+
+    assert resolver_calls == [
+        (
+            "create",
+            NoteContentMutationActorContext(
+                user_profile_id=None,
+                source="api",
+                actor_kind=None,
+                actor_name=None,
+            ),
+        )
+    ]
+    request = calls[0]
+    assert request.actor.user_profile_id == resolved_profile_id
+    assert request.actor.kind == "mcp_client"
+    assert request.actor.name == "Resolved Actor"
+    assert request.source == "web"
 
 
 @pytest.mark.asyncio
