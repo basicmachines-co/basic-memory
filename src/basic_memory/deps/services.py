@@ -850,6 +850,28 @@ def _schedule_background_coroutine(
     task.add_done_callback(_log_task_failure)
 
 
+async def drain_background_tasks() -> None:
+    """Await scheduled background work until none remains.
+
+    One-shot CLI clients close the event loop right after the command coroutine
+    returns, which would cancel in-flight vector sync and relation resolution
+    scheduled by the write path — leaving semantic search stale until an
+    unrelated reindex. A task can schedule a follow-up task (the
+    relation-resolution dirty re-run), so drain in waves until no running task
+    remains. Failures are already logged by the done callback; the drain itself
+    never raises.
+    """
+    while True:
+        # Filter on task state, not set membership: completed tasks are pruned
+        # by a call_soon done-callback that may not have run yet, and awaiting
+        # only already-done tasks never suspends — checking membership alone
+        # would busy-spin without ever letting that callback fire.
+        running = [task for task in _background_tasks if not task.done()]
+        if not running:
+            break
+        await asyncio.wait(running)
+
+
 @dataclass(frozen=True, slots=True)
 class LocalEntityVectorSyncScheduler:
     search_service: EntityVectorSyncSearchService
