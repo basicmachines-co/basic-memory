@@ -5,25 +5,29 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from basic_memory.indexing import (
-    ChangeReport,
-    EmbeddingIndexTarget,
+from basic_memory.indexing.change_planning import ChangeReport
+from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
+from basic_memory.indexing.models import (
     IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
+)
+from basic_memory.indexing.project_index_coordinator import (
     ProjectIndexBatchJobPlan,
-    ProjectIndexDeleteRun,
-    ProjectIndexMoveRun,
     ProjectIndexRequest,
     build_project_index_batch_job_plan,
     run_project_index_coordinator,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexDeleteRun,
+    ProjectIndexMoveRun,
+)
+from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 
 
 @dataclass(frozen=True, slots=True)

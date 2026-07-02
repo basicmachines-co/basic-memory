@@ -34,7 +34,7 @@ from basic_memory.indexing.note_content_batch_reconciliation import (
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository, RelationRepository
-from basic_memory.runtime import ProjectId
+from basic_memory.runtime.storage import ProjectId
 from basic_memory.services import EntityService
 
 

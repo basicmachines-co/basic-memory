@@ -32,21 +32,23 @@ from basic_memory.repository import NoteContentRepository
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
+    RuntimeAcceptedNoteChange,
+    RuntimeAcceptedNoteWriteConflictKind,
+    RuntimeNoteContentResponsePayload,
+    accepted_note_file_path_conflicts,
+    classify_accepted_note_write_conflict,
+    plan_accepted_note_write_change,
+)
+from basic_memory.runtime.note_move import normalize_note_move_destination_path
+from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectExternalId,
     ProjectId,
-    RuntimeAcceptedNoteChange,
-    RuntimeAcceptedNoteWriteConflictKind,
     RuntimeFilePath,
     RuntimeNoteActorKind,
     RuntimeNoteActorName,
     RuntimeNoteChangeSource,
-    RuntimeNoteContentResponsePayload,
-    accepted_note_file_path_conflicts,
-    classify_accepted_note_write_conflict,
-    normalize_note_move_destination_path,
-    plan_accepted_note_write_change,
     runtime_content_type_is_markdown,
 )
 from basic_memory.schemas.base import Entity as EntitySchema

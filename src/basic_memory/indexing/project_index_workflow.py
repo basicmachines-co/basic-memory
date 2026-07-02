@@ -22,7 +22,7 @@ from basic_memory.indexing.project_index_progress import (
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
 )
-from basic_memory.runtime import WorkflowId
+from basic_memory.runtime.workflows import WorkflowId
 
 
 @dataclass(frozen=True, slots=True)

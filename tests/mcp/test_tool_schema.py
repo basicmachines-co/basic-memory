@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.index import LocalProjectIndexRunner
+from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.models import Project

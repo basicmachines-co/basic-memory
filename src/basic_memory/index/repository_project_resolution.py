@@ -9,9 +9,9 @@ from basic_memory import db
 from basic_memory.index.storage_events import StorageEventProjectResolver
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
-from basic_memory.runtime import (
-    ProjectPath,
-    ProjectRuntimeReference,
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import ProjectPath
+from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixMatch,
     resolve_storage_project_prefix,
 )

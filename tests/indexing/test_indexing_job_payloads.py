@@ -2,26 +2,33 @@
 
 from datetime import timedelta
 
-from basic_memory import indexing as indexing_module
-from basic_memory.indexing import (
-    EmbeddingIndexBatchJobPayload,
+from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexBatchJobRequest,
-    EmbeddingIndexJobPayload,
     EmbeddingIndexJobRequest,
     EmbeddingIndexTarget,
+)
+from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
+from basic_memory.indexing.job_payloads import (
+    DELETE_PROJECT_ENTRYPOINT,
+    INDEX_EMBEDDINGS_BATCH_ENTRYPOINT,
+    INDEX_EMBEDDINGS_ENTRYPOINT,
+    INDEX_FILE_BATCH_ENTRYPOINT,
+    INDEX_FILE_ENTRYPOINT,
+    INDEX_PROJECT_ENTRYPOINT,
+    RESOLVE_RELATIONS_ENTRYPOINT,
+    EmbeddingIndexBatchJobPayload,
+    EmbeddingIndexJobPayload,
     EmbeddingIndexTargetPayload,
     IndexFileBatchJobPayload,
     IndexFileJobPayload,
     IndexFileObjectMetadataPayload,
-    IndexFileRuntimeRequest,
     ObservedIndexFilePayload,
     ProjectDeleteJobPayload,
     ProjectIndexJobPayload,
     ResolveRelationsJobPayload,
-    ResolveRelationsJobRequest,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.indexing.relation_resolution import ResolveRelationsJobRequest
+from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeJobRequest,
     RuntimeObservedIndexFile,
@@ -30,6 +37,7 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectObservation,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 
 
 def test_index_file_job_payload_maps_object_metadata_to_runtime_request() -> None:
@@ -249,13 +257,13 @@ def test_project_index_job_payload_round_trips_runtime_request() -> None:
 
 def test_indexing_entrypoints_export_cloud_queue_names() -> None:
     """The portable indexing contract owns cloud indexing queue names."""
-    assert indexing_module.INDEX_FILE_ENTRYPOINT == "index_file"
-    assert indexing_module.INDEX_FILE_BATCH_ENTRYPOINT == "index_file_batch"
-    assert indexing_module.INDEX_PROJECT_ENTRYPOINT == "index_project"
-    assert indexing_module.DELETE_PROJECT_ENTRYPOINT == "delete_project"
-    assert indexing_module.INDEX_EMBEDDINGS_ENTRYPOINT == "index_embeddings"
-    assert indexing_module.INDEX_EMBEDDINGS_BATCH_ENTRYPOINT == "index_embeddings_batch"
-    assert indexing_module.RESOLVE_RELATIONS_ENTRYPOINT == "resolve_relations"
+    assert INDEX_FILE_ENTRYPOINT == "index_file"
+    assert INDEX_FILE_BATCH_ENTRYPOINT == "index_file_batch"
+    assert INDEX_PROJECT_ENTRYPOINT == "index_project"
+    assert DELETE_PROJECT_ENTRYPOINT == "delete_project"
+    assert INDEX_EMBEDDINGS_ENTRYPOINT == "index_embeddings"
+    assert INDEX_EMBEDDINGS_BATCH_ENTRYPOINT == "index_embeddings_batch"
+    assert RESOLVE_RELATIONS_ENTRYPOINT == "resolve_relations"
 
 
 def test_project_index_job_payload_builds_runtime_queue_request() -> None:

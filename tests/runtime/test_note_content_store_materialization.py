@@ -6,7 +6,15 @@ from uuid import UUID
 
 import pytest
 
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
+    RuntimeFileConflictError,
+    RuntimeNoteMaterializationJobRequest,
+)
+from basic_memory.runtime.note_materialization import (
+    plan_prepared_note_write,
+    write_prepared_note_to_content_store,
+)
+from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_KIND_METADATA,
     NOTE_OBJECT_ACTOR_NAME_METADATA,
     NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA,
@@ -16,10 +24,6 @@ from basic_memory.runtime import (
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_FILE_VERSION_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
-    RuntimeFileConflictError,
-    RuntimeNoteMaterializationJobRequest,
-    plan_prepared_note_write,
-    write_prepared_note_to_content_store,
 )
 
 

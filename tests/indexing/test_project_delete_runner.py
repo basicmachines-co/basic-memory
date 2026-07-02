@@ -20,14 +20,14 @@ from basic_memory.indexing.project_delete_runner import (
 )
 from basic_memory.models import Base as BasicMemoryBase
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,
-    RuntimeProjectDeleteJobRequest,
     RuntimeProjectDeleteResult,
     RuntimeProjectFileSnapshot,
 )
+from basic_memory.runtime.jobs import RuntimeProjectDeleteJobRequest
 
 
 @pytest_asyncio.fixture

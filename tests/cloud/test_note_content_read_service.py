@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.cloud.note_content_reads as note_content_reads
 from basic_memory.cloud.note_content_reads import NoteContentQueryService
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     runtime_note_content_payload_as_dict,
 )

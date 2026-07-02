@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 
-from basic_memory.runtime import (
+from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixMatch,
     resolve_storage_project_prefix,
     storage_object_key_from_project_path,

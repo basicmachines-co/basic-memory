@@ -5,20 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from basic_memory.runtime import (
-    ProjectId,
+from basic_memory.runtime.cleanup import (
+    RuntimeNoteFileDeleteJobRequest,
+    plan_note_file_delete_job_request,
+)
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteResponse,
-    RuntimeEntityId,
     RuntimeNoteContentResponsePayload,
-    RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
-    plan_note_file_delete_job_request,
     plan_note_materialization_job_request,
     runtime_note_content_payload_as_dict,
 )
+from basic_memory.runtime.storage import ProjectId, RuntimeEntityId
 
 
 @dataclass(frozen=True, slots=True)

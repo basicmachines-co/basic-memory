@@ -14,25 +14,27 @@ from basic_memory.indexing.note_content_reconciler import (
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import EntityRepository, NoteContentRepository, ProjectRepository
-from basic_memory.runtime import (
-    NoteExternalId,
-    ProjectExternalId,
-    ProjectId,
-    ProjectPath,
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteEntitySource,
     RuntimeAcceptedNoteResponse,
-    RuntimeContentType,
-    RuntimeEntityId,
-    RuntimeFilePath,
-    RuntimeNoteChangeSource,
     RuntimeNoteContentReadAction,
     RuntimeNoteContentReadRepairStatus,
     RuntimeNoteContentResource,
     RuntimeNoteContentResponsePayload,
     RuntimeNoteContentState,
     RuntimeNoteContentStateSource,
-    plan_runtime_note_content_read_repair,
     plan_runtime_note_content_read,
+    plan_runtime_note_content_read_repair,
+)
+from basic_memory.runtime.storage import (
+    NoteExternalId,
+    ProjectExternalId,
+    ProjectId,
+    ProjectPath,
+    RuntimeContentType,
+    RuntimeEntityId,
+    RuntimeFilePath,
+    RuntimeNoteChangeSource,
     runtime_content_type_is_markdown,
 )
 from basic_memory.schemas.v2.entity import EntityResponseV2

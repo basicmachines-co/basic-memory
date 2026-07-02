@@ -24,14 +24,16 @@ from basic_memory.indexing.note_materialization_runner import (
 )
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.models import Entity, NoteContent
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.note_content import (
     RuntimeFileConflict,
     RuntimeFileConflictError,
-    RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
     RuntimePendingNoteFileDelete,
+)
+from basic_memory.runtime.note_materialization import (
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
     plan_prepared_note_write,

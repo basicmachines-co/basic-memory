@@ -13,11 +13,8 @@ from basic_memory.indexing.file_index_planning import (
     plan_legacy_file_index_targets,
     summarize_file_index_plan,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
-    RuntimeIndexFileBatchJobRequest,
-    RuntimeObservedIndexFile,
-)
+from basic_memory.runtime.jobs import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
+from basic_memory.runtime.projects import ProjectRuntimeReference
 
 
 def test_file_index_target_from_observed_storage_object_normalizes_etag() -> None:

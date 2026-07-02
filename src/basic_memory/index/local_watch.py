@@ -20,7 +20,7 @@ from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     run_storage_event_indexing,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.storage import (
     ProjectPath,
     RuntimeStorageEventProcessingResult,
     StorageBucketName,

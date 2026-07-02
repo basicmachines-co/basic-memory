@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from basic_memory.runtime import normalize_note_move_destination_path
+from basic_memory.runtime.note_move import normalize_note_move_destination_path
 
 
 def test_normalize_note_move_destination_path_trims_and_posix_normalizes() -> None:

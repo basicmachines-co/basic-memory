@@ -12,7 +12,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.indexing import (
+from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteAcceptanceRequest,
     DirectoryDeleteRejected,
     DirectoryDeleteRejection,

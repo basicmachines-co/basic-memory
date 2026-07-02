@@ -9,15 +9,13 @@ from unittest.mock import ANY, AsyncMock, Mock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing import (
+from basic_memory.indexing.file_indexer import (
     FileIndexer,
-    FileIndexOperation,
-    FileIndexResult,
     IndexCurrentMarkdownFileIndexer,
-    NoteContentReconciler,
-    SyncedMarkdownFile,
     build_default_file_indexer,
 )
+from basic_memory.indexing.models import FileIndexOperation, FileIndexResult, SyncedMarkdownFile
+from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 
 CHECKSUM = "abc123"
 CANONICAL_MARKDOWN = "---\ntitle: Note\npermalink: notes/note\n---\n\n# Note\n"

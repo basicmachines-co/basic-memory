@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig
-from basic_memory.index import LocalProjectIndexRunner
+from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.importers.claude_conversations_importer import ClaudeConversationsImporter
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor

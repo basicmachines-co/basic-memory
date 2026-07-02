@@ -13,7 +13,7 @@ from basic_memory import db
 from basic_memory.indexing.project_index_progress import ProjectIndexMetadataReporter
 from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.repository.project_repository import _load_sqlite_vec_on_session
-from basic_memory.runtime import ProjectId
+from basic_memory.runtime.storage import ProjectId
 
 
 class ProjectIndexMaintenanceRunner(Protocol):

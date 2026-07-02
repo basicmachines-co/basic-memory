@@ -20,7 +20,7 @@ from basic_memory.repository import (
 )
 
 if TYPE_CHECKING:
-    from basic_memory.index import LocalProjectIndexRuntime
+    from basic_memory.index.local_project import LocalProjectIndexRuntime
 
 
 class InitialProjectIndexRuntimeFactory(Protocol):
@@ -35,7 +35,7 @@ async def run_initial_project_index(
     runtime_factory: InitialProjectIndexRuntimeFactory,
 ) -> None:
     """Run startup project indexing through the local project-index fanout runtime."""
-    from basic_memory.index import run_local_project_index_for_project
+    from basic_memory.index.local_project import run_local_project_index_for_project
 
     result = await run_local_project_index_for_project(
         project,
@@ -128,11 +128,9 @@ async def initialize_file_indexing(
         return None
 
     # delay import
-    from basic_memory.index import (
-        LocalProjectIndexRuntimeFactory,
-        LocalWatchEventIndexRuntimeFactory,
-        WatchService,
-    )
+    from basic_memory.index.local_project import LocalProjectIndexRuntimeFactory
+    from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+    from basic_memory.index.watch_service import WatchService
 
     # Get database session (migrations already run if needed)
     _, session_maker = await db.get_or_create_db(

@@ -195,7 +195,7 @@ async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
     monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
     monkeypatch.setattr(
-        "basic_memory.index.run_local_project_index_for_project",
+        "basic_memory.index.local_project.run_local_project_index_for_project",
         project_index,
     )
     monkeypatch.setattr(
@@ -371,7 +371,9 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
     )
     monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
     monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
-    monkeypatch.setattr("basic_memory.index.run_local_project_index_for_project", project_index)
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.run_local_project_index_for_project", project_index
+    )
     monkeypatch.setattr(
         "basic_memory.repository.search_repository.create_search_repository",
         lambda *args, **kwargs: object(),

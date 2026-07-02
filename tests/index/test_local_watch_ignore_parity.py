@@ -7,7 +7,8 @@ from watchfiles import Change
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.index import LocalWatchEventIndexRuntimeFactory, WatchService
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index.watch_service import WatchService
 
 
 async def create_test_file(path: Path, content: str) -> None:

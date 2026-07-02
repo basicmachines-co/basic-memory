@@ -8,7 +8,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.runtime import RuntimeFilePath
+from basic_memory.runtime.storage import RuntimeFilePath
 
 
 class OrphanCleanupSessionProvider(Protocol):

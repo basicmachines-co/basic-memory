@@ -4,12 +4,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from basic_memory.runtime import (
-    RUNTIME_MARKDOWN_CONTENT_TYPE,
+from basic_memory.runtime.note_content import (
     RuntimeDeletedNoteResponse,
     RuntimePendingNoteFileDelete,
     plan_accepted_note_delete_change,
 )
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 @dataclass(frozen=True, slots=True)

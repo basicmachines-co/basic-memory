@@ -11,7 +11,7 @@ from basic_memory.cloud.project_deletes import (
 )
 from basic_memory.models import Base as BasicMemoryBase
 from basic_memory.models import Project
-from basic_memory.runtime import RuntimeJobId, RuntimeProjectDeleteJobRequest
+from basic_memory.runtime.jobs import RuntimeJobId, RuntimeProjectDeleteJobRequest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 

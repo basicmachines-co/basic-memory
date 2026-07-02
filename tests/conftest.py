@@ -30,7 +30,8 @@ from basic_memory.config import (
     DatabaseBackend,
 )
 from basic_memory.db import DatabaseType
-from basic_memory.index import LocalProjectIndexRunner, WatchService
+from basic_memory.index.local_project import LocalProjectIndexRunner
+from basic_memory.index.watch_service import WatchService
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Base

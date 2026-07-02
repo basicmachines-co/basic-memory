@@ -6,7 +6,7 @@ from basic_memory.indexing.project_delete_acceptance import (
     ProjectDeleteAcceptedProject,
     ProjectDeleteAcceptedResult,
 )
-from basic_memory.runtime import RuntimeProjectDeleteJobRequest
+from basic_memory.runtime.jobs import RuntimeProjectDeleteJobRequest
 
 
 @dataclass(frozen=True, slots=True)

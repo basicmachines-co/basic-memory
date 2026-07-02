@@ -3,7 +3,7 @@
 import pytest
 
 from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,

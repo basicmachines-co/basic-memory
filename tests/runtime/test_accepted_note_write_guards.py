@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from basic_memory.runtime import (
-    RUNTIME_MARKDOWN_CONTENT_TYPE,
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteWriteConflictKind,
     accepted_note_file_path_conflicts,
     classify_accepted_note_write_conflict,
+)
+from basic_memory.runtime.storage import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
     runtime_content_type_is_markdown,
 )
 

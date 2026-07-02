@@ -10,7 +10,7 @@ import basic_memory.indexing.project_index_maintenance as project_index_maintena
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing import (
+from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteBatch,
     ProjectIndexDeleteBatchPlan,
     ProjectIndexDeleteBatchProgress,
@@ -29,7 +29,7 @@ from basic_memory.indexing import (
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
-from basic_memory.runtime import RuntimeWorkflowMetadataPatch
+from basic_memory.runtime.workflows import RuntimeWorkflowMetadataPatch
 
 
 @dataclass(slots=True)

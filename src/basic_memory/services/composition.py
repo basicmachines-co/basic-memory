@@ -17,7 +17,7 @@ from basic_memory.repository import (
     RelationRepository,
 )
 from basic_memory.repository.search_repository import SearchRepository, create_search_repository
-from basic_memory.runtime import ProjectId
+from basic_memory.runtime.storage import ProjectId
 from basic_memory.services.entity_service import EntityService
 from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver

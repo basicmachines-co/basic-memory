@@ -4,7 +4,7 @@ from pathlib import Path
 
 from watchfiles import Change
 
-from basic_memory.index import local_storage_events_from_watchfiles_changes
+from basic_memory.index.filesystem import local_storage_events_from_watchfiles_changes
 
 
 def test_watchfiles_changes_normalize_to_storage_event_payloads(tmp_path: Path) -> None:

@@ -11,13 +11,8 @@ from watchfiles import Change
 from watchfiles.main import FileChange
 
 from basic_memory.ignore_utils import should_ignore_path
-from basic_memory.runtime import (
-    StorageBucketName,
-    StorageEventInput,
-    StorageEventPayload,
-    StorageKey,
-    storage_event_payload_from_input,
-)
+from basic_memory.runtime.storage import StorageBucketName, StorageEventPayload, StorageKey
+from basic_memory.runtime.storage_events import StorageEventInput, storage_event_payload_from_input
 from basic_memory.runtime.storage import STORAGE_OBJECT_DELETED_EVENT
 from basic_memory.runtime.storage_project_resolution import storage_object_key_from_project_prefix
 

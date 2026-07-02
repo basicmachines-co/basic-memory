@@ -13,8 +13,8 @@ import pytest
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
-from basic_memory.index import ProjectIndexCoordinatorResult
-from basic_memory.index import LocalWatchEventIndexRuntimeFactory
+from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
@@ -203,7 +203,7 @@ async def test_initialize_file_indexing_passes_constrained_project_to_watch_serv
     """
     _disable_test_env_short_circuit(monkeypatch)
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "target-project")
-    monkeypatch.setattr("basic_memory.index.WatchService", _FakeWatchService)
+    monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
     _FakeWatchService.last_kwargs = {}
 
     await initialize_file_indexing(app_config, quiet=True)
@@ -218,7 +218,7 @@ async def test_initialize_file_indexing_no_constraint_when_env_unset(
     """With no env var set, the watch service is unconstrained."""
     _disable_test_env_short_circuit(monkeypatch)
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
-    monkeypatch.setattr("basic_memory.index.WatchService", _FakeWatchService)
+    monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
     _FakeWatchService.last_kwargs = {}
 
     await initialize_file_indexing(app_config, quiet=True)
@@ -232,7 +232,7 @@ async def test_initialize_file_indexing_wires_event_index_runtime_by_default(
 ):
     """Watcher event indexing is the default startup path."""
     _disable_test_env_short_circuit(monkeypatch)
-    monkeypatch.setattr("basic_memory.index.WatchService", _FakeWatchService)
+    monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
     _FakeWatchService.last_kwargs = {}
 
     await initialize_file_indexing(app_config, quiet=True)
@@ -266,7 +266,7 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
         await reconcile_projects_with_config(updated)
 
         _disable_test_env_short_circuit(monkeypatch)
-        monkeypatch.setattr("basic_memory.index.WatchService", _FakeWatchService)
+        monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
 
         original_create_task = asyncio.create_task
         created_coroutines = []
@@ -307,11 +307,11 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
             "basic_memory.services.initialization.asyncio.create_task", capture_task
         )
         monkeypatch.setattr(
-            "basic_memory.index.LocalProjectIndexRuntimeFactory",
+            "basic_memory.index.local_project.LocalProjectIndexRuntimeFactory",
             RecordingProjectIndexRuntimeFactory,
         )
         monkeypatch.setattr(
-            "basic_memory.index.run_local_project_index_for_project",
+            "basic_memory.index.local_project.run_local_project_index_for_project",
             run_project_index_for_project,
         )
 
@@ -358,7 +358,7 @@ async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
         await reconcile_projects_with_config(updated)
 
         _disable_test_env_short_circuit(monkeypatch)
-        monkeypatch.setattr("basic_memory.index.WatchService", _FakeWatchService)
+        monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
 
         infos: list[str] = []
         monkeypatch.setattr(

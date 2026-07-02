@@ -10,7 +10,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing import (
+from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
@@ -26,7 +26,7 @@ from basic_memory.indexing import (
     run_accepted_note_move,
     run_accepted_note_update,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeNoteContentResponsePayload,
 )

@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     plan_accepted_note_response,

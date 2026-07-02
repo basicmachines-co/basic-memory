@@ -8,14 +8,11 @@ from typing import cast
 
 from basic_memory.index.local_dependencies import LocalIndexSearchService
 from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
-from basic_memory.indexing import (
-    IndexFileJobResult,
-    IndexFileJobStatus,
-    ProjectIndexMovedEntitySearchRefresher,
-    RelationResolutionRuntime,
-)
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
+from basic_memory.indexing.project_index_maintenance import ProjectIndexMovedEntitySearchRefresher
+from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
     StorageEventPayload,

@@ -23,11 +23,8 @@ from basic_memory.indexing.models import (
     IndexFileJobStatus,
     IndexingBatchResult,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
-    RuntimeIndexFileBatchJobRequest,
-    RuntimeObservedIndexFile,
-)
+from basic_memory.runtime.jobs import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
+from basic_memory.runtime.projects import ProjectRuntimeReference
 
 
 class LoadedFile:

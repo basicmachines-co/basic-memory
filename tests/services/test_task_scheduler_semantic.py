@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from basic_memory.index import ProjectIndexCoordinatorResult
+from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 from basic_memory.deps.services import (
     LocalEntityVectorSyncScheduler,
     LocalProjectIndexScheduler,

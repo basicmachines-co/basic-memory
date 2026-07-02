@@ -7,7 +7,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing import cleanup_orphan_entities
+from basic_memory.indexing.orphan_cleanup import cleanup_orphan_entities
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,6 @@
 """Tests for the default accepted-note repository provider."""
 
-from basic_memory.indexing import (
+from basic_memory.indexing.accepted_note_mutation_runner import (
     DefaultAcceptedNoteRepositories,
     build_default_accepted_note_repositories,
 )

@@ -22,7 +22,7 @@ from basic_memory.indexing.note_content_read_repair_runner import (
     prepare_note_content_read_repair,
     run_note_content_read_repair,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteResponse,
     RuntimeNoteContentReadRepairStatus,
     RuntimeNoteContentResource,

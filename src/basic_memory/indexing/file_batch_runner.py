@@ -21,7 +21,7 @@ from basic_memory.indexing.models import (
     build_index_file_batch_job_result,
     index_file_job_result_from_decision,
 )
-from basic_memory.runtime import RuntimeIndexFileBatchJobRequest
+from basic_memory.runtime.jobs import RuntimeIndexFileBatchJobRequest
 
 
 class IndexFileBatchChecker(Protocol):

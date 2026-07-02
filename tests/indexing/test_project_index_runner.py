@@ -5,22 +5,24 @@ from uuid import UUID
 
 import pytest
 
-from basic_memory.indexing import (
-    ChangeReport,
-    ProjectIndexCompletion,
+from basic_memory.indexing.change_planning import ChangeReport
+from basic_memory.indexing.project_index_coordinator import (
     ProjectIndexCoordinatorResult,
-    ProjectIndexDeleteRun,
-    ProjectIndexMoveRun,
     ProjectIndexRequest,
     run_project_index_coordinator,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexDeleteRun,
+    ProjectIndexMoveRun,
+)
+from basic_memory.indexing.project_index_progress import ProjectIndexCompletion
+from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeJobId,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 
 
 def project_index_request() -> RuntimeProjectIndexJobRequest:

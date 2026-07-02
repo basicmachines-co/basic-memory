@@ -14,7 +14,7 @@ from basic_memory.indexing.progress import (
     apply_vector_sync_batch_result,
     initialize_vector_sync_progress,
 )
-from basic_memory.runtime import ProjectId
+from basic_memory.runtime.storage import ProjectId
 
 type CheckpointPhase = str | None
 type EntityId = int

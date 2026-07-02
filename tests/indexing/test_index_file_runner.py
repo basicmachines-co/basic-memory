@@ -30,13 +30,12 @@ from basic_memory.indexing.models import (
     IndexFileJobResult,
     IndexFileJobStatus,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode, RuntimeStorageObjectObservation
+from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA,
     NOTE_OBJECT_DB_VERSION_METADATA,
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
-    RuntimeStorageFileIndexMode,
-    RuntimeStorageObjectObservation,
 )
 from basic_memory.services.exceptions import FileOperationError
 

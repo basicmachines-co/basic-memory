@@ -8,9 +8,12 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing import ProjectDeleteAcceptedProject, ProjectDeleteAcceptedResult
+from basic_memory.indexing.project_delete_acceptance import (
+    ProjectDeleteAcceptedProject,
+    ProjectDeleteAcceptedResult,
+)
 from basic_memory.models import Project
-from basic_memory.runtime import RuntimeJobId, RuntimeProjectDeleteJobRequest
+from basic_memory.runtime.jobs import RuntimeJobId, RuntimeProjectDeleteJobRequest
 
 
 class ProjectDeleteAcceptanceError(Exception):

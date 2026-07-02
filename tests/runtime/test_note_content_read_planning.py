@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimeNoteContentReadAction,
     RuntimeNoteContentReadRepairStatus,
     plan_runtime_note_content_read,

@@ -15,8 +15,8 @@ from basic_memory.cloud.note_content_materialization import (
     LocalNoteContentMaterializationProvider,
     LocalNoteContentStorage,
 )
-from basic_memory.indexing import FileIndexOperation, FileIndexResult
-from basic_memory.runtime import (
+from basic_memory.indexing.models import FileIndexOperation, FileIndexResult
+from basic_memory.runtime.note_content import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteResponse,

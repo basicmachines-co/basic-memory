@@ -21,7 +21,7 @@ from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
     note_content_repository_for_project,
 )
-from basic_memory.runtime import ProjectId, RuntimeFilePath
+from basic_memory.runtime.storage import ProjectId, RuntimeFilePath
 
 if TYPE_CHECKING:  # pragma: no cover
     from loguru._logger import Logger

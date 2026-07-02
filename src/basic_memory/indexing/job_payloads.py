@@ -20,9 +20,8 @@ from basic_memory.indexing.models import (
 from basic_memory.indexing.project_index_progress import ObservedObjectIndexCompletionContext
 from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
 from basic_memory.indexing.relation_resolution import ResolveRelationsJobRequest
-from basic_memory.runtime import (
+from basic_memory.runtime.jobs import (
     JobEntrypoint,
-    ProjectRuntimeReference,
     RuntimeIndexFileBatchJobRequest,
     RuntimeJobRequest,
     RuntimeObservedIndexFile,
@@ -34,6 +33,7 @@ from basic_memory.runtime import (
     RuntimeStorageObjectObservation,
     runtime_job_request_from_source,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 
 INDEX_FILE_ENTRYPOINT: JobEntrypoint = "index_file"
 INDEX_FILE_BATCH_ENTRYPOINT: JobEntrypoint = "index_file_batch"

@@ -7,7 +7,7 @@ from basic_memory.mcp.container import (
     get_container,
     set_container,
 )
-from basic_memory.runtime import RuntimeMode
+from basic_memory.runtime.mode import RuntimeMode
 
 
 class TestMcpContainer:

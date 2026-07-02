@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
-from basic_memory.indexing import ExternalFileDeleteEntityDeleteResult
+from basic_memory.indexing.external_file_delete_runner import ExternalFileDeleteEntityDeleteResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.external_file_delete_runner as external_file_delete_runner
@@ -13,7 +13,8 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
     run_external_file_delete,
 )
-from basic_memory.runtime import RUNTIME_MARKDOWN_CONTENT_TYPE, RuntimeExternalFileDeleteAction
+from basic_memory.runtime.cleanup import RuntimeExternalFileDeleteAction
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 @dataclass(frozen=True, slots=True)

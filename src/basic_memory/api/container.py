@@ -17,10 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, AsyncSession
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
+from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 
 if TYPE_CHECKING:  # pragma: no cover
-    from basic_memory.index import WatchCoordinator
+    from basic_memory.index.watch_coordinator import WatchCoordinator
 
 
 @dataclass
@@ -85,7 +85,7 @@ class ApiContainer:
             WatchCoordinator configured for this runtime environment
         """
         # Deferred import to avoid circular dependency
-        from basic_memory.index import WatchCoordinator
+        from basic_memory.index.watch_coordinator import WatchCoordinator
 
         return WatchCoordinator(
             config=self.config,

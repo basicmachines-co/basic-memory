@@ -12,17 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.project_index_maintenance import delete_project_index_vector_rows
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeDirectoryFileSnapshot,
     RuntimeFileDeleteResult,
-    RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
-    ProjectId,
-    ProjectExternalId,
     plan_directory_file_snapshot,
     plan_note_file_delete_job_request,
 )
+from basic_memory.runtime.storage import ProjectExternalId, ProjectId, RuntimeFilePath
 from basic_memory.utils import valid_project_path_value
 
 type DirectoryDeleteFileStatus = Literal["complete", "pending", "failed"]

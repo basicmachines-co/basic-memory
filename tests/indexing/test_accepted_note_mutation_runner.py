@@ -33,7 +33,7 @@ from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import AcceptedNoteContentWrite
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
-from basic_memory.runtime import RuntimeAcceptedNoteResponse
+from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 

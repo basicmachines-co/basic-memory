@@ -2,14 +2,16 @@
 
 import pytest
 
-from basic_memory.runtime import (
+from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
-    RuntimeStorageEventSource,
-    StorageEventInput,
     StorageEventPayload,
     StorageObjectIdentity,
     StorageObjectVersion,
     group_storage_events_by_bucket,
+)
+from basic_memory.runtime.storage_events import (
+    RuntimeStorageEventSource,
+    StorageEventInput,
     run_runtime_storage_event_operations,
     storage_event_payload_from_input,
 )

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 
-from basic_memory.runtime import (
+from basic_memory.runtime.jobs import (
     RuntimeJobDedupeKey,
     RuntimeJobRequest,
     runtime_job_request_from_source,
