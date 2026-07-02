@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from basic_memory.indexing.job_payloads import INDEX_PROJECT_ENTRYPOINT
+from basic_memory.indexing.project_index_coordinator import ProjectIndexWorkflowRequest
 from basic_memory.indexing.project_index_workflow import (
-    ProjectIndexWorkflowRequest,
     build_project_index_workflow_queued,
     project_index_workflow_logical_key,
 )

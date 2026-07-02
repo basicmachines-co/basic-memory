@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.workflows import (
     RuntimeJobStatus,
     RuntimeJobStatusType,
     RuntimeWorkflowCheckpoint,

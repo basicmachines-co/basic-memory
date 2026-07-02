@@ -28,7 +28,7 @@ from basic_memory.indexing.models import (
 )
 from basic_memory.models import Entity, Relation
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.storage import (
     RUNTIME_MARKDOWN_CONTENT_TYPE,
     runtime_file_path_is_markdown_note,
 )

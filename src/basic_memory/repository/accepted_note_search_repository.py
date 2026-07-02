@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
-from basic_memory.indexing.project_index_workflow import delete_project_index_vector_rows
+from basic_memory.indexing.project_index_maintenance import delete_project_index_vector_rows
 
 type SearchIndexSqlValue = str | int | datetime | None
 type SearchIndexSqlParams = dict[str, SearchIndexSqlValue]

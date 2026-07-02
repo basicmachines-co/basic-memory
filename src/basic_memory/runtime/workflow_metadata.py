@@ -3,9 +3,8 @@
 from dataclasses import dataclass
 from typing import Literal, Self
 
-from basic_memory.runtime.contracts import (
-    JobEntrypoint,
-    RuntimeJobId,
+from basic_memory.runtime.jobs import JobEntrypoint, RuntimeJobId
+from basic_memory.runtime.workflows import (
     RuntimeWorkflowBroker,
     RuntimeWorkflowFailureMetadata,
     RuntimeWorkflowMetadataPatch,

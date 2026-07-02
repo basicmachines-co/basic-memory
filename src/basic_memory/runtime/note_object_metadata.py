@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Self
 from uuid import UUID
 
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.storage import (
     RuntimeEntityId,
     RuntimeFileChecksum,
     RuntimeNoteActorKind,

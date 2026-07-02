@@ -3,11 +3,8 @@
 from collections.abc import Mapping
 from typing import Protocol
 
-from basic_memory.runtime.contracts import (
-    RuntimeFileChecksum,
-    RuntimeFilePath,
-    RuntimeObservedIndexFile,
-)
+from basic_memory.runtime.jobs import RuntimeObservedIndexFile
+from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
 
 
 class RuntimeObservedIndexFileMetadataSource(Protocol):

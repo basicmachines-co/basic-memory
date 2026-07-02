@@ -16,13 +16,13 @@ from basic_memory.indexing import (
     ProjectIndexMaintenanceRunner,
     ProjectIndexMovedEntitySearchRefresher,
 )
-from basic_memory.indexing.project_index_workflow import (
+from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMoveContentUpdater,
     ProjectIndexMovedFile,
     ProjectIndexMovedFileContentUpdate,
 )
 from basic_memory.runtime import RuntimeFilePath, StorageEventPayload
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.storage import (
     STORAGE_OBJECT_CREATED_EVENTS,
     STORAGE_OBJECT_DELETED_EVENT,
 )

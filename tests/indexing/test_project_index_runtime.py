@@ -17,7 +17,7 @@ from basic_memory.indexing.project_index_runtime import (
     ProjectIndexRuntime,
     build_default_project_index_runtime,
 )
-from basic_memory.indexing.project_index_workflow import (
+from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteBatch,
     ProjectIndexDeleteBatchResult,
     ProjectIndexMoveBatch,

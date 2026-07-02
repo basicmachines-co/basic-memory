@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.models import Entity
-from basic_memory.runtime.contracts import RUNTIME_MARKDOWN_FILE_SUFFIXES
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 type LinkText = str
 

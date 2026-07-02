@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from basic_memory.runtime.contracts import RuntimeFilePath
+from basic_memory.runtime.storage import RuntimeFilePath
 
 
 def normalize_note_move_destination_path(destination_path: str) -> RuntimeFilePath:

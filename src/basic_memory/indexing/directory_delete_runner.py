@@ -10,7 +10,7 @@ from typing import Literal, Protocol
 from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from basic_memory.indexing.project_index_workflow import delete_project_index_vector_rows
+from basic_memory.indexing.project_index_maintenance import delete_project_index_vector_rows
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.runtime import (
     RuntimeDeleteStatus,

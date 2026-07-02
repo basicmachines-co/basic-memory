@@ -30,7 +30,7 @@ from basic_memory.indexing.forward_reference_resolution import (
 )
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.project_index_progress import ProjectIndexMetadataReporter
-from basic_memory.indexing.project_index_workflow import (
+from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteBatchStore,
     ProjectIndexDeleteRun,
     ProjectIndexMoveBatchStore,
