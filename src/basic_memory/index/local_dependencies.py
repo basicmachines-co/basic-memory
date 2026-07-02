@@ -13,31 +13,40 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import FileMetadata, ParseError, compute_checksum, remove_frontmatter
-from basic_memory.indexing import (
-    BatchIndexer,
-    CurrentMaterializedNoteEntityRepository,
-    DefaultIndexBatchRuntime,
-    EmbeddingIndexBatchSummary,
-    FileIndexOperation,
-    FileIndexResult,
-    IndexFileBatchIndexer,
-    IndexedFileChecksumRow,
+from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.embedding_index_planning import EmbeddingIndexBatchSummary
+from basic_memory.indexing.file_batch_runner import IndexFileBatchIndexer
+from basic_memory.indexing.file_index_checking import (
     IndexedFileChecksumRepository,
-    IndexEntitySearchWriter,
-    IndexFileExecutor,
-    IndexInputFile,
-    IndexingBatchResult,
+    IndexedFileChecksumRow,
+)
+from basic_memory.indexing.file_indexer import (
     IndexMarkdownEntityRepository,
     IndexMarkdownNoteContentReconciler,
-    OrphanEntityRepository,
-    OrphanSearchIndex,
+)
+from basic_memory.indexing.index_batch_runtime import (
+    DefaultIndexBatchRuntime,
+    build_default_index_batch_runtime,
+)
+from basic_memory.indexing.index_file_runner import (
+    CurrentMaterializedNoteEntityRepository,
+    IndexFileExecutor,
+)
+from basic_memory.indexing.models import (
+    FileIndexOperation,
+    FileIndexResult,
+    IndexEntitySearchWriter,
+    IndexInputFile,
+    IndexingBatchResult,
+    StorageIndexFileWriter,
+    SyncedMarkdownFile,
+)
+from basic_memory.indexing.orphan_cleanup import OrphanEntityRepository, OrphanSearchIndex
+from basic_memory.indexing.relation_resolution import (
     RelationResolutionEntityIndexer,
     RelationResolutionEntityRepository,
     RelationResolutionLinkResolver,
     RelationResolutionRelationRepository,
-    StorageIndexFileWriter,
-    SyncedMarkdownFile,
-    build_default_index_batch_runtime,
 )
 from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
@@ -51,7 +60,7 @@ from basic_memory.repository import (
     RelationRepository,
 )
 from basic_memory.repository.search_repository import create_search_repository
-from basic_memory.runtime import ProjectId, RuntimeFilePath
+from basic_memory.runtime.storage import ProjectId, RuntimeFilePath
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.link_resolver import LinkResolver

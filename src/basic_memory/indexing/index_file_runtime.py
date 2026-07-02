@@ -14,17 +14,19 @@ from basic_memory.indexing.models import (
 )
 from basic_memory.indexing.project_index_progress import ObservedObjectIndexCompletionContext
 from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.runtime.jobs import (
+    RuntimeStorageFileIndexContext,
+    RuntimeStorageFileIndexJobIdentity,
+    RuntimeStorageFileIndexMode,
+    RuntimeStorageObjectObservation,
+)
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     ProjectExternalId,
     ProjectName,
     ProjectPath,
     RuntimeFilePath,
-    RuntimeStorageFileIndexContext,
-    RuntimeStorageFileIndexJobIdentity,
-    RuntimeStorageFileIndexMode,
     RuntimeStorageFileIndexRequest,
-    RuntimeStorageObjectObservation,
     StorageEventPayload,
 )
 

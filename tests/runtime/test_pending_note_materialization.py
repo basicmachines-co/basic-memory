@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteContentWritePlan,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,

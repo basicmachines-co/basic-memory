@@ -7,12 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Self
 
-from basic_memory.runtime import (
-    RuntimeIndexFileBatchJobRequest,
-    RuntimeObservedIndexFile,
-    StorageEtag,
-    normalize_storage_etag,
-)
+from basic_memory.runtime.jobs import RuntimeIndexFileBatchJobRequest, RuntimeObservedIndexFile
+from basic_memory.runtime.storage import StorageEtag, normalize_storage_etag
 
 type FileIndexPath = str
 type FileIndexChecksum = str

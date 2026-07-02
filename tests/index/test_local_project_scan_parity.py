@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import basic_memory.index.local_project as local_project
-from basic_memory.index import (
+from basic_memory.index.local_project import (
     LocalProjectIndexObservedFileSource,
     local_project_index_file_paths,
 )

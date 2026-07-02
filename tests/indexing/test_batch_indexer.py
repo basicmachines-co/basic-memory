@@ -12,11 +12,8 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.indexing import (
-    BatchIndexer,
-    IndexInputFile,
-    StorageIndexFileWriter,
-)
+from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import SyncFatalError

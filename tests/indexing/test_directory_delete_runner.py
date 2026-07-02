@@ -19,7 +19,7 @@ from basic_memory.indexing.directory_delete_runner import (
     normalize_directory_delete_path,
     run_directory_delete,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
     RuntimeDirectoryFileSnapshot,
     RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,

@@ -1,6 +1,6 @@
 """Tests for portable sample-note initialization results."""
 
-from basic_memory.runtime import RuntimeSampleNotesInitializationResult
+from basic_memory.runtime.sample_notes import RuntimeSampleNotesInitializationResult
 
 
 def test_sample_notes_initialization_result_tracks_counts_for_workflow_result() -> None:

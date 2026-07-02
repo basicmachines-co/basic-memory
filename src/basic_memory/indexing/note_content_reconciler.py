@@ -25,7 +25,7 @@ from basic_memory.indexing.note_content_reconciliation import (
 )
 from basic_memory.models import NoteContent
 from basic_memory.repository import NoteContentRepository
-from basic_memory.runtime import ProjectId, RuntimeEntityId, RuntimeFilePath
+from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeFilePath
 
 type NoteContentUpdatePlan = (
     NoteContentFileSynced

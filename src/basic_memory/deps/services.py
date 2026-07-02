@@ -50,26 +50,25 @@ from basic_memory.cloud import (
     NoteContentMutationService,
     NoteContentQueryService,
 )
-from basic_memory.index import (
-    LocalProjectIndexObservation,
-    LocalProjectIndexRunner,
-    ProjectIndexCoordinatorResult,
-    build_local_markdown_file_indexer,
-)
-from basic_memory.indexing import (
+from basic_memory.index.local_dependencies import build_local_markdown_file_indexer
+from basic_memory.index.local_project import LocalProjectIndexObservation, LocalProjectIndexRunner
+from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
+from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationMovePolicy,
     AcceptedNoteMutationPreparer,
-    BatchIndexer,
-    DirectoryDeleteRuntime,
-    DirectoryFileDeleteEnqueueError,
-    IndexFileExecutor,
-    RepositoryDirectoryDeleteAcceptanceStore,
-    StorageIndexFileWriter,
     SystemAcceptedNoteMutationClock,
     build_default_accepted_note_repositories,
-    run_note_file_delete,
 )
+from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.directory_delete_runner import (
+    DirectoryDeleteRuntime,
+    DirectoryFileDeleteEnqueueError,
+    RepositoryDirectoryDeleteAcceptanceStore,
+)
+from basic_memory.indexing.index_file_runner import IndexFileExecutor
+from basic_memory.indexing.models import StorageIndexFileWriter
+from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
 from basic_memory.file_utils import FileError
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -77,11 +76,10 @@ from basic_memory.models import Project
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.search_repository import create_search_repository
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import RuntimeFileDeleteResult, RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.storage import (
     RuntimeFileChecksum,
-    RuntimeFileDeleteResult,
     RuntimeFilePath,
-    RuntimeNoteFileDeleteJobRequest,
     runtime_content_type_is_markdown,
 )
 from basic_memory.schemas import ProjectIndexRunResponse

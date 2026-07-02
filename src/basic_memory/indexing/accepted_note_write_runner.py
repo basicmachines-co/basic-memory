@@ -24,20 +24,22 @@ from basic_memory.repository.entity_repository import (
     EntityMetadata,
     EntityRepository,
 )
-from basic_memory.runtime import (
-    ProjectId,
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteContentWriteSource,
     RuntimeDeletedNoteFileChecksumSource,
     RuntimeDeletedNoteFileDeleteEntitySource,
+    RuntimePendingNoteFileDelete,
+    plan_accepted_note_content_write,
+    plan_accepted_note_delete_change,
+)
+from basic_memory.runtime.storage import (
+    ProjectId,
     RuntimeEntityId,
     RuntimeFilePath,
     RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
-    RuntimePendingNoteFileDelete,
-    plan_accepted_note_delete_change,
-    plan_accepted_note_content_write,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
 

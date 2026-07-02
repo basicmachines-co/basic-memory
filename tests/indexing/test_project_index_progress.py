@@ -28,7 +28,7 @@ from basic_memory.indexing.project_index_progress import (
     should_emit_project_index_progress_event,
     summarize_project_index_file_outcomes,
 )
-from basic_memory.runtime import RuntimeStorageFileIndexMode
+from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode
 
 
 def test_project_index_counters_format_progress_text() -> None:

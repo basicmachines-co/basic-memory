@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from basic_memory.index import (
+from basic_memory.index.event_operations import (
     StorageEventDeleteOperationRunner,
     StorageEventDeleteResourcesFactory,
     StorageEventIndexOperationRunner,
@@ -10,7 +10,7 @@ from basic_memory.index import (
     StorageEventOperationProcessor,
     StorageEventOperationRuntime,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
     RuntimeStorageEventSkipReason,

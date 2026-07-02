@@ -50,7 +50,7 @@ from basic_memory.indexing.vector_sync_planning import (
     plan_vector_sync_progress,
     run_vector_sync,
 )
-from basic_memory.runtime import ProjectId
+from basic_memory.runtime.storage import ProjectId
 
 
 @dataclass(frozen=True, slots=True)

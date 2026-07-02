@@ -2,61 +2,29 @@
 
 from collections.abc import Sequence
 from dataclasses import MISSING, fields
-from inspect import signature
 from importlib.util import find_spec
+from inspect import signature
 from typing import get_type_hints
 
-from basic_memory import index
 from basic_memory import deps
 from basic_memory.deps import services as service_deps
+from basic_memory.index.inline_operations import InlineStorageEventIndexRuntime
 from basic_memory.index.local_dependencies import (
     LocalIndexEntityRepository,
     LocalIndexEntityService,
 )
-from basic_memory.indexing import IndexedFileChecksumRow
+from basic_memory.index.local_project import LocalProjectIndexRuntimeFactory
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index.watch_service import WatchService
+from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.models import Entity
 
 
-def test_index_package_exports_project_index_fanout_contracts() -> None:
-    """Project-wide fanout orchestration is owned by ``basic_memory.index``."""
-    assert index.INDEX_PROJECT_ENTRYPOINT == "index_project"
-
-    expected_contracts = {
-        "ProjectIndexJobPayload": index.ProjectIndexJobPayload,
-        "ProjectIndexRequest": index.ProjectIndexRequest,
-        "ProjectIndexCoordinatorResult": index.ProjectIndexCoordinatorResult,
-        "ProjectIndexObservedFileSource": index.ProjectIndexObservedFileSource,
-        "ProjectIndexChangeDetector": index.ProjectIndexChangeDetector,
-        "ProjectIndexMaintenanceRunner": index.ProjectIndexMaintenanceRunner,
-        "ProjectIndexWorkflowStarter": index.ProjectIndexWorkflowStarter,
-        "ProjectIndexBatchEnqueuer": index.ProjectIndexBatchEnqueuer,
-        "ProjectIndexFanoutFailureRecorder": index.ProjectIndexFanoutFailureRecorder,
-        "StoreProjectIndexMaintenanceRunner": index.StoreProjectIndexMaintenanceRunner,
-    }
-    for expected_name, contract in expected_contracts.items():
-        assert contract.__name__ == expected_name
-
-    assert callable(index.run_project_index_coordinator)
-
-
-def test_index_package_exports_local_event_index_runtime_contracts() -> None:
-    """Local event-index adapters are available from the core index surface."""
-    assert index.LocalWatchEventIndexRuntimeFactory.__name__ == (
-        "LocalWatchEventIndexRuntimeFactory"
-    )
-    assert callable(index.local_project_prefix)
-
-
-def test_index_package_exports_local_watch_service_surface() -> None:
+def test_watch_service_uses_event_index_runtime_not_sync_service() -> None:
     """The local runtime watcher lives with event-index orchestration, not sync."""
-    watch_signature = signature(index.WatchService)
+    watch_signature = signature(WatchService)
 
-    assert index.WatchService.__module__ == "basic_memory.index.watch_service"
-    assert index.WatchServiceState.__name__ == "WatchServiceState"
-    assert index.WatchEvent.__name__ == "WatchEvent"
-    assert index.WatchCoordinator.__name__ == "WatchCoordinator"
-    assert index.WatchStatus.__name__ == "WatchStatus"
     assert "event_index_runtime_factory" in watch_signature.parameters
     assert "sync_service_factory" not in watch_signature.parameters
 
@@ -64,8 +32,8 @@ def test_index_package_exports_local_watch_service_surface() -> None:
 def test_index_package_local_factories_are_not_sync_service_adapters() -> None:
     """The new index runtime must not depend on the legacy SyncService shape."""
     factory_signatures = (
-        signature(index.LocalWatchEventIndexRuntimeFactory),
-        signature(index.LocalProjectIndexRuntimeFactory),
+        signature(LocalWatchEventIndexRuntimeFactory),
+        signature(LocalProjectIndexRuntimeFactory),
     )
 
     for factory_signature in factory_signatures:
@@ -97,27 +65,11 @@ def test_fastapi_deps_do_not_export_sync_service_dependencies() -> None:
 def test_inline_storage_event_runtime_requires_explicit_result_recorder() -> None:
     """Inline runtimes should receive local/cloud observer behavior explicitly."""
     result_recorder_field = next(
-        field
-        for field in fields(index.InlineStorageEventIndexRuntime)
-        if field.name == "result_recorder"
+        field for field in fields(InlineStorageEventIndexRuntime) if field.name == "result_recorder"
     )
 
     assert result_recorder_field.default is MISSING
     assert result_recorder_field.default_factory is MISSING
-
-
-def test_index_package_exports_storage_event_source_contracts() -> None:
-    """Storage ingress adapters should depend on the index-owned event surface."""
-    assert index.StorageEventInput.__name__ == "StorageEventInput"
-    assert index.StorageEventPayload.__name__ == "StorageEventPayload"
-    assert index.StorageEventSource.__name__ == "StorageEventSource"
-    assert index.RuntimeStorageEventSource.__name__ == "RuntimeStorageEventSource"
-    assert index.StorageBucketName.__name__ == "StorageBucketName"
-    assert index.StorageKey.__name__ == "StorageKey"
-    assert index.StorageEtag.__name__ == "StorageEtag"
-    assert index.StorageEventName.__name__ == "StorageEventName"
-    assert callable(index.storage_event_payload_from_input)
-    assert callable(index.group_storage_events_by_bucket)
 
 
 def test_local_index_dependency_contracts_use_domain_types() -> None:

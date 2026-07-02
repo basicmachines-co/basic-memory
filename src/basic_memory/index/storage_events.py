@@ -6,15 +6,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar
 
-from basic_memory.runtime import (
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     ProjectPath,
-    ProjectRuntimeReference,
-    RuntimeStorageEventOperationProcessor,
     RuntimeStorageEventProcessingResult,
     StorageBucketName,
     StorageEventPayload,
     StorageEventSource,
     plan_runtime_storage_events_by_project,
+)
+from basic_memory.runtime.storage_events import (
+    RuntimeStorageEventOperationProcessor,
     run_runtime_storage_event_operations,
 )
 

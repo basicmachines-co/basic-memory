@@ -26,22 +26,27 @@ from basic_memory.index.storage_events import (
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
 )
-from basic_memory.indexing import (
-    ExternalFileDeleteResult,
+from basic_memory.indexing.external_file_delete_runner import ExternalFileDeleteResult
+from basic_memory.indexing.file_index_checking import (
     FileIndexChecker,
-    IndexFileJobResult,
-    IndexFileJobStatus,
-    IndexFileRelationResolutionContext,
-    IndexFileObjectMetadata,
-    ProjectIndexMovedEntitySearchRefresher,
-    RepositoryCurrentMaterializedNoteSource,
     RepositoryIndexedFileChecksumSource,
+    StorageCurrentFileChecksumSource,
+)
+from basic_memory.indexing.index_file_runner import (
+    IndexFileObjectMetadata,
+    RepositoryCurrentMaterializedNoteSource,
+)
+from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
+from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexMovedEntitySearchRefresher,
     RepositoryProjectIndexMaintenanceStore,
     RepositoryProjectIndexMovedEntitySearchRefresher,
-    RepositoryRelationResolutionRuntime,
-    RelationResolutionRuntime,
-    StorageCurrentFileChecksumSource,
     StoreProjectIndexMaintenanceRunner,
+)
+from basic_memory.indexing.relation_resolution import (
+    IndexFileRelationResolutionContext,
+    RelationResolutionRuntime,
+    RepositoryRelationResolutionRuntime,
     plan_index_file_relation_resolution,
     resolve_project_relations,
 )
@@ -49,9 +54,9 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.models import Entity, Project
-from basic_memory.runtime import (
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     ProjectPath,
-    ProjectRuntimeReference,
     RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeStorageEventOperation,

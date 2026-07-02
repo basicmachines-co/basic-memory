@@ -8,16 +8,15 @@ from typing import Protocol
 from pydantic import Field, StrictInt, StrictStr, ValidationError, model_validator
 
 from basic_memory.indexing.progress import CheckpointModel
-from basic_memory.runtime import (
+from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode
+from basic_memory.runtime.storage import (
     ProjectExternalId,
     ProjectName,
     ProjectPath,
     ProjectPermalink,
     RuntimeNoteChangeSource,
-    RuntimeStorageFileIndexMode,
-    RuntimeWorkflowMetadataPatch,
-    WorkflowId,
 )
+from basic_memory.runtime.workflows import RuntimeWorkflowMetadataPatch, WorkflowId
 
 PROJECT_INDEX_PROGRESS_EVENT_INTERVAL = 50
 

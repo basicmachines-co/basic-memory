@@ -3,25 +3,23 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from basic_memory.index import (
+from basic_memory.index.inline_operations import (
     InlineStorageEventIndexRuntime,
     InlineStorageEventOperationProcessor,
 )
-from basic_memory.indexing import (
+from basic_memory.indexing.external_file_delete_runner import (
     ExternalFileDeleteEntityDeleteResult,
     ExternalFileDeleteResult,
-    FileIndexOperation,
-    FileIndexPlan,
-    FileIndexResult,
-    IndexFileJobResult,
-    IndexFileObjectMetadata,
 )
+from basic_memory.indexing.file_index_planning import FileIndexPlan
+from basic_memory.indexing.index_file_runner import IndexFileObjectMetadata
+from basic_memory.indexing.models import FileIndexOperation, FileIndexResult, IndexFileJobResult
 from basic_memory.indexing.file_index_planning import FileIndexTarget
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import RuntimeExternalFileDeleteAction
+from basic_memory.runtime.note_content import RuntimeDeletedNoteEntityDeleteSource
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     RUNTIME_MARKDOWN_CONTENT_TYPE,
-    ProjectRuntimeReference,
-    RuntimeDeletedNoteEntityDeleteSource,
-    RuntimeExternalFileDeleteAction,
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
     RuntimeStorageEventSkipReason,

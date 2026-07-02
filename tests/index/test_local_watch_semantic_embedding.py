@@ -15,7 +15,8 @@ from watchfiles import Change
 from basic_memory import config as config_module
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.index import LocalWatchEventIndexRuntimeFactory, WatchService
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index.watch_service import WatchService
 
 
 def _enable_semantic(app_config: BasicMemoryConfig, config_manager: ConfigManager) -> None:

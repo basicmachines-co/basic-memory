@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
     RuntimeFileDeleteResult,
-    RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
-    RuntimeFileChecksum,
     plan_note_file_delete_cleanup,
-    read_runtime_file_checksum,
 )
+from basic_memory.runtime.note_content import read_runtime_file_checksum
+from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
 
 
 class NoteFileDeleteStorage(Protocol):

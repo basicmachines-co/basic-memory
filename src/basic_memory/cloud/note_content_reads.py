@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.indexing import (
+from basic_memory.indexing.note_content_read_repair_runner import (
     NoteContentReadRepairFileReader,
     NoteContentReadView,
     load_note_content_read_view_with_default_repositories,
@@ -15,7 +15,7 @@ from basic_memory.indexing import (
     run_note_content_read_repair_with_default_reconciler,
 )
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimeNoteContentResource,
     RuntimeNoteContentResponsePayload,
 )

@@ -12,48 +12,51 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.index import (
-    LocalIndexProjectDependencies,
+from basic_memory.index.local_dependencies import LocalIndexProjectDependencies
+from basic_memory.index.local_project import (
     LocalProjectIndexBatchEnqueuer,
     LocalProjectIndexObservedFileSource,
-    LocalProjectIndexRuntimeFactory,
     LocalProjectIndexRuntime,
+    LocalProjectIndexRuntimeFactory,
     local_project_index_file_paths,
     run_local_project_index,
     run_local_project_index_for_project,
 )
-from basic_memory.indexing import (
-    ChangeDetector,
-    ChangeReport,
-    FileIndexPlan,
-    FileIndexTarget,
-    IndexFileBatchJobResult,
-    IndexFileBatchReadResult,
-    IndexFileJobResult,
-    IndexFileJobStatus,
+from basic_memory.indexing.change_detector import ChangeDetector
+from basic_memory.indexing.change_planning import ChangeReport
+from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
+from basic_memory.indexing.file_batch_runner import IndexFileBatchReadResult
+from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
+from basic_memory.indexing.file_index_planning import FileIndexPlan, FileIndexTarget
+from basic_memory.indexing.models import (
     FileIndexOperation,
     FileIndexResult,
-    EmbeddingIndexTarget,
-    IndexedFileChecksumRow,
+    IndexFileBatchJobResult,
+    IndexFileJobResult,
+    IndexFileJobStatus,
+    IndexInputFile,
     IndexedEntity,
     IndexingBatchResult,
-    IndexInputFile,
+)
+from basic_memory.indexing.project_index_coordinator import ProjectIndexObservedFileSource
+from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
+    StoreProjectIndexMaintenanceRunner,
+)
+from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
     ResolvedRelationTarget,
-    StoreProjectIndexMaintenanceRunner,
-    ProjectIndexObservedFileSource,
     UnresolvedRelation,
 )
 from basic_memory.models import Entity, Project
 from basic_memory.repository.note_content_repository import NoteContentRepository
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services import FileService
 

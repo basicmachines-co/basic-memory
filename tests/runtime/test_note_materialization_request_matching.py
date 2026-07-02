@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
     note_content_matches_materialization_request,

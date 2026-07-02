@@ -4,10 +4,8 @@ from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 
-from basic_memory.runtime import (
-    RuntimeObservedIndexFile,
-    runtime_observed_index_files_from_metadata_map,
-)
+from basic_memory.runtime.jobs import RuntimeObservedIndexFile
+from basic_memory.runtime.observed_index_files import runtime_observed_index_files_from_metadata_map
 
 
 @dataclass(frozen=True, slots=True)

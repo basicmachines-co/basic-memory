@@ -6,13 +6,10 @@ from types import SimpleNamespace
 
 from watchfiles import Change
 
-from basic_memory.index import (
-    LocalWatchProjectChangeBatch,
+from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
+    LocalWatchProjectChangeBatch,
     LocalWatchStorageEventSource,
-    StorageEventIndexRuntime,
-    StorageEventOperationProcessorFactory,
-    StorageEventProjectResolver,
     local_watch_filter_roots,
     local_watch_path_is_observable,
     local_watch_path_is_under_project,
@@ -20,8 +17,13 @@ from basic_memory.index import (
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.index.storage_events import (
+    StorageEventIndexRuntime,
+    StorageEventOperationProcessorFactory,
+    StorageEventProjectResolver,
+)
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventProcessingResult,
 )

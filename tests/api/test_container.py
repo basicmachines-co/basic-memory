@@ -1,7 +1,7 @@
 """Tests for the API container composition root."""
 
 from basic_memory.api.container import ApiContainer
-from basic_memory.runtime import RuntimeMode
+from basic_memory.runtime.mode import RuntimeMode
 
 
 class TestApiContainerWatchGating:

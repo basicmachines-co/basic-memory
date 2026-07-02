@@ -8,27 +8,29 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
-from basic_memory.indexing import (
+from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
     AcceptedNoteMoveMutation,
     AcceptedNoteMutationDependencies,
+    AcceptedNoteMutationRejectKind,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
-    AcceptedNoteMutationRejectKind,
     AcceptedNoteUpdateMutation,
-    DirectoryDeleteRuntime,
+)
+from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRejectKind,
+    DirectoryDeleteRuntime,
+)
+from basic_memory.indexing.note_content_read_repair_runner import (
     NoteContentReadRepairFile,
     NoteContentReadRepairPreflight,
     NoteContentReadRepairTarget,
     NoteContentReadView,
 )
-from basic_memory.runtime import (
-    RuntimeNoteFileDeleteJobRequest,
-    RuntimeNoteContentReadRepairStatus,
-)
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.note_content import RuntimeNoteContentReadRepairStatus
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -96,7 +98,7 @@ class FakeDirectoryDeleteStore:
         assert session is not None
         assert project_id == 3
         assert directory == "notes"
-        from basic_memory.runtime import RuntimeDirectoryFileSnapshot
+        from basic_memory.runtime.cleanup import RuntimeDirectoryFileSnapshot
 
         return [
             RuntimeDirectoryFileSnapshot(

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     RuntimePendingNoteFileDelete,
     plan_previous_materialized_note_file_delete,
 )

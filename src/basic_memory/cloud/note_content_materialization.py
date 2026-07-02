@@ -12,30 +12,31 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db, file_utils
-from basic_memory.indexing import (
+from basic_memory.indexing.index_file_runner import IndexFileExecutor
+from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
+from basic_memory.indexing.note_materialization_runner import (
     ContentStoreNoteMaterializationFileWriter,
-    IndexFileExecutor,
     RepositoryNoteMaterializationPreflight,
     RepositoryNoteMaterializationPublisher,
     RepositoryNoteMaterializationStatusPublisher,
-    run_note_file_delete,
     run_note_materialization,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
+    RuntimeNoteFileDeleteJobRequest,
+    plan_note_file_delete_job_request,
+)
+from basic_memory.runtime.note_content import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteResponse,
-    RuntimeFileChecksum,
-    RuntimeFileMetadataSource,
-    RuntimeFilePath,
+    RuntimeNoteContentResponsePayload,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
-    RuntimeNoteContentResponsePayload,
-    RuntimeNoteFileDeleteJobRequest,
-    plan_note_file_delete_job_request,
-    plan_note_materialization_job_request,
     plan_accepted_note_response,
+    plan_note_materialization_job_request,
 )
+from basic_memory.runtime.note_materialization import RuntimeFileMetadataSource
+from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository
 from basic_memory.schemas.response import ObservationResponse, RelationResponse

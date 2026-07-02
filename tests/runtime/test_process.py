@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from basic_memory.runtime import process as process_module
-from basic_memory.runtime import runtime_process_rss_bytes
+from basic_memory.runtime.process import runtime_process_rss_bytes
 
 
 def test_runtime_process_rss_bytes_reads_linux_proc_status(tmp_path) -> None:

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from basic_memory.index import (
+from basic_memory.index.storage_events import (
     StorageEventBucketContextProcessor,
     StorageEventBucketContextResolver,
     StorageEventBucketIndexRuntime,
@@ -15,11 +15,11 @@ from basic_memory.index import (
     StorageEventProjectResolver,
     StorageEventSourceIndexRuntime,
     run_storage_event_bucket_indexing,
-    run_storage_event_source_indexing,
     run_storage_event_indexing,
+    run_storage_event_source_indexing,
 )
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventProcessingResult,
     StorageBucketName,

@@ -10,14 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.models import Relation
-from basic_memory.runtime import (
-    ProjectId,
+from basic_memory.runtime.cleanup import RuntimeExternalFileDeletePlan
+from basic_memory.runtime.note_content import (
     RuntimeDeletedNoteEntityDeleteSource,
     RuntimeDeletedNoteReference,
-    RuntimeEntityId,
-    RuntimeExternalFileDeletePlan,
-    RuntimeFilePath,
 )
+from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeFilePath
 
 
 class ExternalFileDeleteEntities(Protocol):

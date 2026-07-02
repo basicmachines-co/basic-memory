@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from basic_memory.runtime import select_deleted_note_file_checksum
+from basic_memory.runtime.note_content import select_deleted_note_file_checksum
 
 
 @dataclass(frozen=True, slots=True)

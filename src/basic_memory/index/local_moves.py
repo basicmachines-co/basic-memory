@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.markdown import EntityMarkdown
-from basic_memory.indexing import (
+from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMaintenanceRunner,
     ProjectIndexMovedEntitySearchRefresher,
 )
@@ -21,7 +21,7 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMovedFile,
     ProjectIndexMovedFileContentUpdate,
 )
-from basic_memory.runtime import RuntimeFilePath, StorageEventPayload
+from basic_memory.runtime.storage import RuntimeFilePath, StorageEventPayload
 from basic_memory.runtime.storage import (
     STORAGE_OBJECT_CREATED_EVENTS,
     STORAGE_OBJECT_DELETED_EVENT,

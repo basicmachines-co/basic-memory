@@ -139,7 +139,7 @@ async def _reindex_projects(app_config):
     from basic_memory import db
     from basic_memory.repository import ProjectRepository
     from basic_memory.services.initialization import reconcile_projects_with_config
-    from basic_memory.index import (
+    from basic_memory.index.local_project import (
         LocalProjectIndexRuntimeFactory,
         run_local_project_index_for_project,
     )
@@ -323,7 +323,7 @@ async def _reindex(
     # Deferred: SQLAlchemy, repositories, and the indexing stack load only when a
     # reindex actually runs, not on every CLI start (#886).
     from basic_memory import db
-    from basic_memory.index import (
+    from basic_memory.index.local_project import (
         LocalProjectIndexRuntimeFactory,
         run_local_project_index_for_project,
     )

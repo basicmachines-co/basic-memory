@@ -2,17 +2,17 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from basic_memory.indexing import (
-    CurrentMaterializedNoteEntity,
-    CurrentMaterializedNotePlan,
+from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexJobRequest,
     EmbeddingIndexTarget,
-    FileIndexDecision,
-    FileIndexDecisionStatus,
+)
+from basic_memory.indexing.file_index_planning import FileIndexDecision, FileIndexDecisionStatus
+from basic_memory.indexing.index_file_runtime import IndexFileRuntimeRequest
+from basic_memory.indexing.models import (
+    CurrentMaterializedNoteEntity,
+    CurrentMaterializedNotePlan,
     FileIndexOperation,
     FileIndexResult,
-    IndexedFileLiveUpdatePlan,
-    IndexedEntity,
     IndexFileBatchJobResult,
     IndexFileEmbeddingJobContext,
     IndexFileJobResult,
@@ -20,24 +20,33 @@ from basic_memory.indexing import (
     IndexFileNoteLiveUpdateContext,
     IndexFileNoteLiveUpdatePlan,
     IndexFileNoteLiveUpdateType,
-    IndexFileRelationResolutionContext,
-    IndexFileRuntimeRequest,
+    IndexedEntity,
+    IndexedFileLiveUpdatePlan,
+    apply_project_index_batch_job_results,
+    build_index_file_batch_job_result,
+    index_file_job_result_from_decision,
+    index_file_job_result_from_indexed_file,
+    plan_current_materialized_note_result,
+    plan_index_file_embedding_job,
+    plan_index_file_note_live_update,
+    plan_indexed_file_live_update_metadata,
+    project_index_file_outcome_from_job_result,
+    project_index_file_outcomes_from_job_results,
+)
+from basic_memory.indexing.project_index_progress import (
     ObservedObjectIndexCompletionContext,
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
     ProjectIndexFileOutcome,
-    apply_project_index_batch_job_results,
-    build_index_file_batch_job_result,
-    index_file_job_result_from_indexed_file,
-    index_file_job_result_from_decision,
-    plan_index_file_note_live_update,
-    plan_index_file_embedding_job,
-    plan_indexed_file_live_update_metadata,
-    plan_current_materialized_note_result,
-    project_index_file_outcome_from_job_result,
-    project_index_file_outcomes_from_job_results,
 )
-from basic_memory.runtime import (
+from basic_memory.indexing.relation_resolution import IndexFileRelationResolutionContext
+from basic_memory.runtime.jobs import (
+    RuntimeStorageFileIndexContext,
+    RuntimeStorageFileIndexJobIdentity,
+    RuntimeStorageFileIndexMode,
+    RuntimeStorageObjectObservation,
+)
+from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
     NOTE_OBJECT_ACTOR_KIND_METADATA,
     NOTE_OBJECT_ACTOR_NAME_METADATA,
@@ -45,12 +54,10 @@ from basic_memory.runtime import (
     NOTE_OBJECT_DB_VERSION_METADATA,
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
-    ProjectRuntimeReference,
-    RuntimeStorageFileIndexMode,
-    RuntimeStorageFileIndexContext,
-    RuntimeStorageFileIndexJobIdentity,
     RuntimeStorageObjectChecksumSource,
-    RuntimeStorageObjectObservation,
+)
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import (
     StorageEventPayload,
     StorageObjectIdentity,
     StorageObjectVersion,

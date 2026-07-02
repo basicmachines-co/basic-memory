@@ -1,6 +1,6 @@
 """Tests for portable workflow metadata helpers."""
 
-from basic_memory.runtime import merge_runtime_workflow_metadata_patch
+from basic_memory.runtime.workflows import merge_runtime_workflow_metadata_patch
 
 
 def test_merge_runtime_workflow_metadata_patch_recurses_into_nested_mappings() -> None:

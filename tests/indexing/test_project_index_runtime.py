@@ -30,7 +30,7 @@ from basic_memory.indexing.forward_reference_resolution import (
     RepositoryForwardReferenceRelationSource,
     RepositoryForwardReferenceResolutionRuntime,
 )
-from basic_memory.runtime import RuntimeWorkflowMetadataPatch
+from basic_memory.runtime.workflows import RuntimeWorkflowMetadataPatch
 
 
 @dataclass(frozen=True, slots=True)

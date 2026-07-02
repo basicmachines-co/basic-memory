@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig
-from basic_memory.index import LocalProjectIndexRunner
+from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from basic_memory.services import EntityService

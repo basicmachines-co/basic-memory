@@ -23,49 +23,59 @@ from basic_memory.index.local_dependencies import (
 )
 from basic_memory.index.local_moves import LocalProjectIndexMoveContentUpdater
 from basic_memory.index.local_runtime import LocalStorageFileMetadataSource
-from basic_memory.indexing import (
-    ChangeDetector,
-    EmbeddingBatchVectorSync,
-    FileIndexChecker,
-    IndexFileBatchJobResult,
+from basic_memory.indexing.change_detector import ChangeDetector
+from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
+from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchChecker,
     IndexFileBatchContentClassifier,
     IndexFileBatchIndexer,
-    IndexFileBatchReader,
     IndexFileBatchReadOutcome,
     IndexFileBatchReadResult,
+    IndexFileBatchReader,
+    read_current_index_files,
+    run_index_file_batch,
+)
+from basic_memory.indexing.file_index_checking import (
+    FileIndexChecker,
+    RepositoryIndexedFileChecksumSource,
+    StorageCurrentFileChecksumSource,
+)
+from basic_memory.indexing.models import (
+    IndexFileBatchJobResult,
     IndexFileJobResult,
     IndexFileJobStatus,
     IndexInputFile,
-    RepositoryIndexedFileChecksumSource,
-    RepositoryProjectIndexMovedEntitySearchRefresher,
-    RepositoryProjectIndexMaintenanceStore,
-    RepositoryRelationResolutionRuntime,
-    StorageCurrentFileChecksumSource,
+)
+from basic_memory.indexing.project_index_coordinator import (
     ProjectIndexBatchEnqueuer,
     ProjectIndexChangeDetector,
     ProjectIndexCoordinatorResult,
     ProjectIndexFanoutFailureRecorder,
-    ProjectIndexMaintenanceRunner,
-    ProjectIndexMovedEntitySearchRefresher,
     ProjectIndexObservedFileSource,
     ProjectIndexWorkflowStarter,
+    run_project_index_coordinator,
+)
+from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexMaintenanceRunner,
+    ProjectIndexMovedEntitySearchRefresher,
+    RepositoryProjectIndexMaintenanceStore,
+    RepositoryProjectIndexMovedEntitySearchRefresher,
+    StoreProjectIndexMaintenanceRunner,
+)
+from basic_memory.indexing.relation_resolution import (
     ProjectIndexRelationResolutionContext,
     RelationResolutionRuntime,
-    StoreProjectIndexMaintenanceRunner,
+    RepositoryRelationResolutionRuntime,
     resolve_project_index_completion_relations,
-    read_current_index_files,
-    run_project_index_coordinator,
-    run_index_file_batch,
 )
 from basic_memory.models import Project
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
-    RuntimeJobId,
+from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
+    RuntimeJobId,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
 

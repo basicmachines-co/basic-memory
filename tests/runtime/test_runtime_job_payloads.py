@@ -7,19 +7,20 @@ from uuid import UUID
 
 import pytest
 
-from basic_memory import runtime as runtime_module
-from basic_memory.runtime import (
-    NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.job_payloads import (
+    DELETE_NOTE_FILE_ENTRYPOINT,
+    MATERIALIZE_NOTE_FILE_ENTRYPOINT,
     RuntimeJobPayloadSerializer,
     RuntimeJobPayloadSource,
-    RuntimeJobRequest,
     RuntimeNoteFileDeleteJobPayload,
-    RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobPayload,
-    RuntimeNoteMaterializationJobRequest,
     RuntimePayloadJobEnqueuer,
     enqueue_runtime_job_payload,
 )
+from basic_memory.runtime.jobs import RuntimeJobRequest
+from basic_memory.runtime.note_content import RuntimeNoteMaterializationJobRequest
+from basic_memory.runtime.note_object_metadata import NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT
 
 
 @dataclass(slots=True)
@@ -75,8 +76,8 @@ def test_runtime_note_file_delete_job_payload_round_trips_runtime_request() -> N
 
 def test_runtime_note_file_entrypoints_export_cloud_queue_names() -> None:
     """The portable runtime contract owns note-file queue names."""
-    assert runtime_module.DELETE_NOTE_FILE_ENTRYPOINT == "delete_note_file"
-    assert runtime_module.MATERIALIZE_NOTE_FILE_ENTRYPOINT == "materialize_note_file"
+    assert DELETE_NOTE_FILE_ENTRYPOINT == "delete_note_file"
+    assert MATERIALIZE_NOTE_FILE_ENTRYPOINT == "materialize_note_file"
 
 
 def test_runtime_note_file_delete_job_payload_builds_runtime_queue_request() -> None:

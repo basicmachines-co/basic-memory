@@ -13,15 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import ProjectRepository
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,
-    RuntimeProjectDeleteJobRequest,
     RuntimeProjectDeleteResult,
     RuntimeProjectFileSnapshot,
     plan_note_file_delete_job_request,
 )
+from basic_memory.runtime.jobs import RuntimeProjectDeleteJobRequest
 
 
 class ProjectDeleteSessionProvider(Protocol):

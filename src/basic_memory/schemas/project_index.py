@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from basic_memory.index import LocalProjectIndexObservation, ProjectIndexCoordinatorResult
+    from basic_memory.index.local_project import LocalProjectIndexObservation
+    from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 
 
 class ProjectIndexObservedFileResponse(BaseModel):

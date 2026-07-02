@@ -1,6 +1,6 @@
 """Tests for deterministic indexing batch planning."""
 
-from basic_memory.indexing import IndexFileMetadata
+from basic_memory.indexing.models import IndexFileMetadata
 from basic_memory.indexing.batching import build_index_batches
 
 

@@ -7,8 +7,14 @@ from uuid import UUID
 
 import pytest
 
-import basic_memory.runtime as runtime
-from basic_memory.runtime import (
+from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
+from basic_memory.runtime.note_content import RuntimeAcceptedNoteChange
+from basic_memory.runtime.note_materialization import (
+    RuntimePreparedNoteWrite,
+    RuntimeWrittenFileState,
+    plan_prepared_note_write,
+)
+from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
     NOTE_OBJECT_ACTOR_KIND_METADATA,
     NOTE_OBJECT_ACTOR_NAME_METADATA,
@@ -19,25 +25,19 @@ from basic_memory.runtime import (
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_FILE_VERSION_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
-    RuntimeAcceptedNoteChange,
-    RuntimeMode,
     RuntimeNoteActorOrigin,
     RuntimeNoteObjectMetadata,
     RuntimeNoteObjectProvenance,
-    RuntimePreparedNoteWrite,
     RuntimeStorageObjectChecksum,
     RuntimeStorageObjectChecksumSource,
-    RuntimeWrittenFileState,
     actor_kind_from_object_metadata,
     actor_name_from_object_metadata,
     actor_user_profile_id_from_object_metadata,
     db_version_from_object_metadata,
     file_checksum_from_object_metadata,
     normalize_actor_name,
-    resolve_runtime_mode,
     source_from_object_metadata,
     storage_object_checksum_for_index_match,
-    plan_prepared_note_write,
 )
 from basic_memory.runtime.cleanup import (
     RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS,
@@ -848,24 +848,6 @@ class TestRuntimeContracts:
                 permalink="deleted-note",
             ),
         )
-
-    def test_runtime_does_not_export_cloud_only_snapshot_or_history_contracts(self):
-        unsupported_exports = {
-            "NoteHistoryPage",
-            "NoteHistoryProvider",
-            "NoteHistoryReference",
-            "NoteHistoryVersion",
-            "SnapshotArchiveRequest",
-            "SnapshotBrowseFile",
-            "SnapshotProvider",
-            "SnapshotReference",
-            "SnapshotRestorePlan",
-            "plan_snapshot_name",
-        }
-
-        assert unsupported_exports.isdisjoint(runtime.__all__)
-        for export_name in unsupported_exports:
-            assert not hasattr(runtime, export_name)
 
     def test_runtime_capabilities_require_configured_adapters(self):
         empty_capabilities = RuntimeCapabilities()

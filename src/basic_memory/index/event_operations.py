@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar
 
-from basic_memory.runtime import RuntimeStorageEventOperation
+from basic_memory.runtime.storage import RuntimeStorageEventOperation
 
 ProjectOperationContextT = TypeVar("ProjectOperationContextT")
 DeleteResourcesT = TypeVar("DeleteResourcesT")

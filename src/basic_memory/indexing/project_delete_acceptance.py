@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol, Self
 
-from basic_memory.runtime import RuntimeJobId, RuntimeProjectDeleteJobRequest
+from basic_memory.runtime.jobs import RuntimeJobId, RuntimeProjectDeleteJobRequest
 
 type ProjectDeleteAcceptedStatus = Literal["success"]
 type ProjectDeleteAcceptedDeletionStatus = Literal["pending"]

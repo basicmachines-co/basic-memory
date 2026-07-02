@@ -5,25 +5,24 @@ from uuid import UUID
 
 import pytest
 
-from basic_memory.indexing import (
-    IndexFileJobResult,
-    IndexFileJobStatus,
-    ProjectIndexCounters,
+from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
+from basic_memory.indexing.project_index_coordinator import ProjectIndexRequest
+from basic_memory.indexing.project_index_progress import ProjectIndexCounters
+from basic_memory.indexing.project_index_workflow import (
     ProjectIndexBatchJobActivity,
     ProjectIndexBatchJobActivityUpdate,
+    ProjectIndexStaleWorkflowPlan,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
     ProjectIndexWorkflowRecordPlan,
-    ProjectIndexRequest,
-    ProjectIndexStaleWorkflowPlan,
     ProjectIndexWorkflowStart,
     ProjectIndexWorkflowStartPlan,
     build_project_index_batch_activity_update,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
-    build_project_index_workflow_start,
     build_project_index_workflow_stale_failure_update,
+    build_project_index_workflow_start,
     plan_project_index_batch_result_record,
     plan_project_index_file_result_record,
     plan_project_index_stale_workflow,

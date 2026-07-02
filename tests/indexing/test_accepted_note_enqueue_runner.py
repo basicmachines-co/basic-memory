@@ -11,11 +11,11 @@ from basic_memory.indexing.accepted_note_enqueue_runner import (
     enqueue_accepted_note_materialization,
     enqueue_accepted_note_write_jobs,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteResponse,
     RuntimeNoteContentResponsePayload,
-    RuntimeNoteFileDeleteJobRequest,
     RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,

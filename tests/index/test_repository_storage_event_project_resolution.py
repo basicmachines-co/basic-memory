@@ -5,12 +5,12 @@ from dataclasses import MISSING, fields
 import pytest
 
 from basic_memory import db
-from basic_memory.index import RepositoryStorageEventProjectResolver
+from basic_memory.index.repository_project_resolution import RepositoryStorageEventProjectResolver
 from basic_memory.index import repository_project_resolution as resolver_module
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
-from basic_memory.runtime import (
-    ProjectRuntimeReference,
+from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage_project_resolution import (
     StorageProjectPrefixMatch,
     StorageProjectPrefixResolution,
 )

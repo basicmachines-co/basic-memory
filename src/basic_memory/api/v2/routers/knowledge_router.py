@@ -48,7 +48,7 @@ from basic_memory.deps import (
     SessionDep,
     SessionMakerDep,
 )
-from basic_memory.runtime import (
+from basic_memory.runtime.note_content import (
     runtime_note_content_payload_as_dict,
     runtime_note_content_payload_as_json_bytes,
 )

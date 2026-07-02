@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from basic_memory.indexing import MarkdownOnlyIndexEntitySearchWriter
+from basic_memory.indexing.batch_indexer import MarkdownOnlyIndexEntitySearchWriter
 from basic_memory.models import Entity
 
 

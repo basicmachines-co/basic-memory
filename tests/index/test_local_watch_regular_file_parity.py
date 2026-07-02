@@ -7,12 +7,12 @@ from watchfiles import Change
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.index import (
+from basic_memory.index.local_project import (
     LocalProjectIndexRuntimeFactory,
-    LocalWatchEventIndexRuntimeFactory,
-    WatchService,
     run_local_project_index_for_project,
 )
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index.watch_service import WatchService
 from basic_memory.models.knowledge import Entity
 from basic_memory.schemas.search import SearchItemType
 
