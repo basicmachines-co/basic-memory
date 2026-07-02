@@ -800,8 +800,7 @@ class EntityService(BaseService[EntityModel]):
             accepted_search_content_from_markdown,
         )
 
-        destination = normalize_note_move_destination_path(destination_path)
-        file_path = Path(destination.file_path)
+        file_path = Path(normalize_note_move_destination_path(destination_path))
         markdown_content = current_content
         permalink = entity.permalink
         disable_permalinks = bool(self.app_config and self.app_config.disable_permalinks)
@@ -836,7 +835,7 @@ class EntityService(BaseService[EntityModel]):
         is allowed. Cloud is DB-first and opts out via verify_storage_absent_on_create.
         """
         source = Path(source_file_path)
-        destination = Path(normalize_note_move_destination_path(destination_file_path).file_path)
+        destination = Path(normalize_note_move_destination_path(destination_file_path))
         if (
             source != destination
             and await self.file_service.exists(destination)
@@ -1715,9 +1714,9 @@ class EntityService(BaseService[EntityModel]):
         current_path = entity.file_path
         old_permalink = entity.permalink
 
-        # 2. Validate destination path format first
-        if not destination_path or destination_path.startswith("/") or not destination_path.strip():
-            raise ValueError(f"Invalid destination path: {destination_path}")
+        # 2. Validate and normalize the destination with the shared move-path
+        # rules so move_entity and move_note accept identical inputs.
+        destination_path = normalize_note_move_destination_path(destination_path)
 
         # 3. Validate paths
         # NOTE: In tenantless/cloud mode, we cannot rely on local filesystem paths.

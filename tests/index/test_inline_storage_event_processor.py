@@ -277,7 +277,7 @@ async def test_inline_processor_delegates_skip_and_failed_notifications() -> Non
         kind=RuntimeStorageEventOperationKind.skip,
         storage_event=storage_event(key="main/image.png"),
         relative_path="image.png",
-        skip_reason=RuntimeStorageEventSkipReason.non_markdown,
+        skip_reason=RuntimeStorageEventSkipReason.unknown_event,
     )
 
     await processor.skip_event(operation)

@@ -638,7 +638,6 @@ class RuntimeStorageEventSkipReason(StrEnum):
     """Reasons a project-scoped storage event should not produce work."""
 
     project_root = "project_root"
-    non_markdown = "non_markdown"
     unknown_event = "unknown_event"
 
 

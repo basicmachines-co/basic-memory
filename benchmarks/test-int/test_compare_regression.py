@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from basic_memory_benchmarks.reporting.compare import compare_provider_metric, load_retrieval_summary
+from basic_memory_benchmarks.reporting.compare import (
+    compare_provider_metric,
+    load_retrieval_summary,
+)
 
 
 def test_compare_provider_metric(tmp_path: Path) -> None:

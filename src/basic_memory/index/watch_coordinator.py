@@ -60,6 +60,8 @@ class WatchCoordinator:
         logger.info("Starting local event-index watcher in background")
 
         try:
+            # Imported here to avoid a circular import: services.initialization
+            # depends on basic_memory.index, whose __init__ imports this module.
             from basic_memory.services.initialization import initialize_file_indexing
 
             async def _watch_runner() -> None:  # pragma: no cover

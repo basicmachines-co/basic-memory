@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.models import Entity
+from basic_memory.runtime.contracts import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 type LinkText = str
 
@@ -55,8 +56,10 @@ def resolve_link_texts(
         if target.file_path:
             file_path_lower = target.file_path.lower()
             by_file_path[file_path_lower] = target.entity_id
-            if file_path_lower.endswith(".md"):
-                by_file_path[file_path_lower[:-3]] = target.entity_id
+            for markdown_suffix in RUNTIME_MARKDOWN_FILE_SUFFIXES:
+                if file_path_lower.endswith(markdown_suffix):
+                    by_file_path[file_path_lower[: -len(markdown_suffix)]] = target.entity_id
+                    break
 
     resolved: dict[LinkText, int | None] = {}
     for original_link_text in link_texts:

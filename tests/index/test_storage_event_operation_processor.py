@@ -186,11 +186,11 @@ async def test_storage_event_operation_processor_notifies_skips_and_failures() -
         kind=RuntimeStorageEventOperationKind.skip,
         storage_event=storage_event(key="main/image.png"),
         relative_path="image.png",
-        skip_reason=RuntimeStorageEventSkipReason.non_markdown,
+        skip_reason=RuntimeStorageEventSkipReason.unknown_event,
     )
 
     await processor.skip_event(operation)
     await processor.event_failed(operation, RuntimeError("boom"))
 
-    assert observer.skipped == [("main", RuntimeStorageEventSkipReason.non_markdown)]
+    assert observer.skipped == [("main", RuntimeStorageEventSkipReason.unknown_event)]
     assert observer.failed == [("image.png", "boom")]

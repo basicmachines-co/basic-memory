@@ -128,8 +128,6 @@ def diagnose_run(
             seen.add(case.provider)
             providers.append(case.provider)
     return [
-        diagnose_provider(
-            qa_cases, retrieval_rows, provider=provider, recall_field=recall_field
-        )
+        diagnose_provider(qa_cases, retrieval_rows, provider=provider, recall_field=recall_field)
         for provider in providers
     ]
