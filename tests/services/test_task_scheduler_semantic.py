@@ -11,6 +11,7 @@ from basic_memory.deps.services import (
     LocalProjectIndexScheduler,
     LocalRelationResolutionScheduler,
     LocalSearchReindexScheduler,
+    drain_background_tasks,
 )
 
 
@@ -181,6 +182,65 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
     assert runtime.resolve_calls == 2
     assert 21 not in _pending_relation_resolution
     assert 21 not in _dirty_relation_resolution
+
+
+@pytest.mark.asyncio
+async def test_drain_background_tasks_awaits_scheduled_work():
+    """Draining must complete in-flight scheduled work without relying on sleeps —
+    one-shot CLI clients call it right before closing the event loop."""
+    search_service = StubSearchService()
+
+    scheduler = LocalEntityVectorSyncScheduler(
+        search_service=search_service,
+        test_mode=False,
+    )
+    scheduler.schedule_entity_vector_sync(entity_id=7, project_id=13)
+
+    await drain_background_tasks()
+
+    assert search_service.vector_synced == [7]
+
+
+@pytest.mark.asyncio
+async def test_drain_background_tasks_covers_follow_up_tasks():
+    """A drained task can schedule a follow-up (the relation-resolution dirty
+    re-run); the drain must wait for that wave too, not just the first snapshot."""
+    from basic_memory.deps.services import (
+        _dirty_relation_resolution,
+        _pending_relation_resolution,
+    )
+
+    _pending_relation_resolution.clear()
+    _dirty_relation_resolution.clear()
+
+    class WriteDuringScanRuntime:
+        def __init__(self) -> None:
+            self.resolve_calls = 0
+            self.scheduler: LocalRelationResolutionScheduler | None = None
+
+        async def count_unresolved_relations(self) -> int:
+            return 0
+
+        async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
+            self.resolve_calls += 1
+            if self.resolve_calls == 1:
+                assert self.scheduler is not None
+                self.scheduler.schedule_relation_resolution(project_id=34)
+            return set()
+
+    runtime = WriteDuringScanRuntime()
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        test_mode=False,
+        debounce_seconds=0.0,
+    )
+    runtime.scheduler = scheduler
+
+    scheduler.schedule_relation_resolution(project_id=34)
+
+    await drain_background_tasks()
+
+    assert runtime.resolve_calls == 2
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,7 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     # at CLI import time — only when a command actually runs (#886).
     from basic_memory import db
     from basic_memory.cloud.note_content_materialization import drain_pending_materializations
+    from basic_memory.deps.services import drain_background_tasks
 
     async def _with_cleanup() -> T:
         try:
@@ -43,6 +44,10 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
             # one-shot client would otherwise exit before the markdown file is
             # written (the API already reported the note accepted).
             await drain_pending_materializations()
+            # Then the follow-up work those writes scheduled (vector sync,
+            # relation resolution): cancelling it at loop close would leave
+            # semantic search and inbound wikilinks stale until a later reindex.
+            await drain_background_tasks()
             await db.shutdown_db()
 
     return asyncio.run(_with_cleanup())
