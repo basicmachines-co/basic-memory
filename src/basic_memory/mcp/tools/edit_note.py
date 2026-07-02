@@ -60,7 +60,7 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
 
 
 # Suffixes mimetypes maps to text/markdown (extension matching is case-insensitive),
-# mirroring FileService.is_markdown which gates the sync-file endpoint server-side.
+# mirroring FileService.is_markdown which gates the index-file endpoint server-side.
 _MARKDOWN_SUFFIXES = (".md", ".markdown")
 
 
@@ -72,7 +72,7 @@ async def _resolve_after_disk_recovery(
 
     Trigger: identifier resolution failed with "not found", but the identifier may map
         to a markdown file written directly to disk before the watcher indexed it (#581).
-    Why: editing an on-disk note should not require a manual full sync or watcher restart.
+    Why: editing an on-disk note should not require a manual full reindex or watcher restart.
     Outcome: the single file is indexed server-side and resolution is retried exactly
         once. Returns None when the identifier does not map to an indexable file on
         disk, so the caller keeps its existing not-found handling.
@@ -87,9 +87,9 @@ async def _resolve_after_disk_recovery(
 
     for candidate in candidates:
         try:
-            synced = await knowledge_client.sync_file(candidate)
-        except ToolError as sync_error:
-            # Trigger: the sync-file request failed
+            indexed = await knowledge_client.index_file(candidate)
+        except ToolError as index_error:
+            # Trigger: the index-file request failed
             # Why: 400/404 are the expected "nothing to recover" rejections (missing
             #      file, traversal, non-markdown) — except the ignored-path 400, which
             #      means the file exists on disk but the ignore rules forbid indexing
@@ -99,7 +99,7 @@ async def _resolve_after_disk_recovery(
             # Outcome: ignored-path rejections raise a clear ToolError; other expected
             #      rejections try the next candidate or fall through to the caller's
             #      existing not-found behavior; unexpected failures propagate.
-            cause = sync_error.__cause__
+            cause = index_error.__cause__
             candidate_rejected = isinstance(
                 cause, HTTPStatusError
             ) and cause.response.status_code in (400, 404)
@@ -110,22 +110,22 @@ async def _resolve_after_disk_recovery(
                 raise ToolError(
                     f"Note file '{candidate}' exists on disk but {IGNORED_PATH_REJECTION_DETAIL} "
                     "and will not be edited"
-                ) from sync_error
-            logger.debug(f"edit_note disk recovery skipped for '{candidate}': {sync_error}")
+                ) from index_error
+            logger.debug(f"edit_note disk recovery skipped for '{candidate}': {index_error}")
             continue
 
-        # Trigger: sync-file succeeded and returned the indexed entity.
+        # Trigger: index-file succeeded and returned the indexed entity.
         # Why: the server may have canonicalized the path casing (notes/Disk-Note ->
         #      notes/disk-note.md), so strictly re-resolving the raw identifier can
         #      still miss the entity we just indexed.
-        # Outcome: use the entity identity from the sync-file response directly; only
+        # Outcome: use the entity identity from the index-file response directly; only
         #      fall back to a strict re-resolve when an older server omits external_id,
         #      and let that re-resolve fail loudly instead of guessing.
-        if synced.external_id:
+        if indexed.external_id:
             logger.info(
-                f"edit_note indexed unindexed file '{candidate}' as entity {synced.external_id}"
+                f"edit_note indexed unindexed file '{candidate}' as entity {indexed.external_id}"
             )
-            return synced.external_id
+            return indexed.external_id
         logger.info(f"edit_note indexed unindexed file '{candidate}'; retrying resolution")
         return await knowledge_client.resolve_entity(identifier, strict=True)
 
@@ -206,7 +206,7 @@ The note with identifier '{identifier}' could not be found. The `find_replace` a
 ## Suggestions to try:
 1. **Use append/prepend instead**: These operations will create the note automatically if it doesn't exist
 2. **Search for the note first**: Use `search_notes("{project or "project-name"}", "{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
-3. **File exists on disk but is not indexed yet?**: edit_note indexes the file automatically when the identifier matches its path (e.g. 'folder/note' for 'folder/note.md'). If your identifier is a title or differs from the file path, run a sync (`basic-memory sync`) or wait for the file watcher, then retry
+3. **File exists on disk but is not indexed yet?**: edit_note indexes the file automatically when the identifier matches its path (e.g. 'folder/note' for 'folder/note.md'). If your identifier is a title or differs from the file path, run `basic-memory db reindex --search` or wait for the file watcher, then retry
 4. **Try different exact identifier formats**:
    - If you used a permalink like "folder/note-title", try the exact title: "{identifier.split("/")[-1].replace("-", " ").title()}"
    - If you used a title, try the exact permalink format: "{identifier.lower().replace(" ", "-")}"

@@ -926,6 +926,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using PostgreSQL tsvector."""
         # --- Dispatch vector / hybrid modes (shared logic) ---
@@ -996,24 +997,32 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """
 
         logger.trace(f"Search {sql} params: {params}")
-        try:
-            async with db.scoped_session(self.session_maker) as session:
-                result = await session.execute(text(sql), params)
+
+        async def run_search(active_session: AsyncSession):
+            result = await active_session.execute(text(sql), params)
+            rows = result.fetchall()
+            # Trigger: multi-word natural-language query matched nothing
+            # under the default all-terms-AND tsquery semantics.
+            # Why: questions rarely have every word in one document;
+            # without relaxation the FTS half of hybrid search contributes
+            # zero candidates (parity with the SQLite path).
+            # Outcome: one retry with OR-joined prefix lexemes; ts_rank
+            # still ranks multi-term matches first.
+            relaxed = (
+                self._relaxed_tsquery_text(search_text) if allow_relaxed and not rows else None
+            )
+            if relaxed and params.get("text"):
+                params["text"] = relaxed
+                result = await active_session.execute(text(sql), params)
                 rows = result.fetchall()
-                # Trigger: multi-word natural-language query matched nothing
-                # under the default all-terms-AND tsquery semantics.
-                # Why: questions rarely have every word in one document;
-                # without relaxation the FTS half of hybrid search contributes
-                # zero candidates (parity with the SQLite path).
-                # Outcome: one retry with OR-joined prefix lexemes; ts_rank
-                # still ranks multi-term matches first.
-                relaxed = (
-                    self._relaxed_tsquery_text(search_text) if allow_relaxed and not rows else None
-                )
-                if relaxed and params.get("text"):
-                    params["text"] = relaxed
-                    result = await session.execute(text(sql), params)
-                    rows = result.fetchall()
+            return rows
+
+        try:
+            if session is not None:
+                rows = await run_search(session)
+            else:
+                async with db.scoped_session(self.session_maker) as owned_session:
+                    rows = await run_search(owned_session)
         except Exception as e:
             if self._is_tsquery_syntax_error(e):
                 logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")

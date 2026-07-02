@@ -3,17 +3,20 @@
 import asyncio
 import ast
 import re
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Set, Dict, Any
+from typing import Any, AsyncIterator, List, Optional, Set, Dict
 
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
 
+from basic_memory import db
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import (
@@ -116,10 +119,24 @@ class SearchService:
         search_repository: SearchRepository,
         entity_repository: EntityRepository,
         file_service: FileService,
+        session_maker: async_sessionmaker[AsyncSession],
     ):
         self.repository = search_repository
         self.entity_repository = entity_repository
         self.file_service = file_service
+        self.session_maker = session_maker
+
+    @asynccontextmanager
+    async def _session_scope(
+        self, session: AsyncSession | None = None
+    ) -> AsyncIterator[AsyncSession]:
+        """Use the caller's session or open a service-owned transaction."""
+        if session is not None:
+            yield session
+            return
+
+        async with db.scoped_session(self.session_maker) as owned_session:
+            yield owned_session
 
     async def init_search_index(self):
         """Create FTS5 virtual table if it doesn't exist."""
@@ -148,7 +165,8 @@ class SearchService:
 
         # Reindex all entities
         logger.debug("Indexing entities")
-        entities = await self.entity_repository.find_all()
+        async with self._session_scope() as session:
+            entities = await self.entity_repository.find_all(session)
         for entity in entities:
             await self.index_entity(entity, background_tasks)
 
@@ -235,6 +253,7 @@ class SearchService:
         search_text: str | None,
         limit: int,
         offset: int,
+        session: AsyncSession | None = None,
     ) -> List[SearchIndexRow]:
         return await self.repository.search(
             search_text=search_text,
@@ -250,6 +269,7 @@ class SearchService:
             min_similarity=prepared.min_similarity,
             limit=limit,
             offset=offset,
+            session=session,
         )
 
     async def _count_repository(
@@ -272,7 +292,13 @@ class SearchService:
             min_similarity=prepared.min_similarity,
         )
 
-    async def search(self, query: SearchQuery, limit=10, offset=0) -> List[SearchIndexRow]:
+    async def search(
+        self,
+        query: SearchQuery,
+        limit=10,
+        offset=0,
+        session: AsyncSession | None = None,
+    ) -> List[SearchIndexRow]:
         """Search across all indexed content.
 
         Supports three modes:
@@ -304,6 +330,7 @@ class SearchService:
                 search_text=strict_search_text,
                 limit=limit,
                 offset=offset,
+                session=session,
             )
 
         # Trigger: strict FTS with plain multi-term text returned no results.
@@ -337,6 +364,7 @@ class SearchService:
                 search_text=relaxed_search_text,
                 limit=limit,
                 offset=offset,
+                session=session,
             )
 
     async def count(self, query: SearchQuery) -> int:
@@ -533,7 +561,8 @@ class SearchService:
 
     async def sync_entity_vectors(self, entity_id: int) -> None:
         """Refresh vector chunks for one entity in repositories that support semantic indexing."""
-        entity = await self.entity_repository.find_by_id(entity_id)
+        async with self._session_scope() as session:
+            entity = await self.entity_repository.find_by_id(session, entity_id)
         if entity is None:
             await self._clear_entity_vectors(entity_id)
             return
@@ -557,9 +586,11 @@ class SearchService:
                 entities_failed=0,
             )
 
-        entities_by_id = {
-            entity.id: entity for entity in await self.entity_repository.find_by_ids(entity_ids)
-        }
+        async with self._session_scope() as session:
+            entities_by_id = {
+                entity.id: entity
+                for entity in await self.entity_repository.find_by_ids(session, entity_ids)
+            }
         unknown_ids = [entity_id for entity_id in entity_ids if entity_id not in entities_by_id]
         opted_out_ids = [
             entity_id
@@ -649,7 +680,8 @@ class SearchService:
         Returns:
             dict with stats: total_entities, embedded, skipped, errors
         """
-        entities = await self.entity_repository.find_all()
+        async with self._session_scope() as session:
+            entities = await self.entity_repository.find_all(session)
         entity_ids = [entity.id for entity in entities]
 
         # Clean up stale rows in search_index and search_vector_chunks

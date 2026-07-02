@@ -54,7 +54,7 @@ async def lifespan(app: FastMCP):
 
     Handles:
     - Database initialization and migrations
-    - File sync via SyncCoordinator (if enabled and not in cloud mode)
+    - Local file watching via WatchCoordinator (if enabled and not in cloud mode)
     - Proper cleanup on shutdown
     """
     # --- Composition Root ---
@@ -116,9 +116,9 @@ async def lifespan(app: FastMCP):
         if config.semantic_search_enabled and db._session_maker is not None:
             await _log_embedding_status(db._session_maker)
 
-        # Create and start sync coordinator (lifecycle centralized in coordinator)
-        sync_coordinator = container.create_sync_coordinator()
-        await sync_coordinator.start()
+        # Create and start local watch coordinator (lifecycle centralized in coordinator)
+        watch_coordinator = container.create_watch_coordinator()
+        await watch_coordinator.start()
 
     try:
         yield
@@ -131,7 +131,7 @@ async def lifespan(app: FastMCP):
         ):
             logger.debug("Shutting down Basic Memory MCP server")
 
-            await sync_coordinator.stop()
+            await watch_coordinator.stop()
 
             # Only shutdown DB if we created it (not if test fixture provided it)
             if engine_was_none:

@@ -1,31 +1,5 @@
-"""Reusable indexing primitives shared by local sync and future remote callers."""
+"""Reusable indexing primitives shared by local sync and future remote callers.
 
-from basic_memory.indexing.batch_indexer import BatchIndexer
-from basic_memory.indexing.batching import build_index_batches
-from basic_memory.indexing.models import (
-    IndexedEntity,
-    IndexBatch,
-    IndexFileMetadata,
-    IndexFileWriter,
-    IndexFrontmatterUpdate,
-    IndexFrontmatterWriteResult,
-    IndexingBatchResult,
-    IndexInputFile,
-    IndexProgress,
-    SyncedMarkdownFile,
-)
-
-__all__ = [
-    "BatchIndexer",
-    "IndexedEntity",
-    "IndexBatch",
-    "IndexFileMetadata",
-    "IndexFileWriter",
-    "IndexFrontmatterUpdate",
-    "IndexFrontmatterWriteResult",
-    "IndexingBatchResult",
-    "IndexInputFile",
-    "IndexProgress",
-    "SyncedMarkdownFile",
-    "build_index_batches",
-]
+This package has no barrel exports; use the concrete owning submodule
+(``basic_memory.indexing.file_indexer``, ``basic_memory.indexing.models``, ...).
+"""

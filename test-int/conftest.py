@@ -56,6 +56,8 @@ from typing import AsyncGenerator, Generator, Literal
 import pytest
 import pytest_asyncio
 from pathlib import Path
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -68,6 +70,7 @@ from testcontainers.postgres import PostgresContainer
 
 from httpx import AsyncClient, ASGITransport
 
+from basic_memory import db
 from basic_memory.config import (
     BasicMemoryConfig,
     ProjectConfig,
@@ -201,7 +204,22 @@ def _resolve_postgres_sync_url(postgres_container) -> str:
     return postgres_container.get_connection_url()
 
 
-async def _reset_postgres_integration_schema(engine) -> None:
+def _postgres_alembic_config(async_url: str) -> Config:
+    """Build Alembic config for stamping the shared Postgres integration schema."""
+    alembic_dir = Path(db.__file__).parent / "alembic"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(alembic_dir))
+    cfg.set_main_option(
+        "file_template",
+        "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s",
+    )
+    cfg.set_main_option("timezone", "UTC")
+    cfg.set_main_option("revision_environment", "false")
+    cfg.set_main_option("sqlalchemy.url", async_url)
+    return cfg
+
+
+async def _reset_postgres_integration_schema(engine: AsyncEngine, async_url: str) -> None:
     """Restore the shared Postgres integration schema to a clean baseline."""
     from basic_memory.models.search import (
         CREATE_POSTGRES_SEARCH_INDEX_FTS,
@@ -227,6 +245,13 @@ async def _reset_postgres_integration_schema(engine) -> None:
         await conn.execute(
             text(f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} RESTART IDENTITY CASCADE")
         )
+
+        alembic_version_exists = (
+            await conn.execute(text("SELECT to_regclass('public.alembic_version')"))
+        ).scalar() is not None
+
+    if not alembic_version_exists:
+        command.stamp(_postgres_alembic_config(async_url), "head")
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -273,7 +298,8 @@ async def engine_factory(
         # Why: one savepoint-backed connection is too brittle for that flow.
         # Outcome: reuse the engine, but reset rows/schema before each test and
         # let app code use normal transaction boundaries.
-        await _reset_postgres_integration_schema(postgres_engine)
+        async_url = postgres_engine.url.render_as_string(hide_password=False)
+        await _reset_postgres_integration_schema(postgres_engine, async_url)
 
         session_maker = async_sessionmaker(
             bind=postgres_engine,
@@ -326,9 +352,12 @@ async def test_project(config_home, engine_factory) -> Project:
         "is_default": True,
     }
 
-    engine, session_maker = engine_factory
-    project_repository = ProjectRepository(session_maker)
-    project = await project_repository.create(project_data)
+    _, session_maker = engine_factory
+    project_repository = ProjectRepository()
+    from basic_memory import db
+
+    async with db.scoped_session(session_maker) as session:
+        project = await project_repository.create(session, project_data)
     return project
 
 
@@ -378,7 +407,7 @@ def app_config(
         projects=projects,
         default_project="test-project",
         update_permalinks_on_move=True,
-        sync_changes=False,  # Disable file sync in tests - prevents lifespan from starting blocking task
+        index_changes=False,  # Disable file indexing in tests - prevents lifespan from starting blocking task
         database_backend=database_backend,
         database_url=database_url,
         # Trigger: semantic_search_enabled defaults to True whenever fastembed/sqlite-vec
@@ -461,12 +490,12 @@ async def search_service(engine_factory, test_project, app_config):
 
     from basic_memory.repository.search_repository import create_search_repository
 
-    engine, session_maker = engine_factory
+    _, session_maker = engine_factory
 
     # Use factory function to create appropriate search repository
     search_repository = create_search_repository(session_maker, project_id=test_project.id)
 
-    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
+    entity_repository = EntityRepository(project_id=test_project.id)
 
     # Create file service
     entity_parser = EntityParser(Path(test_project.path))
@@ -474,7 +503,12 @@ async def search_service(engine_factory, test_project, app_config):
     file_service = FileService(Path(test_project.path), markdown_processor)
 
     # Create and initialize search service
-    service = SearchService(search_repository, entity_repository, file_service)
+    service = SearchService(
+        search_repository,
+        entity_repository,
+        file_service,
+        session_maker=session_maker,
+    )
     await service.init_search_index()
     return service
 

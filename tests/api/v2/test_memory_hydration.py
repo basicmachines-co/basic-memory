@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.api.v2.utils import to_graph_context
 from basic_memory.schemas.memory import EntitySummary, ObservationSummary, RelationSummary
@@ -44,6 +45,10 @@ def _make_row(*, type: str, id: int, root_id: int, **kwargs: Any) -> ContextResu
     return ContextResultRow(type=type, id=id, **defaults)
 
 
+def _fake_session() -> AsyncSession:
+    return cast(AsyncSession, object())
+
+
 class SpyEntityRepository:
     """Tracks batched ID lookups and returns entities from a preset map."""
 
@@ -56,7 +61,7 @@ class SpyEntityRepository:
         return [self.entities_by_id[i] for i in ids if i in self.entities_by_id]
 
     async def find_by_ids_for_hydration(
-        self, ids: list[int], *, include_cross_project: bool = False
+        self, session: AsyncSession, ids: list[int], *, include_cross_project: bool = False
     ):
         self.calls.append((ids, include_cross_project))
         return [self.entities_by_id[i] for i in ids if i in self.entities_by_id]
@@ -73,7 +78,7 @@ class LightweightOnlyEntityRepository:
         raise AssertionError("graph hydration must use the lightweight hydration lookup")
 
     async def find_by_ids_for_hydration(
-        self, ids: list[int], *, include_cross_project: bool = False
+        self, session: AsyncSession, ids: list[int], *, include_cross_project: bool = False
     ):
         self.hydration_calls.append((ids, include_cross_project))
         return [self.entities_by_id[i] for i in ids if i in self.entities_by_id]
@@ -178,7 +183,9 @@ async def test_to_graph_context_batches_entity_hydration_for_recent_activity():
         ),
     )
 
-    graph = await to_graph_context(context, entity_repository=repo, page=1, page_size=10)
+    graph = await to_graph_context(
+        context, entity_repository=repo, session=_fake_session(), page=1, page_size=10
+    )
 
     assert len(repo.calls) == 1, f"Expected 1 entity lookup, got {len(repo.calls)}"
     assert set(repo.calls[0][0]) == {1, 2, 3}
@@ -218,7 +225,7 @@ async def test_to_graph_context_empty_results_skip_entity_lookup():
     repo = SpyEntityRepository({})
     context = ServiceContextResult(results=[], metadata=ContextMetadata(depth=1))
 
-    graph = await to_graph_context(context, entity_repository=repo)
+    graph = await to_graph_context(context, entity_repository=repo, session=_fake_session())
 
     assert repo.calls == []
     assert list(graph.results) == []
@@ -274,7 +281,7 @@ async def test_to_graph_context_uses_lightweight_hydration_lookup():
         ),
     )
 
-    graph = await to_graph_context(context, entity_repository=repo)
+    graph = await to_graph_context(context, entity_repository=repo, session=_fake_session())
 
     assert len(repo.hydration_calls) == 1
     assert set(repo.hydration_calls[0][0]) == {1, 2}

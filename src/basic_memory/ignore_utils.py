@@ -8,7 +8,7 @@ from basic_memory.config import resolve_data_dir
 
 
 # Marker shared by the API ignored-path rejection detail and MCP-side error handling.
-# The sync-file endpoint embeds it in its 400 detail and edit_note's disk recovery
+# The index-file endpoint embeds it in its 400 detail and edit_note's disk recovery
 # matches on it, so "exists but ignored" stays distinguishable from generic rejections
 # without duplicating message text across layers.
 IGNORED_PATH_REJECTION_DETAIL = (
@@ -91,7 +91,7 @@ def create_default_bmignore() -> None:
 
     bmignore_path.parent.mkdir(parents=True, exist_ok=True)
     bmignore_path.write_text("""# Basic Memory Ignore Patterns
-# This file is used by both 'bm cloud upload', 'bm cloud bisync', and file sync
+# This file is used by 'bm cloud upload', 'bm cloud bisync', and file indexing
 # Patterns use standard gitignore-style syntax
 
 # Hidden files (files starting with dot)

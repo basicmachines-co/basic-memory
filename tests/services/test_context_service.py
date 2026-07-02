@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, UTC
 import pytest
 import pytest_asyncio
 
+from basic_memory import db
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import memory_url, memory_url_path
 from basic_memory.schemas.search import SearchItemType
@@ -15,11 +16,15 @@ from basic_memory.models.project import Project
 
 @pytest_asyncio.fixture
 async def context_service(
-    search_repository, entity_repository, observation_repository, link_resolver
+    search_repository, entity_repository, observation_repository, link_resolver, session_maker
 ):
     """Create context service for testing."""
     return ContextService(
-        search_repository, entity_repository, observation_repository, link_resolver=link_resolver
+        search_repository,
+        entity_repository,
+        observation_repository,
+        link_resolver=link_resolver,
+        session_maker=session_maker,
     )
 
 
@@ -49,7 +54,7 @@ async def test_find_connected_depth_limit(context_service, test_graph):
 
 @pytest.mark.asyncio
 async def test_find_connected_timeframe(
-    context_service, test_graph, search_repository, entity_repository, app_config
+    context_service, test_graph, search_repository, entity_repository, app_config, session_maker
 ):
     """Test timeframe filtering.
     This tests how traversal is affected by the item dates.
@@ -70,13 +75,18 @@ async def test_find_connected_timeframe(
     # Update entity table timestamps directly
     # Root entity uses old date
     root_entity = test_graph["root"]
-    await entity_repository.update(root_entity.id, {"created_at": old_date, "updated_at": old_date})
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.update(
+            session, root_entity.id, {"created_at": old_date, "updated_at": old_date}
+        )
 
-    # Connected entity uses recent date
-    connected_entity = test_graph["connected1"]
-    await entity_repository.update(
-        connected_entity.id, {"created_at": recent_date, "updated_at": recent_date}
-    )
+        # Connected entity uses recent date
+        connected_entity = test_graph["connected1"]
+        await entity_repository.update(
+            session,
+            connected_entity.id,
+            {"created_at": recent_date, "updated_at": recent_date},
+        )
 
     # Also update search_index for test consistency
     await search_repository.index_item(
@@ -349,14 +359,18 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
             search_repo_p2 = SQLiteSearchRepository(session_maker, project2.id)
 
         # Create repositories for project1
-        entity_repo_p1 = EntityRepository(session_maker, project1.id)
-        obs_repo_p1 = ObservationRepository(session_maker, project1.id)
-        context_service_p1 = ContextService(search_repo_p1, entity_repo_p1, obs_repo_p1)
+        entity_repo_p1 = EntityRepository(project1.id)
+        obs_repo_p1 = ObservationRepository(project1.id)
+        context_service_p1 = ContextService(
+            search_repo_p1, entity_repo_p1, obs_repo_p1, session_maker=session_maker
+        )
 
         # Create repositories for project2
-        entity_repo_p2 = EntityRepository(session_maker, project2.id)
-        obs_repo_p2 = ObservationRepository(session_maker, project2.id)
-        context_service_p2 = ContextService(search_repo_p2, entity_repo_p2, obs_repo_p2)
+        entity_repo_p2 = EntityRepository(project2.id)
+        obs_repo_p2 = ObservationRepository(project2.id)
+        context_service_p2 = ContextService(
+            search_repo_p2, entity_repo_p2, obs_repo_p2, session_maker=session_maker
+        )
 
         # Test: find_related for project1 should only return project1 entities
         type_id_pairs_p1 = [("entity", entity1_p1.id)]
@@ -470,9 +484,11 @@ async def test_find_related_expands_cross_project_relation_targets(session_maker
     else:
         search_repo_p1 = SQLiteSearchRepository(session_maker, project1.id)
 
-    entity_repo_p1 = EntityRepository(session_maker, project1.id)
-    obs_repo_p1 = ObservationRepository(session_maker, project1.id)
-    context_service_p1 = ContextService(search_repo_p1, entity_repo_p1, obs_repo_p1)
+    entity_repo_p1 = EntityRepository(project1.id)
+    obs_repo_p1 = ObservationRepository(project1.id)
+    context_service_p1 = ContextService(
+        search_repo_p1, entity_repo_p1, obs_repo_p1, session_maker=session_maker
+    )
 
     await search_repo_p1.index_item(
         SearchIndexRow(
@@ -586,9 +602,11 @@ async def test_find_related_does_not_revisit_entities_in_cycles(session_maker, a
     else:
         search_repo = SQLiteSearchRepository(session_maker, project.id)
 
-    entity_repo = EntityRepository(session_maker, project.id)
-    obs_repo = ObservationRepository(session_maker, project.id)
-    context_service = ContextService(search_repo, entity_repo, obs_repo)
+    entity_repo = EntityRepository(project.id)
+    obs_repo = ObservationRepository(project.id)
+    context_service = ContextService(
+        search_repo, entity_repo, obs_repo, session_maker=session_maker
+    )
 
     related = await context_service.find_related(
         [("entity", root.id)], max_depth=4, max_results=100
@@ -631,10 +649,15 @@ async def test_build_context_fallback_not_found(context_service):
 
 @pytest.mark.asyncio
 async def test_build_context_without_link_resolver(
-    search_repository, entity_repository, observation_repository, test_graph
+    search_repository, entity_repository, observation_repository, test_graph, session_maker
 ):
     """Test that build_context still works without a link_resolver (no fallback)."""
-    service = ContextService(search_repository, entity_repository, observation_repository)
+    service = ContextService(
+        search_repository,
+        entity_repository,
+        observation_repository,
+        session_maker=session_maker,
+    )
 
     # Exact permalink lookup should still work
     url = memory_url.validate_strings("memory://test-project/test/root")
@@ -713,9 +736,11 @@ async def test_find_related_carries_to_name_for_unresolved_relations(session_mak
             search_repo = PostgresSearchRepository(session_maker, project.id)
         else:
             search_repo = SQLiteSearchRepository(session_maker, project.id)
-        entity_repo = EntityRepository(session_maker, project.id)
-        obs_repo = ObservationRepository(session_maker, project.id)
-        context_service = ContextService(search_repo, entity_repo, obs_repo)
+        entity_repo = EntityRepository(project.id)
+        obs_repo = ObservationRepository(project.id)
+        context_service = ContextService(
+            search_repo, entity_repo, obs_repo, session_maker=session_maker
+        )
 
         related = await context_service.find_related([("entity", source.id)], max_depth=2)
         relation_rows = {r.to_name: r for r in related if r.type == "relation"}

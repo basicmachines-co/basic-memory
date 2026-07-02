@@ -8,6 +8,7 @@ import pytest
 
 import pytest_asyncio
 
+from basic_memory import db
 from basic_memory.models.knowledge import Entity as EntityModel
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -78,18 +79,20 @@ async def test_entities(entity_service, file_service):
     )
 
     # non markdown entity
-    e7 = await entity_service.repository.add(
-        EntityModel(
-            title="Image.png",
-            note_type="file",
-            content_type="image/png",
-            file_path="Image.png",
-            permalink="image",  # Required for Postgres NOT NULL constraint
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            project_id=entity_service.repository.project_id,
+    async with db.scoped_session(entity_service.session_maker) as session:
+        e7 = await entity_service.repository.add(
+            session,
+            EntityModel(
+                title="Image.png",
+                note_type="file",
+                content_type="image/png",
+                file_path="Image.png",
+                permalink="image",  # Required for Postgres NOT NULL constraint
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                project_id=entity_service.repository.project_id,
+            ),
         )
-    )
 
     e8 = await entity_service.create_entity(  # duplicate title
         EntitySchema(
@@ -104,13 +107,13 @@ async def test_entities(entity_service, file_service):
 
 
 @pytest_asyncio.fixture
-async def link_resolver(entity_repository, search_service, test_entities):
+async def link_resolver(entity_repository, search_service, test_entities, session_maker):
     """Create LinkResolver instance with indexed test data."""
     # Index all test entities
     for entity in test_entities:
         await search_service.index_entity(entity)
 
-    return LinkResolver(entity_repository, search_service)
+    return LinkResolver(entity_repository, search_service, session_maker)
 
 
 @pytest.fixture
@@ -561,33 +564,36 @@ async def test_cross_project_link_resolution(
     """Test resolving explicit cross-project links."""
     from basic_memory.repository.project_repository import ProjectRepository
 
-    project_repo = ProjectRepository(session_maker)
-    other_project = await project_repo.create(
-        {
-            "name": "other-project",
-            "description": "Secondary project",
-            "path": str(tmp_path / "other-project"),
-            "is_active": True,
-            "is_default": False,
-        }
-    )
-
-    now = datetime.now(timezone.utc)
-    other_entity_repo = EntityRepository(session_maker, project_id=other_project.id)
-    target = await other_entity_repo.add(
-        EntityModel(
-            title="Cross Project Note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="docs/Cross Project Note.md",
-            permalink=f"{other_project.permalink}/docs/cross-project-note",
-            created_at=now,
-            updated_at=now,
-            project_id=other_project.id,
+    project_repo = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        other_project = await project_repo.create(
+            session,
+            {
+                "name": "other-project",
+                "description": "Secondary project",
+                "path": str(tmp_path / "other-project"),
+                "is_active": True,
+                "is_default": False,
+            },
         )
-    )
 
-    resolver = LinkResolver(entity_repository, search_service)
+        now = datetime.now(timezone.utc)
+        other_entity_repo = EntityRepository(project_id=other_project.id)
+        target = await other_entity_repo.add(
+            session,
+            EntityModel(
+                title="Cross Project Note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="docs/Cross Project Note.md",
+                permalink=f"{other_project.permalink}/docs/cross-project-note",
+                created_at=now,
+                updated_at=now,
+                project_id=other_project.id,
+            ),
+        )
+
+    resolver = LinkResolver(entity_repository, search_service, session_maker)
     resolved = await resolver.resolve_link("other-project::Cross Project Note", strict=True)
 
     assert resolved is not None
@@ -601,7 +607,7 @@ async def test_cross_project_link_resolution(
 
 
 @pytest_asyncio.fixture
-async def context_aware_entities(entity_repository):
+async def context_aware_entities(entity_repository, session_maker):
     """Create entities for testing context-aware resolution.
 
     Structure:
@@ -621,123 +627,133 @@ async def context_aware_entities(entity_repository):
     now = datetime.now(timezone.utc)
     project_id = entity_repository.project_id
 
-    # Root level testing.md
-    e1 = await entity_repository.add(
-        EntityModel(
-            title="testing",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="testing.md",
-            permalink="testing",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+    async with db.scoped_session(session_maker) as session:
+        # Root level testing.md
+        e1 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="testing",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="testing.md",
+                permalink="testing",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e1)
+        entities.append(e1)
 
-    # main/testing/testing.md
-    e2 = await entity_repository.add(
-        EntityModel(
-            title="testing",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="main/testing/testing.md",
-            permalink="main/testing/testing",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # main/testing/testing.md
+        e2 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="testing",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="main/testing/testing.md",
+                permalink="main/testing/testing",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e2)
+        entities.append(e2)
 
-    # main/testing/another-test.md
-    e3 = await entity_repository.add(
-        EntityModel(
-            title="another-test",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="main/testing/another-test.md",
-            permalink="main/testing/another-test",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # main/testing/another-test.md
+        e3 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="another-test",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="main/testing/another-test.md",
+                permalink="main/testing/another-test",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e3)
+        entities.append(e3)
 
-    # other/testing.md
-    e4 = await entity_repository.add(
-        EntityModel(
-            title="testing",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="other/testing.md",
-            permalink="other/testing",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # other/testing.md
+        e4 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="testing",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="other/testing.md",
+                permalink="other/testing",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e4)
+        entities.append(e4)
 
-    # deep/nested/folder/note.md
-    e5 = await entity_repository.add(
-        EntityModel(
-            title="note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="deep/nested/folder/note.md",
-            permalink="deep/nested/folder/note",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # deep/nested/folder/note.md
+        e5 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="deep/nested/folder/note.md",
+                permalink="deep/nested/folder/note",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e5)
+        entities.append(e5)
 
-    # deep/note.md (for ancestor testing)
-    e6 = await entity_repository.add(
-        EntityModel(
-            title="note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="deep/note.md",
-            permalink="deep/note",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # deep/note.md (for ancestor testing)
+        e6 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="deep/note.md",
+                permalink="deep/note",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e6)
+        entities.append(e6)
 
-    # note.md at root (for ancestor testing)
-    e7 = await entity_repository.add(
-        EntityModel(
-            title="note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="note.md",
-            permalink="note",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # note.md at root (for ancestor testing)
+        e7 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="note.md",
+                permalink="note",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e7)
+        entities.append(e7)
 
     return entities
 
 
 @pytest_asyncio.fixture
-async def context_link_resolver(entity_repository, search_service, context_aware_entities):
+async def context_link_resolver(
+    entity_repository, search_service, context_aware_entities, session_maker
+):
     """Create LinkResolver instance with context-aware test data.
 
     Note: We don't index entities for search because these tests focus on
     exact title/permalink matching, not fuzzy search. The entities are
     database-only records (no files on disk).
     """
-    return LinkResolver(entity_repository, search_service)
+    return LinkResolver(entity_repository, search_service, session_maker)
 
 
 @pytest.mark.asyncio
@@ -903,7 +919,7 @@ async def test_nonexistent_link_with_source_path(context_link_resolver):
 
 
 @pytest_asyncio.fixture
-async def relative_path_entities(entity_repository):
+async def relative_path_entities(entity_repository, session_maker):
     """Create entities for testing relative path resolution.
 
     Structure:
@@ -920,73 +936,80 @@ async def relative_path_entities(entity_repository):
     now = datetime.now(timezone.utc)
     project_id = entity_repository.project_id
 
-    # testing/link-test.md (source file)
-    e1 = await entity_repository.add(
-        EntityModel(
-            title="link-test",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="testing/link-test.md",
-            permalink="testing/link-test",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+    async with db.scoped_session(session_maker) as session:
+        # testing/link-test.md (source file)
+        e1 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="link-test",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="testing/link-test.md",
+                permalink="testing/link-test",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e1)
+        entities.append(e1)
 
-    # testing/nested/deep-note.md (relative target)
-    e2 = await entity_repository.add(
-        EntityModel(
-            title="deep-note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="testing/nested/deep-note.md",
-            permalink="testing/nested/deep-note",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # testing/nested/deep-note.md (relative target)
+        e2 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="deep-note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="testing/nested/deep-note.md",
+                permalink="testing/nested/deep-note",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e2)
+        entities.append(e2)
 
-    # nested/deep-note.md (absolute path target)
-    e3 = await entity_repository.add(
-        EntityModel(
-            title="deep-note",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="nested/deep-note.md",
-            permalink="nested/deep-note",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # nested/deep-note.md (absolute path target)
+        e3 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="deep-note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="nested/deep-note.md",
+                permalink="nested/deep-note",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e3)
+        entities.append(e3)
 
-    # other/file.md
-    e4 = await entity_repository.add(
-        EntityModel(
-            title="file",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="other/file.md",
-            permalink="other/file",
-            created_at=now,
-            updated_at=now,
-            project_id=project_id,
+        # other/file.md
+        e4 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="file",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="other/file.md",
+                permalink="other/file",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
         )
-    )
-    entities.append(e4)
+        entities.append(e4)
 
     return entities
 
 
 @pytest_asyncio.fixture
-async def relative_path_resolver(entity_repository, search_service, relative_path_entities):
+async def relative_path_resolver(
+    entity_repository, search_service, relative_path_entities, session_maker
+):
     """Create LinkResolver instance with relative path test data."""
-    return LinkResolver(entity_repository, search_service)
+    return LinkResolver(entity_repository, search_service, session_maker)
 
 
 @pytest.mark.asyncio

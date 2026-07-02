@@ -5,6 +5,7 @@ This module provides database-related dependencies:
 - Session dependencies for request handling
 """
 
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -54,3 +55,12 @@ async def get_session_maker(engine_factory: EngineFactoryDep) -> async_sessionma
 
 
 SessionMakerDep = Annotated[async_sessionmaker, Depends(get_session_maker)]
+
+
+async def get_session(session_maker: SessionMakerDep) -> AsyncGenerator[AsyncSession, None]:
+    """Yield a request-scoped SQLAlchemy session."""
+    async with db.scoped_session(session_maker) as session:
+        yield session
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]

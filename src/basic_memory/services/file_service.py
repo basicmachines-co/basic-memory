@@ -20,6 +20,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from basic_memory.file_utils import FileError, FileMetadata, ParseError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Entity as EntityModel
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.utils import FilePath
@@ -613,4 +614,4 @@ class FileService:
         Returns:
             True if the file is a markdown file, False otherwise
         """
-        return self.content_type(path) == "text/markdown"
+        return self.content_type(path) == RUNTIME_MARKDOWN_CONTENT_TYPE

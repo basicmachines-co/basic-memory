@@ -1,16 +1,19 @@
 """Service for managing entities in the database."""
 
-import asyncio
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, AsyncIterator, List, Optional, Sequence, Tuple, Union
 
 import frontmatter
 import yaml
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import (
     has_frontmatter,
@@ -31,6 +34,7 @@ from basic_memory.models.knowledge import Entity
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
 from basic_memory.schemas.response import (
@@ -60,6 +64,36 @@ class EntityWriteResult:
     search_content: str
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedEntityFields:
+    """Entity row values that mirror one accepted markdown snapshot."""
+
+    title: str
+    note_type: str
+    entity_metadata: dict[str, Any] | None
+    content_type: str
+    permalink: str | None
+    file_path: str
+
+
+def apply_prepared_entity_fields(
+    entity: EntityModel,
+    entity_fields: PreparedEntityFields,
+    *,
+    updated_at: datetime,
+    user_profile_value: str | None,
+) -> None:
+    """Copy prepared accepted markdown fields onto an entity row."""
+    entity.title = entity_fields.title
+    entity.note_type = entity_fields.note_type
+    entity.entity_metadata = entity_fields.entity_metadata
+    entity.content_type = entity_fields.content_type
+    entity.permalink = entity_fields.permalink
+    entity.file_path = entity_fields.file_path
+    entity.updated_at = updated_at
+    entity.last_updated_by = user_profile_value
+
+
 @dataclass(frozen=True)
 class PreparedEntityWrite:
     """Accepted note state before any persistence side effects happen.
@@ -71,9 +105,7 @@ class PreparedEntityWrite:
         file_path: Canonical note path implied by the request.
         markdown_content: Full markdown to persist, including frontmatter.
         search_content: Frontmatter-stripped content for inline FTS indexing.
-        entity_fields: Entity row values that mirror the accepted markdown state.
-            Keys are ``title``, ``note_type``, ``file_path``, ``content_type``,
-            ``entity_metadata``, and ``permalink``.
+        entity_fields: Typed entity row values that mirror the accepted markdown state.
         entity_markdown: Parsed markdown reused by the local write path to update
             entities, observations, and relations without reparsing a second time.
     """
@@ -81,13 +113,80 @@ class PreparedEntityWrite:
     file_path: Path
     markdown_content: str
     search_content: str
-    entity_fields: dict[str, Any]
+    entity_fields: PreparedEntityFields
     entity_markdown: EntityMarkdown
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedEditTitleReconciliation:
+    """Markdown title state after reconciling an edit with the note's body heading."""
+
+    markdown_content: str
+    title: str
+    metadata: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedEntityMove:
+    """Accepted markdown state for a DB-first note move."""
+
+    file_path: Path
+    markdown_content: str
+    search_content: str
+    permalink: str | None
 
 
 def _frontmatter_permalink(value: object) -> str | None:
     """Return an explicit frontmatter permalink only when YAML parsed a real string."""
     return value if isinstance(value, str) and value else None
+
+
+def reconcile_prepared_edit_title_from_h1(
+    *,
+    original_markdown: str,
+    markdown_content: str,
+    current_title: str | None,
+    prepared_title: str,
+    metadata: dict[str, Any] | None,
+) -> PreparedEditTitleReconciliation:
+    """Keep PATCH title metadata in step when a direct H1 edit changes the note title."""
+    # The indexing package imports services at module load time, so keep this shared helper import
+    # inside the function to avoid a startup cycle while still preserving one H1 parser.
+    from basic_memory.indexing.accepted_note_search import (
+        accepted_search_content_from_markdown,
+        first_markdown_h1,
+    )
+
+    original_h1 = first_markdown_h1(accepted_search_content_from_markdown(original_markdown))
+    prepared_h1 = first_markdown_h1(accepted_search_content_from_markdown(markdown_content))
+
+    if not prepared_h1 or prepared_h1 == prepared_title:
+        return PreparedEditTitleReconciliation(
+            markdown_content=markdown_content,
+            title=prepared_title,
+            metadata=metadata,
+        )
+
+    # Only infer a title edit when the note previously used the H1 as its title.
+    # If frontmatter and H1 intentionally differed, preserve that explicit metadata.
+    if original_h1 != current_title or prepared_title != current_title:
+        return PreparedEditTitleReconciliation(
+            markdown_content=markdown_content,
+            title=prepared_title,
+            metadata=metadata,
+        )
+
+    post = frontmatter.loads(markdown_content)
+    post.metadata["title"] = prepared_h1
+    reconciled_metadata = metadata
+    if reconciled_metadata is not None:
+        reconciled_metadata = {**reconciled_metadata, "title": prepared_h1}
+
+    return PreparedEditTitleReconciliation(
+        markdown_content=dump_frontmatter(post),
+        title=prepared_h1,
+        metadata=reconciled_metadata,
+    )
 
 
 class EntityService(BaseService[EntityModel]):
@@ -101,6 +200,7 @@ class EntityService(BaseService[EntityModel]):
         relation_repository: RelationRepository,
         file_service: FileService,
         link_resolver: LinkResolver,
+        session_maker: async_sessionmaker[AsyncSession],
         search_service: Optional[SearchService] = None,
         app_config: Optional[BasicMemoryConfig] = None,
     ):
@@ -110,6 +210,7 @@ class EntityService(BaseService[EntityModel]):
         self.entity_parser = entity_parser
         self.file_service = file_service
         self.link_resolver = link_resolver
+        self.session_maker = session_maker
         self.search_service = search_service
         self.app_config = app_config
         self._project_permalink: Optional[str] = None
@@ -117,8 +218,23 @@ class EntityService(BaseService[EntityModel]):
         # Default returns None for local/CLI usage. Cloud overrides this to read from UserContext.
         self.get_user_id: Callable[[], Optional[str]] = lambda: None
 
+    @asynccontextmanager
+    async def _session_scope(
+        self, session: AsyncSession | None = None
+    ) -> AsyncIterator[AsyncSession]:
+        """Use the caller's session or open a service-owned transaction."""
+        if session is not None:
+            yield session
+            return
+
+        async with db.scoped_session(self.session_maker) as owned_session:
+            yield owned_session
+
     async def detect_file_path_conflicts(
-        self, file_path: str, skip_check: bool = False
+        self,
+        file_path: str,
+        skip_check: bool = False,
+        session: AsyncSession | None = None,
     ) -> List[str]:
         """Detect potential file path conflicts for a given file path.
 
@@ -142,7 +258,8 @@ class EntityService(BaseService[EntityModel]):
 
         # Load only file paths. Conflict detection is on the hot write path and
         # does not need observations or relations.
-        existing_paths = await self.repository.get_all_file_paths()
+        async with self._session_scope(session) as active_session:
+            existing_paths = await self.repository.get_all_file_paths(active_session)
 
         # Use the enhanced conflict detection utility
         return detect_potential_file_conflicts(file_path, existing_paths)
@@ -152,6 +269,7 @@ class EntityService(BaseService[EntityModel]):
         file_path: Permalink | Path,
         markdown: Optional[EntityMarkdown] = None,
         skip_conflict_check: bool = False,
+        session: AsyncSession | None = None,
     ) -> str:
         """Get or generate unique permalink for an entity.
 
@@ -169,71 +287,74 @@ class EntityService(BaseService[EntityModel]):
         file_path_str = Path(file_path).as_posix()
 
         # Check for potential file path conflicts before resolving permalink
-        conflicts = await self.detect_file_path_conflicts(
-            file_path_str, skip_check=skip_conflict_check
-        )
-        if conflicts:
-            logger.warning(
-                f"Detected potential file path conflicts for '{file_path_str}': {conflicts}"
+        async with self._session_scope(session) as active_session:
+            conflicts = await self.detect_file_path_conflicts(
+                file_path_str, skip_check=skip_conflict_check, session=active_session
             )
+            if conflicts:
+                logger.warning(
+                    f"Detected potential file path conflicts for '{file_path_str}': {conflicts}"
+                )
 
-        # If markdown has explicit permalink, try to validate it
-        if markdown and markdown.frontmatter.permalink:
-            desired_permalink = markdown.frontmatter.permalink
-            # Use lightweight method - we only need to check file_path
-            existing_file_path = await self.repository.get_file_path_for_permalink(
-                desired_permalink
+            # If markdown has explicit permalink, try to validate it
+            if markdown and markdown.frontmatter.permalink:
+                desired_permalink = markdown.frontmatter.permalink
+                # Use lightweight method - we only need to check file_path
+                existing_file_path = await self.repository.get_file_path_for_permalink(
+                    active_session, desired_permalink
+                )
+
+                # If no conflict or it's our own file, use as is
+                if not existing_file_path or existing_file_path == file_path_str:
+                    return desired_permalink
+
+            # For existing files, try to find current permalink
+            # Use lightweight method - we only need the permalink
+            existing_permalink = await self.repository.get_permalink_for_file_path(
+                active_session, file_path_str
             )
+            if existing_permalink:
+                return existing_permalink
 
-            # If no conflict or it's our own file, use as is
-            if not existing_file_path or existing_file_path == file_path_str:
-                return desired_permalink
+            # New file - generate permalink
+            if markdown and markdown.frontmatter.permalink:
+                desired_permalink = markdown.frontmatter.permalink
+            else:
+                # Trigger: generating a permalink for a new file
+                # Why: canonical permalinks may require project prefix for global addressing
+                # Outcome: include project slug when enabled in config
+                include_project = True
+                if self.app_config:
+                    include_project = self.app_config.permalinks_include_project
 
-        # For existing files, try to find current permalink
-        # Use lightweight method - we only need the permalink
-        existing_permalink = await self.repository.get_permalink_for_file_path(file_path_str)
-        if existing_permalink:
-            return existing_permalink
+                workspace_permalink = workspace_slug_for_canonical_permalinks()
+                project_permalink = None
+                # Trigger: project-prefixed permalinks are enabled, or organization workspace
+                #   context requires a complete workspace/project canonical permalink.
+                # Why: project slug is the stable middle segment for globally addressable links.
+                # Outcome: fetch and cache the project's permalink before building the canonical URL.
+                if include_project or workspace_permalink:
+                    project_permalink = await self._get_project_permalink(active_session)
 
-        # New file - generate permalink
-        if markdown and markdown.frontmatter.permalink:
-            desired_permalink = markdown.frontmatter.permalink
-        else:
-            # Trigger: generating a permalink for a new file
-            # Why: canonical permalinks may require project prefix for global addressing
-            # Outcome: include project slug when enabled in config
-            include_project = True
-            if self.app_config:
-                include_project = self.app_config.permalinks_include_project
+                desired_permalink = build_canonical_permalink(
+                    project_permalink,
+                    file_path_str,
+                    include_project=include_project,
+                    workspace_permalink=workspace_permalink,
+                )
 
-            workspace_permalink = workspace_slug_for_canonical_permalinks()
-            project_permalink = None
-            # Trigger: project-prefixed permalinks are enabled, or organization workspace
-            #   context requires a complete workspace/project canonical permalink.
-            # Why: project slug is the stable middle segment for globally addressable links.
-            # Outcome: fetch and cache the project's permalink before building the canonical URL.
-            if include_project or workspace_permalink:
-                project_permalink = await self._get_project_permalink()
-
-            desired_permalink = build_canonical_permalink(
-                project_permalink,
-                file_path_str,
-                include_project=include_project,
-                workspace_permalink=workspace_permalink,
-            )
-
-        # Make unique if needed - enhanced to handle character conflicts
-        # Use lightweight existence check instead of loading full entity
-        permalink = desired_permalink
-        suffix = 1
-        while await self.repository.permalink_exists(permalink):
-            permalink = f"{desired_permalink}-{suffix}"
-            suffix += 1
-            logger.debug(f"creating unique permalink: {permalink}")
+            # Make unique if needed - enhanced to handle character conflicts
+            # Use lightweight existence check instead of loading full entity
+            permalink = desired_permalink
+            suffix = 1
+            while await self.repository.permalink_exists(active_session, permalink):
+                permalink = f"{desired_permalink}-{suffix}"
+                suffix += 1
+                logger.debug(f"creating unique permalink: {permalink}")
 
         return permalink
 
-    async def _get_project_permalink(self) -> Optional[str]:
+    async def _get_project_permalink(self, session: AsyncSession) -> Optional[str]:
         """Get and cache the current project's permalink."""
         if self._project_permalink is not None:
             return self._project_permalink
@@ -242,8 +363,8 @@ class EntityService(BaseService[EntityModel]):
         if project_id is None:  # pragma: no cover
             return None  # pragma: no cover
 
-        project_repository = ProjectRepository(self.repository.session_maker)
-        project = await project_repository.get_by_id(project_id)
+        project_repository = ProjectRepository()
+        project = await project_repository.get_by_id(session, project_id)
         if project:
             self._project_permalink = project.permalink
         return self._project_permalink
@@ -299,15 +420,15 @@ class EntityService(BaseService[EntityModel]):
         # Older service flows mutated the request schema with the resolved permalink and any
         # frontmatter-derived note type. Several callers and tests still rely on that behavior
         # after create/update returns.
-        source_schema.title = prepared.entity_fields["title"]
-        source_schema.note_type = prepared.entity_fields["note_type"]
-        source_schema.content_type = prepared.entity_fields["content_type"]
-        source_schema.entity_metadata = prepared.entity_fields["entity_metadata"]
+        source_schema.title = prepared.entity_fields.title
+        source_schema.note_type = prepared.entity_fields.note_type
+        source_schema.content_type = prepared.entity_fields.content_type
+        source_schema.entity_metadata = prepared.entity_fields.entity_metadata
 
         if self.app_config and self.app_config.disable_permalinks:
             source_schema._permalink = ""
         else:
-            source_schema._permalink = prepared.entity_fields["permalink"]
+            source_schema._permalink = prepared.entity_fields.permalink
 
     def _apply_schema_frontmatter_overrides(self, schema: EntitySchema) -> EntityMarkdown | None:
         """Apply schema content frontmatter overrides and return permalink resolution metadata."""
@@ -343,6 +464,7 @@ class EntityService(BaseService[EntityModel]):
         current_permalink: str | None = None,
         content_markdown: EntityMarkdown | None = None,
         skip_conflict_check: bool = False,
+        session: AsyncSession | None = None,
     ) -> str | None:
         """Resolve the canonical permalink for a create/update write."""
         if self.app_config and self.app_config.disable_permalinks:
@@ -360,6 +482,7 @@ class EntityService(BaseService[EntityModel]):
             file_path,
             content_markdown,
             skip_conflict_check=skip_conflict_check,
+            session=session,
         )
         schema._permalink = resolved_permalink
         return resolved_permalink
@@ -373,25 +496,25 @@ class EntityService(BaseService[EntityModel]):
         content_type: str,
         metadata: dict[str, Any] | None,
         permalink: str | None,
-    ) -> dict[str, Any]:
+    ) -> PreparedEntityFields:
         """Build the entity row data that mirrors accepted markdown state."""
         normalized_metadata = normalize_frontmatter_metadata(metadata or {})
         entity_metadata = {k: v for k, v in normalized_metadata.items() if v is not None}
-        return {
-            "title": title,
-            "note_type": note_type,
-            "file_path": file_path.as_posix(),
-            "content_type": content_type,
-            "entity_metadata": entity_metadata or None,
-            "permalink": permalink,
-        }
+        return PreparedEntityFields(
+            title=title,
+            note_type=note_type,
+            file_path=file_path.as_posix(),
+            content_type=content_type,
+            entity_metadata=entity_metadata or None,
+            permalink=permalink,
+        )
 
     async def _build_prepared_write(
         self,
         *,
         file_path: Path,
         markdown_content: str,
-        entity_fields: dict[str, Any],
+        entity_fields: PreparedEntityFields,
     ) -> PreparedEntityWrite:
         """Parse accepted markdown once so all persistence paths share the same state."""
         # Trigger: both local and cloud-style callers need the exact same accepted markdown.
@@ -437,6 +560,7 @@ class EntityService(BaseService[EntityModel]):
         *,
         check_storage_exists: bool = True,
         skip_conflict_check: bool = False,
+        session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         """Derive accepted markdown and entity fields for a new note.
 
@@ -469,6 +593,7 @@ class EntityService(BaseService[EntityModel]):
             file_path=file_path,
             content_markdown=content_markdown,
             skip_conflict_check=skip_conflict_check,
+            session=session,
         )
 
         # Build the final markdown once here. Local mode will write it immediately; cloud mode can
@@ -496,6 +621,7 @@ class EntityService(BaseService[EntityModel]):
         existing_content: str,
         *,
         skip_conflict_check: bool = False,
+        session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         """Derive accepted markdown and entity fields for a full note replacement.
 
@@ -533,6 +659,7 @@ class EntityService(BaseService[EntityModel]):
             current_permalink=current_permalink,
             content_markdown=content_markdown,
             skip_conflict_check=skip_conflict_check,
+            session=session,
         )
 
         post = await schema_to_markdown(schema)
@@ -573,6 +700,7 @@ class EntityService(BaseService[EntityModel]):
         find_text: Optional[str] = None,
         expected_replacements: int = 1,
         skip_conflict_check: bool = False,
+        session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         """Derive accepted markdown and entity fields for an edit request.
 
@@ -621,10 +749,22 @@ class EntityService(BaseService[EntityModel]):
                         file_path,
                         content_markdown,
                         skip_conflict_check=skip_conflict_check,
+                        session=session,
                     )
 
             normalized_metadata = normalize_frontmatter_metadata(content_frontmatter or {})
             metadata = {k: v for k, v in normalized_metadata.items() if v is not None} or None
+
+        title_reconciliation = reconcile_prepared_edit_title_from_h1(
+            original_markdown=current_content,
+            markdown_content=markdown_content,
+            current_title=entity.title,
+            prepared_title=title,
+            metadata=metadata,
+        )
+        markdown_content = title_reconciliation.markdown_content
+        title = title_reconciliation.title
+        metadata = title_reconciliation.metadata
 
         entity_fields = self._build_entity_fields(
             file_path=file_path,
@@ -639,6 +779,71 @@ class EntityService(BaseService[EntityModel]):
             markdown_content=markdown_content,
             entity_fields=entity_fields,
         )
+
+    async def prepare_move_entity_content(
+        self,
+        entity: EntityModel,
+        current_content: str,
+        destination_path: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> PreparedEntityMove:
+        """Derive accepted markdown and permalink state for a note move.
+
+        This method does not read files, write files, or mutate database rows.
+        The caller supplies the current accepted markdown because cloud DB-first
+        moves may need to use note_content rather than a materialized file.
+        """
+        # Keep the search helper import lazy for the same package-cycle reason as
+        # reconcile_prepared_edit_title_from_h1.
+        from basic_memory.indexing.accepted_note_search import (
+            accepted_search_content_from_markdown,
+        )
+
+        file_path = Path(normalize_note_move_destination_path(destination_path))
+        markdown_content = current_content
+        permalink = entity.permalink
+        disable_permalinks = bool(self.app_config and self.app_config.disable_permalinks)
+        update_permalinks_on_move = bool(
+            self.app_config and self.app_config.update_permalinks_on_move
+        )
+
+        if not disable_permalinks and (update_permalinks_on_move or entity.permalink is None):
+            permalink = await self.resolve_permalink(file_path, session=session)
+            post = frontmatter.loads(markdown_content)
+            post.metadata["permalink"] = permalink
+            markdown_content = dump_frontmatter(post)
+
+        return PreparedEntityMove(
+            file_path=file_path,
+            markdown_content=markdown_content,
+            search_content=accepted_search_content_from_markdown(markdown_content),
+            permalink=permalink,
+        )
+
+    async def verify_move_destination_absent(
+        self,
+        *,
+        source_file_path: str,
+        destination_file_path: str,
+    ) -> None:
+        """Reject a local move onto a destination that exists on disk but is unindexed.
+
+        Mirrors the create/PUT storage-existence guard: committing the move would
+        point DB/search at an unchanged file and leave the source to be reindexed as
+        a duplicate. A case-only rename or shared storage target (same physical file)
+        is allowed. Cloud is DB-first and opts out via verify_storage_absent_on_create.
+        """
+        source = Path(source_file_path)
+        destination = Path(normalize_note_move_destination_path(destination_file_path))
+        if (
+            source != destination
+            and await self.file_service.exists(destination)
+            and not self._paths_share_storage_target(source, destination)
+        ):
+            raise EntityAlreadyExistsError(
+                f"file already exists at destination path: {destination.as_posix()}"
+            )
 
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:
         """Create new entity or update existing one.
@@ -676,30 +881,34 @@ class EntityService(BaseService[EntityModel]):
     async def create_entity_with_content(self, schema: EntitySchema) -> EntityWriteResult:
         """Create a new entity and return both the entity row and written markdown."""
         logger.debug(f"Creating entity: {schema.title}")
-        # --- Prepare Accepted State ---
-        # Derive the canonical markdown/entity fields before touching the filesystem.
-        prepared = await self.prepare_create_entity_content(schema)
-        self._sync_prepared_schema_state(schema, prepared)
-        # --- Persist File, Then Indexable DB State ---
-        # Local mode still writes the file immediately; the prepare object keeps semantics separate
-        # from that persistence step.
-        checksum = await self.file_service.write_file(prepared.file_path, prepared.markdown_content)
-        entity = await self.upsert_entity_from_markdown(
-            prepared.file_path,
-            prepared.entity_markdown,
-            is_new=True,
-        )
-        updated = await self.repository.update(entity.id, {"checksum": checksum})
-        if not updated:  # pragma: no cover
-            raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
-        persisted_content, search_content = await self._read_persisted_write_content(
-            prepared.file_path
-        )
-        return EntityWriteResult(
-            entity=updated,
-            content=persisted_content,
-            search_content=search_content,
-        )
+        async with self._session_scope() as session:
+            # --- Prepare Accepted State ---
+            # Derive the canonical markdown/entity fields before touching the filesystem.
+            prepared = await self.prepare_create_entity_content(schema, session=session)
+            self._sync_prepared_schema_state(schema, prepared)
+            # --- Persist File, Then Indexable DB State ---
+            # Local mode still writes the file immediately; the prepare object keeps semantics separate
+            # from that persistence step.
+            checksum = await self.file_service.write_file(
+                prepared.file_path, prepared.markdown_content
+            )
+            entity = await self.upsert_entity_from_markdown(
+                prepared.file_path,
+                prepared.entity_markdown,
+                is_new=True,
+                session=session,
+            )
+            updated = await self.repository.update(session, entity.id, {"checksum": checksum})
+            if not updated:  # pragma: no cover
+                raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
+            persisted_content, search_content = await self._read_persisted_write_content(
+                prepared.file_path
+            )
+            return EntityWriteResult(
+                entity=updated,
+                content=persisted_content,
+                search_content=search_content,
+            )
 
     async def update_entity(self, entity: EntityModel, schema: EntitySchema) -> EntityModel:
         """Update an entity's content and metadata."""
@@ -716,58 +925,63 @@ class EntityService(BaseService[EntityModel]):
             f"Updating entity with permalink: {entity.permalink} content-type: {schema.content_type}"
         )
 
-        # --- Read Current File State ---
-        # Full replacements merge with existing frontmatter, so local mode still needs the current
-        # file contents as input to the prepare step.
-        existing_content = await self.file_service.read_file_content(entity.file_path)
-        prepared = await self.prepare_update_entity_content(
-            entity,
-            schema,
-            existing_content,
-        )
-        self._sync_prepared_schema_state(schema, prepared)
-        previous_file_path = Path(entity.file_path)
-        # Trigger: a full replacement also renames the note to a different canonical path.
-        # Why: Path.replace() overwrites existing files, so the destination must be conflict-free
-        #      before we write or we can clobber another note and only fail later at the DB layer.
-        # Outcome: conflicting rename attempts fail before touching either file on disk.
-        if (
-            prepared.file_path.as_posix() != previous_file_path.as_posix()
-            and await self.file_service.exists(prepared.file_path)
-            and not self._paths_share_storage_target(previous_file_path, prepared.file_path)
-        ):
-            raise EntityAlreadyExistsError(
-                f"file already exists at destination path: {prepared.file_path.as_posix()}"
+        async with self._session_scope() as session:
+            # --- Read Current File State ---
+            # Full replacements merge with existing frontmatter, so local mode still needs the current
+            # file contents as input to the prepare step.
+            existing_content = await self.file_service.read_file_content(entity.file_path)
+            prepared = await self.prepare_update_entity_content(
+                entity,
+                schema,
+                existing_content,
+                session=session,
             )
-        # --- Persist Prepared State ---
-        checksum = await self.file_service.write_file(
-            prepared.file_path,
-            prepared.markdown_content,
-        )
-        entity = await self.upsert_entity_from_markdown(
-            prepared.file_path,
-            prepared.entity_markdown,
-            is_new=False,
-            existing_entity=entity,
-        )
-        if prepared.file_path.as_posix() != previous_file_path.as_posix():
-            # Trigger: a full replacement changed the canonical note path.
-            # Why: the new file has already been written and the entity now points at it.
-            # Outcome: remove the stale old file so local Basic Memory mirrors cloud's PGQ cleanup.
-            if not self._paths_share_storage_target(previous_file_path, prepared.file_path):
-                await self.file_service.delete_file(previous_file_path)
-        entity = await self.repository.update(entity.id, {"checksum": checksum})
-        if not entity:  # pragma: no cover
-            raise ValueError(f"Failed to update entity checksum after update: {prepared.file_path}")
-        persisted_content, search_content = await self._read_persisted_write_content(
-            prepared.file_path
-        )
+            self._sync_prepared_schema_state(schema, prepared)
+            previous_file_path = Path(entity.file_path)
+            # Trigger: a full replacement also renames the note to a different canonical path.
+            # Why: Path.replace() overwrites existing files, so the destination must be conflict-free
+            #      before we write or we can clobber another note and only fail later at the DB layer.
+            # Outcome: conflicting rename attempts fail before touching either file on disk.
+            if (
+                prepared.file_path.as_posix() != previous_file_path.as_posix()
+                and await self.file_service.exists(prepared.file_path)
+                and not self._paths_share_storage_target(previous_file_path, prepared.file_path)
+            ):
+                raise EntityAlreadyExistsError(
+                    f"file already exists at destination path: {prepared.file_path.as_posix()}"
+                )
+            # --- Persist Prepared State ---
+            checksum = await self.file_service.write_file(
+                prepared.file_path,
+                prepared.markdown_content,
+            )
+            entity = await self.upsert_entity_from_markdown(
+                prepared.file_path,
+                prepared.entity_markdown,
+                is_new=False,
+                existing_entity=entity,
+                session=session,
+            )
+            if prepared.file_path.as_posix() != previous_file_path.as_posix():
+                # Trigger: a full replacement changed the canonical note path.
+                # Why: the new file has already been written and the entity now points at it.
+                # Outcome: remove the stale old file so local Basic Memory mirrors cloud's queued cleanup.
+                if not self._paths_share_storage_target(previous_file_path, prepared.file_path):
+                    await self.file_service.delete_file(previous_file_path)
+            entity = await self.repository.update(session, entity.id, {"checksum": checksum})
+            if not entity:  # pragma: no cover
+                raise ValueError(
+                    f"Failed to update entity checksum after update: {prepared.file_path}"
+                )
+            persisted_content, search_content = await self._read_persisted_write_content(
+                prepared.file_path
+            )
 
-        return EntityWriteResult(
-            entity=entity,
-            content=persisted_content,
-            search_content=search_content,
-        )
+            return EntityWriteResult(
+                entity=entity,
+                content=persisted_content,
+                search_content=search_content,
+            )
 
     async def delete_entity(self, permalink_or_id: str | int) -> bool:
         """Delete entity and its file."""
@@ -812,7 +1026,8 @@ class EntityService(BaseService[EntityModel]):
             # Trigger: repository.delete returns False when entity is already gone (NoResultFound)
             # Why: concurrent delete_directory requests can race to delete the same entity
             # Outcome: treat as success since the entity is deleted either way
-            deleted = await self.repository.delete(entity.id)
+            async with self._session_scope() as session:
+                deleted = await self.repository.delete(session, entity.id)
             if not deleted:
                 logger.info("Entity already removed from DB", entity_id=permalink_or_id)
             return True
@@ -824,7 +1039,8 @@ class EntityService(BaseService[EntityModel]):
     async def get_by_permalink(self, permalink: str) -> EntityModel:
         """Get entity by type and name combination."""
         logger.debug(f"Getting entity by permalink: {permalink}")
-        db_entity = await self.repository.get_by_permalink(permalink)
+        async with self._session_scope() as session:
+            db_entity = await self.repository.get_by_permalink(session, permalink)
         if not db_entity:
             raise EntityNotFoundError(f"Entity not found: {permalink}")
         return db_entity
@@ -832,19 +1048,25 @@ class EntityService(BaseService[EntityModel]):
     async def get_entities_by_id(self, ids: List[int]) -> Sequence[EntityModel]:
         """Get specific entities and their relationships."""
         logger.debug(f"Getting entities: {ids}")
-        return await self.repository.find_by_ids(ids)
+        async with self._session_scope() as session:
+            return await self.repository.find_by_ids(session, ids)
 
     async def get_entities_by_permalinks(self, permalinks: List[str]) -> Sequence[EntityModel]:
         """Get specific nodes and their relationships."""
         logger.debug(f"Getting entities permalinks: {permalinks}")
-        return await self.repository.find_by_permalinks(permalinks)
+        async with self._session_scope() as session:
+            return await self.repository.find_by_permalinks(session, permalinks)
 
     async def delete_entity_by_file_path(self, file_path: Union[str, Path]) -> None:
         """Delete entity by file path."""
-        await self.repository.delete_by_file_path(str(file_path))
+        async with self._session_scope() as session:
+            await self.repository.delete_by_file_path(session, str(file_path))
 
     async def create_entity_from_markdown(
-        self, file_path: Path, markdown: EntityMarkdown
+        self,
+        file_path: Path,
+        markdown: EntityMarkdown,
+        session: AsyncSession | None = None,
     ) -> EntityModel:
         """Create entity and observations only.
 
@@ -867,12 +1089,13 @@ class EntityService(BaseService[EntityModel]):
             model.created_by = user_id
             model.last_updated_by = user_id
 
-        # Use UPSERT to handle conflicts cleanly
-        try:
-            return await self.repository.upsert_entity(model)
-        except Exception as e:
-            logger.error(f"Failed to upsert entity for {file_path}: {e}")
-            raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
+        async with self._session_scope(session) as active_session:
+            # Use UPSERT to handle conflicts cleanly
+            try:
+                return await self.repository.upsert_entity(active_session, model)
+            except Exception as e:
+                logger.error(f"Failed to upsert entity for {file_path}: {e}")
+                raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
     async def update_entity_and_observations(
         self,
@@ -880,6 +1103,7 @@ class EntityService(BaseService[EntityModel]):
         markdown: EntityMarkdown,
         *,
         existing_entity: EntityModel | None = None,
+        session: AsyncSession | None = None,
     ) -> EntityModel:
         """Update entity fields and observations.
 
@@ -888,65 +1112,53 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        if existing_entity is not None:
-            db_entity = await self.repository.get_by_id(
-                existing_entity.id,
-                load_relations=False,
+        async with self._session_scope(session) as active_session:
+            if existing_entity is not None:
+                db_entity = await self.repository.get_by_id(
+                    active_session,
+                    existing_entity.id,
+                    load_relations=False,
+                )
+            else:
+                db_entity = await self.repository.get_by_file_path(
+                    active_session,
+                    file_path.as_posix(),
+                    load_relations=False,
+                )
+            if db_entity is None:  # pragma: no cover
+                raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
+
+            # Observations are owned by the markdown file, so re-indexing replaces the old set.
+            # We only need the entity id here; loading the old relationship collection is wasted work.
+            await self.observation_repository.delete_by_fields(
+                active_session, entity_id=db_entity.id
             )
-        else:
-            db_entity = await self.repository.get_by_file_path(
-                file_path.as_posix(),
-                load_relations=False,
-            )
-        if db_entity is None:  # pragma: no cover
-            raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
 
-        # Observations are owned by the markdown file, so re-indexing replaces the old set.
-        # We only need the entity id here; loading the old relationship collection is wasted work.
-        await self.observation_repository.delete_by_fields(entity_id=db_entity.id)
+            observations = [
+                Observation(
+                    project_id=self.observation_repository.project_id,
+                    entity_id=db_entity.id,
+                    content=obs.content,
+                    category=obs.category,
+                    context=obs.context,
+                    tags=obs.tags,
+                )
+                for obs in markdown.observations
+            ]
+            await self.observation_repository.add_all_no_return(active_session, observations)
 
-        observations = [
-            Observation(
-                project_id=self.observation_repository.project_id,
-                entity_id=db_entity.id,
-                content=obs.content,
-                category=obs.category,
-                context=obs.context,
-                tags=obs.tags,
-            )
-            for obs in markdown.observations
-        ]
-        await self.observation_repository.add_all_no_return(observations)
+            self._apply_markdown_entity_fields(db_entity, file_path, markdown)
 
-        self._apply_markdown_entity_fields(db_entity, file_path, markdown)
+            # checksum value is None == not finished with sync
+            db_entity.checksum = None
 
-        # checksum value is None == not finished with sync
-        db_entity.checksum = None
+            # Set last_updated_by for cloud usage (preserve existing created_by)
+            user_id = self.get_user_id()
+            if user_id is not None:
+                db_entity.last_updated_by = user_id
 
-        # Set last_updated_by for cloud usage (preserve existing created_by)
-        user_id = self.get_user_id()
-        if user_id is not None:
-            db_entity.last_updated_by = user_id
-
-        entity_updates = {
-            "title": db_entity.title,
-            "note_type": db_entity.note_type,
-            "permalink": db_entity.permalink,
-            "file_path": db_entity.file_path,
-            "content_type": db_entity.content_type,
-            "created_at": db_entity.created_at,
-            "updated_at": db_entity.updated_at,
-            "entity_metadata": db_entity.entity_metadata,
-            "checksum": db_entity.checksum,
-            "last_updated_by": db_entity.last_updated_by,
-        }
-        updated = await self.repository.update_fields(
-            db_entity.id,
-            entity_updates,
-        )
-        if not updated:  # pragma: no cover
-            raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
-        return db_entity
+            await active_session.flush()
+            return db_entity
 
     def _apply_markdown_entity_fields(
         self,
@@ -981,23 +1193,29 @@ class EntityService(BaseService[EntityModel]):
         existing_entity: EntityModel | None = None,
         resolve_relations: bool = True,
         reload_entity: bool = True,
+        session: AsyncSession | None = None,
     ) -> EntityModel:
         """Create/update entity and relations from parsed markdown."""
-        if is_new:
-            created = await self.create_entity_from_markdown(file_path, markdown)
-        else:
-            created = await self.update_entity_and_observations(
-                file_path,
+        async with self._session_scope(session) as active_session:
+            if is_new:
+                created = await self.create_entity_from_markdown(
+                    file_path, markdown, session=active_session
+                )
+            else:
+                created = await self.update_entity_and_observations(
+                    file_path,
+                    markdown,
+                    existing_entity=existing_entity,
+                    session=active_session,
+                )
+            # Pass the entity through so relation work does not have to rediscover the source row.
+            return await self.update_entity_relations(
+                created,
                 markdown,
-                existing_entity=existing_entity,
+                resolve_targets=resolve_relations,
+                reload_entity=reload_entity,
+                session=active_session,
             )
-        # Pass the entity through so relation work does not have to rediscover the source row.
-        return await self.update_entity_relations(
-            created,
-            markdown,
-            resolve_targets=resolve_relations,
-            reload_entity=reload_entity,
-        )
 
     async def update_entity_relations(
         self,
@@ -1006,6 +1224,7 @@ class EntityService(BaseService[EntityModel]):
         *,
         resolve_targets: bool = True,
         reload_entity: bool = True,
+        session: AsyncSession | None = None,
     ) -> EntityModel:
         """Update relations for entity.
 
@@ -1015,69 +1234,79 @@ class EntityService(BaseService[EntityModel]):
         entity_id = entity.id
         logger.debug(f"Updating relations for entity: {entity.file_path}")
 
-        # Clear existing relations first
-        await self.relation_repository.delete_outgoing_relations_from_entity(entity_id)
+        async with self._session_scope(session) as active_session:
+            # Clear existing relations first
+            await self.relation_repository.delete_outgoing_relations_from_entity(
+                active_session, entity_id
+            )
 
-        if markdown.relations:
-            if resolve_targets:
-                # Exact target resolution is useful for local sync, but expensive for cloud
-                # one-file jobs. Cloud can write unresolved rows and let a relation repair pass
-                # fill in to_id later.
-                resolved_entities = await asyncio.gather(
-                    *(
-                        self.link_resolver.resolve_link(
-                            rel.target,
-                            strict=True,
-                            load_relations=False,
+            if markdown.relations:
+                if resolve_targets:
+                    # Exact target resolution is useful for local sync, but expensive for cloud
+                    # one-file jobs. Cloud can write unresolved rows and let a relation repair pass
+                    # fill in to_id later.
+                    resolved_entities = []
+                    for rel in markdown.relations:
+                        try:
+                            resolved_entities.append(
+                                await self.link_resolver.resolve_link(
+                                    rel.target,
+                                    strict=True,
+                                    load_relations=False,
+                                    session=active_session,
+                                )
+                            )
+                        except Exception as exc:
+                            resolved_entities.append(exc)
+                else:
+                    resolved_entities = [None] * len(markdown.relations)
+
+                # Process results and create relation records
+                relations_to_add = []
+                for rel, resolved in zip(markdown.relations, resolved_entities):
+                    # Handle exceptions from gather and None results
+                    target_entity: Optional[Entity] = None
+                    if not isinstance(resolved, Exception):
+                        # Relation target resolution keeps exceptions as values so a failed lookup
+                        # becomes an unresolved forward reference instead of aborting the write.
+                        target_entity = resolved
+
+                    if target_entity is None and not resolve_targets:
+                        target_entity = await self._resolve_deferred_self_relation(
+                            rel.target, entity, session=active_session
                         )
-                        for rel in markdown.relations
-                    ),
-                    return_exceptions=True,
-                )
-            else:
-                resolved_entities = [None] * len(markdown.relations)
 
-            # Process results and create relation records
-            relations_to_add = []
-            for rel, resolved in zip(markdown.relations, resolved_entities):
-                # Handle exceptions from gather and None results
-                target_entity: Optional[Entity] = None
-                if not isinstance(resolved, BaseException):
-                    # asyncio.gather(..., return_exceptions=True) can return any BaseException.
-                    target_entity = resolved
+                    # if the target is found, store the id
+                    target_id = target_entity.id if target_entity else None
+                    # if the target is found, store the title, otherwise add the target for a "forward link"
+                    target_name = target_entity.title if target_entity else rel.target
 
-                if target_entity is None and not resolve_targets:
-                    target_entity = await self._resolve_deferred_self_relation(rel.target, entity)
+                    # Create the relation
+                    relation = Relation(
+                        project_id=self.relation_repository.project_id,
+                        from_id=entity_id,
+                        to_id=target_id,
+                        to_name=target_name,
+                        relation_type=rel.type,
+                        context=rel.context,
+                    )
+                    relations_to_add.append(relation)
 
-                # if the target is found, store the id
-                target_id = target_entity.id if target_entity else None
-                # if the target is found, store the title, otherwise add the target for a "forward link"
-                target_name = target_entity.title if target_entity else rel.target
+                # Batch insert all relations
+                if relations_to_add:
+                    await self.relation_repository.add_all_ignore_duplicates(
+                        active_session, relations_to_add
+                    )
 
-                # Create the relation
-                relation = Relation(
-                    project_id=self.relation_repository.project_id,
-                    from_id=entity_id,
-                    to_id=target_id,
-                    to_name=target_name,
-                    relation_type=rel.type,
-                    context=rel.context,
-                )
-                relations_to_add.append(relation)
+            if not reload_entity:
+                return entity
 
-            # Batch insert all relations
-            if relations_to_add:
-                await self.relation_repository.add_all_ignore_duplicates(relations_to_add)
-
-        if not reload_entity:
-            return entity
-
-        # Reload entity with relations via PK lookup (faster than get_by_file_path string match).
-        reloaded = await self.repository.find_by_ids([entity_id])
-        return reloaded[0]
+            # Reload entity with relations via PK lookup (faster than get_by_file_path string match).
+            reloaded = await self.repository.find_by_ids(active_session, [entity_id])
+            return reloaded[0]
 
     async def _resolve_deferred_self_relation(
-        self, target: str, entity: EntityModel
+        self, target: str, entity: EntityModel, session: AsyncSession | None = None
     ) -> EntityModel | None:
         """Resolve only self-relations that are safe to identify in deferred mode."""
         clean_target = target.strip()
@@ -1101,9 +1330,12 @@ class EntityService(BaseService[EntityModel]):
         # Title-only links are ambiguous because Basic Memory allows duplicate titles.
         # Collapse them to self only when the title lookup proves this source is the sole candidate;
         # otherwise leave the relation unresolved so we do not create a wrong permanent edge.
-        title_matches = await self.repository.get_by_title(clean_target, load_relations=False)
-        if len(title_matches) == 1 and title_matches[0].id == entity.id:
-            return entity
+        async with self._session_scope(session) as active_session:
+            title_matches = await self.repository.get_by_title(
+                active_session, clean_target, load_relations=False
+            )
+            if len(title_matches) == 1 and title_matches[0].id == entity.id:
+                return entity
 
         return None
 
@@ -1166,43 +1398,46 @@ class EntityService(BaseService[EntityModel]):
 
         file_path = Path(entity.file_path)
         current_content, _ = await self.file_service.read_file(file_path)
-        # --- Prepare Against Explicit Base Content ---
-        # The edit operation is the semantic step; file/DB writes below are just persistence of that
-        # accepted result.
-        prepared = await self.prepare_edit_entity_content(
-            entity,
-            current_content,
-            operation=operation,
-            content=content,
-            section=section,
-            find_text=find_text,
-            expected_replacements=expected_replacements,
-        )
+        async with self._session_scope() as session:
+            # --- Prepare Against Explicit Base Content ---
+            # The edit operation is the semantic step; file/DB writes below are just persistence of that
+            # accepted result.
+            prepared = await self.prepare_edit_entity_content(
+                entity,
+                current_content,
+                operation=operation,
+                content=content,
+                section=section,
+                find_text=find_text,
+                expected_replacements=expected_replacements,
+                session=session,
+            )
 
-        checksum = await self.file_service.write_file(
-            file_path,
-            prepared.markdown_content,
-        )
+            checksum = await self.file_service.write_file(
+                file_path,
+                prepared.markdown_content,
+            )
 
-        # --- Rebuild Structured Knowledge State ---
-        # Non-fast edits remain fully synchronous locally: once the file write succeeds, we refresh
-        # observations, relations, and checksum in the same request.
-        entity = await self.upsert_entity_from_markdown(
-            file_path,
-            prepared.entity_markdown,
-            is_new=False,
-        )
+            # --- Rebuild Structured Knowledge State ---
+            # Non-fast edits remain fully synchronous locally: once the file write succeeds, we refresh
+            # observations, relations, and checksum in the same request.
+            entity = await self.upsert_entity_from_markdown(
+                file_path,
+                prepared.entity_markdown,
+                is_new=False,
+                session=session,
+            )
 
-        entity = await self.repository.update(entity.id, {"checksum": checksum})
-        if not entity:  # pragma: no cover
-            raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
-        persisted_content, search_content = await self._read_persisted_write_content(file_path)
+            entity = await self.repository.update(session, entity.id, {"checksum": checksum})
+            if not entity:  # pragma: no cover
+                raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
+            persisted_content, search_content = await self._read_persisted_write_content(file_path)
 
-        return EntityWriteResult(
-            entity=entity,
-            content=persisted_content,
-            search_content=search_content,
-        )
+            return EntityWriteResult(
+                entity=entity,
+                content=persisted_content,
+                search_content=search_content,
+            )
 
     def apply_edit_operation(
         self,
@@ -1479,9 +1714,9 @@ class EntityService(BaseService[EntityModel]):
         current_path = entity.file_path
         old_permalink = entity.permalink
 
-        # 2. Validate destination path format first
-        if not destination_path or destination_path.startswith("/") or not destination_path.strip():
-            raise ValueError(f"Invalid destination path: {destination_path}")
+        # 2. Validate and normalize the destination with the shared move-path
+        # rules so move_entity and move_note accept identical inputs.
+        destination_path = normalize_note_move_destination_path(destination_path)
 
         # 3. Validate paths
         # NOTE: In tenantless/cloud mode, we cannot rely on local filesystem paths.
@@ -1528,11 +1763,12 @@ class EntityService(BaseService[EntityModel]):
             updates["checksum"] = new_checksum
 
             # 9. Update database
-            updated_entity = await self.repository.update(entity.id, updates)
-            if not updated_entity:
-                raise ValueError(f"Failed to update entity in database: {entity.id}")
+            async with self._session_scope() as session:
+                updated_entity = await self.repository.update(session, entity.id, updates)
+                if not updated_entity:
+                    raise ValueError(f"Failed to update entity in database: {entity.id}")
 
-            return updated_entity
+                return updated_entity
 
         except Exception as e:
             # Rollback: try to restore original file location if move succeeded
@@ -1581,7 +1817,8 @@ class EntityService(BaseService[EntityModel]):
         destination_directory = destination_directory.strip("/")
 
         # Find all entities in the source directory
-        entities = await self.repository.find_by_directory_prefix(source_directory)
+        async with self._session_scope() as session:
+            entities = await self.repository.find_by_directory_prefix(session, source_directory)
 
         if not entities:
             logger.warning(f"No entities found in directory: {source_directory}")
@@ -1665,7 +1902,8 @@ class EntityService(BaseService[EntityModel]):
         directory = directory.strip("/")
 
         # Find all entities in the directory
-        entities = await self.repository.find_by_directory_prefix(directory)
+        async with self._session_scope() as session:
+            entities = await self.repository.find_by_directory_prefix(session, directory)
 
         if not entities:
             logger.warning(f"No entities found in directory: {directory}")

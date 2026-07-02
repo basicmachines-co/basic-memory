@@ -10,7 +10,12 @@ from fastapi import APIRouter, Query, Path
 from loguru import logger
 
 import logfire
-from basic_memory.deps import ContextServiceV2ExternalDep, EntityRepositoryV2ExternalDep
+from basic_memory import db
+from basic_memory.deps import (
+    ContextServiceV2ExternalDep,
+    EntityRepositoryV2ExternalDep,
+    SessionMakerDep,
+)
 from basic_memory.schemas.base import TimeFrame, parse_timeframe
 from basic_memory.schemas.memory import (
     GraphContext,
@@ -27,6 +32,7 @@ router = APIRouter(tags=["memory"])
 async def recent(
     context_service: ContextServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     type: Annotated[list[SearchItemType] | None, Query()] = None,
     depth: int = 1,
@@ -95,9 +101,14 @@ async def recent(
             phase="shape_response",
             result_count=len(context.results),
         ):
-            recent_context = await to_graph_context(
-                context, entity_repository=entity_repository, page=page, page_size=page_size
-            )
+            async with db.scoped_session(session_maker) as session:
+                recent_context = await to_graph_context(
+                    context,
+                    entity_repository=entity_repository,
+                    session=session,
+                    page=page,
+                    page_size=page_size,
+                )
         logger.debug(f"V2 Recent context: {recent_context.model_dump_json()}")
         return recent_context
 
@@ -109,6 +120,7 @@ async def recent(
 async def get_memory_context(
     context_service: ContextServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    session_maker: SessionMakerDep,
     uri: str,
     project_id: str = Path(..., description="Project external UUID"),
     depth: int = 1,
@@ -177,6 +189,11 @@ async def get_memory_context(
             phase="shape_response",
             result_count=len(context.results),
         ):
-            return await to_graph_context(
-                context, entity_repository=entity_repository, page=page, page_size=page_size
-            )
+            async with db.scoped_session(session_maker) as session:
+                return await to_graph_context(
+                    context,
+                    entity_repository=entity_repository,
+                    session=session,
+                    page=page,
+                    page_size=page_size,
+                )

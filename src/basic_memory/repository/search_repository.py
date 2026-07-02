@@ -48,6 +48,8 @@ class SearchRepository(Protocol):
         min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
+        allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
     ) -> List[SearchIndexRow]:
         """Search across indexed content."""
         ...

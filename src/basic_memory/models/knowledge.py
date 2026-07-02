@@ -23,6 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from basic_memory.models.base import Base
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.utils import generate_permalink
 
 
@@ -134,7 +135,7 @@ class Entity(Base):
     @property
     def is_markdown(self):
         """Check if the entity is a markdown file."""
-        return self.content_type == "text/markdown"
+        return self.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
 
     def __getattribute__(self, name):
         """Override attribute access to ensure datetime fields are timezone-aware."""

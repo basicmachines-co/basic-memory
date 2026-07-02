@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status, Path
 from loguru import logger
 
+from basic_memory import db
 from basic_memory.api.v2.utils import to_graph_context, to_search_results
 from basic_memory.api.template_loader import template_loader
 from basic_memory.schemas.base import parse_timeframe
@@ -18,6 +19,7 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     SearchServiceV2ExternalDep,
     EntityServiceV2ExternalDep,
+    SessionMakerDep,
 )
 from basic_memory.schemas.prompt import (
     ContinueConversationRequest,
@@ -36,6 +38,7 @@ async def continue_conversation(
     entity_service: EntityServiceV2ExternalDep,
     context_service: ContextServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    session_maker: SessionMakerDep,
     request: ContinueConversationRequest,
     project_id: str = Path(..., description="Project external UUID"),
 ) -> PromptResponse:
@@ -82,9 +85,10 @@ async def continue_conversation(
                 )
 
                 # Process results into the schema format
-                graph_context = await to_graph_context(
-                    context_result, entity_repository=entity_repository
-                )
+                async with db.scoped_session(session_maker) as session:
+                    graph_context = await to_graph_context(
+                        context_result, entity_repository=entity_repository, session=session
+                    )
 
                 # Add results to our collection (limit to top results for each permalink)
                 if graph_context.results:
@@ -109,7 +113,10 @@ async def continue_conversation(
             max_related=request.related_items_limit,
             include_observations=True,
         )
-        recent_context = await to_graph_context(context_result, entity_repository=entity_repository)
+        async with db.scoped_session(session_maker) as session:
+            recent_context = await to_graph_context(
+                context_result, entity_repository=entity_repository, session=session
+            )
 
         hierarchical_results = recent_context.results[:5]  # Limit to top 5 recent items
 

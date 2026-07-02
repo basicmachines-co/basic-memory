@@ -49,7 +49,7 @@ def test_cloud_upload_uses_control_plane_client(monkeypatch, tmp_path, config_ma
             str(upload_dir),
             "--project",
             "routing-test",
-            "--no-sync",
+            "--no-index",
         ],
     )
 
@@ -104,7 +104,7 @@ def test_cloud_upload_uses_project_workspace_for_api_and_webdav(
             str(upload_dir),
             "--project",
             "routing-test",
-            "--no-sync",
+            "--no-index",
         ],
     )
 
@@ -135,7 +135,7 @@ def test_cloud_upload_exits_when_project_lookup_fails(monkeypatch, tmp_path):
             str(upload_dir),
             "--project",
             "routing-test",
-            "--no-sync",
+            "--no-index",
         ],
     )
 

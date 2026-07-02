@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 
+from basic_memory import db
 from basic_memory.config import DatabaseBackend
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 
@@ -108,16 +109,18 @@ async def seed_diagnostic_notes(search_service):
 
     entities = []
     for note in notes:
-        entity = await search_service.entity_repository.create(
-            {
-                "title": note["title"],
-                "note_type": "note",
-                "entity_metadata": {"tags": note.get("tags", [])},
-                "content_type": "text/markdown",
-                "permalink": note["permalink"],
-                "file_path": f"{note['permalink']}.md",
-            }
-        )
+        async with db.scoped_session(search_service.session_maker) as session:
+            entity = await search_service.entity_repository.create(
+                session,
+                {
+                    "title": note["title"],
+                    "note_type": "note",
+                    "entity_metadata": {"tags": note.get("tags", [])},
+                    "content_type": "text/markdown",
+                    "permalink": note["permalink"],
+                    "file_path": f"{note['permalink']}.md",
+                },
+            )
         await search_service.index_entity_data(entity, content=note["content"])
         await search_service.sync_entity_vectors(entity.id)
         entities.append(entity)

@@ -11,7 +11,6 @@ Key Concepts:
 4. Everything is stored in both SQLite and markdown files
 """
 
-import os
 import mimetypes
 import re
 from datetime import datetime, timedelta
@@ -281,13 +280,10 @@ class Entity(BaseModel):
         """Get the file path for this entity based on its permalink."""
         safe_title = self.safe_title
         if self.content_type == "text/markdown":
-            return (
-                os.path.join(self.directory, f"{safe_title}.md")
-                if self.directory
-                else f"{safe_title}.md"
-            )
+            filename = f"{safe_title}.md"
         else:
-            return os.path.join(self.directory, safe_title) if self.directory else safe_title
+            filename = safe_title
+        return f"{self.directory}/{filename}" if self.directory else filename
 
     @property
     def permalink(self) -> Optional[Permalink]:

@@ -16,11 +16,14 @@ from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
 
 import logfire
+from basic_memory import db
 from basic_memory.deps import (
     ProjectConfigV2ExternalDep,
     FileServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
+    NoteContentQueryServiceDep,
     SearchServiceV2ExternalDep,
+    SessionMakerDep,
 )
 from basic_memory.models.knowledge import Entity as EntityModel
 from basic_memory.schemas.v2.resource import (
@@ -38,6 +41,8 @@ async def get_resource_content(
     config: ProjectConfigV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
+    note_content_query_service: NoteContentQueryServiceDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
 ) -> Response:
@@ -64,15 +69,33 @@ async def get_resource_content(
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
 
-        with logfire.span(
-            "api.resource.get_content.load_entity",
-            domain="resource",
-            action="get_content",
-            phase="load_entity",
-        ):
-            entity = await entity_repository.get_by_external_id(entity_id)
-        if not entity:
-            raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+        # Keep the DB session open only for the lookups; close it before the
+        # filesystem I/O below so large/slow resource reads don't pin a pooled
+        # connection (and an open read transaction on Postgres) for their duration.
+        async with db.scoped_session(session_maker) as session:
+            note_resource = await note_content_query_service.get_note_resource_with_read_repair(
+                project_external_id=project_id,
+                entity_external_id=entity_id,
+                session=session,
+            )
+            if note_resource is not None:
+                return Response(
+                    content=note_resource.content,
+                    media_type=note_resource.content_type,
+                )
+
+            with logfire.span(
+                "api.resource.get_content.load_entity",
+                domain="resource",
+                action="get_content",
+                phase="load_entity",
+            ):
+                entity = await entity_repository.get_by_external_id(session, entity_id)
+            if not entity:
+                raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+            # Copy the scalar columns needed for file I/O so the session can close.
+            entity_file_path = entity.file_path
+            entity_db_id = entity.id
 
         with logfire.span(
             "api.resource.get_content.validate_path",
@@ -81,9 +104,9 @@ async def get_resource_content(
             phase="validate_path",
         ):
             project_path = PathLib(config.home)
-            if not validate_project_path(entity.file_path, project_path):
+            if not validate_project_path(entity_file_path, project_path):
                 logger.error(  # pragma: no cover
-                    f"Invalid file path in entity {entity.id}: {entity.file_path}"
+                    f"Invalid file path in entity {entity_db_id}: {entity_file_path}"
                 )
                 raise HTTPException(  # pragma: no cover
                     status_code=500,
@@ -96,10 +119,10 @@ async def get_resource_content(
             action="get_content",
             phase="ensure_exists",
         ):
-            if not await file_service.exists(entity.file_path):
+            if not await file_service.exists(entity_file_path):
                 raise HTTPException(  # pragma: no cover
                     status_code=404,
-                    detail=f"File not found: {entity.file_path}",
+                    detail=f"File not found: {entity_file_path}",
                 )
 
         with logfire.span(
@@ -108,8 +131,8 @@ async def get_resource_content(
             action="get_content",
             phase="read_content",
         ):
-            content = await file_service.read_file_bytes(entity.file_path)
-            content_type = file_service.content_type(entity.file_path)
+            content = await file_service.read_file_bytes(entity_file_path)
+            content_type = file_service.content_type(entity_file_path)
 
         return Response(content=content, media_type=content_type)
 
@@ -121,6 +144,7 @@ async def create_resource(
     file_service: FileServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
 ) -> ResourceResponse:
     """Create a new resource file.
@@ -158,13 +182,14 @@ async def create_resource(
                     "Path must be relative and stay within project boundaries.",
                 )
 
-            existing_entity = await entity_repository.get_by_file_path(data.file_path)
-            if existing_entity:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Resource already exists at {data.file_path} with entity_id {existing_entity.external_id}. "
-                    f"Use PUT /resource/{existing_entity.external_id} to update it.",
-                )
+            async with db.scoped_session(session_maker) as session:
+                existing_entity = await entity_repository.get_by_file_path(session, data.file_path)
+                if existing_entity:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Resource already exists at {data.file_path} with entity_id {existing_entity.external_id}. "
+                        f"Use PUT /resource/{existing_entity.external_id} to update it.",
+                    )
 
             with logfire.span(
                 "api.resource.create.write_file",
@@ -203,7 +228,8 @@ async def create_resource(
                 action="create",
                 phase="upsert_entity",
             ):
-                entity = await entity_repository.add(entity)
+                async with db.scoped_session(session_maker) as session:
+                    entity = await entity_repository.add(session, entity)
 
             with logfire.span(
                 "api.resource.create.search_index",
@@ -236,6 +262,7 @@ async def update_resource(
     file_service: FileServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
+    session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
 ) -> ResourceResponse:
@@ -265,7 +292,8 @@ async def update_resource(
         action="update",
     ):
         try:
-            entity = await entity_repository.get_by_external_id(entity_id)
+            async with db.scoped_session(session_maker) as session:
+                entity = await entity_repository.get_by_external_id(session, entity_id)
             if not entity:
                 raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 
@@ -315,17 +343,19 @@ async def update_resource(
                 action="update",
                 phase="update_entity",
             ):
-                updated_entity = await entity_repository.update(
-                    entity.id,
-                    {
-                        "title": file_name,
-                        "note_type": note_type,
-                        "content_type": content_type,
-                        "file_path": target_file_path,
-                        "checksum": checksum,
-                        "updated_at": file_metadata.modified_at,
-                    },
-                )
+                async with db.scoped_session(session_maker) as session:
+                    updated_entity = await entity_repository.update(
+                        session,
+                        entity.id,
+                        {
+                            "title": file_name,
+                            "note_type": note_type,
+                            "content_type": content_type,
+                            "file_path": target_file_path,
+                            "checksum": checksum,
+                            "updated_at": file_metadata.modified_at,
+                        },
+                    )
             if updated_entity is None:
                 raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
 

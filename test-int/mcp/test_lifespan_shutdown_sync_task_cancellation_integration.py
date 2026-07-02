@@ -2,7 +2,7 @@
 Integration test for FastAPI lifespan shutdown behavior.
 
 This test verifies the asyncio cancellation pattern used by the API lifespan:
-when the background sync task is cancelled during shutdown, it must be *awaited*
+when the background watch task is cancelled during shutdown, it must be *awaited*
 before database shutdown begins. This prevents "hang on exit" scenarios in
 `asyncio.run(...)` callers (e.g. CLI/MCP clients using httpx ASGITransport).
 """
@@ -12,9 +12,9 @@ import asyncio
 from httpx import ASGITransport, AsyncClient
 
 
-def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
+def test_lifespan_shutdown_awaits_watch_task_cancellation(app, monkeypatch):
     """
-    Ensure lifespan shutdown awaits the cancelled background sync task.
+    Ensure lifespan shutdown awaits the cancelled background watch task.
 
     Why this is deterministic:
     - Cancelling a task does not make it "done" immediately; it becomes done only
@@ -22,7 +22,7 @@ def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
     - In the buggy version, shutdown proceeded directly to db.shutdown_db()
       immediately after calling cancel(), so at *entry* to shutdown_db the task
       is still not done.
-    - In the fixed version, SyncCoordinator.stop() awaits the task before returning,
+    - In the fixed version, WatchCoordinator.stop() awaits the task before returning,
       so by the time shutdown_db is called, the task is done (cancelled).
     """
 
@@ -51,24 +51,24 @@ def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
 
     monkeypatch.setattr(container_module.ApiContainer, "init_database", _fake_init_database)
 
-    # Make the sync task long-lived so it must be cancelled on shutdown.
-    # Patch at the source module where SyncCoordinator imports it.
-    async def _fake_initialize_file_sync(_app_config):
+    # Make the watch task long-lived so it must be cancelled on shutdown.
+    # Patch at the source module where WatchCoordinator imports it.
+    async def _fake_initialize_file_indexing(_app_config, quiet=True):  # noqa: ANN001, FBT002
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(init_module, "initialize_file_sync", _fake_initialize_file_sync)
+    monkeypatch.setattr(init_module, "initialize_file_indexing", _fake_initialize_file_indexing)
 
-    # Assert ordering: shutdown_db must be called only after the sync_task is done.
-    # SyncCoordinator stores the task in _sync_task attribute.
-    async def _assert_sync_task_done_before_db_shutdown(self):
-        sync_coordinator = api_app_module.app.state.sync_coordinator
-        assert sync_coordinator._sync_task is not None
-        assert sync_coordinator._sync_task.done()
+    # Assert ordering: shutdown_db must be called only after the watch task is done.
+    # WatchCoordinator stores the task in _watch_task.
+    async def _assert_watch_task_done_before_db_shutdown(self):
+        watch_coordinator = api_app_module.app.state.watch_coordinator
+        assert watch_coordinator._watch_task is not None
+        assert watch_coordinator._watch_task.done()
 
     monkeypatch.setattr(
         container_module.ApiContainer,
         "shutdown_database",
-        _assert_sync_task_done_before_db_shutdown,
+        _assert_watch_task_done_before_db_shutdown,
     )
 
     async def _run_client_once():

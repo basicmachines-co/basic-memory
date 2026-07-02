@@ -295,9 +295,9 @@ class KnowledgeClient:
             )
         return DirectoryDeleteResult.model_validate(response.json())
 
-    # --- Single-file sync ---
+    # --- Single-file indexing ---
 
-    async def sync_file(self, file_path: str) -> EntityResponse:
+    async def index_file(self, file_path: str) -> EntityResponse:
         """Index a markdown file that exists on disk but is not indexed yet.
 
         Args:
@@ -312,17 +312,17 @@ class KnowledgeClient:
         from basic_memory.mcp.tools.utils import call_post
 
         with logfire.span(
-            "mcp.client.knowledge.sync_file",
+            "mcp.client.knowledge.index_file",
             client_name="knowledge",
-            operation="sync_file",
+            operation="index_file",
         ):
             response = await call_post(
                 self.http_client,
-                f"{self._base_path}/sync-file",
+                f"{self._base_path}/index-file",
                 json={"file_path": file_path},
                 client_name="knowledge",
-                operation="sync_file",
-                path_template="/v2/projects/{project_id}/knowledge/sync-file",
+                operation="index_file",
+                path_template="/v2/projects/{project_id}/knowledge/index-file",
             )
         return EntityResponse.model_validate(response.json())
 

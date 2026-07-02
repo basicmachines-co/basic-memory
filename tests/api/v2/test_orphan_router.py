@@ -24,8 +24,8 @@ async def test_get_orphan_entities_returns_unlinked_entities(client: AsyncClient
         f"{v2_project_url}/knowledge/entities",
         json={"title": "Orphan Two", "directory": "orphan", "content": "Also no links"},
     )
-    assert first.status_code == 200
-    assert second.status_code == 200
+    assert first.status_code == 202
+    assert second.status_code == 202
 
     response = await client.get(f"{v2_project_url}/knowledge/orphans")
 
@@ -61,9 +61,9 @@ async def test_get_orphan_entities_excludes_incoming_and_outgoing_relation_nodes
         f"{v2_project_url}/knowledge/entities",
         json={"title": "Standalone Note", "directory": "linked", "content": "No links"},
     )
-    assert source.status_code == 200
-    assert target.status_code == 200
-    assert standalone.status_code == 200
+    assert source.status_code == 202
+    assert target.status_code == 202
+    assert standalone.status_code == 202
 
     response = await client.get(f"{v2_project_url}/knowledge/orphans")
 
@@ -81,7 +81,7 @@ async def test_get_orphan_entities_response_shape(client: AsyncClient, v2_projec
         f"{v2_project_url}/knowledge/entities",
         json={"title": "Shape Test", "directory": "shape", "content": "Testing shape"},
     )
-    assert created.status_code == 200
+    assert created.status_code == 202
 
     response = await client.get(f"{v2_project_url}/knowledge/orphans")
 

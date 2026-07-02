@@ -22,6 +22,55 @@ def _migrate_legacy_projects(data: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], cast(Any, BasicMemoryConfig.migrate_legacy_projects)(data))
 
 
+def _migrate_legacy_sync_changes(data: Any) -> Any:
+    return cast(Any, BasicMemoryConfig.migrate_legacy_sync_fields)(data)
+
+
+class TestLegacySyncChangesMigration:
+    """Backward compatibility for the sync_changes/sync_delay renames."""
+
+    def test_legacy_sync_changes_false_disables_indexing(self):
+        assert _migrate_legacy_sync_changes({"sync_changes": False})["index_changes"] is False
+
+    def test_legacy_sync_changes_true_enables_indexing(self):
+        assert _migrate_legacy_sync_changes({"sync_changes": True})["index_changes"] is True
+
+    def test_new_index_changes_takes_precedence(self):
+        data = _migrate_legacy_sync_changes({"sync_changes": False, "index_changes": True})
+        assert data["index_changes"] is True
+
+    def test_absent_legacy_key_is_left_untouched(self):
+        assert "index_changes" not in _migrate_legacy_sync_changes({})
+
+    def test_non_dict_input_passes_through(self):
+        assert _migrate_legacy_sync_changes("not-a-dict") == "not-a-dict"
+
+    def test_legacy_sync_delay_migrates_to_index_delay(self):
+        assert _migrate_legacy_sync_changes({"sync_delay": 5000})["index_delay"] == 5000
+
+    def test_new_index_delay_takes_precedence(self):
+        data = _migrate_legacy_sync_changes({"sync_delay": 5000, "index_delay": 2000})
+        assert data["index_delay"] == 2000
+
+    def test_constructed_config_honors_legacy_opt_out(self):
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+            sync_changes=False,
+        )
+        assert config.index_changes is False
+
+    def test_constructed_config_honors_legacy_sync_delay(self):
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+            sync_delay=5000,
+        )
+        assert config.index_delay == 5000
+
+
 class TestBasicMemoryConfig:
     """Test BasicMemoryConfig behavior with BASIC_MEMORY_HOME environment variable."""
 

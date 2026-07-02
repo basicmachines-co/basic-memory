@@ -4,12 +4,15 @@ import os
 
 import pytest
 
+from basic_memory import db
+
 
 @pytest.mark.asyncio
 async def test_get_project_info_supports_db_only_project(
     project_service,
     project_repository,
     config_manager,
+    session_maker,
 ):
     """Project info should work when project exists in DB but not local config."""
     suffix = os.urandom(4).hex()
@@ -21,14 +24,16 @@ async def test_get_project_info_supports_db_only_project(
     config.projects.pop(project_name, None)
     config_manager.save_config(config)
 
-    await project_repository.create(
-        {
-            "name": project_name,
-            "path": project_path,
-            "is_active": True,
-            "is_default": False,
-        }
-    )
+    async with db.scoped_session(session_maker) as session:
+        await project_repository.create(
+            session,
+            {
+                "name": project_name,
+                "path": project_path,
+                "is_active": True,
+                "is_default": False,
+            },
+        )
 
     info = await project_service.get_project_info(project_name)
 

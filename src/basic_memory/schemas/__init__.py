@@ -45,12 +45,14 @@ from basic_memory.schemas.project_info import (
     ProjectInfoResponse,
 )
 
-from basic_memory.schemas.directory import (
-    DirectoryNode,
+from basic_memory.schemas.project_index import (
+    ProjectIndexObservedFileResponse,
+    ProjectIndexRunResponse,
+    ProjectIndexStatusResponse,
 )
 
-from basic_memory.schemas.sync_report import (
-    SyncReportResponse,
+from basic_memory.schemas.directory import (
+    DirectoryNode,
 )
 
 # For convenient imports, export all models
@@ -81,8 +83,9 @@ __all__ = [
     "SystemStatus",
     "EmbeddingStatus",
     "ProjectInfoResponse",
+    "ProjectIndexObservedFileResponse",
+    "ProjectIndexRunResponse",
+    "ProjectIndexStatusResponse",
     # Directory
     "DirectoryNode",
-    # Sync
-    "SyncReportResponse",
 ]

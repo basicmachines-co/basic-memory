@@ -16,7 +16,7 @@ from basic_memory.mcp.tools.read_content import (
 
 
 @pytest.mark.asyncio
-async def test_read_file_text_file(app, synced_files, test_project):
+async def test_read_file_text_file(app, indexed_files, test_project):
     """Test reading a text file.
 
     Should:
@@ -44,7 +44,7 @@ async def test_read_file_text_file(app, synced_files, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_content_file_path(app, synced_files, test_project):
+async def test_read_content_file_path(app, indexed_files, test_project):
     """Test reading a text file.
 
     Should:
@@ -72,7 +72,7 @@ async def test_read_content_file_path(app, synced_files, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_file_image_file(app, synced_files, test_project):
+async def test_read_file_image_file(app, indexed_files, test_project):
     """Test reading an image file.
 
     Should:
@@ -80,8 +80,8 @@ async def test_read_file_image_file(app, synced_files, test_project):
     - Optimize the image
     - Return base64 encoded image data
     """
-    # Get the path to the synced image file
-    image_path = synced_files["image"].name
+    # Get the path to the indexed image file
+    image_path = indexed_files["image"].name
 
     # Read it as a resource
     response = await read_content(image_path, project=test_project.name)
@@ -101,15 +101,15 @@ async def test_read_file_image_file(app, synced_files, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_file_pdf_file(app, synced_files, test_project):
+async def test_read_file_pdf_file(app, indexed_files, test_project):
     """Test reading a PDF file.
 
     Should:
     - Correctly identify PDF content
     - Return base64 encoded PDF data
     """
-    # Get the path to the synced PDF file
-    pdf_path = synced_files["pdf"].name
+    # Get the path to the indexed PDF file
+    pdf_path = indexed_files["pdf"].name
 
     # Read it as a resource
     response = await read_content(pdf_path, project=test_project.name)
@@ -132,7 +132,7 @@ async def test_read_file_not_found(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_file_memory_url(app, synced_files, test_project):
+async def test_read_file_memory_url(app, indexed_files, test_project):
     """Test reading a resource using a memory:// URL."""
     # Create a text file via notes
     await write_note(
@@ -151,7 +151,7 @@ async def test_read_file_memory_url(app, synced_files, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_file_memory_url_with_project_prefix(app, synced_files, test_project):
+async def test_read_file_memory_url_with_project_prefix(app, indexed_files, test_project):
     """Test reading a resource using a memory:// URL with explicit project prefix."""
     await write_note(
         project=test_project.name,
@@ -214,15 +214,15 @@ async def test_image_optimization_functions(app):
 
 
 @pytest.mark.asyncio
-async def test_image_conversion(app, synced_files, test_project):
+async def test_image_conversion(app, indexed_files, test_project):
     """Test reading an image and verify conversion works.
 
     Should:
     - Handle image content correctly
     - Return optimized image data
     """
-    # Use the synced image file that's already part of our test fixtures
-    image_path = synced_files["image"].name
+    # Use the indexed image file that's already part of our test fixtures
+    image_path = indexed_files["image"].name
 
     # Test reading the resource
     response = await read_content(image_path, project=test_project.name)

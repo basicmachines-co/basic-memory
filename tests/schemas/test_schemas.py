@@ -1,6 +1,5 @@
 """Tests for Pydantic schema validation and conversion."""
 
-import os
 import pytest
 from datetime import datetime, timedelta
 from pydantic import ValidationError, BaseModel
@@ -21,7 +20,7 @@ def test_entity_project_name():
     """Test creating EntityIn with minimal required fields."""
     data = {"title": "Test Entity", "directory": "test", "note_type": "knowledge"}
     entity = Entity.model_validate(data)
-    assert entity.file_path == os.path.join("test", "Test Entity.md")
+    assert entity.file_path == "test/Test Entity.md"
     assert entity.permalink == "test/test-entity"
     assert entity.note_type == "knowledge"
 
@@ -30,7 +29,7 @@ def test_entity_project_id():
     """Test creating EntityIn with minimal required fields."""
     data = {"project": 2, "title": "Test Entity", "directory": "test", "note_type": "knowledge"}
     entity = Entity.model_validate(data)
-    assert entity.file_path == os.path.join("test", "Test Entity.md")
+    assert entity.file_path == "test/Test Entity.md"
     assert entity.permalink == "test/test-entity"
     assert entity.note_type == "knowledge"
 
@@ -44,7 +43,7 @@ def test_entity_non_markdown():
         "content_type": "text/plain",
     }
     entity = Entity.model_validate(data)
-    assert entity.file_path == os.path.join("test", "Test Entity.txt")
+    assert entity.file_path == "test/Test Entity.txt"
     assert entity.permalink == "test/test-entity"
     assert entity.note_type == "file"
 

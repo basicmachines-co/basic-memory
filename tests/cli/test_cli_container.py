@@ -8,7 +8,7 @@ from basic_memory.cli.container import (
     set_container,
     get_or_create_container,
 )
-from basic_memory.runtime import RuntimeMode
+from basic_memory.runtime.mode import RuntimeMode
 
 
 class TestCliContainer:

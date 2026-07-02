@@ -32,22 +32,33 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     # Deferred: basic_memory.db pulls SQLAlchemy + Alembic, which must not load
     # at CLI import time — only when a command actually runs (#886).
     from basic_memory import db
+    from basic_memory.cloud.note_content_materialization import drain_pending_materializations
+    from basic_memory.deps.services import drain_background_tasks
 
     async def _with_cleanup() -> T:
         try:
             return await coro
         finally:
+            # Drain queued source-of-truth file writes before the loop closes:
+            # local writes accept and materialize off the request path, so a
+            # one-shot client would otherwise exit before the markdown file is
+            # written (the API already reported the note accepted).
+            await drain_pending_materializations()
+            # Then the follow-up work those writes scheduled (vector sync,
+            # relation resolution): cancelling it at loop close would leave
+            # semantic search and inbound wikilinks stale until a later reindex.
+            await drain_background_tasks()
             await db.shutdown_db()
 
     return asyncio.run(_with_cleanup())
 
 
-async def run_sync(
+async def run_project_index(
     project: Optional[str] = None,
     force_full: bool = False,
     run_in_background: bool = True,
 ):
-    """Run sync operation via API endpoint.
+    """Run project indexing via API endpoint.
 
     Args:
         project: Optional project name
@@ -64,26 +75,25 @@ async def run_sync(
         async with get_client(project_name=project) as client:
             project_item = await get_active_project(client, project, None)
             project_client = ProjectClient(client)
-            data = await project_client.sync(
+            data = await project_client.index(
                 project_item.external_id,
                 force_full=force_full,
                 run_in_background=run_in_background,
             )
-            # Background mode returns {"message": "..."}, foreground returns SyncReportResponse
+            # Background mode returns {"message": "..."}, foreground returns project-index counts.
             if "message" in data:
                 console.print(f"[green]{data['message']}[/green]")
             else:
-                # Foreground mode - show summary of sync results
-                total = data.get("total", 0)
-                new_count = len(data.get("new", []))
-                modified_count = len(data.get("modified", []))
-                deleted_count = len(data.get("deleted", []))
+                total_files = data.get("total_files", 0)
+                enqueued_files = data.get("enqueued_files", 0)
+                enqueued_batches = data.get("enqueued_batches", 0)
+                deleted_files = data.get("deleted_files", 0)
                 console.print(
-                    f"[green]Synced {total} files[/green] "
-                    f"(new: {new_count}, modified: {modified_count}, deleted: {deleted_count})"
+                    f"[green]Indexed {enqueued_files}/{total_files} files[/green] "
+                    f"(batches: {enqueued_batches}, deleted orphans: {deleted_files})"
                 )
     except (ToolError, ValueError) as e:
-        console.print(f"[red]Sync failed: {e}[/red]")
+        console.print(f"[red]Index failed: {e}[/red]")
         raise typer.Exit(1)
 
 

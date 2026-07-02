@@ -53,6 +53,32 @@ def _assert_only_root_span(spans: list[tuple[str, dict]], expected_name: str) ->
     assert [name for name, _ in spans] == [expected_name]
 
 
+def _accepted_change(entity, response_content: str, *, status_code: int = 200):
+    return SimpleNamespace(
+        status_code=status_code,
+        payload={
+            "external_id": entity.external_id,
+            "id": entity.id,
+            "title": entity.title,
+            "note_type": entity.note_type,
+            "content_type": entity.content_type,
+            "permalink": entity.permalink,
+            "file_path": entity.file_path,
+            "content": response_content,
+            "entity_metadata": entity.entity_metadata,
+            "observations": [],
+            "relations": [],
+            "created_at": entity.created_at.isoformat(),
+            "updated_at": entity.updated_at.isoformat(),
+            "created_by": entity.created_by,
+            "last_updated_by": entity.last_updated_by,
+            "api_version": "v2",
+        },
+        materialization=object(),
+        file_delete=None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
@@ -63,25 +89,26 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\ntelemetry content"
     )
 
-    class FakeEntityService:
-        async def create_entity_with_content(self, data):
-            return SimpleNamespace(
-                entity=entity,
-                content=response_content,
-                search_content="telemetry content",
-            )
+    class FakeNoteContentMutationService:
+        async def create_note(self, **kwargs):
+            return _accepted_change(entity, response_content, status_code=201)
 
-    class FakeSearchService:
-        async def index_entity(self, entity, content=None):
-            assert content == "telemetry content"
+    class FakeNoteContentMaterializationProvider:
+        async def materialize_write_change(self, accepted):
+            assert accepted.materialization is not None
+            return accepted
+
+    class FakeVectorSyncScheduler:
+        def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
-    class FakeTaskScheduler:
-        def schedule(self, *args, **kwargs):
+    class FakeRelationResolutionScheduler:
+        def schedule_relation_resolution(self, *args, **kwargs):
             return None
 
     result = await knowledge_router_module.create_entity(
         project_id=123,
+        project_external_id="project-123",
         data=Entity(
             title="Telemetry Entity",
             directory="notes",
@@ -89,9 +116,10 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
             content_type="text/markdown",
             content="telemetry content",
         ),
-        entity_service=cast(Any, FakeEntityService()),
-        search_service=cast(Any, FakeSearchService()),
-        task_scheduler=FakeTaskScheduler(),
+        note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
+        note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
+        vector_sync_scheduler=FakeVectorSyncScheduler(),
+        relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
     )
 
@@ -107,25 +135,21 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
 
-    class FakeEntityService:
-        async def update_entity_with_content(self, existing, data):
-            return SimpleNamespace(
-                entity=entity,
-                content=response_content,
-                search_content="updated telemetry content",
-            )
+    class FakeNoteContentMutationService:
+        async def update_note(self, **kwargs):
+            return _accepted_change(entity, response_content)
 
-    class FakeSearchService:
-        async def index_entity(self, entity, content=None):
-            assert content == "updated telemetry content"
+    class FakeNoteContentMaterializationProvider:
+        async def materialize_write_change(self, accepted):
+            assert accepted.materialization is not None
+            return accepted
+
+    class FakeVectorSyncScheduler:
+        def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
-    class FakeEntityRepository:
-        async def get_by_external_id(self, external_id):
-            return entity
-
-    class FakeTaskScheduler:
-        def schedule(self, *args, **kwargs):
+    class FakeRelationResolutionScheduler:
+        def schedule_relation_resolution(self, *args, **kwargs):
             return None
 
     response = Response()
@@ -139,10 +163,11 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         ),
         response=response,
         project_id=123,
-        entity_service=cast(Any, FakeEntityService()),
-        search_service=cast(Any, FakeSearchService()),
-        entity_repository=cast(Any, FakeEntityRepository()),
-        task_scheduler=FakeTaskScheduler(),
+        project_external_id="project-123",
+        note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
+        note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
+        vector_sync_scheduler=FakeVectorSyncScheduler(),
+        relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )
@@ -159,34 +184,31 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     entity = _fake_entity()
     response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
 
-    class FakeEntityService:
-        async def edit_entity_with_content(self, **kwargs):
-            return SimpleNamespace(
-                entity=entity,
-                content=response_content,
-                search_content="edited telemetry content",
-            )
+    class FakeNoteContentMutationService:
+        async def edit_note(self, **kwargs):
+            return _accepted_change(entity, response_content)
 
-    class FakeSearchService:
-        async def index_entity(self, entity, content=None):
-            assert content == "edited telemetry content"
+    class FakeNoteContentMaterializationProvider:
+        async def materialize_write_change(self, accepted):
+            assert accepted.materialization is not None
+            return accepted
+
+    class FakeVectorSyncScheduler:
+        def schedule_entity_vector_sync(self, *args, **kwargs):
             return None
 
-    class FakeEntityRepository:
-        async def get_by_external_id(self, external_id):
-            return entity
-
-    class FakeTaskScheduler:
-        def schedule(self, *args, **kwargs):
+    class FakeRelationResolutionScheduler:
+        def schedule_relation_resolution(self, *args, **kwargs):
             return None
 
     result = await knowledge_router_module.edit_entity_by_id(
         data=EditEntityRequest(operation="append", content="edited telemetry content"),
         project_id=123,
-        entity_service=cast(Any, FakeEntityService()),
-        search_service=cast(Any, FakeSearchService()),
-        entity_repository=cast(Any, FakeEntityRepository()),
-        task_scheduler=FakeTaskScheduler(),
+        project_external_id="project-123",
+        note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
+        note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
+        vector_sync_scheduler=FakeVectorSyncScheduler(),
+        relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )

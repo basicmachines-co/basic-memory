@@ -1050,12 +1050,13 @@ async def _detach_local_project_row(app_config: BasicMemoryConfig, name: str) ->
         db_type=db.DatabaseType.FILESYSTEM,
     )
     try:
-        repo = ProjectRepository(session_maker)
-        existing = await repo.get_by_name(name)
-        if existing is None:
-            return False
-        await repo.delete(existing.id)
-        return True
+        repo = ProjectRepository()
+        async with db.scoped_session(session_maker) as session:
+            existing = await repo.get_by_name(session, name)
+            if existing is None:
+                return False
+            await repo.delete(session, existing.id)
+            return True
     finally:
         # CLI-only: safe to tear down the global DB singleton here since
         # set-cloud/set-local never run inside a long-lived MCP/API server.
@@ -1082,20 +1083,22 @@ async def _attach_local_project_row(app_config: BasicMemoryConfig, name: str, pa
         db_type=db.DatabaseType.FILESYSTEM,
     )
     try:
-        repo = ProjectRepository(session_maker)
-        existing = await repo.get_by_name(name)
-        if existing is None:
-            await repo.create(
-                {
-                    "name": name,
-                    "path": path,
-                    "permalink": generate_permalink(name),
-                    "is_active": True,
-                }
-            )
-            return
-        if existing.path != path:
-            await repo.update_path(existing.id, path)
+        repo = ProjectRepository()
+        async with db.scoped_session(session_maker) as session:
+            existing = await repo.get_by_name(session, name)
+            if existing is None:
+                await repo.create(
+                    session,
+                    {
+                        "name": name,
+                        "path": path,
+                        "permalink": generate_permalink(name),
+                        "is_active": True,
+                    },
+                )
+                return
+            if existing.path != path:
+                await repo.update_path(session, existing.id, path)
     finally:
         # CLI-only: safe to tear down the global DB singleton here since
         # set-cloud/set-local never run inside a long-lived MCP/API server.

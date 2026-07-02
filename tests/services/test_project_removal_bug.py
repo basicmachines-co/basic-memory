@@ -9,7 +9,25 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.services.project_service import ProjectService
+
+
+class _ProjectRemovalEmbeddingProvider:
+    """Deterministic provider used only to initialize sqlite-vec test tables."""
+
+    model_name = "project-removal-test"
+    dimensions = 384
+
+    async def embed_query(self, text: str) -> list[float]:
+        _ = text
+        return [0.0] * self.dimensions
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0] * self.dimensions for _ in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
 
 
 @pytest.mark.asyncio
@@ -37,13 +55,12 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
             # Verify project exists
             project = await project_service.get_project(test_project_name)
             assert project is not None
+            session_maker = project_service.session_maker
 
             # Step 2: Create related entities for this project
             from basic_memory.repository.entity_repository import EntityRepository
 
-            entity_repo = EntityRepository(
-                project_service.repository.session_maker, project_id=project.id
-            )
+            entity_repo = EntityRepository(project_id=project.id)
 
             entity_data = {
                 "title": "Test Entity for Deletion",
@@ -56,38 +73,35 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
                 "created_at": datetime.now(timezone.utc),
                 "updated_at": datetime.now(timezone.utc),
             }
-            entity = await entity_repo.create(entity_data)
-            assert entity is not None
-
             # Step 3: Create observations for the entity
             from basic_memory.repository.observation_repository import ObservationRepository
 
-            obs_repo = ObservationRepository(
-                project_service.repository.session_maker, project_id=project.id
-            )
-
-            observation_data = {
-                "entity_id": entity.id,
-                "content": "This is a test observation",
-                "category": "note",
-            }
-            observation = await obs_repo.create(observation_data)
-            assert observation is not None
+            obs_repo = ObservationRepository(project_id=project.id)
 
             # Step 4: Create relations involving the entity
             from basic_memory.repository.relation_repository import RelationRepository
 
-            rel_repo = RelationRepository(
-                project_service.repository.session_maker, project_id=project.id
-            )
+            rel_repo = RelationRepository(project_id=project.id)
 
-            relation_data = {
-                "from_id": entity.id,
-                "to_name": "some-target-entity",
-                "relation_type": "relates-to",
-            }
-            relation = await rel_repo.create(relation_data)
-            assert relation is not None
+            async with db.scoped_session(session_maker) as session:
+                entity = await entity_repo.create(session, entity_data)
+                assert entity is not None
+
+                observation_data = {
+                    "entity_id": entity.id,
+                    "content": "This is a test observation",
+                    "category": "note",
+                }
+                observation = await obs_repo.create(session, observation_data)
+                assert observation is not None
+
+                relation_data = {
+                    "from_id": entity.id,
+                    "to_name": "some-target-entity",
+                    "relation_type": "relates-to",
+                }
+                relation = await rel_repo.create(session, relation_data)
+                assert relation is not None
 
             # Step 5: Attempt to remove the project
             # This should work with proper cascade delete, or fail with foreign key constraint
@@ -100,16 +114,17 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
             assert removed_project is None, "Project should have been removed"
 
             # Related entities should be cascade deleted
-            remaining_entity = await entity_repo.find_by_id(entity.id)
-            assert remaining_entity is None, "Entity should have been cascade deleted"
+            async with db.scoped_session(session_maker) as session:
+                remaining_entity = await entity_repo.find_by_id(session, entity.id)
+                assert remaining_entity is None, "Entity should have been cascade deleted"
 
-            # Observations should be cascade deleted
-            remaining_obs = await obs_repo.find_by_id(observation.id)
-            assert remaining_obs is None, "Observation should have been cascade deleted"
+                # Observations should be cascade deleted
+                remaining_obs = await obs_repo.find_by_id(session, observation.id)
+                assert remaining_obs is None, "Observation should have been cascade deleted"
 
-            # Relations should be cascade deleted
-            remaining_rel = await rel_repo.find_by_id(relation.id)
-            assert remaining_rel is None, "Relation should have been cascade deleted"
+                # Relations should be cascade deleted
+                remaining_rel = await rel_repo.find_by_id(session, relation.id)
+                assert remaining_rel is None, "Relation should have been cascade deleted"
 
         except Exception as e:
             # Check if this is the specific foreign key constraint error from the bug report
@@ -137,7 +152,8 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
 
                     project = await project_service.get_project(test_project_name)
                     if project:
-                        await project_service.repository.delete(project.id)
+                        async with db.scoped_session(project_service.session_maker) as session:
+                            await project_service.repository.delete(session, project.id)
 
 
 async def _table_exists(session_maker, table: str) -> bool:
@@ -148,6 +164,23 @@ async def _table_exists(session_maker, table: str) -> bool:
         return await session.run_sync(
             lambda sync_session: table in sa_inspect(sync_session.connection()).get_table_names()
         )
+
+
+async def _enable_sqlite_semantic_tables(search_repository) -> None:
+    """Initialize sqlite-vec tables for tests that assert semantic cleanup."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec embedding cleanup is SQLite-specific.")
+
+    try:
+        import sqlite_vec  # noqa: F401
+    except ImportError:
+        pytest.skip("sqlite-vec dependency is required for sqlite vector cleanup tests.")
+
+    search_repository._semantic_enabled = True
+    search_repository._embedding_provider = _ProjectRemovalEmbeddingProvider()
+    search_repository._vector_dimensions = search_repository._embedding_provider.dimensions
+    search_repository._vector_tables_initialized = False
+    await search_repository.init_search_index()
 
 
 @pytest.mark.asyncio
@@ -173,7 +206,7 @@ async def test_remove_project_purges_search_rows(project_service: ProjectService
 
         # Seed both derived tables directly. The bug is in the cleanup path,
         # not the indexer, so a synthetic row is enough to prove the sweep.
-        async with db.scoped_session(project_service.repository.session_maker) as session:
+        async with db.scoped_session(project_service.session_maker) as session:
             await session.execute(
                 text(
                     "INSERT INTO search_index "
@@ -212,7 +245,7 @@ async def test_remove_project_purges_search_rows(project_service: ProjectService
                 },
             )
 
-        async with db.scoped_session(project_service.repository.session_maker) as session:
+        async with db.scoped_session(project_service.session_maker) as session:
             pre_index = (
                 await session.execute(
                     text("SELECT COUNT(*) FROM search_index WHERE project_id = :pid"),
@@ -230,7 +263,7 @@ async def test_remove_project_purges_search_rows(project_service: ProjectService
 
         await project_service.remove_project(test_project_name)
 
-        async with db.scoped_session(project_service.repository.session_maker) as session:
+        async with db.scoped_session(project_service.session_maker) as session:
             post_index = (
                 await session.execute(
                     text("SELECT COUNT(*) FROM search_index WHERE project_id = :pid"),
@@ -262,12 +295,16 @@ async def test_delete_returns_false_for_missing_project_id(project_service: Proj
     branch isn't covered — a silent True would mislead callers into thinking
     a non-existent project was removed.
     """
-    result = await project_service.repository.delete(9_999_999)
+    async with db.scoped_session(project_service.session_maker) as session:
+        result = await project_service.repository.delete(session, 9_999_999)
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_remove_project_purges_vector_embeddings(project_service: ProjectService):
+async def test_remove_project_purges_vector_embeddings(
+    project_service: ProjectService,
+    search_repository,
+):
     """Project deletion must also drop sqlite-vec embeddings keyed by chunk rowid.
 
     sqlite-vec stores vectors in a vec0 virtual table that has no cascade
@@ -277,12 +314,8 @@ async def test_remove_project_purges_vector_embeddings(project_service: ProjectS
     matches the install path that exercises semantic search.
     """
     test_project_name = f"test-vec-cleanup-{os.urandom(4).hex()}"
-    session_maker = project_service.repository.session_maker
-
-    # The embeddings table only exists once semantic search has initialized.
-    # Skipping when it's absent keeps this test honest on minimal CI DBs.
-    if not await _table_exists(session_maker, "search_vector_embeddings"):
-        pytest.skip("search_vector_embeddings is not present on this connection")
+    session_maker = project_service.session_maker
+    await _enable_sqlite_semantic_tables(search_repository)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         test_project_path = str(Path(temp_dir) / "test-vec-cleanup")

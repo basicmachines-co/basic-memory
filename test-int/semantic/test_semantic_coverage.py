@@ -17,6 +17,7 @@ from typing import Any, cast
 
 import pytest
 
+from basic_memory import db
 from basic_memory.config import DatabaseBackend
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 
@@ -199,16 +200,18 @@ async def test_postgres_vector_dimension_detection(postgres_engine_factory, tmp_
     repo = cast(Any, search_service.repository)
 
     # First entity triggers _ensure_vector_tables
-    entity = await search_service.entity_repository.create(
-        {
-            "title": "Dimension Test Note",
-            "note_type": "benchmark",
-            "entity_metadata": {"tags": ["test"]},
-            "content_type": "text/markdown",
-            "permalink": "bench/dim-test",
-            "file_path": "bench/dim-test.md",
-        }
-    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await search_service.entity_repository.create(
+            session,
+            {
+                "title": "Dimension Test Note",
+                "note_type": "benchmark",
+                "entity_metadata": {"tags": ["test"]},
+                "content_type": "text/markdown",
+                "permalink": "bench/dim-test",
+                "file_path": "bench/dim-test.md",
+            },
+        )
     content = build_benchmark_content("auth", TOPIC_TERMS["auth"], 0)
     await search_service.index_entity_data(entity, content=content)
     await search_service.sync_entity_vectors(entity.id)
@@ -242,16 +245,18 @@ async def test_postgres_incremental_vector_update(postgres_engine_factory, tmp_p
     )
 
     # Create and index initial entity
-    entity = await search_service.entity_repository.create(
-        {
-            "title": "Update Test Note",
-            "note_type": "benchmark",
-            "entity_metadata": {"tags": ["test"]},
-            "content_type": "text/markdown",
-            "permalink": "bench/update-test",
-            "file_path": "bench/update-test.md",
-        }
-    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await search_service.entity_repository.create(
+            session,
+            {
+                "title": "Update Test Note",
+                "note_type": "benchmark",
+                "entity_metadata": {"tags": ["test"]},
+                "content_type": "text/markdown",
+                "permalink": "bench/update-test",
+                "file_path": "bench/update-test.md",
+            },
+        )
     initial_content = build_benchmark_content("sync", TOPIC_TERMS["sync"], 0)
     await search_service.index_entity_data(entity, content=initial_content)
     await search_service.sync_entity_vectors(entity.id)

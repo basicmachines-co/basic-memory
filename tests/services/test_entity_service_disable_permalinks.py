@@ -18,6 +18,7 @@ async def test_create_entity_with_permalinks_disabled(
     entity_parser,
     file_service: FileService,
     link_resolver,
+    session_maker,
 ):
     """Test that entities created with disable_permalinks=True don't have permalinks."""
     # Create entity service with permalinks disabled
@@ -30,6 +31,7 @@ async def test_create_entity_with_permalinks_disabled(
         file_service=file_service,
         link_resolver=link_resolver,
         app_config=app_config,
+        session_maker=session_maker,
     )
 
     entity_data = EntitySchema(
@@ -64,6 +66,7 @@ async def test_update_entity_with_permalinks_disabled(
     entity_parser,
     file_service: FileService,
     link_resolver,
+    session_maker,
 ):
     """Test that entities updated with disable_permalinks=True don't get permalinks added."""
     # First create with permalinks enabled
@@ -76,6 +79,7 @@ async def test_update_entity_with_permalinks_disabled(
         file_service=file_service,
         link_resolver=link_resolver,
         app_config=app_config_enabled,
+        session_maker=session_maker,
     )
 
     entity_data = EntitySchema(
@@ -100,6 +104,7 @@ async def test_update_entity_with_permalinks_disabled(
         file_service=file_service,
         link_resolver=link_resolver,
         app_config=app_config_disabled,
+        session_maker=session_maker,
     )
 
     # Update entity with permalinks disabled
@@ -124,6 +129,7 @@ async def test_create_entity_with_content_frontmatter_permalinks_disabled(
     entity_parser,
     file_service: FileService,
     link_resolver,
+    session_maker,
 ):
     """Test that content frontmatter permalinks are ignored when disabled."""
     # Create entity service with permalinks disabled
@@ -136,6 +142,7 @@ async def test_create_entity_with_content_frontmatter_permalinks_disabled(
         file_service=file_service,
         link_resolver=link_resolver,
         app_config=app_config,
+        session_maker=session_maker,
     )
 
     # Content with frontmatter containing permalink
@@ -180,6 +187,7 @@ async def test_move_entity_with_permalinks_disabled(
     file_service: FileService,
     link_resolver,
     project_config,
+    session_maker,
 ):
     """Test that moving an entity with disable_permalinks=True doesn't update permalinks."""
     # First create with permalinks enabled
@@ -192,6 +200,7 @@ async def test_move_entity_with_permalinks_disabled(
         file_service=file_service,
         link_resolver=link_resolver,
         app_config=app_config,
+        session_maker=session_maker,
     )
 
     entity_data = EntitySchema(

@@ -156,7 +156,7 @@ class WatchServiceState(BaseModel):
     last_scan: Optional[datetime] = None
 
     # File counts
-    synced_files: int = 0
+    indexed_files: int = 0
 
     # Recent activity
     recent_events: List[WatchEvent] = []  # Use directly with Pydantic model

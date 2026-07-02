@@ -130,8 +130,8 @@ class TestKnowledgeClient:
         assert result == "entity-uuid-123"
 
     @pytest.mark.asyncio
-    async def test_sync_file(self, monkeypatch):
-        """Test sync_file posts the file path to the sync-file endpoint."""
+    async def test_index_file(self, monkeypatch):
+        """Test index_file posts the file path to the index-file endpoint."""
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -147,7 +147,7 @@ class TestKnowledgeClient:
         }
 
         async def mock_call_post(client, url, **kwargs):
-            assert "/v2/projects/proj-123/knowledge/sync-file" in url
+            assert "/v2/projects/proj-123/knowledge/index-file" in url
             assert kwargs.get("json") == {"file_path": "notes/disk-note.md"}
             return mock_response
 
@@ -155,7 +155,7 @@ class TestKnowledgeClient:
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
-        result = await client.sync_file("notes/disk-note.md")
+        result = await client.index_file("notes/disk-note.md")
         assert result.file_path == "notes/disk-note.md"
 
     @pytest.mark.asyncio

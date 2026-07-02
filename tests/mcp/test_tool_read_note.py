@@ -6,9 +6,9 @@ from textwrap import dedent
 
 import pytest
 
+from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
-from basic_memory.utils import normalize_newlines
 from tests.mcp.conftest import ContextState, ctx
 
 
@@ -610,7 +610,7 @@ async def test_note_unicode_content(app, test_project):
 
     # Read back should preserve unicode
     result = await read_note("test/unicode-test", project=test_project.name)
-    assert normalize_newlines(content) in result
+    assert content in result
 
 
 @pytest.mark.asyncio
@@ -736,6 +736,7 @@ async def test_team_workspace_write_stores_complete_canonical_permalink(
     app,
     test_project,
     entity_repository,
+    session_maker,
 ):
     from basic_memory.workspace_context import workspace_permalink_context
 
@@ -751,7 +752,8 @@ async def test_team_workspace_write_stores_complete_canonical_permalink(
 
     assert f"permalink: {expected_permalink}" in write_result
 
-    stored = await entity_repository.get_by_permalink(expected_permalink)
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_permalink(session, expected_permalink)
     assert stored is not None
     assert stored.permalink == expected_permalink
 
@@ -772,6 +774,7 @@ async def test_team_workspace_write_stores_complete_permalink_when_project_prefi
     test_project,
     entity_repository,
     config_manager,
+    session_maker,
 ):
     from basic_memory.workspace_context import workspace_permalink_context
 
@@ -791,7 +794,8 @@ async def test_team_workspace_write_stores_complete_permalink_when_project_prefi
 
     assert f"permalink: {expected_permalink}" in write_result
 
-    stored = await entity_repository.get_by_permalink(expected_permalink)
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_permalink(session, expected_permalink)
     assert stored is not None
     assert stored.permalink == expected_permalink
 
@@ -811,6 +815,7 @@ async def test_personal_workspace_write_stores_complete_canonical_permalink(
     app,
     test_project,
     entity_repository,
+    session_maker,
 ):
     from basic_memory.workspace_context import workspace_permalink_context
 
@@ -826,7 +831,8 @@ async def test_personal_workspace_write_stores_complete_canonical_permalink(
 
     assert f"permalink: {expected_permalink}" in write_result
 
-    stored = await entity_repository.get_by_permalink(expected_permalink)
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_permalink(session, expected_permalink)
     assert stored is not None
     assert stored.permalink == expected_permalink
 
@@ -864,6 +870,7 @@ async def test_read_note_workspace_qualified_personal_url_finds_legacy_short_per
     app,
     test_project,
     entity_repository,
+    session_maker,
 ):
     from basic_memory.workspace_context import workspace_permalink_context
 
@@ -877,7 +884,8 @@ async def test_read_note_workspace_qualified_personal_url_finds_legacy_short_per
         content="Legacy personal workspace content",
     )
 
-    stored = await entity_repository.get_by_permalink(legacy_permalink)
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_permalink(session, legacy_permalink)
     assert stored is not None
     assert stored.permalink == legacy_permalink
 

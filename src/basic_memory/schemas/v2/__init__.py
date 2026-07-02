@@ -7,9 +7,9 @@ from basic_memory.schemas.v2.entity import (
     MoveEntityRequestV2,
     MoveDirectoryRequestV2,
     DeleteDirectoryRequestV2,
+    IndexFileRequest,
     ProjectResolveRequest,
     ProjectResolveResponse,
-    SyncFileRequest,
 )
 from basic_memory.schemas.v2.graph import (
     GraphEdge,
@@ -30,9 +30,9 @@ __all__ = [
     "MoveEntityRequestV2",
     "MoveDirectoryRequestV2",
     "DeleteDirectoryRequestV2",
+    "IndexFileRequest",
     "ProjectResolveRequest",
     "ProjectResolveResponse",
-    "SyncFileRequest",
     "GraphEdge",
     "GraphNode",
     "GraphResponse",

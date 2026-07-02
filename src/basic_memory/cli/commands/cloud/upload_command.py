@@ -11,8 +11,8 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.cloud.cloud_utils import (
     CloudUtilsError,
     create_cloud_project,
+    index_project,
     project_exists,
-    sync_project,
 )
 from basic_memory.cli.commands.cloud.upload import upload_path
 from basic_memory.mcp.async_client import (
@@ -44,10 +44,10 @@ def upload(
         "-c",
         help="Create project if it doesn't exist",
     ),
-    sync: bool = typer.Option(
+    index: bool = typer.Option(
         True,
-        "--sync/--no-sync",
-        help="Sync project after upload (default: true)",
+        "--index/--no-index",
+        help="Index project after upload (default: true)",
     ),
     verbose: bool = typer.Option(
         False,
@@ -71,7 +71,7 @@ def upload(
     Examples:
       bm cloud upload ~/my-notes --project research
       bm cloud upload notes.md --project research --create-project
-      bm cloud upload ~/docs --project work --no-sync
+      bm cloud upload ~/docs --project work --no-index
       bm cloud upload ./history --project proto --verbose
       bm cloud upload ./notes --project work --no-gitignore
       bm cloud upload ./files --project test --dry-run
@@ -135,16 +135,16 @@ def upload(
         else:
             console.print(f"[green]Successfully uploaded to '{project}'[/green]")
 
-        # Sync project if requested (skip on dry run).
+        # Index project if requested (skip on dry run).
         # Trigger: upload adds new files the watcher has not observed locally.
         # Why: force_full ensures those freshly uploaded files are indexed immediately.
         # Outcome: upload keeps its eager reindex while sync/bisync stay incremental.
-        if sync and not dry_run:
-            console.print(f"[blue]Syncing project '{project}'...[/blue]")
+        if index and not dry_run:
+            console.print(f"[blue]Indexing project '{project}'...[/blue]")
             try:
-                await sync_project(project)
+                await index_project(project)
             except Exception as e:
-                console.print(f"[yellow]Warning: Sync failed: {e}[/yellow]")
+                console.print(f"[yellow]Warning: indexing failed: {e}[/yellow]")
                 console.print("[dim]Files uploaded but may not be indexed yet[/dim]")
 
     run_with_cleanup(_upload())

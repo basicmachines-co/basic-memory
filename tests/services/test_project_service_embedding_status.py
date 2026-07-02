@@ -6,12 +6,18 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 
+from basic_memory import db
 from basic_memory.schemas.project_info import EmbeddingStatus
 from basic_memory.services.project_service import ProjectService
 
 
 def _is_postgres() -> bool:
     return os.environ.get("BASIC_MEMORY_TEST_POSTGRES", "").lower() in ("1", "true", "yes")
+
+
+async def _execute(project_service: ProjectService, query, params=None):
+    async with db.scoped_session(project_service.session_maker) as session:
+        return await project_service.repository.execute_query(session, query, params or {})
 
 
 async def _create_embeddings_stub(project_service: ProjectService) -> None:
@@ -21,7 +27,8 @@ async def _create_embeddings_stub(project_service: ProjectService) -> None:
     embeddings table is never created. get_embedding_status only probes table
     existence and joins on chunk_id (rowid on SQLite), so a plain table suffices.
     """
-    await project_service.repository.execute_query(
+    await _execute(
+        project_service,
         text(
             "CREATE TABLE IF NOT EXISTS search_vector_embeddings (  chunk_id INTEGER PRIMARY KEY)"
         ),
@@ -31,9 +38,7 @@ async def _create_embeddings_stub(project_service: ProjectService) -> None:
 
 async def _drop_embeddings_stub(project_service: ProjectService) -> None:
     """Drop the stub table to avoid polluting subsequent tests."""
-    await project_service.repository.execute_query(
-        text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
-    )
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
 
 
 @pytest.mark.asyncio
@@ -67,7 +72,7 @@ async def test_embedding_status_vector_tables_missing(
         if _is_postgres()
         else "DROP TABLE IF EXISTS search_vector_chunks"
     )
-    await project_service.repository.execute_query(text(drop_sql), {})
+    await _execute(project_service, text(drop_sql), {})
 
     with patch.object(
         type(project_service),
@@ -121,13 +126,15 @@ async def test_embedding_status_orphaned_chunks(
     """When chunks exist without matching embeddings, recommend reindex."""
     # Insert a chunk row (no matching embedding = orphan)
     # Get a real entity_id from the test graph
-    entity_result = await project_service.repository.execute_query(
+    entity_result = await _execute(
+        project_service,
         text("SELECT id FROM entity WHERE project_id = :project_id LIMIT 1"),
         {"project_id": test_project.id},
     )
     entity_id = entity_result.scalar()
 
-    await project_service.repository.execute_query(
+    await _execute(
+        project_service,
         text(
             "INSERT INTO search_vector_chunks "
             "("
@@ -146,7 +153,8 @@ async def test_embedding_status_orphaned_chunks(
     # so the LEFT JOIN works and finds the orphan.
     # Uses chunk_id as PK — Postgres queries join on chunk_id,
     # SQLite queries join on rowid which aliases INTEGER PRIMARY KEY.
-    await project_service.repository.execute_query(
+    await _execute(
+        project_service,
         text(
             "CREATE TABLE IF NOT EXISTS search_vector_embeddings (  chunk_id INTEGER PRIMARY KEY)"
         ),
@@ -163,9 +171,7 @@ async def test_embedding_status_orphaned_chunks(
         status = await project_service.get_embedding_status(test_project.id)
 
     # Clean up stub table to avoid polluting subsequent tests
-    await project_service.repository.execute_query(
-        text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
-    )
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
 
     assert status.vector_tables_exist is True
     assert status.total_chunks == 1
@@ -191,7 +197,7 @@ async def test_embedding_status_handles_sqlite_vec_unavailable(
 
     # scalar_vec_query returns None when the extension can't be loaded on this
     # Python build (e.g. the python.org macOS interpreter). Simulate that here.
-    async def _vec_query_unavailable(query, params=None):
+    async def _vec_query_unavailable(_session, query, params=None):
         return None
 
     with patch.object(
@@ -221,22 +227,22 @@ async def test_embedding_status_handles_sqlite_vec_unavailable(
 async def test_embedding_status_healthy(project_service: ProjectService, test_graph, test_project):
     """When all entities have embeddings, no reindex recommended."""
     # Clear any leftover data from prior tests
-    await project_service.repository.execute_query(text("DELETE FROM search_vector_chunks"), {})
+    await _execute(project_service, text("DELETE FROM search_vector_chunks"), {})
 
     # Drop any existing virtual table (may have been created by search_service init)
     # and recreate as a simple regular table for testing the join logic.
     # Uses chunk_id as PK — Postgres queries join on chunk_id,
     # SQLite queries join on rowid which aliases INTEGER PRIMARY KEY.
-    await project_service.repository.execute_query(
-        text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
-    )
-    await project_service.repository.execute_query(
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
+    await _execute(
+        project_service,
         text("CREATE TABLE search_vector_embeddings (  chunk_id INTEGER PRIMARY KEY)"),
         {},
     )
 
     # Insert a chunk + matching embedding for every search_index entity
-    entity_result = await project_service.repository.execute_query(
+    entity_result = await _execute(
+        project_service,
         text("SELECT DISTINCT entity_id FROM search_index WHERE project_id = :project_id"),
         {"project_id": test_project.id},
     )
@@ -244,7 +250,8 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
 
     chunk_id = 1
     for eid in entity_ids:
-        await project_service.repository.execute_query(
+        await _execute(
+            project_service,
             text(
                 "INSERT INTO search_vector_chunks "
                 "("
@@ -263,7 +270,8 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
                 "key": f"chunk-{chunk_id}",
             },
         )
-        await project_service.repository.execute_query(
+        await _execute(
+            project_service,
             text("INSERT INTO search_vector_embeddings (chunk_id) VALUES (:chunk_id)"),
             {"chunk_id": chunk_id},
         )
@@ -279,9 +287,7 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
         status = await project_service.get_embedding_status(test_project.id)
 
     # Clean up stub table to avoid polluting subsequent tests
-    await project_service.repository.execute_query(
-        text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
-    )
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
 
     assert status.vector_tables_exist is True
     assert status.total_chunks > 0
@@ -307,7 +313,8 @@ async def test_embedding_status_excludes_stale_entity_ids(
     # Both vector tables must exist to reach the stale-filtered count queries;
     # fixtures run with semantic search disabled, so stub the embeddings table.
     await _create_embeddings_stub(project_service)
-    await project_service.repository.execute_query(
+    await _execute(
+        project_service,
         text(
             "INSERT INTO search_index "
             "(id, entity_id, project_id, type, title, permalink, content_stems, "
@@ -329,7 +336,8 @@ async def test_embedding_status_excludes_stale_entity_ids(
 
     # The stale entity_id should NOT be counted in total_indexed_entities.
     # Count real entities that have search_index rows (the stale one should be excluded).
-    real_indexed_result = await project_service.repository.execute_query(
+    real_indexed_result = await _execute(
+        project_service,
         text(
             "SELECT COUNT(DISTINCT si.entity_id) FROM search_index si "
             "JOIN entity e ON e.id = si.entity_id "

@@ -1,6 +1,7 @@
 from typing import Any, Protocol, Optional, List, Sequence
 
 import logfire
+from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import (
     EntitySummary,
@@ -19,7 +20,11 @@ from basic_memory.services.context_service import (
 
 class EntityBatchLookup(Protocol):
     async def find_by_ids_for_hydration(
-        self, ids: List[int], *, include_cross_project: bool = False
+        self,
+        session: AsyncSession,
+        ids: List[int],
+        *,
+        include_cross_project: bool = False,
     ) -> Sequence[Any]: ...
 
 
@@ -42,6 +47,7 @@ def _search_item_type(value: str | SearchItemType) -> SearchItemType:
 async def to_graph_context(
     context_result: ServiceContextResult,
     entity_repository: EntityBatchLookup,
+    session: AsyncSession,
     page: Optional[int] = None,
     page_size: Optional[int] = None,
 ) -> GraphContext:
@@ -90,7 +96,7 @@ async def to_graph_context(
                 result_count=len(entity_ids_needed),
             ):
                 entities = await entity_repository.find_by_ids_for_hydration(
-                    list(entity_ids_needed), include_cross_project=True
+                    session, list(entity_ids_needed), include_cross_project=True
                 )
             for e in entities:
                 entity_title_lookup[e.id] = e.title

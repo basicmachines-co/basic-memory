@@ -9,7 +9,10 @@ from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
 
 from basic_memory.deps import get_app_config, get_engine_factory
-from basic_memory.deps.services import get_task_scheduler
+from basic_memory.deps.services import (
+    get_entity_vector_sync_scheduler,
+    get_relation_resolution_scheduler,
+)
 from basic_memory.models import Project
 
 
@@ -39,17 +42,33 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture(autouse=True)
-def task_scheduler_spy(app: FastAPI) -> Generator[list[dict[str, Any]], None, None]:
-    """Capture scheduled task specs without executing them."""
+def vector_sync_scheduler_spy(app: FastAPI) -> Generator[list[dict[str, Any]], None, None]:
+    """Capture scheduled vector sync work without executing it."""
     scheduled: list[dict[str, Any]] = []
 
-    class SchedulerSpy:
-        def schedule(self, task_name: str, **payload: Any) -> None:
-            scheduled.append({"task_name": task_name, "payload": payload})
+    class VectorSyncSchedulerSpy:
+        def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None:
+            scheduled.append({"entity_id": entity_id, "project_id": project_id})
 
-    app.dependency_overrides[get_task_scheduler] = lambda: SchedulerSpy()
+    app.dependency_overrides[get_entity_vector_sync_scheduler] = lambda: VectorSyncSchedulerSpy()
     yield scheduled
-    app.dependency_overrides.pop(get_task_scheduler, None)
+    app.dependency_overrides.pop(get_entity_vector_sync_scheduler, None)
+
+
+@pytest.fixture(autouse=True)
+def relation_resolution_scheduler_spy(app: FastAPI) -> Generator[list[dict[str, Any]], None, None]:
+    """Capture scheduled forward-reference resolution without executing it."""
+    scheduled: list[dict[str, Any]] = []
+
+    class RelationResolutionSchedulerSpy:
+        def schedule_relation_resolution(self, *, project_id: int) -> None:
+            scheduled.append({"project_id": project_id})
+
+    app.dependency_overrides[get_relation_resolution_scheduler] = lambda: (
+        RelationResolutionSchedulerSpy()
+    )
+    yield scheduled
+    app.dependency_overrides.pop(get_relation_resolution_scheduler, None)
 
 
 @pytest.fixture

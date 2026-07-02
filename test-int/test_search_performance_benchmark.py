@@ -248,16 +248,18 @@ async def _seed_benchmark_notes(search_service, note_count: int):
         topic = topic_names[note_index % len(topic_names)]
         terms = TOPIC_TERMS[topic]
         permalink = f"bench/{topic}-{note_index:05d}"
-        entity = await search_service.entity_repository.create(
-            {
-                "title": f"{topic.title()} Benchmark Note {note_index}",
-                "note_type": "benchmark",
-                "entity_metadata": {"tags": ["benchmark", topic], "status": "active"},
-                "content_type": "text/markdown",
-                "permalink": permalink,
-                "file_path": f"{permalink}.md",
-            }
-        )
+        async with db.scoped_session(search_service.session_maker) as session:
+            entity = await search_service.entity_repository.create(
+                session,
+                {
+                    "title": f"{topic.title()} Benchmark Note {note_index}",
+                    "note_type": "benchmark",
+                    "entity_metadata": {"tags": ["benchmark", topic], "status": "active"},
+                    "content_type": "text/markdown",
+                    "permalink": permalink,
+                    "file_path": f"{permalink}.md",
+                },
+            )
         content = _build_benchmark_content(topic, terms, note_index)
         await search_service.index_entity_data(entity, content=content)
         if isinstance(search_service.repository, SQLiteSearchRepository):

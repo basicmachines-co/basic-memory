@@ -2,13 +2,12 @@
 
 # PEP 563 lazy annotations let signatures reference IndexProgress without importing
 # the indexing stack at module load; reset/reindex import their heavy database and
-# sync dependencies at call time so CLI startup stays fast (#886).
+# indexing dependencies at call time so CLI startup stays fast (#886).
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import TYPE_CHECKING
 
 import psutil
 import typer
@@ -19,9 +18,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
-
-if TYPE_CHECKING:
-    from basic_memory.indexing import IndexProgress
 
 console = Console()
 
@@ -132,42 +128,21 @@ class EmbeddingProgress:
     total: int
 
 
-def _format_eta(seconds: float | None) -> str:
-    """Render a compact ETA string for CLI progress descriptions."""
-    if seconds is None:
-        return "--:--"
-
-    whole_seconds = max(int(seconds), 0)
-    minutes, remaining_seconds = divmod(whole_seconds, 60)
-    hours, remaining_minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours:d}:{remaining_minutes:02d}:{remaining_seconds:02d}"
-    return f"{remaining_minutes:02d}:{remaining_seconds:02d}"
-
-
-def _format_index_progress(progress: IndexProgress) -> str:
-    """Render typed index progress as a compact Rich task description."""
-    files_per_minute = int(progress.files_per_minute) if progress.files_per_minute else 0
-    return (
-        "  Indexing files... "
-        f"{progress.files_processed}/{progress.files_total} files | "
-        f"{progress.batches_completed}/{progress.batches_total} batches | "
-        f"{files_per_minute}/min | ETA {_format_eta(progress.eta_seconds)}"
-    )
-
-
 async def _reindex_projects(app_config):
     """Reindex all projects in a single async context.
 
     This ensures all database operations use the same event loop,
     and proper cleanup happens when the function completes.
     """
-    # Deferred: SQLAlchemy, repositories, and the sync stack load only when a
+    # Deferred: SQLAlchemy, repositories, and the indexing stack load only when a
     # reindex actually runs, not on every CLI start (#886).
     from basic_memory import db
     from basic_memory.repository import ProjectRepository
     from basic_memory.services.initialization import reconcile_projects_with_config
-    from basic_memory.sync.sync_service import get_sync_service
+    from basic_memory.index.local_project import (
+        LocalProjectIndexRuntimeFactory,
+        run_local_project_index_for_project,
+    )
 
     try:
         await reconcile_projects_with_config(app_config)
@@ -177,16 +152,26 @@ async def _reindex_projects(app_config):
             db_path=app_config.database_path,
             db_type=db.DatabaseType.FILESYSTEM,
         )
-        project_repository = ProjectRepository(session_maker)
-        projects = await project_repository.get_active_projects()
+        project_repository = ProjectRepository()
+        async with db.scoped_session(session_maker) as session:
+            projects = await project_repository.get_active_projects(session)
 
         for project in projects:
             console.print(f"  Indexing [cyan]{project.name}[/cyan]...")
-            logger.info(f"Starting sync for project: {project.name}")
-            sync_service = await get_sync_service(project)
-            sync_dir = Path(project.path)
-            await sync_service.sync(sync_dir, project_name=project.name)
-            logger.info(f"Sync completed for project: {project.name}")
+            logger.info(f"Starting project index for project: {project.name}")
+            result = await run_local_project_index_for_project(
+                project,
+                runtime_factory=LocalProjectIndexRuntimeFactory(),
+                force_full=True,
+            )
+            logger.info(
+                "Project index completed",
+                project_name=project.name,
+                total_files=result.total_files,
+                enqueued_files=result.enqueued_files,
+                enqueued_batches=result.enqueued_batches,
+                deleted_files=result.deleted_files,
+            )
     finally:
         # Clean up database connections before event loop closes
         await db.shutdown_db()
@@ -283,7 +268,7 @@ def reindex(
     full: bool = typer.Option(
         False,
         "--full",
-        help="Force a full filesystem scan and file reindex instead of the default incremental scan",
+        help="Request a full project-index run instead of the default project-index pass",
     ),
     project: str = typer.Option(
         None, "--project", "-p", help="Reindex a specific project (default: all)"
@@ -291,17 +276,16 @@ def reindex(
 ):  # pragma: no cover
     """Rebuild search indexes and/or vector embeddings without dropping the database.
 
-    By default runs incremental search + embeddings (if semantic search is enabled).
-    Use --full to bypass incremental scan optimization, rebuild all file-backed search rows,
-    and re-embed all eligible notes.
+    By default runs the project-index coordinator + embeddings (if semantic search is enabled).
+    Use --full to request a full project-index run and re-embed all eligible notes.
     Use --search or --embeddings to rebuild only one side.
 
     Examples:
-        bm reindex                  # Incremental search + embeddings
-        bm reindex --full           # Full search + full re-embed
+        bm reindex                  # Project index + embeddings
+        bm reindex --full           # Full project index + full re-embed
         bm reindex --embeddings     # Only rebuild vector embeddings
-        bm reindex --search         # Only rebuild FTS index
-        bm reindex --full --search  # Full search only
+        bm reindex --search         # Only run project index
+        bm reindex --full --search  # Full project index only
         bm reindex --full --embeddings  # Full re-embed only
         bm reindex -p claw --full   # Full reindex for only the 'claw' project
     """
@@ -336,15 +320,18 @@ async def _reindex(
     project: str | None,
 ):
     """Run reindex operations."""
-    # Deferred: SQLAlchemy, repositories, and the sync stack load only when a
+    # Deferred: SQLAlchemy, repositories, and the indexing stack load only when a
     # reindex actually runs, not on every CLI start (#886).
     from basic_memory import db
+    from basic_memory.index.local_project import (
+        LocalProjectIndexRuntimeFactory,
+        run_local_project_index_for_project,
+    )
     from basic_memory.repository import EntityRepository, ProjectRepository
     from basic_memory.repository.search_repository import create_search_repository
     from basic_memory.services.initialization import reconcile_projects_with_config
     from basic_memory.services.search_service import SearchService
     from basic_memory.services.file_service import FileService
-    from basic_memory.sync.sync_service import get_sync_service
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown.entity_parser import EntityParser
 
@@ -355,8 +342,9 @@ async def _reindex(
             db_path=app_config.database_path,
             db_type=db.DatabaseType.FILESYSTEM,
         )
-        project_repository = ProjectRepository(session_maker)
-        projects = await project_repository.get_active_projects()
+        project_repository = ProjectRepository()
+        async with db.scoped_session(session_maker) as session:
+            projects = await project_repository.get_active_projects(session)
 
         if project:
             projects = [p for p in projects if p.name == project]
@@ -377,39 +365,28 @@ async def _reindex(
             console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
 
             if search:
-                search_mode_label = "full scan" if full else "incremental scan"
+                search_mode_label = "full project index" if full else "project index"
                 console.print(
                     f"  Rebuilding full-text search index ([cyan]{search_mode_label}[/cyan])..."
                 )
-                sync_service = await get_sync_service(proj)
-                sync_dir = Path(proj.path)
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TaskProgressColumn(),
-                    console=console,
-                ) as progress:
-                    task = progress.add_task("  Indexing files... scanning changes", total=1)
-
-                    async def on_index_progress(update: IndexProgress) -> None:
-                        total = update.files_total or 1
-                        completed = update.files_processed if update.files_total else 1
-                        progress.update(
-                            task,
-                            description=_format_index_progress(update),
-                            total=total,
-                            completed=min(completed, total),
-                        )
-
-                    await sync_service.sync(
-                        sync_dir,
-                        project_name=proj.name,
-                        force_full=full,
-                        sync_embeddings=False,
-                        progress_callback=on_index_progress,
-                    )
-                    progress.update(task, completed=progress.tasks[task].total or 1)
+                result = await run_local_project_index_for_project(
+                    proj,
+                    runtime_factory=LocalProjectIndexRuntimeFactory(),
+                    force_full=full,
+                    # The full-text search rebuild must never embed: the explicit
+                    # embeddings phase below owns vector (re)builds. Passing the CLI
+                    # flag here would double-embed on a full reindex — the inline
+                    # project-index sync, then reindex_vectors discarding and
+                    # rebuilding it — so callers pay the embedding cost twice.
+                    embeddings=False,
+                )
+                console.print(
+                    "  [dim]project index: "
+                    f"{result.total_files} observed, "
+                    f"{result.enqueued_files} indexed, "
+                    f"{result.deleted_files} deleted, "
+                    f"{result.enqueued_batches} batches[/dim]"
+                )
 
                 console.print("  [green]done[/green] Full-text search index rebuilt")
 
@@ -418,7 +395,7 @@ async def _reindex(
                 console.print(
                     f"  Building vector embeddings ([cyan]{embedding_mode_label}[/cyan])..."
                 )
-                entity_repository = EntityRepository(session_maker, project_id=proj.id)
+                entity_repository = EntityRepository(project_id=proj.id)
                 search_repository = create_search_repository(
                     session_maker, project_id=proj.id, app_config=app_config
                 )
@@ -426,7 +403,12 @@ async def _reindex(
                 entity_parser = EntityParser(project_path)
                 markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
                 file_service = FileService(project_path, markdown_processor, app_config=app_config)
-                search_service = SearchService(search_repository, entity_repository, file_service)
+                search_service = SearchService(
+                    search_repository,
+                    entity_repository,
+                    file_service,
+                    session_maker=session_maker,
+                )
 
                 with Progress(
                     SpinnerColumn(),

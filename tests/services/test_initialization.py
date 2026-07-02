@@ -6,18 +6,21 @@ test config + dual-backend fixtures.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
     initialize_app,
     initialize_database,
-    initialize_file_sync,
+    initialize_file_indexing,
     reconcile_projects_with_config,
 )
 
@@ -90,15 +93,16 @@ async def test_reconcile_projects_with_config_creates_projects_and_default(
         _, session_maker = await db.get_or_create_db(
             updated.database_path, db_type=db.DatabaseType.FILESYSTEM
         )
-        repo = ProjectRepository(session_maker)
+        repo = ProjectRepository()
 
-        active = await repo.get_active_projects()
-        names = {p.name for p in active}
-        assert names.issuperset({"proj-a", "proj-b"})
+        async with db.scoped_session(session_maker) as session:
+            active = await repo.get_active_projects(session)
+            names = {p.name for p in active}
+            assert names.issuperset({"proj-a", "proj-b"})
 
-        default = await repo.get_default_project()
-        assert default is not None
-        assert default.name == "proj-b"
+            default = await repo.get_default_project(session)
+            assert default is not None
+            assert default.name == "proj-b"
     finally:
         await db.shutdown_db()
 
@@ -181,55 +185,154 @@ class _FakeWatchService:
 
 
 def _disable_test_env_short_circuit(monkeypatch) -> None:
-    """Bypass ``is_test_env`` so ``initialize_file_sync`` actually runs.
+    """Bypass ``is_test_env`` so ``initialize_file_indexing`` actually runs.
 
     ``is_test_env`` returns True whenever pytest is running, which would cause
-    ``initialize_file_sync`` to return before constructing a WatchService.
+    ``initialize_file_indexing`` to return before constructing a WatchService.
     """
     monkeypatch.setattr(BasicMemoryConfig, "is_test_env", property(lambda self: False))
 
 
 @pytest.mark.asyncio
-async def test_initialize_file_sync_passes_constrained_project_to_watch_service(
+async def test_initialize_file_indexing_passes_constrained_project_to_watch_service(
     app_config: BasicMemoryConfig, monkeypatch
 ):
     """``BASIC_MEMORY_MCP_PROJECT`` must reach the watch service, not just the
-    one-shot background sync. Otherwise multiple ``basic-memory mcp --project X``
+    one-shot background indexing. Otherwise multiple ``basic-memory mcp --project X``
     processes each spawn a watcher over every project and race on file writes.
     """
     _disable_test_env_short_circuit(monkeypatch)
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "target-project")
-    monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+    monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
     _FakeWatchService.last_kwargs = {}
 
-    await initialize_file_sync(app_config, quiet=True)
+    await initialize_file_indexing(app_config, quiet=True)
 
     assert _FakeWatchService.last_kwargs.get("constrained_project") == "target-project"
 
 
 @pytest.mark.asyncio
-async def test_initialize_file_sync_no_constraint_when_env_unset(
+async def test_initialize_file_indexing_no_constraint_when_env_unset(
     app_config: BasicMemoryConfig, monkeypatch
 ):
     """With no env var set, the watch service is unconstrained."""
     _disable_test_env_short_circuit(monkeypatch)
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
-    monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+    monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
     _FakeWatchService.last_kwargs = {}
 
-    await initialize_file_sync(app_config, quiet=True)
+    await initialize_file_indexing(app_config, quiet=True)
 
     assert _FakeWatchService.last_kwargs.get("constrained_project") is None
 
 
 @pytest.mark.asyncio
-async def test_initialize_file_sync_skips_project_with_non_absolute_path(
+async def test_initialize_file_indexing_wires_event_index_runtime_by_default(
+    app_config: BasicMemoryConfig, monkeypatch
+):
+    """Watcher event indexing is the default startup path."""
+    _disable_test_env_short_circuit(monkeypatch)
+    monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
+    _FakeWatchService.last_kwargs = {}
+
+    await initialize_file_indexing(app_config, quiet=True)
+
+    assert isinstance(
+        _FakeWatchService.last_kwargs.get("event_index_runtime_factory"),
+        LocalWatchEventIndexRuntimeFactory,
+    )
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_sync_by_default(
     app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
 ):
-    """Projects without an absolute local path are excluded from background sync (issue #949).
+    """Default startup indexing uses project fanout instead of the legacy sync scan."""
+    await db.shutdown_db()
+    try:
+        from basic_memory.config import ProjectEntry
+
+        project_dir = config_home / "event-startup"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        updated = app_config.model_copy(
+            update={
+                "projects": {"event-startup": ProjectEntry(path=str(project_dir))},
+                "default_project": "event-startup",
+            }
+        )
+        config_manager.save_config(updated)
+
+        await initialize_database(updated)
+        await reconcile_projects_with_config(updated)
+
+        _disable_test_env_short_circuit(monkeypatch)
+        monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
+
+        original_create_task = asyncio.create_task
+        created_coroutines = []
+
+        class _CapturedTask:
+            """Stand-in task: the scheduler holds a strong ref and registers a
+            done callback, so the fake must accept both."""
+
+            def add_done_callback(self, callback) -> None:  # noqa: ANN001
+                del callback
+
+        def capture_task(coro):
+            coroutine_name = getattr(getattr(coro, "cr_code", None), "co_name", "")
+            if coroutine_name == "index_project_background":
+                created_coroutines.append(coro)
+                return _CapturedTask()
+            return original_create_task(coro)
+
+        class RecordingProjectIndexRuntimeFactory:
+            async def runtime_for_project(self, project):  # noqa: ANN001
+                return f"runtime:{project.name}"
+
+        project_index_calls: list[tuple[str, str, bool]] = []
+
+        async def run_project_index_for_project(  # noqa: ANN001
+            project, *, runtime_factory, force_full=False
+        ):
+            runtime = await runtime_factory.runtime_for_project(project)
+            project_index_calls.append((project.name, runtime, force_full))
+            return ProjectIndexCoordinatorResult(
+                total_files=0,
+                enqueued_files=0,
+                enqueued_batches=0,
+                deleted_files=0,
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.services.initialization.asyncio.create_task", capture_task
+        )
+        monkeypatch.setattr(
+            "basic_memory.index.local_project.LocalProjectIndexRuntimeFactory",
+            RecordingProjectIndexRuntimeFactory,
+        )
+        monkeypatch.setattr(
+            "basic_memory.index.local_project.run_local_project_index_for_project",
+            run_project_index_for_project,
+        )
+
+        await initialize_file_indexing(updated, quiet=True)
+
+        assert len(created_coroutines) == 1
+        await created_coroutines[0]
+
+        assert project_index_calls == [("event-startup", "runtime:event-startup", False)]
+    finally:
+        await db.shutdown_db()
+
+
+@pytest.mark.asyncio
+async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
+    app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
+):
+    """Projects without an absolute local path are excluded from background indexing (issue #949).
 
     A config entry of ``{"path": ""}`` defaults to LOCAL mode and is not
-    recognized as cloud, yet Path("") resolves to the process cwd. Syncing it
+    recognized as cloud, yet Path("") resolves to the process cwd. Indexing it
     would inject frontmatter into unrelated files, so it must be skipped.
     """
     await db.shutdown_db()
@@ -255,7 +358,7 @@ async def test_initialize_file_sync_skips_project_with_non_absolute_path(
         await reconcile_projects_with_config(updated)
 
         _disable_test_env_short_circuit(monkeypatch)
-        monkeypatch.setattr("basic_memory.sync.WatchService", _FakeWatchService)
+        monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
 
         infos: list[str] = []
         monkeypatch.setattr(
@@ -263,9 +366,9 @@ async def test_initialize_file_sync_skips_project_with_non_absolute_path(
             lambda message, *args, **kwargs: infos.append(message),
         )
 
-        await initialize_file_sync(updated, quiet=True)
+        await initialize_file_indexing(updated, quiet=True)
 
-        skip_logs = [m for m in infos if "not locally syncable" in m]
+        skip_logs = [m for m in infos if "not locally indexable" in m]
         assert skip_logs, "expected a skip log for the empty-path project"
         assert "empty-path" in skip_logs[0]
         assert "good" not in skip_logs[0]

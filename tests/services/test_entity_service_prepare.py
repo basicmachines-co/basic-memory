@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from basic_memory.file_utils import ParseError, parse_frontmatter, remove_frontmatter
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import EntityAlreadyExistsError
+from basic_memory.services.entity_service import PreparedEntityFields
 
 
 @pytest.mark.asyncio
@@ -26,10 +29,38 @@ async def test_prepare_create_entity_content_matches_create_entity_with_content(
     assert prepared.file_path.as_posix() == result.entity.file_path
     assert prepared.markdown_content == result.content
     assert prepared.search_content == result.search_content
-    assert prepared.entity_fields["title"] == result.entity.title
-    assert prepared.entity_fields["note_type"] == result.entity.note_type
-    assert prepared.entity_fields["permalink"] == result.entity.permalink
-    assert prepared.entity_fields["entity_metadata"] == result.entity.entity_metadata
+    assert prepared.entity_fields.title == result.entity.title
+    assert prepared.entity_fields.note_type == result.entity.note_type
+    assert prepared.entity_fields.permalink == result.entity.permalink
+    assert prepared.entity_fields.entity_metadata == result.entity.entity_metadata
+
+
+@pytest.mark.asyncio
+async def test_prepare_create_entity_content_returns_typed_entity_fields(entity_service) -> None:
+    prepared = await entity_service.prepare_create_entity_content(
+        EntitySchema(
+            title="Typed Fields",
+            directory="notes",
+            note_type="decision",
+            content="---\nstatus: accepted\n---\nBody",
+        )
+    )
+
+    assert prepared.entity_fields == PreparedEntityFields(
+        title="Typed Fields",
+        note_type="decision",
+        entity_metadata={
+            "title": "Typed Fields",
+            "type": "decision",
+            "status": "accepted",
+            "permalink": "test-project/notes/typed-fields",
+        },
+        content_type="text/markdown",
+        permalink="test-project/notes/typed-fields",
+        file_path="notes/Typed Fields.md",
+    )
+    with pytest.raises(FrozenInstanceError):
+        setattr(prepared.entity_fields, "title", "Changed")
 
 
 @pytest.mark.asyncio
@@ -52,7 +83,7 @@ async def test_prepare_create_entity_content_can_skip_storage_existence_check(
     )
 
     assert prepared.file_path.as_posix() == "notes/Prepared Create No HEAD.md"
-    assert prepared.entity_fields["title"] == "Prepared Create No HEAD"
+    assert prepared.entity_fields.title == "Prepared Create No HEAD"
 
 
 @pytest.mark.asyncio
@@ -87,9 +118,9 @@ async def test_prepare_update_entity_content_matches_update_entity_with_content(
 
     assert prepared.markdown_content == result.content
     assert prepared.search_content == result.search_content
-    assert prepared.entity_fields["title"] == result.entity.title
-    assert prepared.entity_fields["note_type"] == result.entity.note_type
-    assert prepared.entity_fields["permalink"] == result.entity.permalink
+    assert prepared.entity_fields.title == result.entity.title
+    assert prepared.entity_fields.note_type == result.entity.note_type
+    assert prepared.entity_fields.permalink == result.entity.permalink
     assert prepared_frontmatter["owner"] == "alice"
     assert prepared_frontmatter["status"] == "published"
     assert prepared_frontmatter["reviewed_by"] == "bob"
@@ -128,8 +159,8 @@ async def test_prepare_update_entity_content_can_change_file_path(
     assert prepared.file_path.as_posix() == "journal/Renamed Note.md"
     assert result.entity.file_path == "journal/Renamed Note.md"
     assert result.content == prepared.markdown_content
-    assert prepared.entity_fields["permalink"] != created.permalink
-    assert prepared.entity_fields["permalink"] == result.entity.permalink
+    assert prepared.entity_fields.permalink != created.permalink
+    assert prepared.entity_fields.permalink == result.entity.permalink
     assert not await file_service.exists("notes/Original Name.md")
     assert await file_service.exists("journal/Renamed Note.md")
 
@@ -167,11 +198,40 @@ async def test_prepare_update_entity_content_preserves_permalink_when_move_updat
 
     assert prepared.file_path.as_posix() == "journal/Renamed Stable Permalink.md"
     assert result.entity.file_path == "journal/Renamed Stable Permalink.md"
-    assert prepared.entity_fields["permalink"] == created.permalink
+    assert prepared.entity_fields.permalink == created.permalink
     assert result.entity.permalink == created.permalink
     assert prepared_frontmatter["permalink"] == created.permalink
     assert not await file_service.exists("notes/Stable Permalink.md")
     assert await file_service.exists("journal/Renamed Stable Permalink.md")
+
+
+@pytest.mark.asyncio
+async def test_prepare_move_entity_content_updates_permalink_when_move_policy_enabled(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Prepared Move",
+            directory="notes",
+            note_type="note",
+            content="Move body",
+        )
+    )
+    entity_service.app_config.update_permalinks_on_move = True
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_move_entity_content(
+        created,
+        current_content,
+        "archive/Prepared Move.md",
+    )
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+
+    assert prepared.file_path.as_posix() == "archive/Prepared Move.md"
+    assert prepared.permalink == "test-project/archive/prepared-move"
+    assert prepared_frontmatter["permalink"] == "test-project/archive/prepared-move"
+    assert prepared.search_content == remove_frontmatter(prepared.markdown_content)
 
 
 @pytest.mark.asyncio
@@ -250,9 +310,40 @@ async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
 
     assert prepared.markdown_content == result.content
     assert prepared.search_content == result.search_content
-    assert prepared.entity_fields["title"] == result.entity.title
-    assert prepared.entity_fields["note_type"] == result.entity.note_type
-    assert prepared.entity_fields["permalink"] == result.entity.permalink
+    assert prepared.entity_fields.title == result.entity.title
+    assert prepared.entity_fields.note_type == result.entity.note_type
+    assert prepared.entity_fields.permalink == result.entity.permalink
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_updates_title_when_h1_changes(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Original Title",
+            directory="notes",
+            note_type="note",
+            content="# Original Title\n\nExisting body",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="find_replace",
+        content="# Updated Title",
+        find_text="# Original Title",
+    )
+    metadata = prepared.entity_fields.entity_metadata
+
+    assert prepared.entity_fields.title == "Updated Title"
+    assert parse_frontmatter(prepared.markdown_content)["title"] == "Updated Title"
+    assert metadata is not None
+    assert metadata["title"] == "Updated Title"
+    assert "# Updated Title" in remove_frontmatter(prepared.markdown_content)
 
 
 @pytest.mark.asyncio

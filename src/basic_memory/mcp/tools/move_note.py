@@ -819,6 +819,38 @@ move_note("{identifier}", destination_folder="notes")
                 }
             return cross_project_error
 
+        # Trigger: caller asks to move a note to its current normalized file path.
+        # Why: the API treats this as a successful update, but no file actually moved.
+        # Outcome: report an honest no-op failure so callers can choose a new path.
+        if source_entity is not None:
+            normalized_source = PureWindowsPath(source_entity.file_path).as_posix().strip("/")
+            normalized_destination = PureWindowsPath(destination_path).as_posix().strip("/")
+            if normalized_source == normalized_destination:
+                logger.info(
+                    f"Move rejected because source and destination are the same: "
+                    f"{source_entity.file_path}"
+                )
+                if output_format == "json":
+                    return {
+                        "moved": False,
+                        "title": source_entity.title,
+                        "permalink": source_entity.permalink,
+                        "file_path": source_entity.file_path,
+                        "source": identifier,
+                        "destination": destination_path,
+                        "error": "DESTINATION_SAME_AS_SOURCE",
+                    }
+                return dedent(f"""
+                    # Move Failed - Destination Same As Source
+
+                    The note '{identifier}' is already at the requested destination.
+
+                    **Current path:** `{source_entity.file_path}`
+                    **Requested destination:** `{destination_path}`
+
+                    Choose a different destination path to move or rename this note.
+                    """).strip()
+
         # Validate that destination path includes a file extension
         if "." not in destination_path or not destination_path.split(".")[-1]:
             logger.warning(f"Move failed - no file extension provided: {destination_path}")

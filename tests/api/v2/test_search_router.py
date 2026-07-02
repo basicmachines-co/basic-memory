@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 from pathlib import Path
 
+from basic_memory import db
 from basic_memory.deps.services import get_search_service_v2_external
 from basic_memory.models import Project
 from basic_memory.repository.search_index_row import SearchIndexRow
@@ -26,7 +27,8 @@ async def create_test_entity(
     await file_service.write_file(file_path, test_content)
 
     # Create entity
-    entity = await entity_repository.create(entity_data)
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.create(session, entity_data)
 
     # Index for search
     await search_service.index_entity(entity)

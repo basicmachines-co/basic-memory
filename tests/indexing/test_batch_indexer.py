@@ -10,30 +10,13 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import text
 
+from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.indexing import (
-    BatchIndexer,
-    IndexFrontmatterUpdate,
-    IndexFrontmatterWriteResult,
-    IndexInputFile,
-)
+from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import SyncFatalError
-
-
-class _TestFileWriter:
-    """Adapt the real FileService for batch indexer tests."""
-
-    def __init__(self, file_service) -> None:
-        self.file_service = file_service
-
-    async def write_frontmatter(
-        self, update: IndexFrontmatterUpdate
-    ) -> IndexFrontmatterWriteResult:
-        result = await self.file_service.update_frontmatter_with_result(
-            update.path, update.metadata
-        )
-        return IndexFrontmatterWriteResult(checksum=result.checksum, content=result.content)
 
 
 async def _create_file(path: Path, content: str | bytes) -> None:
@@ -66,7 +49,8 @@ def _make_batch_indexer(
         entity_repository=entity_repository,
         relation_repository=relation_repository,
         search_service=search_service,
-        file_writer=_TestFileWriter(file_service),
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=search_service.session_maker,
     )
 
 
@@ -150,7 +134,7 @@ async def test_batch_indexer_parses_markdown_with_parallel_path(
 
 
 @pytest.mark.asyncio
-async def test_batch_indexer_creates_entities_with_parallel_path(
+async def test_batch_indexer_creates_entities_with_real_db_session(
     app_config,
     entity_service,
     entity_repository,
@@ -199,33 +183,23 @@ async def test_batch_indexer_creates_entities_with_parallel_path(
         file_service,
     )
 
-    original_upsert = entity_service.upsert_entity_from_markdown
-    in_flight = 0
-    max_in_flight = 0
+    result = await batch_indexer.index_files(
+        files,
+        max_concurrent=2,
+        parse_max_concurrent=2,
+    )
 
-    async def spy_upsert(*args, **kwargs):
-        nonlocal in_flight, max_in_flight
-        in_flight += 1
-        max_in_flight = max(max_in_flight, in_flight)
-        await asyncio.sleep(0.05)
-        try:
-            return await original_upsert(*args, **kwargs)
-        finally:
-            in_flight -= 1
-
-    entity_service.upsert_entity_from_markdown = spy_upsert
-    try:
-        result = await batch_indexer.index_files(
-            files,
-            max_concurrent=2,
-            parse_max_concurrent=2,
-        )
-    finally:
-        entity_service.upsert_entity_from_markdown = original_upsert
-
-    assert max_in_flight >= 2
     assert len(result.indexed) == 2
     assert result.errors == []
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        alpha = await entity_repository.get_by_file_path(session, path_one)
+        beta = await entity_repository.get_by_file_path(session, path_two)
+
+    assert alpha is not None
+    assert alpha.title == "Alpha"
+    assert beta is not None
+    assert beta.title == "Beta"
 
 
 @pytest.mark.asyncio
@@ -316,8 +290,9 @@ async def test_batch_indexer_indexes_non_markdown_files(
     assert {indexed.path for indexed in result.indexed} == {pdf_path, image_path}
     assert all(indexed.markdown_content is None for indexed in result.indexed)
 
-    pdf_entity = await entity_repository.get_by_file_path(pdf_path)
-    image_entity = await entity_repository.get_by_file_path(image_path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        pdf_entity = await entity_repository.get_by_file_path(session, pdf_path)
+        image_entity = await entity_repository.get_by_file_path(session, image_path)
     assert pdf_entity is not None
     assert pdf_entity.content_type == "application/pdf"
     assert image_entity is not None
@@ -383,8 +358,9 @@ async def test_batch_indexer_resolves_relations_and_refreshes_search(
         parse_max_concurrent=2,
     )
 
-    source = await entity_repository.get_by_file_path(source_path)
-    target = await entity_repository.get_by_file_path(target_path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, source_path)
+        target = await entity_repository.get_by_file_path(session, target_path)
     assert source is not None
     assert target is not None
     assert len(source.outgoing_relations) == 1
@@ -400,6 +376,61 @@ async def test_batch_indexer_resolves_relations_and_refreshes_search(
         {"entity_id": source.id},
     )
     assert relation_rows.scalar_one() == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_keeps_file_indexed_when_semantic_dependencies_are_missing(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    path = "notes/semantic.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            """
+            ---
+            title: Semantic
+            type: note
+            ---
+            # Semantic
+            """
+        ).strip(),
+    )
+
+    missing_semantic_dependencies = SemanticDependenciesMissingError(
+        "semantic dependencies unavailable"
+    )
+    index_entity_data = AsyncMock(side_effect=missing_semantic_dependencies)
+    monkeypatch.setattr(search_service, "index_entity_data", index_entity_data)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert len(result.indexed) == 1
+    assert result.indexed[0].path == path
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert entity.checksum == result.indexed[0].checksum
+    index_entity_data.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -476,7 +507,8 @@ async def test_batch_indexer_assigns_unique_permalinks_for_batch_local_conflicts
         path_two
     )
 
-    entities = await entity_repository.find_all()
+    async with db.scoped_session(search_service.session_maker) as session:
+        entities = await entity_repository.find_all(session)
     assert len(entities) == 2
     permalinks = [entity.permalink for entity in entities if entity.permalink]
     assert len(set(permalinks)) == 2
@@ -533,7 +565,8 @@ async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter
     assert len(result.indexed) == 1
     assert result.indexed[0].markdown_content == persisted_content
 
-    entity = await entity_repository.get_by_file_path(path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
     assert entity is not None
 
 
@@ -681,7 +714,8 @@ async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
     )
 
     resolve_link.assert_not_awaited()
-    source = await entity_repository.get_by_file_path(path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, path)
     assert source is not None
     assert len(source.outgoing_relations) == 1
     assert source.outgoing_relations[0].to_id is None
@@ -753,7 +787,8 @@ async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
     )
 
     # The unresolvable relation stayed unresolved.
-    source = await entity_repository.get_by_file_path(path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, path)
     assert source is not None
     assert len(source.outgoing_relations) == 1
     assert source.outgoing_relations[0].to_id is None
@@ -801,7 +836,8 @@ async def test_batch_indexer_strips_frontmatter_from_search_content_when_body_is
     )
 
     persisted_content = await file_service.read_file_content(path)
-    entity = await entity_repository.get_by_file_path(path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
     assert entity is not None
     index_entity_data.assert_awaited_once()
     await_args = index_entity_data.await_args
@@ -861,7 +897,8 @@ async def test_batch_indexer_does_not_inject_frontmatter_when_sync_enforcement_i
     # Why: this assertion cares about preserving a frontmatterless file, not about newline style.
     # Outcome: compare against the exact content stored on disk after sync.
     persisted_content = (project_config.home / path).read_bytes().decode("utf-8")
-    entity = await entity_repository.get_by_file_path(path)
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
     assert entity is not None
     assert entity.permalink == existing_permalink
     assert frontmatter_writer.await_count == 0

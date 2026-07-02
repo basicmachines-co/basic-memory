@@ -191,20 +191,22 @@ async def test_embed_opt_out_note_still_participates_in_fts(
     search_service, session_maker, test_project
 ):
     """Per-note semantic opt-out should not remove the note from FTS search."""
-    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    entity = await entity_repo.create(
-        {
-            "title": "FTS Opt Out",
-            "note_type": "note",
-            "entity_metadata": {"embed": False},
-            "content_type": "text/markdown",
-            "file_path": "test/fts-opt-out.md",
-            "permalink": "test/fts-opt-out",
-            "project_id": test_project.id,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now(),
-        }
-    )
+    entity_repo = EntityRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repo.create(
+            session,
+            {
+                "title": "FTS Opt Out",
+                "note_type": "note",
+                "entity_metadata": {"embed": False},
+                "content_type": "text/markdown",
+                "file_path": "test/fts-opt-out.md",
+                "permalink": "test/fts-opt-out",
+                "project_id": test_project.id,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            },
+        )
 
     await search_service.index_entity(
         entity,

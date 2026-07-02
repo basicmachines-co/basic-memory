@@ -4,6 +4,8 @@ import pytest
 from httpx import AsyncClient
 
 from basic_memory.models import Project
+from basic_memory import db
+from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.schemas.v2.resource import ResourceResponse
 
 
@@ -80,6 +82,46 @@ async def test_get_resource_by_id(
     assert response.status_code == 200
     # Normalize line endings for cross-platform compatibility
     assert test_content.replace("\n", "") in response.text.replace("\r\n", "").replace("\n", "")
+
+
+@pytest.mark.asyncio
+async def test_get_markdown_resource_reads_accepted_note_content(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    session_maker,
+):
+    """Markdown resource reads should prefer accepted DB content over stale files."""
+    create_response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "AcceptedResource",
+            "directory": "test",
+            "content": "Original file content",
+        },
+    )
+    assert create_response.status_code == 202
+    created = create_response.json()
+
+    accepted_content = "# AcceptedResource\n\nAccepted note_content body.\n"
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.upsert(
+            session,
+            {
+                "entity_id": created["id"],
+                "markdown_content": accepted_content,
+                "db_version": 42,
+                "db_checksum": "accepted-db-checksum",
+                "file_write_status": "pending",
+                "last_source": "test",
+            },
+        )
+
+    response = await client.get(f"{v2_project_url}/resource/{created['external_id']}")
+
+    assert response.status_code == 200
+    assert response.text == accepted_content
 
 
 @pytest.mark.asyncio

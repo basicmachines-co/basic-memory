@@ -133,6 +133,23 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
 
+async def write_file_atomic_bytes(path: FilePath, content: bytes) -> None:
+    """Write bytes atomically without text newline translation."""
+    path_obj = Path(path) if isinstance(path, str) else path
+    temp_path = path_obj.with_suffix(".tmp")
+
+    try:
+        async with aiofiles.open(temp_path, mode="wb") as f:
+            await f.write(content)
+
+        temp_path.replace(path_obj)
+        logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
+    except Exception as e:  # pragma: no cover
+        temp_path.unlink(missing_ok=True)
+        logger.error("Failed to write file", path=str(path_obj), error=str(e))
+        raise FileWriteError(f"Failed to write file {path}: {e}")
+
+
 async def format_markdown_builtin(path: Path) -> Optional[str]:
     """
     Format a markdown file using the built-in mdformat formatter.

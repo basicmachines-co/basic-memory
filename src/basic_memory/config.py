@@ -364,9 +364,54 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    # Background materialization (local runtime)
+    materialization_workers: int = Field(
+        default=4,
+        description="Number of in-process workers that materialize accepted note "
+        "writes (write the markdown file + index it) off the accept path. Bounds "
+        "concurrent materializations so they don't contend en masse for the DB "
+        "writer under high write load (local runtime; cloud uses queue workers).",
+        gt=0,
+    )
+
+    # SQLite tuning. The index DB is a cache rebuildable from the markdown files
+    # (the source of truth), so durability *could* be traded for throughput — but
+    # benchmarks showed OFF buys nothing over the NORMAL default (WAL + NORMAL
+    # already skips the per-commit fsync), so the safe default stays.
+    sqlite_synchronous: Literal["OFF", "NORMAL", "FULL", "EXTRA"] = Field(
+        default="NORMAL",
+        description="SQLite `PRAGMA synchronous`. Default NORMAL — safe with WAL "
+        "(survives app crashes; only an OS crash/power loss can lose the last "
+        "transactions). OFF showed no measurable write-throughput gain in "
+        "benchmarks (WAL+NORMAL already avoids the per-commit fsync), so it is only "
+        "worth setting for callers that knowingly trade durability — the index DB "
+        "rebuilds from the markdown files via sync — e.g. a one-off bulk import.",
+    )
+    sqlite_mmap_size: int = Field(
+        default=268435456,  # 256 MB
+        description="SQLite `PRAGMA mmap_size` in bytes (0 disables memory-mapped "
+        "I/O). Speeds reads — including the lookups inside writes (link/permalink "
+        "resolution, FTS).",
+        ge=0,
+    )
+    sqlite_wal_autocheckpoint: int = Field(
+        default=1000,
+        description="SQLite `PRAGMA wal_autocheckpoint` in pages (0 disables "
+        "automatic checkpoints). Higher values checkpoint less often, reducing "
+        "writer stalls under sustained bursts at the cost of a larger WAL.",
+        ge=0,
+    )
+    sqlite_page_size: int = Field(
+        default=4096,
+        description="SQLite `PRAGMA page_size` in bytes (power of two, 512-65536). "
+        "Only takes effect on a freshly created database (or after VACUUM).",
+        ge=512,
+        le=65536,
+    )
+
     # Watch service configuration
-    sync_delay: int = Field(
-        default=1000, description="Milliseconds to wait after changes before syncing", gt=0
+    index_delay: int = Field(
+        default=1000, description="Milliseconds to wait after changes before indexing", gt=0
     )
 
     watch_project_reload_interval: int = Field(
@@ -381,21 +426,9 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to update permalinks when files are moved or renamed. default (False)",
     )
 
-    sync_changes: bool = Field(
+    index_changes: bool = Field(
         default=True,
-        description="Whether to sync changes in real time. default (True)",
-    )
-
-    sync_thread_pool_size: int = Field(
-        default=4,
-        description="Size of thread pool for file I/O operations in sync service. Default of 4 is optimized for cloud deployments with 1-2GB RAM.",
-        gt=0,
-    )
-
-    sync_max_concurrent_files: int = Field(
-        default=10,
-        description="Maximum number of files to process concurrently during sync. Limits memory usage on large projects (2000+ files). Lower values reduce memory consumption.",
-        gt=0,
+        description="Whether to index local file changes in real time. default (True)",
     )
     index_batch_size: int = Field(
         default=32,
@@ -544,6 +577,26 @@ class BasicMemoryConfig(BaseSettings):
         default=None,
         description="Default cloud workspace tenant_id. Set by 'bm cloud workspace set-default'.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_sync_fields(cls, data: Any) -> Any:
+        """Honor legacy ``sync_changes``/``sync_delay`` after their rename to
+        ``index_changes``/``index_delay``.
+
+        Existing configs that set ``"sync_changes": false`` (disable realtime
+        indexing) or a custom ``"sync_delay"`` debounce must keep that behavior
+        across the rename. ``extra="ignore"`` would otherwise drop the unknown
+        keys and fall back to the new defaults (True / 1000ms), silently
+        restarting the watcher or speeding up indexing for users who tuned it.
+        The new field takes precedence when both are present.
+        """
+        if isinstance(data, dict):
+            if "index_changes" not in data and "sync_changes" in data:
+                data["index_changes"] = data["sync_changes"]
+            if "index_delay" not in data and "sync_delay" in data:
+                data["index_delay"] = data["sync_delay"]
+        return data
 
     @model_validator(mode="before")
     @classmethod

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
+from basic_memory import db
 from basic_memory.models.project import Project
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
@@ -16,7 +17,7 @@ from basic_memory.schemas.search import SearchItemType
 
 
 @pytest_asyncio.fixture
-async def second_test_project(project_repository):
+async def second_test_project(project_repository, session_maker):
     """Create a second project for testing project isolation during edits."""
     project_data = {
         "name": "Second Edit Test Project",
@@ -25,7 +26,8 @@ async def second_test_project(project_repository):
         "is_active": True,
         "is_default": None,
     }
-    return await project_repository.create(project_data)
+    async with db.scoped_session(session_maker) as session:
+        return await project_repository.create(session, project_data)
 
 
 @pytest_asyncio.fixture

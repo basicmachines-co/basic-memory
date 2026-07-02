@@ -54,7 +54,7 @@ class EntityResolveResponse(BaseModel):
     )
 
 
-class SyncFileRequest(BaseModel):
+class IndexFileRequest(BaseModel):
     """Request to index a single markdown file that exists on disk.
 
     Used as a recovery path when an identifier fails resolution but maps to a
@@ -158,6 +158,22 @@ class EntityResponseV2(BaseModel):
     # User tracking (cloud only, null for local/CLI usage)
     created_by: Optional[str] = Field(None, description="User profile ID of creator")
     last_updated_by: Optional[str] = Field(None, description="User profile ID of last editor")
+
+    # Accepted note_content state. These are present for markdown note routes that
+    # use the accepted-note runtime and null for legacy indexed entity responses.
+    db_version: Optional[int] = Field(None, description="Accepted note_content DB version")
+    db_checksum: Optional[str] = Field(None, description="Accepted note_content checksum")
+    file_version: Optional[int] = Field(None, description="Materialized file version")
+    file_checksum: Optional[str] = Field(None, description="Materialized file checksum")
+    file_write_status: Optional[str] = Field(None, description="Materialized file write status")
+    last_source: Optional[str] = Field(None, description="Last accepted note_content source")
+    file_updated_at: Optional[datetime] = Field(
+        None, description="Timestamp of the last materialized file update"
+    )
+    last_materialization_error: Optional[str] = Field(
+        None, description="Most recent note materialization error"
+    )
+    sync_error: Optional[str] = Field(None, description="Current note sync error")
 
     # V2-specific metadata
     api_version: Literal["v2"] = Field(

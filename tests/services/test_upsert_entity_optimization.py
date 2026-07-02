@@ -104,9 +104,9 @@ async def test_update_entity_relations_uses_pk_reload(entity_service: EntityServ
     original_find_by_ids = entity_service.repository.find_by_ids
     find_by_ids_calls = []
 
-    async def spy_find_by_ids(ids):
+    async def spy_find_by_ids(session, ids):
         find_by_ids_calls.append(ids)
-        return await original_find_by_ids(ids)
+        return await original_find_by_ids(session, ids)
 
     monkeypatch.setattr(entity_service.repository, "find_by_ids", spy_find_by_ids)
 
@@ -186,9 +186,12 @@ async def test_upsert_with_relations_uses_lightweight_exact_resolution(
     )
     await entity_service.upsert_entity_from_markdown(Path(source.file_path), markdown, is_new=False)
 
-    assert resolve_calls == [
-        ("Lightweight Target", {"strict": True, "load_relations": False}),
-    ]
+    assert len(resolve_calls) == 1
+    link_text, kwargs = resolve_calls[0]
+    assert link_text == "Lightweight Target"
+    assert kwargs["strict"] is True
+    assert kwargs["load_relations"] is False
+    assert "session" in kwargs
 
 
 @pytest.mark.asyncio

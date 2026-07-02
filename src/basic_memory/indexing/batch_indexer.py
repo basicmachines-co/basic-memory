@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Awaitable, Callable, Mapping, TypeVar
+from typing import AsyncIterator, Awaitable, Callable, Mapping, TypeVar
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
+from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import compute_checksum, has_frontmatter, remove_frontmatter
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.indexing.models import (
+    IndexEntitySearchWriter,
     IndexedEntity,
     IndexFileWriter,
     IndexFrontmatterUpdate,
@@ -23,12 +27,29 @@ from basic_memory.indexing.models import (
     IndexInputFile,
 )
 from basic_memory.models import Entity, Relation
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.runtime.storage import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
+    runtime_file_path_is_markdown_note,
+)
 from basic_memory.services import EntityService
 from basic_memory.services.exceptions import SyncFatalError
-from basic_memory.services.search_service import SearchService
 from basic_memory.repository import EntityRepository, RelationRepository
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownOnlyIndexEntitySearchWriter:
+    """Filter regular file entities out of batch search indexing."""
+
+    search_writer: IndexEntitySearchWriter
+
+    async def index_entity_data(self, entity: Entity, content: str | None = None) -> None:
+        if not entity.is_markdown:
+            return
+
+        await self.search_writer.index_entity_data(entity, content=content)
 
 
 @dataclass(slots=True)
@@ -67,8 +88,9 @@ class BatchIndexer:
         entity_service: EntityService,
         entity_repository: EntityRepository,
         relation_repository: RelationRepository,
-        search_service: SearchService,
+        search_service: IndexEntitySearchWriter,
         file_writer: IndexFileWriter,
+        session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
         self.app_config = app_config
         self.entity_service = entity_service
@@ -76,6 +98,19 @@ class BatchIndexer:
         self.relation_repository = relation_repository
         self.search_service = search_service
         self.file_writer = file_writer
+        self.session_maker = session_maker
+
+    @asynccontextmanager
+    async def _session_scope(
+        self, session: AsyncSession | None = None
+    ) -> AsyncIterator[AsyncSession]:
+        """Use the caller's session or open a service-owned transaction."""
+        if session is not None:
+            yield session
+            return
+
+        async with db.scoped_session(self.session_maker) as owned_session:
+            yield owned_session
 
     async def index_files(
         self,
@@ -149,9 +184,10 @@ class BatchIndexer:
                 max_concurrent=max_concurrent,
             )
 
-        refreshed_entities = await self.entity_repository.find_by_ids(
-            [prepared.entity_id for prepared in prepared_entities.values()]
-        )
+        async with self._session_scope() as session:
+            refreshed_entities = await self.entity_repository.find_by_ids(
+                session, [prepared.entity_id for prepared in prepared_entities.values()]
+            )
         entities_by_id = {entity.id: entity for entity in refreshed_entities}
 
         refreshed, refresh_errors = await self._run_bounded(
@@ -196,12 +232,7 @@ class BatchIndexer:
             prepared = await self._prepare_markdown_file(file)
         if existing_permalink_by_path is None:
             with logfire.span("index.markdown_file.load_permalink_map", path=file.path):
-                existing_permalink_by_path = {
-                    path: permalink
-                    for path, permalink in (
-                        await self.entity_repository.get_file_path_to_permalink_map()
-                    ).items()
-                }
+                existing_permalink_by_path = await self._get_file_path_to_permalink_map()
 
         reserved_permalinks = {
             permalink
@@ -226,7 +257,8 @@ class BatchIndexer:
             path=file.path,
             entity_id=persisted.entity.id,
         ):
-            refreshed = await self.entity_repository.find_by_ids([persisted.entity.id])
+            async with self._session_scope() as session:
+                refreshed = await self.entity_repository.find_by_ids(session, [persisted.entity.id])
         if len(refreshed) != 1:  # pragma: no cover
             raise ValueError(f"Failed to reload indexed entity for {file.path}")
         entity = refreshed[0]
@@ -248,6 +280,17 @@ class BatchIndexer:
             content_type=prepared_entity.content_type,
             markdown_content=prepared_entity.markdown_content,
         )
+
+    async def _get_file_path_to_permalink_map(self) -> dict[str, str | None]:
+        """Load current file-path to permalink mappings in a service-owned session."""
+        async with self._session_scope() as session:
+            permalink_by_path: dict[str, str | None] = {
+                path: permalink
+                for path, permalink in (
+                    await self.entity_repository.get_file_path_to_permalink_map(session)
+                ).items()
+            }
+            return permalink_by_path
 
     # --- Preparation ---
 
@@ -283,12 +326,7 @@ class BatchIndexer:
             return {}, {}
 
         if existing_permalink_by_path is None:
-            existing_permalink_by_path = {
-                path: permalink
-                for path, permalink in (
-                    await self.entity_repository.get_file_path_to_permalink_map()
-                ).items()
-            }
+            existing_permalink_by_path = await self._get_file_path_to_permalink_map()
 
         batch_paths = set(prepared_markdown)
         reserved_permalinks = {
@@ -406,7 +444,10 @@ class BatchIndexer:
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
-        existing = await self.entity_repository.get_by_file_path(file.path, load_relations=False)
+        async with self._session_scope() as session:
+            existing = await self.entity_repository.get_by_file_path(
+                session, file.path, load_relations=False
+            )
         is_new_entity = existing is None
 
         if existing is None:
@@ -424,7 +465,8 @@ class BatchIndexer:
             )
 
             try:
-                created = await self.entity_repository.add(entity)
+                async with self._session_scope() as session:
+                    created = await self.entity_repository.add(session, entity)
                 entity_id = created.id
             except IntegrityError as exc:
                 message = str(exc)
@@ -436,10 +478,12 @@ class BatchIndexer:
                         and "file_path" in message
                     )
                 ):
-                    existing = await self.entity_repository.get_by_file_path(
-                        file.path,
-                        load_relations=False,
-                    )
+                    async with self._session_scope() as session:
+                        existing = await self.entity_repository.get_by_file_path(
+                            session,
+                            file.path,
+                            load_relations=False,
+                        )
                     if existing is None:
                         raise ValueError(
                             f"Entity not found after file_path conflict: {file.path}"
@@ -450,10 +494,12 @@ class BatchIndexer:
         else:
             entity_id = existing.id
 
-        updated = await self.entity_repository.update(
-            entity_id,
-            self._entity_metadata_updates(file, checksum, include_created_at=is_new_entity),
-        )
+        async with self._session_scope() as session:
+            updated = await self.entity_repository.update(
+                session,
+                entity_id,
+                self._entity_metadata_updates(file, checksum, include_created_at=is_new_entity),
+            )
         if updated is None:
             raise ValueError(f"Failed to update file entity metadata for {file.path}")
 
@@ -476,10 +522,7 @@ class BatchIndexer:
         max_concurrent: int,
     ) -> tuple[int, int]:
         unresolved_relation_lists = await asyncio.gather(
-            *(
-                self.relation_repository.find_unresolved_relations_for_entity(entity_id)
-                for entity_id in entity_ids
-            )
+            *(self._find_unresolved_relations_for_entity(entity_id) for entity_id in entity_ids)
         )
         unresolved_relations = [
             relation for relation_list in unresolved_relation_lists for relation in relation_list
@@ -499,22 +542,26 @@ class BatchIndexer:
                     # link text, mismatching this with the sync_service forward-reference
                     # path and producing confidently-wrong graph edges. See
                     # sync_service.resolve_forward_references for the same change.
-                    resolved_entity = await self.entity_service.link_resolver.resolve_link(
-                        relation.to_name, strict=True
-                    )
+                    async with self._session_scope() as session:
+                        resolved_entity = await self.entity_service.link_resolver.resolve_link(
+                            relation.to_name, strict=True, session=session
+                        )
                     if resolved_entity is None or resolved_entity.id == relation.from_id:
                         return 0
 
                     try:
-                        await self.relation_repository.update(
-                            relation.id,
-                            {
-                                "to_id": resolved_entity.id,
-                                "to_name": resolved_entity.title,
-                            },
-                        )
+                        async with self._session_scope() as session:
+                            await self.relation_repository.update(
+                                session,
+                                relation.id,
+                                {
+                                    "to_id": resolved_entity.id,
+                                    "to_name": resolved_entity.title,
+                                },
+                            )
                     except IntegrityError:
-                        await self.relation_repository.delete(relation.id)
+                        async with self._session_scope() as session:
+                            await self.relation_repository.delete(session, relation.id)
                     return 1
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.warning(
@@ -531,21 +578,35 @@ class BatchIndexer:
         )
 
         remaining_relation_lists = await asyncio.gather(
-            *(
-                self.relation_repository.find_unresolved_relations_for_entity(entity_id)
-                for entity_id in entity_ids
-            )
+            *(self._find_unresolved_relations_for_entity(entity_id) for entity_id in entity_ids)
         )
         remaining_unresolved = sum(len(relations) for relations in remaining_relation_lists)
 
         return sum(resolved_counts), remaining_unresolved
+
+    async def _find_unresolved_relations_for_entity(self, entity_id: int):
+        """Load unresolved relations for one entity in a service-owned session."""
+        async with self._session_scope() as session:
+            return await self.relation_repository.find_unresolved_relations_for_entity(
+                session, entity_id
+            )
 
     # --- Search refresh ---
 
     async def _refresh_search_index(
         self, prepared: _PreparedEntity, entity: Entity
     ) -> IndexedEntity:
-        await self.search_service.index_entity_data(entity, content=prepared.search_content)
+        try:
+            await self.search_service.index_entity_data(entity, content=prepared.search_content)
+        except SemanticDependenciesMissingError as exc:
+            # Semantic search is optional infrastructure; missing provider deps must not undo
+            # the durable file/entity work that already completed.
+            logger.warning(
+                "Skipping semantic index refresh because dependencies are unavailable",
+                path=prepared.path,
+                entity_id=entity.id,
+                error=str(exc),
+            )
         return IndexedEntity(
             path=prepared.path,
             entity_id=entity.id,
@@ -565,30 +626,36 @@ class BatchIndexer:
         resolve_relations: bool = True,
         reload_entity: bool = True,
     ) -> _PersistedMarkdownFile:
-        existing = await self.entity_repository.get_by_file_path(
-            prepared.file.path,
-            load_relations=False,
-        )
-        if is_new is None:
-            is_new = existing is None
-        entity = await self.entity_service.upsert_entity_from_markdown(
-            Path(prepared.file.path),
-            prepared.markdown,
-            is_new=is_new,
-            existing_entity=existing,
-            resolve_relations=resolve_relations,
-            reload_entity=reload_entity,
-        )
-        prepared = await self._reconcile_persisted_permalink(prepared, entity)
-        metadata_updates = self._entity_metadata_updates(prepared.file, prepared.final_checksum)
-        updated = await self.entity_repository.update_fields(
-            entity.id,
-            metadata_updates,
-        )
-        if not updated:
-            raise ValueError(f"Failed to update markdown entity metadata for {prepared.file.path}")
-        self._apply_entity_metadata_updates(entity, metadata_updates)
-        return _PersistedMarkdownFile(prepared=prepared, entity=entity)
+        async with self._session_scope() as session:
+            existing = await self.entity_repository.get_by_file_path(
+                session,
+                prepared.file.path,
+                load_relations=False,
+            )
+            if is_new is None:
+                is_new = existing is None
+            entity = await self.entity_service.upsert_entity_from_markdown(
+                Path(prepared.file.path),
+                prepared.markdown,
+                is_new=is_new,
+                existing_entity=existing,
+                resolve_relations=resolve_relations,
+                reload_entity=reload_entity,
+                session=session,
+            )
+            prepared = await self._reconcile_persisted_permalink(prepared, entity)
+            metadata_updates = self._entity_metadata_updates(prepared.file, prepared.final_checksum)
+            updated = await self.entity_repository.update_fields(
+                session,
+                entity.id,
+                metadata_updates,
+            )
+            if not updated:
+                raise ValueError(
+                    f"Failed to update markdown entity metadata for {prepared.file.path}"
+                )
+            self._apply_entity_metadata_updates(entity, metadata_updates)
+            return _PersistedMarkdownFile(prepared=prepared, entity=entity)
 
     async def _reconcile_persisted_permalink(
         self,
@@ -685,8 +752,8 @@ class BatchIndexer:
 
     def _is_markdown(self, file: IndexInputFile) -> bool:
         if file.content_type is not None:
-            return file.content_type == "text/markdown"
-        return Path(file.path).suffix.lower() in {".md", ".markdown"}
+            return file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+        return runtime_file_path_is_markdown_note(Path(file.path).as_posix())
 
     async def _run_bounded(
         self,

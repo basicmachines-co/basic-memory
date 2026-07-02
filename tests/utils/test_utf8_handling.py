@@ -1,8 +1,13 @@
 """Test UTF-8 character handling in file operations."""
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.file_utils import compute_checksum, write_file_atomic
+from basic_memory.index.local_project import LocalProjectIndexRunner
+from basic_memory.models import Project
+from basic_memory.repository import ProjectRepository
+from basic_memory.services import EntityService, FileService
 
 
 @pytest.mark.asyncio
@@ -55,11 +60,8 @@ async def test_write_utf8_characters(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_frontmatter_with_utf8(tmp_path, sync_service):
+async def test_frontmatter_with_utf8(tmp_path, file_service: FileService):
     """Test handling of frontmatter with UTF-8 characters."""
-    # Use FileService from sync_service
-    file_service = sync_service.file_service
-
     # Create a test file with frontmatter containing UTF-8
     test_path = tmp_path / "frontmatter_utf8.md"
 
@@ -105,8 +107,14 @@ This file has UTF-8 characters in the frontmatter.
 
 
 @pytest.mark.asyncio
-async def test_utf8_in_entity_sync(sync_service, project_config):
-    """Test syncing an entity with UTF-8 content."""
+async def test_utf8_in_entity_index(
+    project_config,
+    entity_service: EntityService,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+):
+    """Test indexing an entity with UTF-8 content."""
     project_dir = project_config.home
 
     # Create a test file with UTF-8 characters
@@ -131,11 +139,14 @@ permalink: i18n/utf8-document
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text(utf8_content, encoding="utf-8")
 
-    # Sync the file
-    await sync_service.sync(project_config.home)
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+    await runner.index_project(test_project.id, force_full=True)
 
     # Verify entity was created
-    entity = await sync_service.entity_service.get_by_permalink("i18n/utf8-document")
+    entity = await entity_service.get_by_permalink("i18n/utf8-document")
     assert entity is not None
 
     # Verify observations were created with UTF-8 content
@@ -159,10 +170,8 @@ permalink: i18n/utf8-document
 
 
 @pytest.mark.asyncio
-async def test_write_file_service_utf8(sync_service, project_config):
+async def test_write_file_service_utf8(file_service: FileService, project_config):
     """Test FileService handling of UTF-8 content."""
-    file_service = sync_service.file_service
-
     # Test writing UTF-8 content through the file service
     test_path = "utf8_service_test.md"
     utf8_content = """---

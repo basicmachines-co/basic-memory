@@ -12,13 +12,14 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.file_utils import format_file
+from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 
 console = Console()
 
 
 def is_markdown_extension(path: Path) -> bool:
     """Check if file has a markdown extension."""
-    return path.suffix.lower() in (".md", ".markdown")
+    return runtime_file_path_is_markdown_note(path.as_posix())
 
 
 async def format_single_file(file_path: Path, app_config) -> tuple[Path, bool, Optional[str]]:

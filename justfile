@@ -1,8 +1,8 @@
 # Basic Memory - Modern Command Runner
 
-TESTMON_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_FLAGS", "--testmon-noselect")
-TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--testmon --testmon-forceselect")
-TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--testmon-noselect")
+PYTEST_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_FLAGS", "--import-mode=importlib")
+TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--import-mode=importlib --testmon --testmon-forceselect")
+TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--import-mode=importlib --testmon-noselect")
 # CI shards the Postgres unit suite across parallel jobs via pytest-split
 # (e.g. "--splits 3 --group 2"). Empty locally.
 PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
@@ -21,7 +21,10 @@ install:
 # Set BASIC_MEMORY_TEST_POSTGRES=1 to run against Postgres (uses testcontainers).
 #
 # Quick Start:
-#   just test              # Run all tests against SQLite (default)
+#   just check             # Run static checks only (fix, format, typecheck)
+#   just fast-check        # Fast static check: fix, format, typecheck
+#   just fast-test         # Run pytest-testmon impacted tests
+#   just test              # Run all tests against SQLite and Postgres
 #   just test-sqlite       # Run all tests against SQLite
 #   just test-postgres     # Run all tests against Postgres (testcontainers)
 #   just test-unit-sqlite  # Run unit tests against SQLite
@@ -42,41 +45,44 @@ test-sqlite: test-unit-sqlite test-int-sqlite
 test-postgres: test-unit-postgres test-int-postgres
 
 # Run unit tests against SQLite
-test-unit-sqlite: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=unit-sqlite tests
+test-unit-sqlite:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} tests
 
 # Run unit tests against Postgres
-# Exit code 5 (no tests collected) is success: a testmon-selected PR build can
-# leave a pytest-split shard empty.
-test-unit-postgres: testmon-seed
+# Exit code 5 (no tests collected) is success: a pytest-split shard can be empty.
+test-unit-postgres:
     #!/usr/bin/env bash
     set -euo pipefail
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} {{PYTEST_SPLIT_FLAGS}} --testmon-env=unit-postgres tests || test $? -eq 5
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} {{PYTEST_SPLIT_FLAGS}} tests || test $? -eq 5
 
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)
-test-int-sqlite: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-sqlite -m "not semantic and not benchmark" test-int
+test-int-sqlite:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int
 
 # Run integration tests against Postgres
 # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
 # See: https://github.com/jlowin/fastmcp/issues/1311
-test-int-postgres: testmon-seed
+test-int-postgres:
     #!/usr/bin/env bash
     set -euo pipefail
     # Use gtimeout (macOS/Homebrew) or timeout (Linux)
     TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic and not benchmark" test-int' || test $? -eq 137
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int' || test $? -eq 137
     else
         echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=int-postgres -m "not semantic and not benchmark" test-int
+        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int
     fi
 
-# Run tests impacted by recent changes (requires pytest-testmon)
-# Pass paths or node ids after `just testmon` to limit the candidate set further.
-testmon *args: testmon-seed
+# Fast test selection for local iteration; run targeted tests explicitly when possible.
+fast-test *args: testmon-seed
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_SELECT_FLAGS}} --testmon-env=local {{args}}
+
+# Run tests impacted by recent changes (requires pytest-testmon).
+# Backcompat alias for the fast-test recipe.
+testmon *args:
+    just fast-test {{args}}
 
 # Seed pytest-testmon data into this worktree from the shared Git cache.
 testmon-seed:
@@ -86,7 +92,7 @@ testmon-seed:
 testmon-refresh:
     #!/usr/bin/env bash
     set -euo pipefail
-    BASIC_MEMORY_TESTMON_FLAGS="{{TESTMON_REFRESH_FLAGS}}" just test
+    BASIC_MEMORY_PYTEST_FLAGS="{{TESTMON_REFRESH_FLAGS}}" just test
     uv run python scripts/testmon_cache.py refresh
 
 # Show local and shared pytest-testmon cache locations.
@@ -94,15 +100,250 @@ testmon-status:
     uv run python scripts/testmon_cache.py status
 
 # Run MCP smoke test (fast end-to-end loop)
-test-smoke: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=smoke -m smoke test-int/mcp/test_smoke_integration.py
+test-smoke:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m smoke test-int/mcp/test_smoke_integration.py
 
-# Fast local loop: lint, format, typecheck, impacted tests via pytest-testmon
+# Fast static check: auto-fix lint, format, and typecheck, but do not run tests.
 fast-check:
     just fix
     just format
     just typecheck
-    just testmon
+
+# Fast local loop with live OpenAI-backed checks disabled.
+fast-check-no-openai:
+    OPENAI_API_KEY= just fast-check
+
+# ==============================================================================
+# Runtime / Event Indexing Refactor
+# ==============================================================================
+
+# Focused portable storage-event contract tests.
+storage-event-contract-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/test_runtime_storage_events.py \
+        tests/index/test_storage_event_operation_processor.py \
+        tests/index/test_storage_event_orchestration.py
+
+# Focused provider-neutral project-index orchestration surface tests.
+project-index-surface-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_project_index_surface.py
+
+# Focused provider-neutral project-index workflow tests.
+project-index-workflow-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_project_index_workflow.py
+
+# Focused provider-neutral project-index coordinator tests.
+project-index-runner-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_project_index_runner.py
+
+# Focused provider-neutral change-planning tests.
+change-planning-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_change_planning.py
+
+# Focused local project-index adapter tests.
+local-project-index-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py
+
+# Focused local project-index scan parity tests.
+local-project-index-scan-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_scan_parity.py
+
+# Focused local project-index directory delete parity test.
+local-project-index-directory-delete-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_directory_delete_removes_notes_and_repairs_survivors
+
+# Focused local project-index hidden-file parity test.
+local-project-index-hidden-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_skips_hidden_markdown_files
+
+# Focused local project-index null-checksum repair parity test.
+local-project-index-null-checksum-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_repairs_null_checksum_entities
+
+# Focused local project-index file timestamp parity tests.
+local-project-index-timestamp-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_uses_file_mtime_for_new_markdown_entities \
+        tests/index/test_local_project_index.py::test_local_project_index_updates_entity_mtime_on_file_modification
+
+# Focused local project-index regular-file parity tests.
+local-project-index-regular-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_indexes_regular_files \
+        tests/index/test_local_project_index.py::test_local_project_index_updates_regular_file_checksum \
+        tests/index/test_local_project_index.py::test_local_project_index_moves_and_deletes_regular_file_entities \
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_regular_file_relations
+
+# Focused local project-index markdown move conflict parity test.
+local-project-index-markdown-move-conflict-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_moves_markdown_over_deleted_path_with_permalink_repair
+
+# Focused local project-index changed-during-index parity test.
+local-project-index-race-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_reads_current_file_when_file_changes_after_observation
+
+# Focused local project-index duplicate permalink parity test.
+local-project-index-permalink-conflict-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_duplicate_permalink_update
+
+# Focused local project-index new duplicate permalink parity test.
+local-project-index-new-permalink-conflict-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_new_duplicate_permalink
+
+# Focused local project-index path-derived permalink conflict parity test.
+local-project-index-path-conflict-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_assigns_unique_permalinks_for_path_conflicts
+
+# Focused local project-index frontmatter policy parity tests.
+local-project-index-frontmatter-policy-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_does_not_add_frontmatter_when_disabled \
+        tests/index/test_local_project_index.py::test_local_project_index_indexes_thematic_break_content_without_frontmatter \
+        tests/index/test_local_project_index.py::test_local_project_index_writes_frontmatter_when_enabled_even_if_permalinks_disabled
+
+# Focused local project-index thematic-break frontmatter parity test.
+local-project-index-thematic-break-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_indexes_thematic_break_content_without_frontmatter
+
+# Focused local project-index relation resolution parity test.
+local-project-index-relation-parity-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_resolves_order_dependent_relations_after_batches \
+        tests/index/test_local_project_index.py::test_local_project_index_deduplicates_relations_by_type
+
+# Focused local project-index observation category parity test.
+local-project-index-observation-category-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_preserves_loose_observation_categories
+
+# Focused local project-index wikilink stability parity test.
+local-project-index-wikilink-stability-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_project_index.py::test_local_project_index_keeps_wikilink_source_stable_when_target_appears
+
+# Focused per-file indexing runner/model tests.
+file-index-runner-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_index_file_runner.py \
+        tests/indexing/test_file_indexer.py \
+        tests/indexing/test_models.py
+
+# Focused file-batch indexing runner/payload tests.
+file-index-batch-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_file_batch_runner.py \
+        tests/indexing/test_job_payloads.py
+
+# Focused batch-index semantic dependency parity test.
+file-index-semantic-dependency-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_batch_indexer.py::test_batch_indexer_keeps_file_indexed_when_semantic_dependencies_are_missing
+
+# Focused startup wiring for local project-index fanout.
+local-project-index-startup-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/services/test_initialization.py::test_initialize_file_indexing_uses_project_index_runtime_for_initial_sync_by_default
+
+# Focused CLI project-index surface tests.
+project-index-cli-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/cli/test_db_reindex.py \
+        tests/cli/test_status_wait_timeout.py
+
+# Focused project-wide indexing orchestration surface tests.
+project-index-contract-test: project-index-surface-test project-index-workflow-test project-index-runner-test change-planning-test local-project-index-test local-project-index-scan-test local-project-index-markdown-move-conflict-test local-project-index-new-permalink-conflict-test local-project-index-path-conflict-test local-project-index-thematic-break-test local-project-index-observation-category-test local-project-index-wikilink-stability-test local-project-index-startup-test project-index-cli-test
+
+# Focused event-based indexing contract tests for the cloud/core extraction loop.
+local-event-index-regular-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_watch_regular_file_parity.py
+
+# Focused local event-index relation cleanup parity test.
+local-event-index-relation-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_watch_regular_file_parity.py::test_local_event_index_deletes_regular_file_relation_target_and_repairs_search
+
+# Focused local event-index atomic-write parity test.
+local-event-index-atomic-write-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_watch_stress_parity.py::test_local_event_index_handles_rapid_atomic_writes_to_same_file
+
+# Focused local filesystem event temp/backup filtering parity test.
+filesystem-event-temp-file-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_filesystem_events.py::test_editor_swap_and_backup_changes_are_filtered_before_indexing
+
+# Focused local event-index larger watcher batch parity tests.
+local-event-index-stress-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/index/test_local_watch_stress_parity.py
+
+# Focused event-based indexing contract tests for the cloud/core extraction loop.
+event-index-contract-test: storage-event-contract-test filesystem-event-temp-file-test local-event-index-atomic-write-test local-event-index-stress-test
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_external_file_delete_runner.py \
+        tests/index/test_filesystem_events.py \
+        tests/index/test_inline_storage_event_processor.py \
+        tests/index/test_local_watch_ignore_parity.py \
+        tests/index/test_local_watch_regular_file_parity.py \
+        tests/index/test_local_watch_orchestration.py \
+        tests/index/test_repository_storage_event_project_resolution.py \
+        tests/services/test_initialization.py::test_initialize_file_indexing_wires_event_index_runtime_by_default
+
+# Focused parity loop for local project scans and shared storage-event routing.
+event-index-parity-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/test_runtime.py::TestRuntimeContracts::test_runtime_storage_event_operation_plans_index_delete_and_skip_work \
+        tests/test_runtime_observed_index_files.py \
+        tests/index/test_local_project_index.py \
+        tests/index/test_filesystem_events.py \
+        tests/index/test_storage_event_operation_processor.py \
+        tests/index/test_storage_event_orchestration.py
+
+# Focused indexing contract suite for the cloud/core extraction loop.
+index-contract-test: file-index-runner-test file-index-batch-test file-index-semantic-dependency-test project-index-contract-test event-index-contract-test
+
+# Focused core contract suite used by the basic-memory-cloud runtime refactor loop.
+runtime-core-pytest *args:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov {{args}}
+
+# Focused PR #1002 Codex feedback regressions.
+pr-1002-feedback-test:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true LOGFIRE_IGNORE_NO_CONFIG=1 uv run pytest -p pytest_mock -q --no-cov \
+        tests/runtime/test_deleted_note_response.py \
+        tests/repository/test_accepted_note_search_repository.py \
+        tests/indexing/test_project_index_workflow.py \
+        tests/indexing/test_accepted_note_write_runner.py \
+        tests/indexing/test_directory_delete_runner.py
+
+runtime-core-fast-check-no-openai:
+    OPENAI_API_KEY= just fast-check
+
+runtime-refactor-contract-test:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -q --no-cov \
+        tests/indexing/test_accepted_note_write_runner.py \
+        tests/indexing/test_accepted_note_enqueue_runner.py \
+        tests/indexing/test_note_content_read_repair_runner.py \
+        tests/runtime/test_accepted_note_response_planning.py \
+        tests/runtime/test_deleted_note_response.py \
+        tests/runtime/test_pending_note_materialization.py \
+        tests/runtime/test_note_content_read_planning.py
+    just index-contract-test
 
 # Reset Postgres test database (drops and recreates schema)
 # Useful when Alembic migration state gets out of sync during development
@@ -124,18 +365,18 @@ postgres-migrate:
 # Run Windows-specific tests only (only works on Windows platform)
 # These tests verify Windows-specific database optimizations (locking mode, NullPool)
 # Will be skipped automatically on non-Windows platforms
-test-windows: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=windows -m windows tests test-int
+test-windows:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m windows tests test-int
 
 # Run benchmark tests only (performance testing)
 # These are slow tests that measure sync performance with various file counts
 # Excluded from default test runs to keep CI fast
-test-benchmark: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=benchmark -m benchmark tests test-int
+test-benchmark:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m benchmark tests test-int
 
 # Run semantic search quality benchmarks (all combos)
-test-semantic: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=semantic -m semantic test-int/semantic/
+test-semantic:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic test-int/semantic/
 
 # Run semantic benchmarks with JSON artifact output, then show report
 test-semantic-report:
@@ -147,8 +388,8 @@ test-litellm-live *args:
     BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_LITELLM_INTEGRATION=1 PYTHONPATH=test-int:src uv run python -m semantic.litellm_live_harness {{args}}
 
 # Run semantic benchmarks (Postgres combos only)
-test-semantic-postgres: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=semantic-postgres -m semantic -k postgres test-int/semantic/
+test-semantic-postgres:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic -k postgres test-int/semantic/
 
 # View semantic benchmark results (rich formatted table)
 # Usage: just semantic-report [--filter-combo sqlite] [--filter-suite paraphrase] [--sort-by avg_latency_ms]
@@ -164,8 +405,8 @@ benchmark-compare baseline candidate *args:
 
 # Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
 # Use this before releasing to ensure everything works across all backends and platforms
-test-all: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_FLAGS}} --testmon-env=all tests test-int
+test-all:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} tests test-int
 
 # Generate HTML coverage report
 coverage:
@@ -290,8 +531,8 @@ telemetry-smoke:
 update-deps:
     uv sync --upgrade
 
-# Run all code quality checks and tests
-check: lint format typecheck test
+# Run static code quality checks. Use `just test` for the actual test suites.
+check: lint format typecheck
 
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
