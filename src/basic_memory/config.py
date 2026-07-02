@@ -959,8 +959,13 @@ class ConfigManager:
                 # Then overlay with file data for fields that aren't set via env vars
                 # This ensures env vars take precedence
 
-                # Get env-based config fields that are actually set
-                env_config = BasicMemoryConfig()
+                # Get env-based config fields that are actually set.
+                # skip_initialization_sync=True keeps this probe side-effect-free:
+                # model_post_init won't seed a default project, and
+                # ensure_project_paths_exists won't mkdir. Pydantic Settings still
+                # reads env vars as field defaults, so env_dict reflects env-derived
+                # values without writing to the filesystem. See GH#1029.
+                env_config = BasicMemoryConfig(skip_initialization_sync=True)
                 env_dict = env_config.model_dump()
 
                 # Merge: file data as base, but only use it for fields not set by env
