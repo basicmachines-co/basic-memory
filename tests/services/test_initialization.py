@@ -274,11 +274,18 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
         original_create_task = asyncio.create_task
         created_coroutines = []
 
+        class _CapturedTask:
+            """Stand-in task: the scheduler holds a strong ref and registers a
+            done callback, so the fake must accept both."""
+
+            def add_done_callback(self, callback) -> None:  # noqa: ANN001
+                del callback
+
         def capture_task(coro):
             coroutine_name = getattr(getattr(coro, "cr_code", None), "co_name", "")
             if coroutine_name == "index_project_background":
                 created_coroutines.append(coro)
-                return object()
+                return _CapturedTask()
             return original_create_task(coro)
 
         class RecordingProjectIndexRuntimeFactory:

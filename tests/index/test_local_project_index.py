@@ -1155,7 +1155,7 @@ async def test_local_project_index_move_updates_permalink_when_configured(
     assert results[0].file_path == "archive/renamed-note.md"
 
 
-async def test_local_project_index_moves_markdown_over_deleted_path_with_permalink_repair(
+async def test_local_project_index_treats_rename_over_existing_path_as_modify_and_delete(
     test_project: Project,
     project_config,
     entity_repository,
@@ -1165,7 +1165,16 @@ async def test_local_project_index_moves_markdown_over_deleted_path_with_permali
     config_manager,
     monkeypatch,
 ) -> None:
-    """Markdown move-with-delete parity should keep the moved source identity."""
+    """A rename onto an existing indexed path is modify+delete, never a move.
+
+    From the scan snapshot alone, "source renamed over target" is
+    indistinguishable from "target edited in place to content matching a
+    deleted note's checksum" (realistic with empty/duplicate notes). Treating
+    the existing path as a move destination would redirect the deleted note's
+    identity onto it and silently drop an in-place edit, so change planning
+    only pairs moves with genuinely new paths. The target entity keeps its
+    identity and receives the new content; the source entity is deleted.
+    """
     app_config.update_permalinks_on_move = True
     config_manager.save_config(app_config)
 
@@ -1199,33 +1208,27 @@ async def test_local_project_index_moves_markdown_over_deleted_path_with_permali
         runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
     )
 
-    expected_permalink = f"{test_project.permalink}/note"
-    assert second.moved_files == 1
-    assert second.deleted_files == 0
-    assert second.enqueued_files == 0
-    assert f"permalink: {expected_permalink}" in target_path.read_text(encoding="utf-8")
+    assert second.moved_files == 0
+    assert second.deleted_files == 1
+    assert second.enqueued_files == 1
 
     async with db.scoped_session(session_maker) as session:
-        replaced_target = await session.get(Entity, target_entity_id)
-        old_source = await entity_repository.get_by_file_path(session, "other/note-1.md")
-        moved_source = await entity_repository.get_by_file_path(session, "note.md")
-        moved_note_content = await NoteContentRepository(test_project.id).get_by_entity_id(
-            session,
-            source_entity_id,
-        )
+        surviving_target = await session.get(Entity, target_entity_id)
+        deleted_source = await session.get(Entity, source_entity_id)
+        old_source_row = await entity_repository.get_by_file_path(session, "other/note-1.md")
+        target_row = await entity_repository.get_by_file_path(session, "note.md")
 
-    assert replaced_target is None
-    assert old_source is None
-    assert moved_source is not None
-    assert moved_source.id == source_entity_id
-    assert moved_source.permalink == expected_permalink
-    assert moved_note_content is not None
-    assert moved_note_content.file_path == "note.md"
-    assert f"permalink: {expected_permalink}" in moved_note_content.markdown_content
+    assert surviving_target is not None
+    assert deleted_source is None
+    assert old_source_row is None
+    assert target_row is not None
+    assert target_row.id == target_entity_id
 
+    expected_permalink = surviving_target.permalink
+    assert expected_permalink is not None
     results = await search_service.search(SearchQuery(permalink=expected_permalink))
     assert len(results) == 1
-    assert results[0].entity_id == source_entity_id
+    assert results[0].entity_id == target_entity_id
     assert results[0].file_path == "note.md"
 
 
