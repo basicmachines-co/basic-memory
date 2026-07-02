@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -77,7 +76,6 @@ class FailingProjectDeleteEnqueuer:
 async def test_project_delete_acceptance_soft_deletes_and_queues_runtime_request(
     tenant_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
-    tenant_id = uuid4()
     project = await create_project(tenant_session_maker)
     enqueuer = RecordingProjectDeleteEnqueuer()
     service = ProjectDeleteAcceptanceService(
@@ -87,7 +85,6 @@ async def test_project_delete_acceptance_soft_deletes_and_queues_runtime_request
 
     result = await service.delete_project(
         ProjectDeleteAcceptanceRequest(
-            tenant_id=tenant_id,
             project_external_id="project-main",
             delete_notes=True,
         )
@@ -100,7 +97,6 @@ async def test_project_delete_acceptance_soft_deletes_and_queues_runtime_request
     assert stored_project.is_active is False
     assert enqueuer.requests == [
         RuntimeProjectDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=project.id,
             project_external_id="project-main",
             project_name="Main",
@@ -117,7 +113,6 @@ async def test_project_delete_acceptance_soft_deletes_and_queues_runtime_request
 async def test_project_delete_acceptance_rejects_default_project_before_soft_delete(
     tenant_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
-    tenant_id = uuid4()
     project = await create_project(tenant_session_maker, is_default=True)
     enqueuer = RecordingProjectDeleteEnqueuer()
     service = ProjectDeleteAcceptanceService(
@@ -128,7 +123,6 @@ async def test_project_delete_acceptance_rejects_default_project_before_soft_del
     with pytest.raises(ProjectDeleteAcceptanceError) as exc_info:
         await service.delete_project(
             ProjectDeleteAcceptanceRequest(
-                tenant_id=tenant_id,
                 project_external_id="project-main",
                 delete_notes=True,
             )
@@ -148,7 +142,6 @@ async def test_project_delete_acceptance_rejects_default_project_before_soft_del
 async def test_project_delete_acceptance_reactivates_project_when_enqueue_fails(
     tenant_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
-    tenant_id = uuid4()
     project = await create_project(tenant_session_maker)
     service = ProjectDeleteAcceptanceService(
         session_maker=tenant_session_maker,
@@ -158,7 +151,6 @@ async def test_project_delete_acceptance_reactivates_project_when_enqueue_fails(
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await service.delete_project(
             ProjectDeleteAcceptanceRequest(
-                tenant_id=tenant_id,
                 project_external_id="project-main",
                 delete_notes=True,
             )

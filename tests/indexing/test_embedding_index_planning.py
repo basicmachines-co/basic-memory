@@ -1,7 +1,6 @@
 """Tests for portable embedding index planning."""
 
 from dataclasses import FrozenInstanceError
-from uuid import UUID
 
 import pytest
 
@@ -45,38 +44,32 @@ class BatchVectorSync:
         return BatchResult()
 
 
-def test_embedding_index_job_request_matches_cloud_queue_identity() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+def test_embedding_index_job_request_matches_project_queue_identity() -> None:
     request = EmbeddingIndexJobRequest(
-        tenant_id=tenant_id,
         project_id=7,
         entity_id=42,
         entity_checksum="checksum-42",
     )
 
-    assert request.dedupe_key() == (
-        "index-embeddings:11111111-1111-1111-1111-111111111111:7:42:checksum-42"
-    )
+    assert request.dedupe_key() == "index-embeddings:7:42:checksum-42"
     assert request.routing_headers({"source": "test"}) == {
         "source": "test",
-        "tenant_id": str(tenant_id),
         "project_id": "7",
     }
-    assert EmbeddingIndexJobRequest(
-        tenant_id=tenant_id,
-        project_id=7,
-        entity_id=42,
-    ).dedupe_key() == ("index-embeddings:11111111-1111-1111-1111-111111111111:7:42:latest")
+    assert (
+        EmbeddingIndexJobRequest(
+            project_id=7,
+            entity_id=42,
+        ).dedupe_key()
+        == "index-embeddings:7:42:latest"
+    )
 
     with pytest.raises(FrozenInstanceError):
         setattr(request, "entity_id", 43)
 
 
 def test_embedding_index_batch_job_request_uses_core_fingerprint() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
     request = EmbeddingIndexBatchJobRequest(
-        tenant_id=tenant_id,
         project_id=7,
         project_path="main",
         entities=(
@@ -84,33 +77,24 @@ def test_embedding_index_batch_job_request_uses_core_fingerprint() -> None:
             EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-42"),
             EmbeddingIndexTarget(entity_id=42, entity_checksum="newer-checksum-42"),
         ),
-        workflow_id=workflow_id,
     )
 
-    assert request.dedupe_key() == (
-        "index-embeddings-batch:11111111-1111-1111-1111-111111111111:7:ac0bc9102835b829086fa453"
-    )
+    assert request.dedupe_key() == "index-embeddings-batch:7:ac0bc9102835b829086fa453"
     assert request.routing_headers({"source": "test"}) == {
         "source": "test",
-        "tenant_id": str(tenant_id),
         "project_id": "7",
         "project_path": "main",
-        "workflow_id": str(workflow_id),
     }
     assert EmbeddingIndexBatchJobRequest(
-        tenant_id=tenant_id,
         project_id=7,
         project_path="main",
     ).routing_headers() == {
-        "tenant_id": str(tenant_id),
         "project_id": "7",
         "project_path": "main",
     }
 
 
 def test_plan_embedding_index_batch_jobs_chunks_enabled_targets() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
     targets = (
         EmbeddingIndexTarget(entity_id=42, entity_checksum="checksum-42"),
         EmbeddingIndexTarget(entity_id=43, entity_checksum="checksum-43"),
@@ -119,34 +103,27 @@ def test_plan_embedding_index_batch_jobs_chunks_enabled_targets() -> None:
 
     assert plan_embedding_index_batch_jobs(
         EmbeddingIndexBatchJobContext(
-            tenant_id=tenant_id,
             project_id=7,
             project_path="main",
             index_embeddings=True,
             targets=targets,
             batch_size=2,
-            workflow_id=workflow_id,
         )
     ) == (
         EmbeddingIndexBatchJobRequest(
-            tenant_id=tenant_id,
             project_id=7,
             project_path="main",
             entities=targets[:2],
-            workflow_id=workflow_id,
         ),
         EmbeddingIndexBatchJobRequest(
-            tenant_id=tenant_id,
             project_id=7,
             project_path="main",
             entities=targets[2:],
-            workflow_id=workflow_id,
         ),
     )
     assert (
         plan_embedding_index_batch_jobs(
             EmbeddingIndexBatchJobContext(
-                tenant_id=tenant_id,
                 project_id=7,
                 project_path="main",
                 index_embeddings=False,
@@ -159,7 +136,6 @@ def test_plan_embedding_index_batch_jobs_chunks_enabled_targets() -> None:
     assert (
         plan_embedding_index_batch_jobs(
             EmbeddingIndexBatchJobContext(
-                tenant_id=tenant_id,
                 project_id=7,
                 project_path="main",
                 index_embeddings=True,
@@ -173,7 +149,6 @@ def test_plan_embedding_index_batch_jobs_chunks_enabled_targets() -> None:
     with pytest.raises(ValueError, match="batch_size must be greater than zero"):
         plan_embedding_index_batch_jobs(
             EmbeddingIndexBatchJobContext(
-                tenant_id=tenant_id,
                 project_id=7,
                 project_path="main",
                 index_embeddings=True,
@@ -252,7 +227,6 @@ def test_embedding_index_result_describes_one_entity_outcome() -> None:
 async def test_run_embedding_index_syncs_one_entity_and_returns_result() -> None:
     vector_sync = SingleVectorSync()
     request = EmbeddingIndexJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=7,
         entity_id=42,
         entity_checksum="checksum-42",
@@ -272,7 +246,6 @@ async def test_run_embedding_index_syncs_one_entity_and_returns_result() -> None
 async def test_run_embedding_index_batch_dedupes_and_summarizes_vector_sync() -> None:
     vector_sync = BatchVectorSync()
     request = EmbeddingIndexBatchJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=7,
         project_path="main",
         entities=(

@@ -108,14 +108,11 @@ from basic_memory.runtime.storage import (
 from basic_memory.runtime.workflows import (
     RUNTIME_ACTIVE_WORKFLOW_STATUSES,
     RUNTIME_TERMINAL_WORKFLOW_STATUSES,
-    RuntimeJobStatus,
-    RuntimeQueuedWorkflowMetadata,
     RuntimeWorkflowAttemptMetadata,
     RuntimeWorkflowCompletionMetadata,
     RuntimeWorkflowFailureMetadata,
     RuntimeWorkflowMetadataView,
     RuntimeWorkflowProgressMetadata,
-    RuntimeWorkflowTransport,
     parse_runtime_workflow_id,
     runtime_job_status_from_workflow_status,
     truncate_runtime_workflow_text,
@@ -217,12 +214,8 @@ class TestRuntimeContracts:
         assert RuntimeStorageFileIndexMode.observed_object.value == "observed_object"
         assert RuntimeStorageFileIndexMode.current_file.value == "current_file"
 
-    def test_runtime_storage_file_index_job_identity_matches_cloud_dedupe_keys(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-
+    def test_runtime_storage_file_index_job_identity_matches_project_dedupe_keys(self):
         observed_identity = RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
             project_id=42,
             file_path="notes/a.md",
             mode=RuntimeStorageFileIndexMode.observed_object,
@@ -230,38 +223,18 @@ class TestRuntimeContracts:
             object_size=123,
         )
         current_identity = RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
-            project_id=42,
-            file_path="notes/a.md",
-            mode=RuntimeStorageFileIndexMode.current_file,
-            workflow_id=workflow_id,
-        )
-        current_without_workflow = RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
             project_id=42,
             file_path="notes/a.md",
             mode=RuntimeStorageFileIndexMode.current_file,
         )
 
-        assert (
-            observed_identity.dedupe_key() == "index-file:11111111-1111-1111-1111-111111111111:42:"
-            "notes/a.md:observed:etag-a:123"
-        )
-        assert (
-            current_identity.dedupe_key() == "index-file:11111111-1111-1111-1111-111111111111:42:"
-            "notes/a.md:current:22222222-2222-2222-2222-222222222222"
-        )
-        assert (
-            current_without_workflow.dedupe_key()
-            == "index-file:11111111-1111-1111-1111-111111111111:42:"
-            "notes/a.md:current:current"
-        )
+        assert observed_identity.dedupe_key() == "index-file:42:notes/a.md:observed:etag-a:123"
+        assert current_identity.dedupe_key() == "index-file:42:notes/a.md:current"
 
         with pytest.raises(FrozenInstanceError):
             setattr(observed_identity, "file_path", "notes/b.md")
 
         missing_observed_metadata = RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
             project_id=42,
             file_path="notes/a.md",
             mode=RuntimeStorageFileIndexMode.observed_object,
@@ -270,67 +243,48 @@ class TestRuntimeContracts:
             missing_observed_metadata.dedupe_key()
 
     def test_runtime_storage_file_index_job_identity_builds_queue_request(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
         identity = RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
             project_id=42,
             file_path="notes/a.md",
             mode=RuntimeStorageFileIndexMode.current_file,
-            workflow_id=workflow_id,
         )
 
         request = identity.job_request(
             entrypoint="index_file",
             payload=b'{"file_path":"notes/a.md"}',
-            headers={
-                "source": "test",
-                "tenant_id": "caller-tenant",
-            },
+            headers={"source": "test"},
         )
 
         assert request == RuntimeJobRequest(
             entrypoint="index_file",
             payload=b'{"file_path":"notes/a.md"}',
-            dedupe_key=(
-                "index-file:11111111-1111-1111-1111-111111111111:42:"
-                "notes/a.md:current:22222222-2222-2222-2222-222222222222"
-            ),
+            dedupe_key="index-file:42:notes/a.md:current",
             headers={
                 "source": "test",
-                "tenant_id": "11111111-1111-1111-1111-111111111111",
                 "project_id": "42",
-                "workflow_id": "22222222-2222-2222-2222-222222222222",
             },
         )
 
     def test_runtime_storage_object_observation_builds_observed_file_identity(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
         observation = RuntimeStorageObjectObservation(etag='"etag-a"', size=123)
 
         identity = observation.to_file_index_job_identity(
-            tenant_id=tenant_id,
             project_id=42,
             file_path="notes/a.md",
         )
 
         assert identity == RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
             project_id=42,
             file_path="notes/a.md",
             mode=RuntimeStorageFileIndexMode.observed_object,
             object_etag='"etag-a"',
             object_size=123,
         )
-        assert identity.dedupe_key() == (
-            "index-file:11111111-1111-1111-1111-111111111111:42:notes/a.md:observed:etag-a:123"
-        )
+        assert identity.dedupe_key() == "index-file:42:notes/a.md:observed:etag-a:123"
         with pytest.raises(FrozenInstanceError):
             setattr(observation, "etag", "other")
 
-    def test_runtime_project_index_job_request_matches_cloud_queue_identity(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+    def test_runtime_project_index_job_request_matches_project_queue_identity(self):
         project = ProjectRuntimeReference(
             project_id=42,
             project_external_id="project-main",
@@ -340,39 +294,30 @@ class TestRuntimeContracts:
         )
 
         request = plan_project_index_job_request(
-            tenant_id=tenant_id,
             project=project,
-            workflow_id=workflow_id,
             force_full=True,
             search=True,
             embeddings=False,
         )
 
         assert request == RuntimeProjectIndexJobRequest(
-            tenant_id=tenant_id,
             project=project,
-            workflow_id=workflow_id,
             force_full=True,
             search=True,
             embeddings=False,
         )
-        assert request.dedupe_key() == ("index-project:11111111-1111-1111-1111-111111111111:42")
+        assert request.dedupe_key() == "index-project:42"
         assert request.routing_headers({"source": "test"}) == {
             "source": "test",
-            "tenant_id": str(tenant_id),
             "project_id": "42",
             "project_path": "main",
-            "workflow_id": str(workflow_id),
         }
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "force_full", False)
 
-    def test_runtime_project_delete_job_request_matches_cloud_queue_identity(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-
+    def test_runtime_project_delete_job_request_matches_project_queue_identity(self):
         request = RuntimeProjectDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=42,
             project_external_id="project-main",
             project_name="Main",
@@ -380,10 +325,9 @@ class TestRuntimeContracts:
             delete_notes=False,
         )
 
-        assert request.dedupe_key() == "delete-project:11111111-1111-1111-1111-111111111111:42"
+        assert request.dedupe_key() == "delete-project:42"
         assert request.routing_headers({"source": "test"}) == {
             "source": "test",
-            "tenant_id": str(tenant_id),
             "project_id": "42",
         }
 
@@ -391,8 +335,6 @@ class TestRuntimeContracts:
             setattr(request, "delete_notes", True)
 
     def test_runtime_index_file_batch_job_request_carries_observed_targets(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
         project = ProjectRuntimeReference(
             project_id=42,
             project_external_id="project-main",
@@ -404,9 +346,7 @@ class TestRuntimeContracts:
             size=123,
         )
         request = RuntimeIndexFileBatchJobRequest(
-            tenant_id=tenant_id,
             project=project,
-            workflow_id=workflow_id,
             batch_index=2,
             batch_count=5,
             file_paths=("notes/a.md",),
@@ -414,23 +354,16 @@ class TestRuntimeContracts:
             index_embeddings=False,
         )
 
-        assert request.dedupe_key() == (
-            "index-file-batch:11111111-1111-1111-1111-111111111111:42:"
-            "22222222-2222-2222-2222-222222222222:2"
-        )
+        assert request.dedupe_key() == "index-file-batch:42:2"
         assert request.routing_headers({"source": "test"}) == {
             "source": "test",
-            "tenant_id": str(tenant_id),
             "project_id": "42",
             "project_external_id": "project-main",
             "project_path": "main",
-            "workflow_id": str(workflow_id),
         }
         assert request.target_paths() == ("notes/a.md",)
         assert RuntimeIndexFileBatchJobRequest(
-            tenant_id=tenant_id,
             project=project,
-            workflow_id=workflow_id,
             batch_index=0,
             batch_count=1,
             file_paths=("notes/legacy.md",),
@@ -440,16 +373,10 @@ class TestRuntimeContracts:
             setattr(observed_file, "path", "notes/b.md")
 
     def test_runtime_storage_file_index_context_requires_observed_project_context(self):
-        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-
         RuntimeStorageFileIndexContext(
             mode=RuntimeStorageFileIndexMode.observed_object,
             project_external_id="project-main",
             project_name="Main",
-        ).require_enqueue_context()
-        RuntimeStorageFileIndexContext(
-            mode=RuntimeStorageFileIndexMode.observed_object,
-            workflow_id=workflow_id,
         ).require_enqueue_context()
         RuntimeStorageFileIndexContext(
             mode=RuntimeStorageFileIndexMode.current_file,
@@ -680,46 +607,11 @@ class TestRuntimeContracts:
             entrypoint="index_file",
             payload=b"{}",
             execute_after=timedelta(seconds=30),
-            headers={"tenant_id": "tenant-1"},
+            headers={"project_id": "42"},
         )
 
         with pytest.raises(FrozenInstanceError):
             setattr(request, "entrypoint", "other")
-
-    def test_runtime_queued_workflow_metadata_serializes_existing_shapes(self):
-        workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-        payload = {"tenant_id": "tenant-1", "project_id": 42}
-        metadata = RuntimeQueuedWorkflowMetadata(
-            workflow_id=workflow_id,
-            progress="queued for indexing",
-            payload=payload,
-            transport=RuntimeWorkflowTransport(
-                broker="pgq",
-                entrypoint="index_project",
-            ),
-        )
-
-        assert metadata.workflow_metadata() == {
-            "job_id": str(workflow_id),
-            "phase": "queued",
-            "progress": "queued for indexing",
-            "payload": payload,
-            "transport": {
-                "broker": "pgq",
-                "entrypoint": "index_project",
-            },
-        }
-        assert metadata.queued_event_data(logical_key="index-tenant-project") == {
-            "logical_key": "index-tenant-project",
-            "entrypoint": "index_project",
-            "phase": "queued",
-            "progress": "queued for indexing",
-            "tenant_id": "tenant-1",
-            "project_id": 42,
-        }
-
-        with pytest.raises(FrozenInstanceError):
-            setattr(metadata, "progress", "changed")
 
     def test_runtime_workflow_update_metadata_serializes_existing_shapes(self):
         attempt = RuntimeWorkflowAttemptMetadata(
@@ -733,10 +625,18 @@ class TestRuntimeContracts:
         }
         assert attempt.attempt_started_event_data(
             attempt_number=2,
-            pgq_job_id="pgq-7",
+            transport_event_data={"queue_job_id": "job-7"},
         ) == {
             "attempt_number": 2,
-            "pgq_job_id": "pgq-7",
+            "queue_job_id": "job-7",
+            "phase": "running",
+            "progress": "loading files",
+        }
+        assert attempt.attempt_started_event_data(
+            attempt_number=1,
+            transport_event_data=None,
+        ) == {
+            "attempt_number": 1,
             "phase": "running",
             "progress": "loading files",
         }
@@ -853,34 +753,6 @@ class TestRuntimeContracts:
         assert runtime_job_status_from_workflow_status("paused") == "unknown"
         assert parse_runtime_workflow_id(str(workflow_id)) == workflow_id
         assert parse_runtime_workflow_id("not-a-workflow-id") is None
-
-    def test_runtime_job_status_carries_public_status_snapshot(self):
-        created_at = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
-        started_at = datetime(2026, 6, 19, 12, 1, tzinfo=UTC)
-        status = RuntimeJobStatus(
-            job_id="job-1",
-            status="in_progress",
-            job_type="index_project",
-            tenant_id="tenant-1",
-            workflow_id="workflow-1",
-            progress="Indexing files",
-            phase="indexing",
-            checkpoint={"batch": 2},
-            created_at=created_at,
-            started_at=started_at,
-            result={"indexed": 4},
-            index_job_id="index-job-1",
-        )
-
-        assert status.job_id == "job-1"
-        assert status.status == "in_progress"
-        assert status.checkpoint == {"batch": 2}
-        assert status.result == {"indexed": 4}
-        assert status.created_at == created_at
-        assert status.started_at == started_at
-
-        with pytest.raises(FrozenInstanceError):
-            setattr(status, "status", "complete")
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
         result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))
@@ -1357,7 +1229,6 @@ class TestRuntimeContracts:
             setattr(materialization, "db_version", 4)
 
     def test_plan_note_materialization_job_request_flattens_pending_work(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
         actor_user_profile_id = UUID("33333333-3333-3333-3333-333333333333")
         materialization = RuntimePendingNoteMaterialization(
             project_id=7,
@@ -1376,13 +1247,9 @@ class TestRuntimeContracts:
             ),
         )
 
-        request = plan_note_materialization_job_request(
-            tenant_id=tenant_id,
-            materialization=materialization,
-        )
+        request = plan_note_materialization_job_request(materialization)
 
         assert request == RuntimeNoteMaterializationJobRequest(
-            tenant_id=tenant_id,
             project_id=7,
             entity_id=42,
             db_version=3,
@@ -1394,12 +1261,9 @@ class TestRuntimeContracts:
             cleanup_file_path="notes/old.md",
             cleanup_file_checksum="old-checksum",
         )
-        assert request.dedupe_key() == (
-            "materialize-note-file:11111111-1111-1111-1111-111111111111:7:42:3:db-checksum"
-        )
+        assert request.dedupe_key() == "materialize-note-file:7:42:3:db-checksum"
         assert request.routing_headers({"source": "test"}) == {
             "source": "test",
-            "tenant_id": str(tenant_id),
             "project_id": "7",
         }
 
@@ -1407,7 +1271,6 @@ class TestRuntimeContracts:
             setattr(request, "db_version", 4)
 
     def test_plan_note_file_delete_job_request_flattens_pending_cleanup(self):
-        tenant_id = UUID("11111111-1111-1111-1111-111111111111")
         file_delete = RuntimePendingNoteFileDelete(
             project_id=7,
             entity_id=42,
@@ -1415,36 +1278,27 @@ class TestRuntimeContracts:
             file_checksum="old-checksum",
         )
 
-        request = plan_note_file_delete_job_request(
-            tenant_id=tenant_id,
-            file_delete=file_delete,
-        )
+        request = plan_note_file_delete_job_request(file_delete)
 
         assert request == RuntimeNoteFileDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=7,
             entity_id=42,
             file_path="notes/old.md",
             file_checksum="old-checksum",
         )
-        assert request.dedupe_key() == (
-            "delete-note-file:11111111-1111-1111-1111-111111111111:7:42:notes/old.md:old-checksum"
-        )
+        assert request.dedupe_key() == "delete-note-file:7:42:notes/old.md:old-checksum"
         assert request.routing_headers({"source": "test"}) == {
             "source": "test",
-            "tenant_id": str(tenant_id),
             "project_id": "7",
         }
         assert (
             RuntimeNoteFileDeleteJobRequest(
-                tenant_id=tenant_id,
                 project_id=7,
                 entity_id=42,
                 file_path="notes/old.md",
                 file_checksum=None,
             ).dedupe_key()
-            == "delete-note-file:11111111-1111-1111-1111-111111111111:"
-            "7:42:notes/old.md:unknown"
+            == "delete-note-file:7:42:notes/old.md:unknown"
         )
 
         with pytest.raises(FrozenInstanceError):
@@ -1578,7 +1432,6 @@ class TestRuntimeContracts:
         attempted_at = datetime(2026, 6, 18, 14, 17, tzinfo=UTC)
         actor_user_profile_id = UUID("33333333-3333-3333-3333-333333333333")
         request = RuntimeNoteMaterializationJobRequest(
-            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             project_id=7,
             entity_id=42,
             db_version=4,

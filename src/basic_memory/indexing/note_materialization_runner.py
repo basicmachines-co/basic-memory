@@ -44,7 +44,6 @@ from basic_memory.runtime import (
     RuntimePreparedNoteWrite,
     RuntimeWrittenFileState,
     ProjectId,
-    TenantId,
     note_content_matches_materialization_request,
     plan_note_file_delete_job_request,
     plan_note_materialization_cleanup_file_delete,
@@ -596,7 +595,6 @@ async def run_note_materialization(
     if preflight_result.terminal_result is not None:
         cleanup_enqueued = await enqueue_cleanup_file(
             cleanup_enqueuer,
-            tenant_id=request.tenant_id,
             cleanup_file=preflight_result.cleanup_file,
         )
         return replace(
@@ -615,7 +613,6 @@ async def run_note_materialization(
         if result.status == RuntimeNoteMaterializationStatus.written:
             cleanup_enqueued = await enqueue_cleanup_file(
                 cleanup_enqueuer,
-                tenant_id=request.tenant_id,
                 cleanup_file=cleanup_file_from_prepared_write(request, prepared_write),
             )
             result = replace(result, cleanup_enqueue_failed=not cleanup_enqueued)
@@ -625,7 +622,6 @@ async def run_note_materialization(
             # watcher/project index re-imports it as a duplicate note.
             cleanup_enqueued = await enqueue_cleanup_file(
                 cleanup_enqueuer,
-                tenant_id=request.tenant_id,
                 cleanup_file=cleanup_file_for_orphaned_write(request, written_file),
             )
             result = replace(result, cleanup_enqueue_failed=not cleanup_enqueued)
@@ -699,7 +695,6 @@ def cleanup_file_for_orphaned_write(
 async def enqueue_cleanup_file(
     cleanup_enqueuer: NoteFileDeleteEnqueuer,
     *,
-    tenant_id: TenantId,
     cleanup_file: RuntimePendingNoteFileDelete | None,
 ) -> bool:
     """Enqueue old-file cleanup when materialization produced one.
@@ -715,10 +710,7 @@ async def enqueue_cleanup_file(
         return True
     try:
         await cleanup_enqueuer.enqueue_note_file_delete(
-            plan_note_file_delete_job_request(
-                tenant_id=tenant_id,
-                file_delete=cleanup_file,
-            )
+            plan_note_file_delete_job_request(cleanup_file)
         )
     except Exception:
         logger.exception(

@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from uuid import UUID
 
 from basic_memory.runtime import (
     RuntimeNoteMaterializationJobRequest,
@@ -23,7 +22,6 @@ def _request(
     cleanup_file_checksum: str | None = None,
 ) -> RuntimeNoteMaterializationJobRequest:
     return RuntimeNoteMaterializationJobRequest(
-        tenant_id=UUID("12345678-1234-5678-1234-567812345678"),
         project_id=7,
         entity_id=42,
         db_version=db_version,

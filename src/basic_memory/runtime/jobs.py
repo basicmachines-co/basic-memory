@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
 from typing import Protocol
-from uuid import UUID
 
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
@@ -23,11 +22,9 @@ from basic_memory.runtime.storage import (
     normalize_storage_etag,
 )
 
-type TenantId = UUID
 type JobEntrypoint = str
 type RuntimeJobDedupeKey = str
 type RuntimeJobId = str | int
-type WorkflowId = UUID
 
 
 class RuntimeStorageFileIndexMode(StrEnum):
@@ -44,11 +41,10 @@ class RuntimeStorageFileIndexContext:
     mode: RuntimeStorageFileIndexMode
     project_external_id: ProjectExternalId | None = None
     project_name: ProjectName | None = None
-    workflow_id: WorkflowId | None = None
 
     def require_enqueue_context(self) -> None:
         """Raise when an observed object job lacks UI-facing project context."""
-        if self.mode != RuntimeStorageFileIndexMode.observed_object or self.workflow_id is not None:
+        if self.mode != RuntimeStorageFileIndexMode.observed_object:
             return
 
         if not self.project_external_id:
@@ -61,20 +57,17 @@ class RuntimeStorageFileIndexContext:
 class RuntimeStorageFileIndexJobIdentity:
     """Stable queue identity for one runtime file-index job."""
 
-    tenant_id: TenantId
     project_id: ProjectId
     file_path: RuntimeFilePath
     mode: RuntimeStorageFileIndexMode
-    workflow_id: WorkflowId | None = None
     object_etag: StorageEtag | None = None
     object_size: int | None = None
 
     def dedupe_key(self) -> str:
         """Return the existing logical work key for file-index queue requests."""
-        base = f"index-file:{self.tenant_id}:{self.project_id}:{self.file_path}"
+        base = f"index-file:{self.project_id}:{self.file_path}"
         if self.mode == RuntimeStorageFileIndexMode.current_file:
-            workflow_key = str(self.workflow_id) if self.workflow_id is not None else "current"
-            return f"{base}:current:{workflow_key}"
+            return f"{base}:current"
 
         if self.object_etag is None:
             raise ValueError("observed_object index jobs require object metadata")
@@ -83,14 +76,7 @@ class RuntimeStorageFileIndexJobIdentity:
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the file-index job."""
         routing_headers = dict(headers or {})
-        routing_headers.update(
-            {
-                "tenant_id": str(self.tenant_id),
-                "project_id": str(self.project_id),
-            }
-        )
-        if self.workflow_id is not None:
-            routing_headers["workflow_id"] = str(self.workflow_id)
+        routing_headers["project_id"] = str(self.project_id)
         return routing_headers
 
     def job_request(
@@ -123,18 +109,14 @@ class RuntimeStorageObjectObservation:
     def to_file_index_job_identity(
         self,
         *,
-        tenant_id: TenantId,
         project_id: ProjectId,
         file_path: RuntimeFilePath,
-        workflow_id: WorkflowId | None = None,
     ) -> RuntimeStorageFileIndexJobIdentity:
         """Build the queue identity for this observed storage object."""
         return RuntimeStorageFileIndexJobIdentity(
-            tenant_id=tenant_id,
             project_id=project_id,
             file_path=file_path,
             mode=RuntimeStorageFileIndexMode.observed_object,
-            workflow_id=workflow_id,
             object_etag=self.etag,
             object_size=self.size,
         )
@@ -153,26 +135,22 @@ class RuntimeObservedIndexFile:
 class RuntimeProjectIndexJobRequest:
     """Queue-neutral request shape for coordinating a project-wide index."""
 
-    tenant_id: TenantId
     project: ProjectRuntimeReference
-    workflow_id: WorkflowId
     force_full: bool = False
     search: bool = True
     embeddings: bool = True
 
     def dedupe_key(self) -> str:
         """Return the logical project-index coordinator queue identity."""
-        return f"index-project:{self.tenant_id}:{self.project.project_id}"
+        return f"index-project:{self.project.project_id}"
 
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the project-index coordinator."""
         routing_headers = dict(headers or {})
         routing_headers.update(
             {
-                "tenant_id": str(self.tenant_id),
                 "project_id": str(self.project.project_id),
                 "project_path": self.project.project_path,
-                "workflow_id": str(self.workflow_id),
             }
         )
         return routing_headers
@@ -180,18 +158,14 @@ class RuntimeProjectIndexJobRequest:
 
 def plan_project_index_job_request(
     *,
-    tenant_id: TenantId,
     project: ProjectRuntimeReference,
-    workflow_id: WorkflowId,
     force_full: bool = False,
     search: bool = True,
     embeddings: bool = True,
 ) -> RuntimeProjectIndexJobRequest:
-    """Flatten project-index workflow state into a queue-neutral request."""
+    """Flatten project-index coordinator inputs into a queue-neutral request."""
     return RuntimeProjectIndexJobRequest(
-        tenant_id=tenant_id,
         project=project,
-        workflow_id=workflow_id,
         force_full=force_full,
         search=search,
         embeddings=embeddings,
@@ -202,7 +176,6 @@ def plan_project_index_job_request(
 class RuntimeProjectDeleteJobRequest:
     """Queue-neutral request shape for hard-deleting one inactive project."""
 
-    tenant_id: TenantId
     project_id: ProjectId
     project_external_id: ProjectExternalId
     project_name: ProjectName
@@ -211,17 +184,12 @@ class RuntimeProjectDeleteJobRequest:
 
     def dedupe_key(self) -> str:
         """Return the logical project-delete queue identity."""
-        return f"delete-project:{self.tenant_id}:{self.project_id}"
+        return f"delete-project:{self.project_id}"
 
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the project-delete job."""
         routing_headers = dict(headers or {})
-        routing_headers.update(
-            {
-                "tenant_id": str(self.tenant_id),
-                "project_id": str(self.project_id),
-            }
-        )
+        routing_headers["project_id"] = str(self.project_id)
         return routing_headers
 
 
@@ -229,9 +197,7 @@ class RuntimeProjectDeleteJobRequest:
 class RuntimeIndexFileBatchJobRequest:
     """Queue-neutral request shape for indexing one project file batch."""
 
-    tenant_id: TenantId
     project: ProjectRuntimeReference
-    workflow_id: WorkflowId
     batch_index: int
     batch_count: int
     file_paths: tuple[RuntimeFilePath, ...] = ()
@@ -241,21 +207,16 @@ class RuntimeIndexFileBatchJobRequest:
 
     def dedupe_key(self) -> str:
         """Return the logical file-batch index queue identity."""
-        return (
-            f"index-file-batch:{self.tenant_id}:{self.project.project_id}:"
-            f"{self.workflow_id}:{self.batch_index}"
-        )
+        return f"index-file-batch:{self.project.project_id}:{self.batch_index}"
 
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the file-batch index job."""
         routing_headers = dict(headers or {})
         routing_headers.update(
             {
-                "tenant_id": str(self.tenant_id),
                 "project_id": str(self.project.project_id),
                 "project_external_id": self.project.project_external_id,
                 "project_path": self.project.project_path,
-                "workflow_id": str(self.workflow_id),
             }
         )
         return routing_headers
@@ -265,16 +226,6 @@ class RuntimeIndexFileBatchJobRequest:
         if self.observed_files:
             return tuple(observed.path for observed in self.observed_files)
         return self.file_paths
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeJobReference:
-    """Queue job identity that can be shared without depending on one queue."""
-
-    entrypoint: JobEntrypoint
-    job_id: RuntimeJobId | None = None
-    tenant_id: TenantId | None = None
-    workflow_id: WorkflowId | None = None
 
 
 @dataclass(frozen=True, slots=True)

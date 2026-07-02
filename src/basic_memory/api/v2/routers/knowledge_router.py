@@ -45,7 +45,6 @@ from basic_memory.deps import (
     IndexFileExecutorV2ExternalDep,
     EntityVectorSyncSchedulerDep,
     RelationResolutionSchedulerDep,
-    RuntimeTenantIdDep,
     SessionDep,
     SessionMakerDep,
 )
@@ -92,7 +91,7 @@ def _schedule_post_write_followups(
 
     CLOUD/LOCAL PARITY (do not break): every follow-up here is a core *router
     scheduler* that the runtime overrides via dependency injection — local runs
-    it in-process (debounced), cloud overrides each to enqueue a PGQ job. Cloud
+    it in-process (debounced), cloud overrides each to enqueue a queue job. Cloud
     must override BOTH get_entity_vector_sync_scheduler AND
     get_relation_resolution_scheduler; if a new follow-up scheduler is added
     here, cloud needs a matching override or it will run the local in-process
@@ -958,7 +957,6 @@ async def move_directory(
 @router.post("/delete-directory", response_class=Response)
 async def delete_directory(
     data: DeleteDirectoryRequestV2,
-    runtime_tenant_id: RuntimeTenantIdDep,
     project_external_id: Annotated[
         str, Path(alias="project_id", description="Project external UUID")
     ],
@@ -987,7 +985,6 @@ async def delete_directory(
 
         try:
             status_code, payload = await directory_delete_service.delete_directory(
-                tenant_id=runtime_tenant_id,
                 project_external_id=project_external_id,
                 directory=data.directory,
             )

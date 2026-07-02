@@ -1,14 +1,13 @@
 """Shared directory-delete service facade.
 
-Runtime-specific callers provide the tenant/session boundary and the file
-cleanup enqueuer. The core service owns request acceptance and response shaping.
+Runtime-specific callers provide the session boundary and the file cleanup
+enqueuer. The core service owns request acceptance and response shaping.
 """
 
 from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 from typing import Protocol
-from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -64,13 +63,11 @@ class DirectoryDeleteService:
     async def delete_directory(
         self,
         *,
-        tenant_id: UUID,
         project_external_id: str,
         directory: str,
     ) -> tuple[int, dict[str, object]]:
         """Delete directory entities immediately and queue file cleanup in the background."""
         request = DirectoryDeleteAcceptanceRequest(
-            tenant_id=tenant_id,
             project_external_id=project_external_id,
             directory=directory,
         )

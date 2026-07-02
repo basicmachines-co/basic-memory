@@ -2,7 +2,6 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from uuid import UUID
 
 from basic_memory.index import (
     InlineStorageEventIndexRuntime,
@@ -205,7 +204,6 @@ def inline_runtime(
     recorder: RecordingInlineResultRecorder | None = None,
 ) -> InlineStorageEventIndexRuntime:
     return InlineStorageEventIndexRuntime(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project=project_reference(),
         checker=checker or ReadEverythingChecker(),
         metadata_source=metadata_source or CurrentFileMetadataSource(),

@@ -18,7 +18,6 @@ from basic_memory.runtime import (
     RuntimeFileDeleteResult,
     RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
-    TenantId,
     ProjectId,
     ProjectExternalId,
     plan_directory_file_snapshot,
@@ -69,7 +68,6 @@ class DirectoryFileDeleteEnqueueError(Exception):
 class DirectoryDeleteAcceptanceRequest:
     """Input for accepting a directory delete before cleanup jobs run."""
 
-    tenant_id: TenantId
     project_external_id: ProjectExternalId
     directory: RuntimeFilePath
 
@@ -304,7 +302,6 @@ class DirectoryFileDeleteEnqueuer(Protocol):
 
 async def enqueue_directory_file_delete_jobs(
     *,
-    tenant_id: TenantId,
     project_id: ProjectId,
     files: Sequence[RuntimeDirectoryFileSnapshot],
     enqueuer: DirectoryFileDeleteEnqueuer,
@@ -318,10 +315,7 @@ async def enqueue_directory_file_delete_jobs(
     for file_snapshot in files:
         result = await enqueuer.enqueue_directory_file_delete(
             plan_note_file_delete_job_request(
-                tenant_id=tenant_id,
-                file_delete=file_snapshot.to_pending_note_file_delete(
-                    project_id=project_id,
-                ),
+                file_snapshot.to_pending_note_file_delete(project_id=project_id)
             )
         )
         if result is not None:
@@ -385,7 +379,6 @@ async def finish_directory_delete_acceptance(
 
     try:
         file_results = await enqueue_directory_file_delete_jobs(
-            tenant_id=request.tenant_id,
             project_id=accepted.project_id,
             files=accepted.files,
             enqueuer=enqueuer,

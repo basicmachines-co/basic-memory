@@ -18,7 +18,6 @@ from basic_memory.models import Project
 from basic_memory.repository import (
     ProjectRepository,
 )
-from basic_memory.runtime import TenantId
 
 if TYPE_CHECKING:
     from basic_memory.index import LocalProjectIndexRuntime
@@ -26,8 +25,6 @@ if TYPE_CHECKING:
 
 class InitialProjectIndexRuntimeFactory(Protocol):
     """Build local project-index runtime dependencies for startup indexing."""
-
-    tenant_id: TenantId
 
     async def runtime_for_project(self, project: Project) -> "LocalProjectIndexRuntime": ...
 

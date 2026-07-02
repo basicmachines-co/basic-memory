@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, cast
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from basic_memory.indexing import (
@@ -718,7 +718,6 @@ async def test_directory_delete_service_uses_injected_runtime_and_session_maker(
     )
 
     status_code, payload = await service.delete_directory(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_external_id="project-123",
         directory="/notes/",
     )
@@ -728,7 +727,6 @@ async def test_directory_delete_service_uses_injected_runtime_and_session_maker(
     assert payload["deleted_files"] == ["notes/example.md"]
     assert enqueuer.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             project_id=3,
             entity_id=7,
             file_path="notes/example.md",

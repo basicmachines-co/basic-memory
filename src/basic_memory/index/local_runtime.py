@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import UUID
 
 from loguru import logger
 
@@ -56,11 +55,8 @@ from basic_memory.runtime import (
     RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeStorageEventOperation,
-    TenantId,
 )
 from basic_memory.services import FileService
-
-LOCAL_EVENT_INDEX_TENANT_ID: TenantId = UUID("00000000-0000-0000-0000-000000000000")
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +118,6 @@ class LocalInlineStorageEventResultRecorder:
     search until a manual reindex (#1016).
     """
 
-    tenant_id: TenantId
     project: ProjectRuntimeReference
     search_service: LocalIndexSearchService
     relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
@@ -146,10 +141,8 @@ class LocalInlineStorageEventResultRecorder:
         # Back-resolve forward references now that this file is indexed.
         relation_request = plan_index_file_relation_resolution(
             IndexFileRelationResolutionContext(
-                tenant_id=self.tenant_id,
                 project_id=self.project.project_id,
                 project_path=self.project.project_path,
-                workflow_id=None,
                 status=result.status,
             )
         )
@@ -245,7 +238,6 @@ class LocalWatchEventIndexRuntimeFactory:
     dependency_provider: LocalIndexProjectDependencyProvider = (
         DefaultLocalIndexProjectDependencyProvider()
     )
-    tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     # Embedding requires semantic search to be configured, so default it off and
     # let runtime construction opt in via semantic_search_enabled (#1016).
     index_embeddings: bool = False
@@ -283,7 +275,6 @@ class LocalWatchEventIndexRuntimeFactory:
             entity_indexer=dependencies.search_service,
         )
         inline_runtime = InlineStorageEventIndexRuntime(
-            tenant_id=self.tenant_id,
             project=project_ref,
             checker=checker,
             metadata_source=metadata_source,
@@ -298,7 +289,6 @@ class LocalWatchEventIndexRuntimeFactory:
             ),
             delete_objects=LocalExternalFileDeleteObjects(dependencies.file_service),
             result_recorder=LocalInlineStorageEventResultRecorder(
-                tenant_id=self.tenant_id,
                 project=project_ref,
                 search_service=dependencies.search_service,
                 relation_cleanup_search_refresher=moved_entity_search_refresher,

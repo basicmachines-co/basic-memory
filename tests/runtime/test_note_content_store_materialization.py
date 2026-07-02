@@ -65,7 +65,6 @@ class _ContentStore:
 
 def _request() -> RuntimeNoteMaterializationJobRequest:
     return RuntimeNoteMaterializationJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=7,
         entity_id=42,
         db_version=4,

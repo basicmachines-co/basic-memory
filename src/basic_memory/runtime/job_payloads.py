@@ -12,20 +12,12 @@ from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.jobs import (
     JobEntrypoint,
     JobRuntime,
-    RuntimeJobDedupeKey,
     RuntimeJobId,
     RuntimeJobRequest,
     RuntimeJobRequestSource,
-    WorkflowId,
     runtime_job_request_from_source,
 )
 from basic_memory.runtime.note_content import RuntimeNoteMaterializationJobRequest
-from basic_memory.runtime.workflows import (
-    RuntimeQueuedWorkflowMetadata,
-    RuntimeWorkflowBroker,
-    RuntimeWorkflowProgress,
-    RuntimeWorkflowTransport,
-)
 from basic_memory.runtime.note_object_metadata import (
     VALID_NOTE_OBJECT_ACTOR_KINDS,
     VALID_NOTE_OBJECT_SOURCES,
@@ -100,55 +92,9 @@ class RuntimePayloadJobEnqueuer[RequestT: RuntimeJobRequestSource]:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeWorkflowQueueEnvelope:
-    """Queue-neutral workflow job handoff with durable metadata shape helpers."""
-
-    workflow_id: WorkflowId
-    entrypoint: JobEntrypoint
-    progress: RuntimeWorkflowProgress
-    job_payload: RuntimeSerializedJobPayload
-    workflow_payload_metadata: Mapping[str, object] | None = None
-    broker: RuntimeWorkflowBroker = "pgq"
-
-    def queued_metadata(self) -> RuntimeQueuedWorkflowMetadata:
-        """Build the durable queued workflow metadata object."""
-        if self.workflow_payload_metadata is None:
-            raise ValueError("workflow_payload_metadata is required for queued workflow metadata")
-        return RuntimeQueuedWorkflowMetadata(
-            workflow_id=self.workflow_id,
-            progress=self.progress,
-            payload=self.workflow_payload_metadata,
-            transport=RuntimeWorkflowTransport(broker=self.broker, entrypoint=self.entrypoint),
-        )
-
-    def workflow_metadata(self) -> dict[str, object]:
-        """Serialize durable workflow metadata using the established shape."""
-        return self.queued_metadata().workflow_metadata()
-
-    def queued_event_data(self, *, logical_key: str) -> dict[str, object]:
-        """Serialize queued workflow event data using the established shape."""
-        return self.queued_metadata().queued_event_data(logical_key=logical_key)
-
-    def job_request(
-        self,
-        *,
-        headers: Mapping[str, str],
-        dedupe_key: RuntimeJobDedupeKey,
-    ) -> RuntimeJobRequest:
-        """Build the concrete queue request after payload validation."""
-        return RuntimeJobRequest(
-            entrypoint=self.entrypoint,
-            payload=self.job_payload.model_dump_json().encode("utf-8"),
-            dedupe_key=dedupe_key,
-            headers=dict(headers),
-        )
-
-
 class RuntimeNoteFileDeleteJobPayload(BaseModel):
     """Serialized worker payload for materialized note-file cleanup."""
 
-    tenant_id: UUID
     project_id: int
     entity_id: int
     file_path: str
@@ -158,7 +104,6 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
     def from_runtime_request(cls, request: RuntimeNoteFileDeleteJobRequest) -> Self:
         """Validate a queue-neutral runtime request at a worker payload boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             file_path=request.file_path,
@@ -168,7 +113,6 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
     def to_runtime_request(self) -> RuntimeNoteFileDeleteJobRequest:
         """Map the validated worker payload back to the queue-neutral request."""
         return RuntimeNoteFileDeleteJobRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             entity_id=self.entity_id,
             file_path=self.file_path,
@@ -192,7 +136,6 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
 class RuntimeNoteMaterializationJobPayload(BaseModel):
     """Serialized worker payload for accepted note materialization."""
 
-    tenant_id: UUID
     project_id: int
     entity_id: int
     db_version: int
@@ -242,7 +185,6 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
     def from_runtime_request(cls, request: RuntimeNoteMaterializationJobRequest) -> Self:
         """Validate a queue-neutral runtime request at a worker payload boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             db_version=request.db_version,
@@ -258,7 +200,6 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
     def to_runtime_request(self) -> RuntimeNoteMaterializationJobRequest:
         """Map the validated worker payload back to the queue-neutral request."""
         return RuntimeNoteMaterializationJobRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             entity_id=self.entity_id,
             db_version=self.db_version,

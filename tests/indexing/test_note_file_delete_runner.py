@@ -1,7 +1,5 @@
 """Tests for portable note-file cleanup orchestration."""
 
-from uuid import UUID
-
 import pytest
 
 from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
@@ -39,7 +37,6 @@ class FakeNoteFileStorage:
 
 def delete_request(file_checksum: str | None = "file-sum") -> RuntimeNoteFileDeleteJobRequest:
     return RuntimeNoteFileDeleteJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=101,
         entity_id=42,
         file_path="notes/a.md",

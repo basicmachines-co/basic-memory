@@ -2,7 +2,6 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from uuid import UUID
 
 import pytest
 
@@ -15,7 +14,7 @@ from basic_memory.indexing import (
     ProjectIndexBatchJobPlan,
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
-    ProjectIndexWorkflowRequest,
+    ProjectIndexRequest,
     build_project_index_batch_job_plan,
     run_project_index_coordinator,
 )
@@ -29,13 +28,11 @@ from basic_memory.runtime import (
 
 @dataclass(frozen=True, slots=True)
 class ProjectIndexSource:
-    tenant_id: UUID
     project_id: int
     project_external_id: str
     project_name: str | None
     project_permalink: str | None
     project_path: str
-    workflow_id: UUID
     force_full: bool
     search: bool
     embeddings: bool
@@ -131,18 +128,14 @@ class RecordingEmbeddingVectorSync:
         return RecordingEmbeddingBatchSummary(entities_synced=len(entity_ids))
 
 
-def test_project_index_workflow_request_serializes_existing_payload_metadata() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-    request = ProjectIndexWorkflowRequest.from_source(
+def test_project_index_request_serializes_existing_payload_metadata() -> None:
+    request = ProjectIndexRequest.from_source(
         ProjectIndexSource(
-            tenant_id=tenant_id,
             project_id=42,
             project_external_id="external-project",
             project_name="Project Name",
             project_permalink="project-name",
             project_path="project",
-            workflow_id=workflow_id,
             force_full=True,
             search=True,
             embeddings=False,
@@ -150,7 +143,6 @@ def test_project_index_workflow_request_serializes_existing_payload_metadata() -
     )
 
     assert request.workflow_payload_metadata() == {
-        "tenant_id": str(tenant_id),
         "project_id": 42,
         "project_external_id": "external-project",
         "project_name": "Project Name",
@@ -163,17 +155,13 @@ def test_project_index_workflow_request_serializes_existing_payload_metadata() -
 
 
 def test_project_index_batch_job_plan_builds_runtime_batch_requests() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-    request = ProjectIndexWorkflowRequest.from_source(
+    request = ProjectIndexRequest.from_source(
         ProjectIndexSource(
-            tenant_id=tenant_id,
             project_id=42,
             project_external_id="external-project",
             project_name="Project Name",
             project_permalink="project-name",
             project_path="project",
-            workflow_id=workflow_id,
             force_full=False,
             search=True,
             embeddings=False,
@@ -196,9 +184,7 @@ def test_project_index_batch_job_plan_builds_runtime_batch_requests() -> None:
         batch_count=2,
         batch_requests=(
             RuntimeIndexFileBatchJobRequest(
-                tenant_id=tenant_id,
                 project=request.project,
-                workflow_id=workflow_id,
                 batch_index=0,
                 batch_count=2,
                 file_paths=("notes/a.md", "notes/b.txt"),
@@ -206,9 +192,7 @@ def test_project_index_batch_job_plan_builds_runtime_batch_requests() -> None:
                 index_embeddings=False,
             ),
             RuntimeIndexFileBatchJobRequest(
-                tenant_id=tenant_id,
                 project=request.project,
-                workflow_id=workflow_id,
                 batch_index=1,
                 batch_count=2,
                 file_paths=("notes/c.md",),
@@ -221,8 +205,6 @@ def test_project_index_batch_job_plan_builds_runtime_batch_requests() -> None:
 
 @pytest.mark.asyncio
 async def test_project_index_coordinator_syncs_inline_vector_targets() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
     batch_result = IndexFileBatchJobResult(
         total_files=2,
         processed_files=2,
@@ -253,7 +235,6 @@ async def test_project_index_coordinator_syncs_inline_vector_targets() -> None:
 
     result = await run_project_index_coordinator(
         RuntimeProjectIndexJobRequest(
-            tenant_id=tenant_id,
             project=ProjectRuntimeReference(
                 project_id=7,
                 project_external_id="external-project",
@@ -261,7 +242,6 @@ async def test_project_index_coordinator_syncs_inline_vector_targets() -> None:
                 project_name="Project Name",
                 project_permalink="project-name",
             ),
-            workflow_id=workflow_id,
             force_full=False,
             search=True,
             embeddings=True,

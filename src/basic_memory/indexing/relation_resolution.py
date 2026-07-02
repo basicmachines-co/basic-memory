@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol
-from uuid import UUID
 
 import logfire
 from loguru import logger
@@ -215,7 +214,6 @@ class RepositoryRelationResolutionRuntime:
 class ResolveRelationsJobRequest:
     """Queue-neutral request shape for resolving one project's forward references."""
 
-    tenant_id: UUID
     project_id: int
     project_path: str
     debounce_seconds: int = RESOLVE_RELATIONS_DEBOUNCE_SECONDS
@@ -226,18 +224,13 @@ class ResolveRelationsJobRequest:
         return timedelta(seconds=self.debounce_seconds)
 
     def dedupe_key(self) -> str:
-        """Return the per-(tenant, project) relation-resolution queue identity."""
-        return f"resolve-relations:{self.tenant_id}:{self.project_id}"
+        """Return the per-project relation-resolution queue identity."""
+        return f"resolve-relations:{self.project_id}"
 
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the relation-resolution job."""
         routing_headers = dict(headers or {})
-        routing_headers.update(
-            {
-                "tenant_id": str(self.tenant_id),
-                "project_id": str(self.project_id),
-            }
-        )
+        routing_headers["project_id"] = str(self.project_id)
         return routing_headers
 
 
@@ -245,7 +238,6 @@ class ResolveRelationsJobRequest:
 class ProjectIndexRelationResolutionContext:
     """Project-index completion facts needed to queue relation resolution."""
 
-    tenant_id: UUID
     project_id: int | str | None
     project_path: str | None
 
@@ -254,10 +246,8 @@ class ProjectIndexRelationResolutionContext:
 class IndexFileRelationResolutionContext:
     """Index-file facts needed to decide whether relation resolution should run."""
 
-    tenant_id: UUID
     project_id: int
     project_path: str
-    workflow_id: UUID | None
     status: IndexFileJobStatus
 
 
@@ -268,7 +258,6 @@ def plan_project_index_completion_relation_resolution(
     if context.project_id is None or context.project_path is None:
         return None
     return ResolveRelationsJobRequest(
-        tenant_id=context.tenant_id,
         project_id=int(context.project_id),
         project_path=context.project_path,
     )
@@ -290,13 +279,15 @@ async def resolve_project_index_completion_relations(
 def plan_index_file_relation_resolution(
     context: IndexFileRelationResolutionContext,
 ) -> ResolveRelationsJobRequest | None:
-    """Plan relation-resolution work after one incremental file index."""
-    if context.workflow_id is not None:
-        return None
+    """Plan relation-resolution work after one incremental file index.
+
+    Workflow-scoped bulk indexing must not call this per file — the coordinator
+    runs one resolution pass at completion instead. Runtimes that track workflow
+    membership (cloud) apply that gate before building this context.
+    """
     if context.status != IndexFileJobStatus.processed:
         return None
     return ResolveRelationsJobRequest(
-        tenant_id=context.tenant_id,
         project_id=context.project_id,
         project_path=context.project_path,
     )

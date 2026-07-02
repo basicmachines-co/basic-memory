@@ -2,7 +2,6 @@
 
 from collections.abc import Mapping
 from typing import Self
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -64,7 +63,6 @@ class IndexFileObjectMetadataPayload(BaseModel):
 class IndexFileJobPayload(BaseModel):
     """Serialized worker payload for indexing one project file."""
 
-    tenant_id: UUID
     project_id: int
     project_external_id: str | None = None
     project_name: str | None = None
@@ -73,7 +71,6 @@ class IndexFileJobPayload(BaseModel):
     mode: RuntimeStorageFileIndexMode = RuntimeStorageFileIndexMode.observed_object
     object_metadata: IndexFileObjectMetadataPayload | None = None
     index_embeddings: bool = True
-    workflow_id: UUID | None = None
 
     @classmethod
     def from_runtime_request(cls, request: IndexFileRuntimeRequest) -> Self:
@@ -84,7 +81,6 @@ class IndexFileJobPayload(BaseModel):
             else None
         )
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             project_external_id=request.project_external_id,
             project_name=request.project_name,
@@ -93,13 +89,11 @@ class IndexFileJobPayload(BaseModel):
             mode=request.mode,
             object_metadata=object_metadata,
             index_embeddings=request.index_embeddings,
-            workflow_id=request.workflow_id,
         )
 
     def to_runtime_request(self) -> IndexFileRuntimeRequest:
         """Map the validated worker payload into the storage-neutral index request."""
         return IndexFileRuntimeRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             project_external_id=self.project_external_id,
             project_name=self.project_name,
@@ -112,7 +106,6 @@ class IndexFileJobPayload(BaseModel):
                 else None
             ),
             index_embeddings=self.index_embeddings,
-            workflow_id=self.workflow_id,
         )
 
     def runtime_job_identity(self) -> RuntimeStorageFileIndexJobIdentity:
@@ -183,7 +176,6 @@ class ObservedIndexFilePayload(BaseModel):
 class IndexFileBatchJobPayload(BaseModel):
     """Serialized worker payload for indexing a project file batch."""
 
-    tenant_id: UUID
     project_id: int
     project_external_id: str
     project_path: str
@@ -191,7 +183,6 @@ class IndexFileBatchJobPayload(BaseModel):
     observed_files: list[ObservedIndexFilePayload] = Field(default_factory=list)
     batch_index: int
     batch_count: int
-    workflow_id: UUID
     index_embeddings: bool = True
     force_full: bool = False
 
@@ -209,7 +200,6 @@ class IndexFileBatchJobPayload(BaseModel):
     def from_runtime_request(cls, request: RuntimeIndexFileBatchJobRequest) -> Self:
         """Validate the runtime file-batch request at a worker boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project.project_id,
             project_external_id=request.project.project_external_id,
             project_path=request.project.project_path,
@@ -220,7 +210,6 @@ class IndexFileBatchJobPayload(BaseModel):
             ],
             batch_index=request.batch_index,
             batch_count=request.batch_count,
-            workflow_id=request.workflow_id,
             index_embeddings=request.index_embeddings,
             force_full=request.force_full,
         )
@@ -228,13 +217,11 @@ class IndexFileBatchJobPayload(BaseModel):
     def to_runtime_request(self) -> RuntimeIndexFileBatchJobRequest:
         """Map the validated worker payload back to the runtime request."""
         return RuntimeIndexFileBatchJobRequest(
-            tenant_id=self.tenant_id,
             project=ProjectRuntimeReference(
                 project_id=self.project_id,
                 project_external_id=self.project_external_id,
                 project_path=self.project_path,
             ),
-            workflow_id=self.workflow_id,
             batch_index=self.batch_index,
             batch_count=self.batch_count,
             file_paths=tuple(self.file_paths),
@@ -262,13 +249,11 @@ class IndexFileBatchJobPayload(BaseModel):
 class ProjectIndexJobPayload(BaseModel):
     """Serialized worker payload for coordinating a project-wide index."""
 
-    tenant_id: UUID
     project_id: int
     project_external_id: str
     project_name: str | None = None
     project_permalink: str | None = None
     project_path: str
-    workflow_id: UUID
     force_full: bool = False
     search: bool = True
     embeddings: bool = True
@@ -277,13 +262,11 @@ class ProjectIndexJobPayload(BaseModel):
     def from_runtime_request(cls, request: RuntimeProjectIndexJobRequest) -> Self:
         """Validate the runtime project-index request at a worker boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project.project_id,
             project_external_id=request.project.project_external_id,
             project_name=request.project.project_name,
             project_permalink=request.project.project_permalink,
             project_path=request.project.project_path,
-            workflow_id=request.workflow_id,
             force_full=request.force_full,
             search=request.search,
             embeddings=request.embeddings,
@@ -302,9 +285,7 @@ class ProjectIndexJobPayload(BaseModel):
     def to_runtime_request(self) -> RuntimeProjectIndexJobRequest:
         """Map the validated worker payload back to the runtime request."""
         return RuntimeProjectIndexJobRequest(
-            tenant_id=self.tenant_id,
             project=self.project_reference(),
-            workflow_id=self.workflow_id,
             force_full=self.force_full,
             search=self.search,
             embeddings=self.embeddings,
@@ -327,7 +308,6 @@ class ProjectIndexJobPayload(BaseModel):
 class ProjectDeleteJobPayload(BaseModel):
     """Serialized worker payload for hard-deleting a soft-deleted project."""
 
-    tenant_id: UUID
     project_id: int
     project_external_id: str
     project_name: str
@@ -338,7 +318,6 @@ class ProjectDeleteJobPayload(BaseModel):
     def from_runtime_request(cls, request: RuntimeProjectDeleteJobRequest) -> Self:
         """Validate the runtime project-delete request at a worker boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             project_external_id=request.project_external_id,
             project_name=request.project_name,
@@ -349,7 +328,6 @@ class ProjectDeleteJobPayload(BaseModel):
     def to_runtime_request(self) -> RuntimeProjectDeleteJobRequest:
         """Map the validated worker payload back to the runtime request."""
         return RuntimeProjectDeleteJobRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             project_external_id=self.project_external_id,
             project_name=self.project_name,
@@ -374,7 +352,6 @@ class ProjectDeleteJobPayload(BaseModel):
 class EmbeddingIndexJobPayload(BaseModel):
     """Serialized worker payload for indexing one entity's embeddings."""
 
-    tenant_id: UUID
     project_id: int
     entity_id: int
     entity_checksum: str | None = None
@@ -383,7 +360,6 @@ class EmbeddingIndexJobPayload(BaseModel):
     def from_runtime_request(cls, request: EmbeddingIndexJobRequest) -> Self:
         """Validate the runtime embedding request at a worker boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             entity_checksum=request.entity_checksum,
@@ -392,7 +368,6 @@ class EmbeddingIndexJobPayload(BaseModel):
     def to_runtime_request(self) -> EmbeddingIndexJobRequest:
         """Map the validated worker payload back to the runtime request."""
         return EmbeddingIndexJobRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             entity_id=self.entity_id,
             entity_checksum=self.entity_checksum,
@@ -437,24 +412,20 @@ class EmbeddingIndexTargetPayload(BaseModel):
 class EmbeddingIndexBatchJobPayload(BaseModel):
     """Serialized worker payload for indexing embeddings for many entities."""
 
-    tenant_id: UUID
     project_id: int
     project_path: str
     entities: list[EmbeddingIndexTargetPayload] = Field(default_factory=list)
-    workflow_id: UUID | None = None
 
     @classmethod
     def from_runtime_request(cls, request: EmbeddingIndexBatchJobRequest) -> Self:
         """Validate the runtime embedding batch request at a worker boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             project_path=request.project_path,
             entities=[
                 EmbeddingIndexTargetPayload.from_embedding_target(target)
                 for target in request.entities
             ],
-            workflow_id=request.workflow_id,
         )
 
     def targets(self) -> list[EmbeddingIndexTarget]:
@@ -464,11 +435,9 @@ class EmbeddingIndexBatchJobPayload(BaseModel):
     def to_runtime_request(self) -> EmbeddingIndexBatchJobRequest:
         """Map the validated worker payload back to the runtime request."""
         return EmbeddingIndexBatchJobRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             project_path=self.project_path,
             entities=tuple(self.targets()),
-            workflow_id=self.workflow_id,
         )
 
     def runtime_job_request(
@@ -488,7 +457,6 @@ class EmbeddingIndexBatchJobPayload(BaseModel):
 class ResolveRelationsJobPayload(BaseModel):
     """Serialized worker payload for resolving one project's relations."""
 
-    tenant_id: UUID
     project_id: int
     project_path: str
 
@@ -496,7 +464,6 @@ class ResolveRelationsJobPayload(BaseModel):
     def from_runtime_request(cls, request: ResolveRelationsJobRequest) -> Self:
         """Validate the runtime relation-resolution request at a worker boundary."""
         return cls(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             project_path=request.project_path,
         )
@@ -504,7 +471,6 @@ class ResolveRelationsJobPayload(BaseModel):
     def to_runtime_request(self) -> ResolveRelationsJobRequest:
         """Map the validated worker payload back to the runtime request."""
         return ResolveRelationsJobRequest(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             project_path=self.project_path,
         )

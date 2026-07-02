@@ -1,7 +1,5 @@
 """Tests for portable file-index content read planning."""
 
-from uuid import UUID
-
 from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
@@ -38,13 +36,11 @@ def test_file_index_target_from_observed_storage_object_normalizes_etag() -> Non
 
 def test_file_index_targets_from_runtime_batch_request_prefers_observed_files() -> None:
     request = RuntimeIndexFileBatchJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project=ProjectRuntimeReference(
             project_id=101,
             project_external_id="project-main",
             project_path="main",
         ),
-        workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
         batch_index=0,
         batch_count=1,
         file_paths=("notes/legacy.md",),
@@ -68,13 +64,11 @@ def test_file_index_targets_from_runtime_batch_request_prefers_observed_files() 
 
 def test_file_index_targets_from_runtime_batch_request_uses_legacy_paths() -> None:
     request = RuntimeIndexFileBatchJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project=ProjectRuntimeReference(
             project_id=101,
             project_external_id="project-main",
             project_path="main",
         ),
-        workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
         batch_index=0,
         batch_count=1,
         file_paths=("notes/legacy.md",),

@@ -14,16 +14,14 @@ from basic_memory.indexing import (
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
-    ProjectIndexWorkflowQueued,
     ProjectIndexWorkflowRecordPlan,
-    ProjectIndexWorkflowRequest,
+    ProjectIndexRequest,
     ProjectIndexStaleWorkflowPlan,
     ProjectIndexWorkflowStart,
     ProjectIndexWorkflowStartPlan,
     build_project_index_batch_activity_update,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
-    build_project_index_workflow_queued,
     build_project_index_workflow_start,
     build_project_index_workflow_stale_failure_update,
     plan_project_index_batch_result_record,
@@ -35,13 +33,11 @@ from basic_memory.indexing import (
 
 @dataclass(frozen=True, slots=True)
 class ProjectIndexSource:
-    tenant_id: UUID
     project_id: int
     project_external_id: str
     project_name: str | None
     project_permalink: str | None
     project_path: str
-    workflow_id: UUID
     force_full: bool
     search: bool
     embeddings: bool
@@ -83,66 +79,6 @@ def project_index_record_metadata(
     return metadata
 
 
-def test_project_index_workflow_queued_builds_metadata_event_and_logical_key() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-    request = ProjectIndexWorkflowRequest.from_source(
-        ProjectIndexSource(
-            tenant_id=tenant_id,
-            project_id=42,
-            project_external_id="external-project",
-            project_name="Project Name",
-            project_permalink="project-name",
-            project_path="project",
-            workflow_id=workflow_id,
-            force_full=True,
-            search=True,
-            embeddings=False,
-        )
-    )
-
-    queued = build_project_index_workflow_queued(
-        request=request,
-        transport_broker="pgq",
-        transport_entrypoint="index_project",
-    )
-
-    assert queued == ProjectIndexWorkflowQueued(
-        logical_key=f"index-{tenant_id}-Project Name-full-search",
-        metadata={
-            "job_id": str(workflow_id),
-            "phase": "queued",
-            "progress": "queued for index",
-            "payload": {
-                "tenant_id": str(tenant_id),
-                "project_id": 42,
-                "project_external_id": "external-project",
-                "project_name": "Project Name",
-                "project_permalink": "project-name",
-                "project_path": "project",
-                "force_full": True,
-                "search": True,
-                "embeddings": False,
-            },
-            "transport": {
-                "broker": "pgq",
-                "entrypoint": "index_project",
-            },
-        },
-        queued_event_data={
-            "logical_key": f"index-{tenant_id}-Project Name-full-search",
-            "entrypoint": "index_project",
-            "phase": "queued",
-            "progress": "queued for index",
-            "project_id": 42,
-            "project_external_id": "external-project",
-            "project_name": "Project Name",
-            "project_permalink": "project-name",
-            "project_path": "project",
-        },
-    )
-
-
 def test_project_index_batch_activity_update_builds_last_activity_metadata() -> None:
     activity = ProjectIndexBatchJobActivity(
         batch_indexes=(1, 3),
@@ -181,17 +117,13 @@ def test_project_index_batch_activity_update_builds_last_activity_metadata() -> 
 
 
 def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-    request = ProjectIndexWorkflowRequest.from_source(
+    request = ProjectIndexRequest.from_source(
         ProjectIndexSource(
-            tenant_id=tenant_id,
             project_id=42,
             project_external_id="external-project",
             project_name="Project Name",
             project_permalink="project-name",
             project_path="project",
-            workflow_id=workflow_id,
             force_full=True,
             search=True,
             embeddings=False,
@@ -204,9 +136,12 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
         batch_count=2,
         batch_size=50,
         discovered_at="2026-06-19T10:20:30+00:00",
-        transport_broker="pgq",
-        transport_entrypoint="index_project",
-        transport_job_id=123,
+        transport_metadata={
+            "broker": "queue-x",
+            "entrypoint": "index_project",
+            "queue_job_id": "123",
+        },
+        transport_event_data={"queue_job_id": "123"},
     )
 
     assert start == ProjectIndexWorkflowStart(
@@ -222,7 +157,6 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
             "phase": "indexing",
             "progress": "Indexed 0/4 files, 0 succeeded",
             "payload": {
-                "tenant_id": str(tenant_id),
                 "project_id": 42,
                 "project_external_id": "external-project",
                 "project_name": "Project Name",
@@ -246,9 +180,9 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
                 "failed": 0,
             },
             "transport": {
-                "broker": "pgq",
+                "broker": "queue-x",
                 "entrypoint": "index_project",
-                "pgq_job_id": "123",
+                "queue_job_id": "123",
             },
         },
         attempt_event_data={
@@ -257,7 +191,7 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
             "total_files": 4,
             "batch_count": 2,
             "batch_size": 50,
-            "pgq_job_id": "123",
+            "queue_job_id": "123",
             "project_id": 42,
             "project_name": "Project Name",
             "project_permalink": "project-name",
@@ -267,17 +201,13 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
 
 
 def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-    request = ProjectIndexWorkflowRequest.from_source(
+    request = ProjectIndexRequest.from_source(
         ProjectIndexSource(
-            tenant_id=tenant_id,
             project_id=42,
             project_external_id="external-project",
             project_name="Project Name",
             project_permalink="project-name",
             project_path="project",
-            workflow_id=workflow_id,
             force_full=True,
             search=True,
             embeddings=False,
@@ -290,9 +220,12 @@ def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() ->
         batch_count=2,
         batch_size=50,
         discovered_at="2026-06-19T10:20:30+00:00",
-        transport_broker="pgq",
-        transport_entrypoint="index_project",
-        transport_job_id=123,
+        transport_metadata={
+            "broker": "queue-x",
+            "entrypoint": "index_project",
+            "queue_job_id": "123",
+        },
+        transport_event_data={"queue_job_id": "123"},
     )
 
     assert plan.status == "running"
@@ -301,26 +234,22 @@ def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() ->
     assert plan.workflow_start.progress == "Indexed 0/4 files, 0 succeeded"
     assert plan.workflow_start.metadata["phase"] == "indexing"
     assert plan.workflow_start.metadata["transport"] == {
-        "broker": "pgq",
+        "broker": "queue-x",
         "entrypoint": "index_project",
-        "pgq_job_id": "123",
+        "queue_job_id": "123",
     }
     with pytest.raises(RuntimeError, match="does not include a completion update"):
         plan.require_completion_update()
 
 
 def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
-    request = ProjectIndexWorkflowRequest.from_source(
+    request = ProjectIndexRequest.from_source(
         ProjectIndexSource(
-            tenant_id=tenant_id,
             project_id=42,
             project_external_id="external-project",
             project_name="Project Name",
             project_permalink="project-name",
             project_path="project",
-            workflow_id=workflow_id,
             force_full=False,
             search=True,
             embeddings=False,
@@ -333,9 +262,12 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
         batch_count=0,
         batch_size=50,
         discovered_at="2026-06-19T10:20:30+00:00",
-        transport_broker="pgq",
-        transport_entrypoint="index_project",
-        transport_job_id=None,
+        transport_metadata={
+            "broker": "queue-x",
+            "entrypoint": "index_project",
+            "queue_job_id": None,
+        },
+        transport_event_data={"queue_job_id": None},
     )
 
     assert plan == ProjectIndexWorkflowStartPlan.complete(
@@ -352,7 +284,6 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
                 "phase": "indexing",
                 "progress": "No files found",
                 "payload": {
-                    "tenant_id": str(tenant_id),
                     "project_id": 42,
                     "project_external_id": "external-project",
                     "project_name": "Project Name",
@@ -376,9 +307,9 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
                     "failed": 0,
                 },
                 "transport": {
-                    "broker": "pgq",
+                    "broker": "queue-x",
                     "entrypoint": "index_project",
-                    "pgq_job_id": None,
+                    "queue_job_id": None,
                 },
             },
             attempt_event_data={
@@ -387,7 +318,7 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
                 "total_files": 0,
                 "batch_count": 0,
                 "batch_size": 50,
-                "pgq_job_id": None,
+                "queue_job_id": None,
                 "project_id": 42,
                 "project_name": "Project Name",
                 "project_permalink": "project-name",
@@ -407,7 +338,6 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
                 "phase": "completed",
                 "progress": "No files found",
                 "payload": {
-                    "tenant_id": str(tenant_id),
                     "project_id": 42,
                     "project_external_id": "external-project",
                     "project_name": "Project Name",
@@ -431,9 +361,9 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
                     "failed": 0,
                 },
                 "transport": {
-                    "broker": "pgq",
+                    "broker": "queue-x",
                     "entrypoint": "index_project",
-                    "pgq_job_id": None,
+                    "queue_job_id": None,
                 },
                 "result": {
                     "total": 0,
@@ -447,7 +377,6 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
                 "phase": "completed",
                 "progress": "No files found",
                 "payload": {
-                    "tenant_id": str(tenant_id),
                     "project_id": 42,
                     "project_external_id": "external-project",
                     "project_name": "Project Name",

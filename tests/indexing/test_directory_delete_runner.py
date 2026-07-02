@@ -3,7 +3,6 @@
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import cast
-from uuid import UUID
 
 import basic_memory.indexing.directory_delete_runner as directory_delete_runner_module
 import pytest
@@ -217,11 +216,9 @@ def test_normalize_directory_delete_path_rejects_project_traversal() -> None:
 
 @pytest.mark.asyncio
 async def test_enqueue_directory_file_delete_jobs_maps_runtime_snapshots() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     enqueuer = FakeDirectoryFileDeleteEnqueuer()
 
     await enqueue_directory_file_delete_jobs(
-        tenant_id=tenant_id,
         project_id=3,
         files=[
             directory_snapshot(entity_id=7, file_path="notes/example.md"),
@@ -236,14 +233,12 @@ async def test_enqueue_directory_file_delete_jobs_maps_runtime_snapshots() -> No
 
     assert enqueuer.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=3,
             entity_id=7,
             file_path="notes/example.md",
             file_checksum="note-sha",
         ),
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=3,
             entity_id=8,
             file_path="notes/legacy.md",
@@ -254,7 +249,6 @@ async def test_enqueue_directory_file_delete_jobs_maps_runtime_snapshots() -> No
 
 @pytest.mark.asyncio
 async def test_run_directory_delete_accepts_rows_and_queues_cleanup() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     files = [
         directory_snapshot(entity_id=7, file_path="notes/a.md"),
         directory_snapshot(entity_id=8, file_path="notes/b.md", file_checksum=None),
@@ -265,7 +259,6 @@ async def test_run_directory_delete_accepts_rows_and_queues_cleanup() -> None:
     result = await run_directory_delete(
         AsyncSession(),
         request=DirectoryDeleteAcceptanceRequest(
-            tenant_id=tenant_id,
             project_external_id="project-123",
             directory="/notes/",
         ),
@@ -281,14 +274,12 @@ async def test_run_directory_delete_accepts_rows_and_queues_cleanup() -> None:
     assert result.to_response_payload()["failed_deletes"] == 0
     assert enqueuer.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=3,
             entity_id=7,
             file_path="notes/a.md",
             file_checksum="note-sha",
         ),
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=tenant_id,
             project_id=3,
             entity_id=8,
             file_path="notes/b.md",
@@ -301,7 +292,6 @@ async def test_run_directory_delete_accepts_rows_and_queues_cleanup() -> None:
 async def test_run_directory_delete_reports_skipped_guarded_cleanup() -> None:
     """A guarded inline delete that skips a file (checksum changed) must surface as
     a failed delete with the reason, not a silent success that strands the file."""
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     files = [directory_snapshot(entity_id=7, file_path="notes/a.md")]
     store = FakeDirectoryDeleteStore(project_id=3, files=files)
 
@@ -318,7 +308,6 @@ async def test_run_directory_delete_reports_skipped_guarded_cleanup() -> None:
     result = await run_directory_delete(
         AsyncSession(),
         request=DirectoryDeleteAcceptanceRequest(
-            tenant_id=tenant_id,
             project_external_id="project-123",
             directory="/notes/",
         ),
@@ -338,7 +327,6 @@ async def test_run_directory_delete_rejects_unknown_project() -> None:
         await run_directory_delete(
             AsyncSession(),
             request=DirectoryDeleteAcceptanceRequest(
-                tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
                 project_external_id="missing-project",
                 directory="notes",
             ),

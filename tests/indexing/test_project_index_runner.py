@@ -11,7 +11,7 @@ from basic_memory.indexing import (
     ProjectIndexCoordinatorResult,
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
-    ProjectIndexWorkflowRequest,
+    ProjectIndexRequest,
     run_project_index_coordinator,
 )
 from basic_memory.runtime import (
@@ -25,7 +25,6 @@ from basic_memory.runtime import (
 
 def project_index_request() -> RuntimeProjectIndexJobRequest:
     return RuntimeProjectIndexJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project=ProjectRuntimeReference(
             project_id=42,
             project_external_id="project-main",
@@ -33,7 +32,6 @@ def project_index_request() -> RuntimeProjectIndexJobRequest:
             project_permalink="main",
             project_path="main",
         ),
-        workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
         force_full=False,
         search=True,
         embeddings=False,
@@ -42,7 +40,6 @@ def project_index_request() -> RuntimeProjectIndexJobRequest:
 
 def project_index_completion() -> ProjectIndexCompletion:
     return ProjectIndexCompletion(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id="42",
         project_external_id="project-main",
         project_name="Main",
@@ -140,7 +137,7 @@ class FakeMovedEntitySearchRefresher:
 class FakeWorkflowStarter:
     def __init__(self, events: list[str]) -> None:
         self.events = events
-        self.request: ProjectIndexWorkflowRequest | None = None
+        self.request: ProjectIndexRequest | None = None
         self.total_files: int | None = None
         self.batch_count: int | None = None
         self.batch_size: int | None = None
@@ -148,7 +145,7 @@ class FakeWorkflowStarter:
 
     async def start_project_index_workflow(
         self,
-        request: ProjectIndexWorkflowRequest,
+        request: ProjectIndexRequest,
         *,
         total_files: int,
         batch_count: int,
@@ -182,19 +179,18 @@ class FakeFanoutFailureRecorder:
     def __init__(self, events: list[str], *, expect_record: bool = False) -> None:
         self.events = events
         self.expect_record = expect_record
-        self.calls: list[tuple[UUID, str, str]] = []
+        self.calls: list[tuple[str, str]] = []
 
     async def record_project_index_fanout_failure(
         self,
         *,
-        workflow_id: UUID,
         error_message: str,
         progress: str,
     ) -> None:
         if not self.expect_record:
             raise AssertionError("fanout failure should not be recorded")
         self.events.append("failure")
-        self.calls.append((workflow_id, error_message, progress))
+        self.calls.append((error_message, progress))
 
 
 @pytest.mark.asyncio
@@ -244,9 +240,7 @@ async def test_run_project_index_coordinator_lists_detects_maintains_starts_and_
     }
     assert maintenance_runner.deleted_paths == ["notes/deleted.md"]
     assert moved_entity_search_refresher.entity_ids == []
-    assert workflow_starter.request == ProjectIndexWorkflowRequest(
-        tenant_id=request.tenant_id,
-        workflow_id=request.workflow_id,
+    assert workflow_starter.request == ProjectIndexRequest(
         project=request.project,
         force_full=request.force_full,
         search=request.search,
@@ -371,7 +365,6 @@ async def test_run_project_index_coordinator_records_fanout_failure_before_rerai
     ]
     assert failure_recorder.calls == [
         (
-            request.workflow_id,
             "Failed to enqueue project index batch jobs after 2/3 files: queue offline",
             "fan-out failed",
         )

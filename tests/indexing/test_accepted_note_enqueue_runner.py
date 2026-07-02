@@ -64,10 +64,6 @@ class FakeFileDeleteEnqueuer:
             raise self.error
 
 
-def tenant_id() -> UUID:
-    return UUID("11111111-1111-1111-1111-111111111111")
-
-
 def accepted_materialization_change() -> RuntimeAcceptedNoteChange[
     RuntimeNoteContentResponsePayload
 ]:
@@ -106,7 +102,6 @@ async def test_enqueue_accepted_note_materialization_queues_runtime_request() ->
 
     result = await enqueue_accepted_note_materialization(
         accepted_materialization_change(),
-        tenant_id=tenant_id(),
         materialization_enqueuer=materialization_enqueuer,
         failure_marker=FakeMaterializationFailureMarker(),
     )
@@ -117,7 +112,6 @@ async def test_enqueue_accepted_note_materialization_queues_runtime_request() ->
     )
     assert materialization_enqueuer.requests == [
         RuntimeNoteMaterializationJobRequest(
-            tenant_id=tenant_id(),
             project_id=7,
             entity_id=42,
             db_version=3,
@@ -168,17 +162,18 @@ async def test_enqueue_accepted_note_materialization_keeps_typed_payload_on_fail
                 db_checksum="db-checksum",
             ),
         ),
-        tenant_id=tenant_id(),
-        materialization_enqueuer=FakeMaterializationEnqueuer(error=RuntimeError("pgq unavailable")),
+        materialization_enqueuer=FakeMaterializationEnqueuer(
+            error=RuntimeError("queue unavailable")
+        ),
         failure_marker=failure_marker,
     )
 
     assert result.status_code == 202
     assert isinstance(result.payload, RuntimeAcceptedNoteResponse)
     assert result.payload.file_write_status == "failed"
-    assert result.payload.last_materialization_error == "pgq unavailable"
+    assert result.payload.last_materialization_error == "queue unavailable"
     assert result.payload.to_response_payload()["external_id"] == "note-1"
-    assert failure_marker.calls == [(7, 42, "pgq unavailable")]
+    assert failure_marker.calls == [(7, 42, "queue unavailable")]
 
 
 @pytest.mark.asyncio
@@ -187,8 +182,9 @@ async def test_enqueue_accepted_note_materialization_marks_failed_status() -> No
 
     result = await enqueue_accepted_note_materialization(
         accepted_materialization_change(),
-        tenant_id=tenant_id(),
-        materialization_enqueuer=FakeMaterializationEnqueuer(error=RuntimeError("pgq unavailable")),
+        materialization_enqueuer=FakeMaterializationEnqueuer(
+            error=RuntimeError("queue unavailable")
+        ),
         failure_marker=failure_marker,
     )
 
@@ -196,10 +192,10 @@ async def test_enqueue_accepted_note_materialization_marks_failed_status() -> No
         status_code=202,
         payload={
             "file_write_status": "failed",
-            "last_materialization_error": "pgq unavailable",
+            "last_materialization_error": "queue unavailable",
         },
     )
-    assert failure_marker.calls == [(7, 42, "pgq unavailable")]
+    assert failure_marker.calls == [(7, 42, "queue unavailable")]
 
 
 @pytest.mark.asyncio
@@ -207,9 +203,8 @@ async def test_enqueue_accepted_note_materialization_preserves_double_failure() 
     with pytest.raises(ExceptionGroup) as exc_info:
         await enqueue_accepted_note_materialization(
             accepted_materialization_change(),
-            tenant_id=tenant_id(),
             materialization_enqueuer=FakeMaterializationEnqueuer(
-                error=RuntimeError("pgq unavailable")
+                error=RuntimeError("queue unavailable")
             ),
             failure_marker=FakeMaterializationFailureMarker(
                 error=RuntimeError("cannot mark failed")
@@ -220,7 +215,7 @@ async def test_enqueue_accepted_note_materialization_preserves_double_failure() 
         "Failed to enqueue note materialization and mark the note as failed"
     )
     assert [str(error) for error in exc_info.value.exceptions] == [
-        "pgq unavailable",
+        "queue unavailable",
         "cannot mark failed",
     ]
 
@@ -248,7 +243,6 @@ async def test_enqueue_accepted_note_write_jobs_embeds_cleanup_in_materializatio
 
     result = await enqueue_accepted_note_write_jobs(
         accepted,
-        tenant_id=tenant_id(),
         materialization_enqueuer=materialization_enqueuer,
         failure_marker=FakeMaterializationFailureMarker(),
         file_delete_enqueuer=file_delete_enqueuer,
@@ -271,7 +265,6 @@ async def test_enqueue_accepted_note_file_delete_queues_runtime_request() -> Non
 
     result = await enqueue_accepted_note_file_delete(
         accepted_delete_change(),
-        tenant_id=tenant_id(),
         file_delete_enqueuer=file_delete_enqueuer,
     )
 
@@ -281,7 +274,6 @@ async def test_enqueue_accepted_note_file_delete_queues_runtime_request() -> Non
     )
     assert file_delete_enqueuer.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=tenant_id(),
             project_id=7,
             entity_id=42,
             file_path="notes/deleted.md",
@@ -294,8 +286,7 @@ async def test_enqueue_accepted_note_file_delete_queues_runtime_request() -> Non
 async def test_enqueue_accepted_note_file_delete_marks_enqueue_failure() -> None:
     result = await enqueue_accepted_note_file_delete(
         accepted_delete_change(),
-        tenant_id=tenant_id(),
-        file_delete_enqueuer=FakeFileDeleteEnqueuer(error=RuntimeError("pgq unavailable")),
+        file_delete_enqueuer=FakeFileDeleteEnqueuer(error=RuntimeError("queue unavailable")),
     )
 
     assert result == AcceptedNoteEnqueueResult(
@@ -303,7 +294,7 @@ async def test_enqueue_accepted_note_file_delete_marks_enqueue_failure() -> None
         payload={
             "deleted": True,
             "file_delete_status": "failed",
-            "error": "pgq unavailable",
+            "error": "queue unavailable",
         },
     )
 
@@ -313,7 +304,6 @@ async def test_enqueue_accepted_note_materialization_requires_materialization() 
     with pytest.raises(RuntimeError, match="does not contain a materialization"):
         await enqueue_accepted_note_materialization(
             accepted_delete_change(),
-            tenant_id=tenant_id(),
             materialization_enqueuer=FakeMaterializationEnqueuer(),
             failure_marker=FakeMaterializationFailureMarker(),
         )
@@ -324,6 +314,5 @@ async def test_enqueue_accepted_note_file_delete_requires_file_delete() -> None:
     with pytest.raises(RuntimeError, match="does not contain a file delete"):
         await enqueue_accepted_note_file_delete(
             accepted_materialization_change(),
-            tenant_id=tenant_id(),
             file_delete_enqueuer=FakeFileDeleteEnqueuer(),
         )

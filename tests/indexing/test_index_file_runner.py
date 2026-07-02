@@ -4,7 +4,6 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import cast
-from uuid import UUID
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -150,7 +149,6 @@ class FakeFileIndexer:
 
 def observed_request() -> IndexFileRuntimeRequest:
     return IndexFileRuntimeRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=101,
         project_external_id="project-main",
         project_name="Main",
@@ -163,7 +161,6 @@ def observed_request() -> IndexFileRuntimeRequest:
 
 def current_file_request() -> IndexFileRuntimeRequest:
     return IndexFileRuntimeRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=101,
         project_external_id="project-main",
         project_name="Main",

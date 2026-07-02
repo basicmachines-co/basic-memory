@@ -8,7 +8,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
-from basic_memory.runtime.jobs import TenantId
 from basic_memory.runtime.note_content import (
     RuntimeDeletedNoteEntityDeleteSource,
     RuntimeDeletedNoteReference,
@@ -193,7 +192,6 @@ def plan_directory_file_snapshot(
 class RuntimeNoteFileDeleteJobRequest:
     """Queue-neutral request shape for deleting one materialized note file."""
 
-    tenant_id: TenantId
     project_id: ProjectId
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
@@ -203,30 +201,21 @@ class RuntimeNoteFileDeleteJobRequest:
         """Return the logical note-file delete queue identity."""
         checksum_key = self.file_checksum or "unknown"
         return (
-            f"delete-note-file:{self.tenant_id}:{self.project_id}:"
-            f"{self.entity_id}:{self.file_path}:{checksum_key}"
+            f"delete-note-file:{self.project_id}:{self.entity_id}:{self.file_path}:{checksum_key}"
         )
 
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the note-file delete job."""
         routing_headers = dict(headers or {})
-        routing_headers.update(
-            {
-                "tenant_id": str(self.tenant_id),
-                "project_id": str(self.project_id),
-            }
-        )
+        routing_headers["project_id"] = str(self.project_id)
         return routing_headers
 
 
 def plan_note_file_delete_job_request(
-    *,
-    tenant_id: TenantId,
     file_delete: RuntimePendingNoteFileDelete,
 ) -> RuntimeNoteFileDeleteJobRequest:
     """Flatten accepted note cleanup work into a queue-neutral delete request."""
     return RuntimeNoteFileDeleteJobRequest(
-        tenant_id=tenant_id,
         project_id=file_delete.project_id,
         entity_id=file_delete.entity_id,
         file_path=file_delete.file_path,

@@ -7,7 +7,6 @@ from collections.abc import Coroutine, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
-from uuid import UUID
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -42,13 +41,11 @@ from basic_memory.repository import EntityRepository, NoteContentRepository
 from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
-LOCAL_NOTE_CONTENT_TENANT_ID = UUID(int=0)
-
 
 class _MaterializationWorkerPool:
     """Bounded in-process worker pool that drains queued note materializations.
 
-    Mirrors the cloud's PGQ worker model locally: the accept enqueues a
+    Mirrors the cloud's queue worker model locally: the accept enqueues a
     materialization and returns; a fixed number of workers pull from the queue
     and run them. Bounding concurrency to `workers` is the point — fire-and-forget
     `create_task` let every deferred file write + index run at once, and at high
@@ -300,7 +297,7 @@ class LocalNoteContentMaterializationProvider:
         """Materialize an accepted note write OFF the accept path.
 
         Cloud/local parity (DO NOT UNDO): cloud's materialize_write_change
-        enqueues a PGQ job and returns immediately, letting Tigris object storage
+        enqueues a queue job and returns immediately, letting Tigris object storage
         + indexing catch up asynchronously because S3 writes are slow. Locally we
         mirror that with an in-process background task. The accept has already
         persisted note_content (the write/read-through cache that serves reads);
@@ -340,10 +337,7 @@ class LocalNoteContentMaterializationProvider:
         storage = LocalNoteContentStorage(self.file_service)
         cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(storage)
         result = await run_note_materialization(
-            plan_note_materialization_job_request(
-                tenant_id=LOCAL_NOTE_CONTENT_TENANT_ID,
-                materialization=accepted.materialization,
-            ),
+            plan_note_materialization_job_request(accepted.materialization),
             preflight=RepositoryNoteMaterializationPreflight(
                 session_maker=self.session_maker,
             ),
@@ -402,9 +396,6 @@ class LocalNoteContentMaterializationProvider:
 
         storage = LocalNoteContentStorage(self.file_service)
         await InlineNoteFileDeleteEnqueuer(storage).enqueue_note_file_delete(
-            plan_note_file_delete_job_request(
-                tenant_id=LOCAL_NOTE_CONTENT_TENANT_ID,
-                file_delete=accepted.file_delete,
-            )
+            plan_note_file_delete_job_request(accepted.file_delete)
         )
         return accepted

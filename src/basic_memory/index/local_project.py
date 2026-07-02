@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from uuid import uuid4
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -23,10 +22,7 @@ from basic_memory.index.local_dependencies import (
     LocalIndexProjectDependencyProvider,
 )
 from basic_memory.index.local_moves import LocalProjectIndexMoveContentUpdater
-from basic_memory.index.local_runtime import (
-    LOCAL_EVENT_INDEX_TENANT_ID,
-    LocalStorageFileMetadataSource,
-)
+from basic_memory.index.local_runtime import LocalStorageFileMetadataSource
 from basic_memory.indexing import (
     ChangeDetector,
     EmbeddingBatchVectorSync,
@@ -69,7 +65,6 @@ from basic_memory.runtime import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
-    TenantId,
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
@@ -214,8 +209,6 @@ class LocalProjectIndexObservation:
 class LocalProjectIndexRuntimeProvider(Protocol):
     """Minimal factory shape needed to run a local project-index request."""
 
-    tenant_id: TenantId
-
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime: ...
 
 
@@ -317,7 +310,6 @@ class LocalProjectIndexRuntimeFactory:
     dependency_provider: LocalIndexProjectDependencyProvider = (
         DefaultLocalIndexProjectDependencyProvider()
     )
-    tenant_id: TenantId = LOCAL_EVENT_INDEX_TENANT_ID
     batch_size: int = 100
     read_max_concurrent: int = 8
     index_max_concurrent: int = 8
@@ -402,9 +394,7 @@ async def run_local_project_index_for_project(
     """
     return await run_local_project_index(
         RuntimeProjectIndexJobRequest(
-            tenant_id=runtime_factory.tenant_id,
             project=ProjectRuntimeReference.from_project(project),
-            workflow_id=uuid4(),
             force_full=force_full,
             embeddings=embeddings,
         ),
@@ -470,7 +460,6 @@ async def run_local_project_index(
     if runtime.completion_relation_runtime is not None:
         await resolve_project_index_completion_relations(
             ProjectIndexRelationResolutionContext(
-                tenant_id=request.tenant_id,
                 project_id=request.project.project_id,
                 project_path=request.project.project_path,
             ),

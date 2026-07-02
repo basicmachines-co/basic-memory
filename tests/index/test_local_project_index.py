@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -57,10 +56,6 @@ from basic_memory.runtime import (
 )
 from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services import FileService
-
-
-TENANT_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-WORKFLOW_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 
 
 def test_local_project_index_file_paths_filter_and_sort(tmp_path: Path) -> None:
@@ -553,9 +548,7 @@ permalink: changing
 
     result = await run_local_project_index(
         RuntimeProjectIndexJobRequest(
-            tenant_id=runtime_factory.tenant_id,
             project=ProjectRuntimeReference.from_project(test_project),
-            workflow_id=WORKFLOW_ID,
         ),
         runtime=mutating_runtime,
     )
@@ -703,8 +696,6 @@ async def test_run_local_project_index_uses_core_project_fanout() -> None:
 
     result = await run_local_project_index(
         RuntimeProjectIndexJobRequest(
-            tenant_id=TENANT_ID,
-            workflow_id=WORKFLOW_ID,
             project=project_ref(),
             search=True,
             embeddings=False,
@@ -751,8 +742,6 @@ async def test_run_local_project_index_resolves_relations_after_inline_fanout() 
 
     await run_local_project_index(
         RuntimeProjectIndexJobRequest(
-            tenant_id=TENANT_ID,
-            workflow_id=WORKFLOW_ID,
             project=project_ref(),
             search=True,
             embeddings=False,
@@ -800,8 +789,6 @@ async def test_run_local_project_index_preserves_inline_batch_results() -> None:
 
     result = await run_local_project_index(
         RuntimeProjectIndexJobRequest(
-            tenant_id=TENANT_ID,
-            workflow_id=WORKFLOW_ID,
             project=project_ref(),
             search=True,
             embeddings=False,
@@ -938,9 +925,7 @@ async def test_local_project_index_batch_enqueuer_runs_shared_batch_contract() -
 
     result = await enqueuer.enqueue_index_file_batch(
         RuntimeIndexFileBatchJobRequest(
-            tenant_id=TENANT_ID,
             project=project_ref(),
-            workflow_id=WORKFLOW_ID,
             batch_index=1,
             batch_count=2,
             observed_files=(

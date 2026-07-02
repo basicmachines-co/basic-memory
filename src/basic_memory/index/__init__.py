@@ -77,10 +77,7 @@ from basic_memory.index.local_project import (
     run_local_project_index,
     run_local_project_index_for_project,
 )
-from basic_memory.index.local_runtime import (
-    LOCAL_EVENT_INDEX_TENANT_ID,
-    LocalWatchEventIndexRuntimeFactory,
-)
+from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.index.project_index import (
     INDEX_PROJECT_ENTRYPOINT,
     ProjectIndexBatchEnqueuer,
@@ -92,11 +89,9 @@ from basic_memory.index.project_index import (
     ProjectIndexMovedEntitySearchRefresher,
     ProjectIndexObservedFileSource,
     RepositoryProjectIndexMovedEntitySearchRefresher,
-    ProjectIndexWorkflowRequest,
+    ProjectIndexRequest,
     ProjectIndexWorkflowStarter,
     StoreProjectIndexMaintenanceRunner,
-    build_project_index_workflow_queued,
-    project_index_workflow_logical_key,
     run_project_index_coordinator,
 )
 from basic_memory.index.repository_project_resolution import (
@@ -120,7 +115,6 @@ from basic_memory.index.storage_events import (
 
 __all__ = [
     "LOCAL_FILESYSTEM_BUCKET_NAME",
-    "LOCAL_EVENT_INDEX_TENANT_ID",
     "InlineStorageEventIndexRuntime",
     "InlineStorageEventOperationProcessor",
     "InlineStorageEventResultRecorder",
@@ -159,7 +153,7 @@ __all__ = [
     "ProjectIndexMovedEntitySearchRefresher",
     "ProjectIndexObservedFileSource",
     "RepositoryProjectIndexMovedEntitySearchRefresher",
-    "ProjectIndexWorkflowRequest",
+    "ProjectIndexRequest",
     "ProjectIndexWorkflowStarter",
     "RepositoryStorageEventProjectResolver",
     "StoreProjectIndexMaintenanceRunner",
@@ -187,7 +181,6 @@ __all__ = [
     "StorageEventProjectResolutionLogger",
     "StorageEventSource",
     "StorageKey",
-    "build_project_index_workflow_queued",
     "build_local_index_project_dependencies",
     "build_local_markdown_file_indexer",
     "group_storage_events_by_bucket",
@@ -202,7 +195,6 @@ __all__ = [
     "local_project_prefix",
     "local_watch_project_change_batches",
     "plan_local_watch_event_index_status_update",
-    "project_index_workflow_logical_key",
     "run_local_watch_event_indexing",
     "run_local_project_index",
     "run_local_project_index_for_project",

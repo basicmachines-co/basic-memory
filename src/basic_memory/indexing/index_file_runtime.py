@@ -26,8 +26,6 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexRequest,
     RuntimeStorageObjectObservation,
     StorageEventPayload,
-    TenantId,
-    WorkflowId,
 )
 
 
@@ -35,7 +33,6 @@ from basic_memory.runtime import (
 class IndexFileRuntimeRequest:
     """Storage-neutral request shape for indexing one project file."""
 
-    tenant_id: TenantId
     project_id: int
     project_external_id: ProjectExternalId | None
     project_name: ProjectName | None
@@ -44,24 +41,20 @@ class IndexFileRuntimeRequest:
     mode: RuntimeStorageFileIndexMode = RuntimeStorageFileIndexMode.observed_object
     object_observation: RuntimeStorageObjectObservation | None = None
     index_embeddings: bool = True
-    workflow_id: WorkflowId | None = None
 
     @classmethod
     def from_storage_event(
         cls,
         *,
-        tenant_id: TenantId,
         project: ProjectRuntimeReference,
         storage_event: StorageEventPayload,
         index_embeddings: bool = True,
-        workflow_id: WorkflowId | None = None,
     ) -> Self:
         index_request = RuntimeStorageFileIndexRequest.from_project_event(
             project=project,
             storage_event=storage_event,
         )
         return cls(
-            tenant_id=tenant_id,
             project_id=index_request.project_id,
             project_external_id=index_request.project_external_id,
             project_name=index_request.project_name,
@@ -73,7 +66,6 @@ class IndexFileRuntimeRequest:
                 size=index_request.object_size,
             ),
             index_embeddings=index_embeddings,
-            workflow_id=workflow_id,
         )
 
     def storage_job_identity(self) -> RuntimeStorageFileIndexJobIdentity:
@@ -82,18 +74,14 @@ class IndexFileRuntimeRequest:
             and self.object_observation is not None
         ):
             return self.object_observation.to_file_index_job_identity(
-                tenant_id=self.tenant_id,
                 project_id=self.project_id,
                 file_path=self.file_path,
-                workflow_id=self.workflow_id,
             )
 
         return RuntimeStorageFileIndexJobIdentity(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             file_path=self.file_path,
             mode=self.mode,
-            workflow_id=self.workflow_id,
         )
 
     def dedupe_key(self) -> str:
@@ -109,31 +97,26 @@ class IndexFileRuntimeRequest:
             mode=self.mode,
             project_external_id=self.project_external_id,
             project_name=self.project_name,
-            workflow_id=self.workflow_id,
         )
 
     def note_live_update_context(self) -> IndexFileNoteLiveUpdateContext:
         object_etag = self.object_observation.etag if self.object_observation is not None else None
         object_size = self.object_observation.size if self.object_observation is not None else None
         return IndexFileNoteLiveUpdateContext(
-            tenant_id=self.tenant_id,
             project_external_id=self.project_external_id,
             project_name=self.project_name,
             file_path=self.file_path,
             mode=self.mode,
-            workflow_id=self.workflow_id,
             object_etag=object_etag,
             object_size=object_size,
         )
 
     def observed_object_completion_context(self) -> ObservedObjectIndexCompletionContext:
         return ObservedObjectIndexCompletionContext(
-            tenant_id=self.tenant_id,
             project_external_id=self.project_external_id,
             project_name=self.project_name,
             project_path=self.project_path,
             mode=self.mode,
-            workflow_id=self.workflow_id,
         )
 
     def relation_resolution_context(
@@ -141,10 +124,8 @@ class IndexFileRuntimeRequest:
         status: IndexFileJobStatus,
     ) -> IndexFileRelationResolutionContext:
         return IndexFileRelationResolutionContext(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             project_path=self.project_path,
-            workflow_id=self.workflow_id,
             status=status,
         )
 
@@ -153,7 +134,6 @@ class IndexFileRuntimeRequest:
         result: IndexFileJobResult,
     ) -> IndexFileEmbeddingJobContext:
         return IndexFileEmbeddingJobContext(
-            tenant_id=self.tenant_id,
             project_id=self.project_id,
             index_embeddings=self.index_embeddings,
             result=result,
