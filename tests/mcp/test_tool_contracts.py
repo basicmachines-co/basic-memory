@@ -140,13 +140,19 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "search": {"readOnlyHint": True},
     "search_notes": {"readOnlyHint": True},
     "view_note": {"readOnlyHint": True},
-    "canvas": {"readOnlyHint": False, "destructiveHint": False},
+    # canvas falls back to PUT when the file already exists, replacing its content.
+    "canvas": {"readOnlyHint": False, "destructiveHint": True},
+    # create_memory_project is purely additive: it creates a new project and errors
+    # if the target already exists.
     "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
     "delete_note": {"readOnlyHint": False, "destructiveHint": True},
     "delete_project": {"readOnlyHint": False, "destructiveHint": True},
     # edit_note's find_replace/replace_section overwrite existing content, so it is
     # destructive even though append/prepend are additive.
     "edit_note": {"readOnlyHint": False, "destructiveHint": True},
+    # move_note refuses to overwrite an existing destination and preserves all
+    # content — it relocates and propagates links, so no data can be lost. Keeping
+    # it non-destructive lets clients allowlist bulk lifecycle moves.
     "move_note": {"readOnlyHint": False, "destructiveHint": False},
     "write_note": {"readOnlyHint": False, "destructiveHint": True},
 }

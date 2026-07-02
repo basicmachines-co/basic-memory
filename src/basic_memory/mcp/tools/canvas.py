@@ -23,7 +23,8 @@ from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
     annotations={
         "title": "Create Canvas",
         "readOnlyHint": False,
-        "destructiveHint": False,
+        # Falls back to PUT when the canvas already exists, replacing its content.
+        "destructiveHint": True,
         "idempotentHint": True,
         "openWorldHint": False,
     },
