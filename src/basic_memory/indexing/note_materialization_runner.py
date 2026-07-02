@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, Self
+
+from loguru import logger
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -592,12 +594,15 @@ async def run_note_materialization(
     """Run one queue-neutral materialized-note write."""
     preflight_result = await preflight.prepare_note_materialization(request)
     if preflight_result.terminal_result is not None:
-        await enqueue_cleanup_file(
+        cleanup_enqueued = await enqueue_cleanup_file(
             cleanup_enqueuer,
             tenant_id=request.tenant_id,
             cleanup_file=preflight_result.cleanup_file,
         )
-        return preflight_result.terminal_result
+        return replace(
+            preflight_result.terminal_result,
+            cleanup_enqueue_failed=not cleanup_enqueued,
+        )
 
     prepared_write = preflight_result.require_prepared_write()
     try:
@@ -608,20 +613,22 @@ async def run_note_materialization(
             written_file,
         )
         if result.status == RuntimeNoteMaterializationStatus.written:
-            await enqueue_cleanup_file(
+            cleanup_enqueued = await enqueue_cleanup_file(
                 cleanup_enqueuer,
                 tenant_id=request.tenant_id,
                 cleanup_file=cleanup_file_from_prepared_write(request, prepared_write),
             )
+            result = replace(result, cleanup_enqueue_failed=not cleanup_enqueued)
         elif result.written_file_orphaned:
             # Written to disk but the note moved/disappeared before publish, so the
             # DB no longer owns this path; clean up the just-written file or the
             # watcher/project index re-imports it as a duplicate note.
-            await enqueue_cleanup_file(
+            cleanup_enqueued = await enqueue_cleanup_file(
                 cleanup_enqueuer,
                 tenant_id=request.tenant_id,
                 cleanup_file=cleanup_file_for_orphaned_write(request, written_file),
             )
+            result = replace(result, cleanup_enqueue_failed=not cleanup_enqueued)
         return result
     except RuntimeFileConflictError as exc:
         await status_publisher.publish_note_materialization_status(
@@ -694,13 +701,30 @@ async def enqueue_cleanup_file(
     *,
     tenant_id: TenantId,
     cleanup_file: RuntimePendingNoteFileDelete | None,
-) -> None:
-    """Enqueue old-file cleanup when materialization produced one."""
+) -> bool:
+    """Enqueue old-file cleanup when materialization produced one.
+
+    Returns False when the enqueue failed. Cleanup runs after the materialized
+    write and its DB state are already durable, so a transient queue error must
+    not fail the job — that would report a completed materialization as failed
+    and re-run finished work. The caller surfaces the failure on the result
+    instead; the orphaned old-path file shows up as a duplicate note on the next
+    project index until it is cleaned up.
+    """
     if cleanup_file is None:
-        return
-    await cleanup_enqueuer.enqueue_note_file_delete(
-        plan_note_file_delete_job_request(
-            tenant_id=tenant_id,
-            file_delete=cleanup_file,
+        return True
+    try:
+        await cleanup_enqueuer.enqueue_note_file_delete(
+            plan_note_file_delete_job_request(
+                tenant_id=tenant_id,
+                file_delete=cleanup_file,
+            )
         )
-    )
+    except Exception:
+        logger.exception(
+            "Failed to enqueue note file cleanup after materialization",
+            entity_id=cleanup_file.entity_id,
+            file_path=cleanup_file.file_path,
+        )
+        return False
+    return True
