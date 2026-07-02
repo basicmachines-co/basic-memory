@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
     RuntimeStorageEventProcessingResult,

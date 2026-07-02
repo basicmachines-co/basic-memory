@@ -18,7 +18,7 @@ from basic_memory.runtime import (
     StorageKey,
     storage_event_payload_from_input,
 )
-from basic_memory.runtime.contracts import STORAGE_OBJECT_DELETED_EVENT
+from basic_memory.runtime.storage import STORAGE_OBJECT_DELETED_EVENT
 from basic_memory.runtime.storage_project_resolution import storage_object_key_from_project_prefix
 
 LOCAL_FILESYSTEM_BUCKET_NAME: StorageBucketName = "local-filesystem"

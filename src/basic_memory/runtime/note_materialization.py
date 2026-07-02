@@ -6,14 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.note_content import (
     RuntimeExpectedFileState,
-    RuntimeFileChecksum,
     RuntimeFileChecksumReader,
-    RuntimeFilePath,
     RuntimeNoteMaterializationJobRequest,
     assert_runtime_file_matches_expected,
 )
+from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
 from basic_memory.runtime.note_object_metadata import RuntimeNoteObjectMetadata
 
 

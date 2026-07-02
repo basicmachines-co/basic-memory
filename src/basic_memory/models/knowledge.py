@@ -23,7 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from basic_memory.models.base import Base
-from basic_memory.runtime.contracts import RUNTIME_MARKDOWN_CONTENT_TYPE
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.utils import generate_permalink
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from posixpath import join as posix_join
 from typing import Protocol
 
-from basic_memory.runtime.contracts import ProjectId, ProjectPath, StorageKey
+from basic_memory.runtime.storage import ProjectId, ProjectPath, StorageKey
 
 
 class StorageProjectSource(Protocol):

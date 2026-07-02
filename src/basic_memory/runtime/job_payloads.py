@@ -8,21 +8,23 @@ from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
-from basic_memory.runtime.contracts import (
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.jobs import (
     JobEntrypoint,
     JobRuntime,
     RuntimeJobDedupeKey,
     RuntimeJobId,
     RuntimeJobRequest,
     RuntimeJobRequestSource,
-    RuntimeNoteFileDeleteJobRequest,
-    RuntimeNoteMaterializationJobRequest,
+    WorkflowId,
+    runtime_job_request_from_source,
+)
+from basic_memory.runtime.note_content import RuntimeNoteMaterializationJobRequest
+from basic_memory.runtime.workflows import (
     RuntimeQueuedWorkflowMetadata,
     RuntimeWorkflowBroker,
     RuntimeWorkflowProgress,
     RuntimeWorkflowTransport,
-    WorkflowId,
-    runtime_job_request_from_source,
 )
 from basic_memory.runtime.note_object_metadata import (
     VALID_NOTE_OBJECT_ACTOR_KINDS,
