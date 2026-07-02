@@ -731,6 +731,40 @@ async def test_run_note_materialization_writes_publishes_and_cleans_previous_fil
     ]
 
 
+class FailingCleanupEnqueuer:
+    async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None:
+        raise RuntimeError("queue unavailable")
+
+
+@pytest.mark.asyncio
+async def test_run_note_materialization_reports_cleanup_enqueue_failure_without_raising() -> None:
+    """Regression: the S3 write and synced DB state are durable before cleanup is
+    enqueued, so a transient queue error must not fail the job — it is surfaced on
+    the result instead."""
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    result = RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.written,
+        reason="note file materialized: notes/a.md",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+
+    actual = await run_note_materialization(
+        request,
+        preflight=FakePreflight(NoteMaterializationPreflightResult.prepared(prepared)),
+        writer=FakeWriter(written),
+        publisher=FakePublisher(result),
+        status_publisher=FakeStatusPublisher(),
+        cleanup_enqueuer=FailingCleanupEnqueuer(),
+    )
+
+    assert actual.status == RuntimeNoteMaterializationStatus.written
+    assert actual.cleanup_enqueue_failed is True
+
+
 @pytest.mark.asyncio
 async def test_run_note_materialization_terminal_result_can_enqueue_cleanup() -> None:
     request = materialization_request()

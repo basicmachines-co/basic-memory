@@ -1624,6 +1624,11 @@ class RuntimeNoteMaterializationResult:
     # orphaned and must be cleaned up. Distinct from stale_db_version, where the
     # same path will be re-materialized by a newer pending version.
     written_file_orphaned: bool = False
+    # True when the materialization itself succeeded but enqueueing the old-path
+    # cleanup failed. The job must not fail for this — the write and its DB state
+    # are already durable — but runtimes should surface it: the leftover object is
+    # re-imported as a duplicate note by the next project index unless cleaned up.
+    cleanup_enqueue_failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
