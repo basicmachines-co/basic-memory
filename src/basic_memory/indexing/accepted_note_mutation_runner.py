@@ -668,9 +668,7 @@ async def _run_accepted_note_move(
     dependencies: AcceptedNoteMutationDependencies,
 ) -> AcceptedNoteMutationChange:
     try:
-        accepted_file_path = normalize_note_move_destination_path(
-            request.destination_path
-        ).file_path
+        accepted_file_path = normalize_note_move_destination_path(request.destination_path)
     except ValueError as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 

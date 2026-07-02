@@ -190,7 +190,6 @@ from basic_memory.runtime.job_status import (
     runtime_job_status_response_payload,
 )
 from basic_memory.runtime.note_move import (
-    RuntimeNoteMoveDestination,
     normalize_note_move_destination_path,
 )
 from basic_memory.runtime.note_materialization import (
@@ -368,7 +367,6 @@ __all__ = [
     "RuntimeNoteMaterializationStatus",
     "RuntimePayloadJobEnqueuer",
     "RuntimePendingNoteMaterializationSource",
-    "RuntimeNoteMoveDestination",
     "RuntimeNoteObjectMetadata",
     "RuntimeNoteObjectMetadataMap",
     "RuntimeNoteObjectProvenance",

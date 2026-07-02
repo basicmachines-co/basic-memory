@@ -328,6 +328,7 @@ def plan_written_note_materialization_publish(
     current_file_path: RuntimeFilePath | None,
 ) -> NoteMaterializationPublishPlan:
     """Plan DB publication after storage accepts a materialized note file."""
+
     def _result(
         status: RuntimeNoteMaterializationStatus,
         reason: str,

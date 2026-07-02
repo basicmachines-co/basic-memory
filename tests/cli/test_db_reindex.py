@@ -383,9 +383,7 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
     monkeypatch.setattr(
         "basic_memory.markdown.markdown_processor.MarkdownProcessor", lambda *a, **k: object()
     )
-    monkeypatch.setattr(
-        "basic_memory.services.file_service.FileService", lambda *a, **k: object()
-    )
+    monkeypatch.setattr("basic_memory.services.file_service.FileService", lambda *a, **k: object())
     monkeypatch.setattr("basic_memory.services.search_service.SearchService", StubSearchService)
     monkeypatch.setattr(db_cmd, "Progress", SilentProgress)
     monkeypatch.setattr(db_cmd.console, "print", lambda message="", *a, **k: None)

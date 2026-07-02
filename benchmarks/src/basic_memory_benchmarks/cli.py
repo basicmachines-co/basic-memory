@@ -153,7 +153,9 @@ def convert_structure_corpus(
         max_workers=max_workers,
     )
 
-    console.print(f"Structured ([green]{mode}[/green]): [cyan]{output_dir}[/cyan] ({doc_count} docs)")
+    console.print(
+        f"Structured ([green]{mode}[/green]): [cyan]{output_dir}[/cyan] ({doc_count} docs)"
+    )
     console.print(f"Extractor: [green]{extractor}[/green]")
     if cats:
         console.print(f"Filtered to categories: {sorted(cats)}")

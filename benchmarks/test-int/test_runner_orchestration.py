@@ -21,7 +21,11 @@ class FakeProvider(BenchmarkProvider):
         doc_id = self.mapping.get(query)
         if not doc_id:
             return []
-        return [SearchHit(source_doc_id=doc_id, source_path=f"docs/{doc_id}.md", text="match", score=1.0)]
+        return [
+            SearchHit(
+                source_doc_id=doc_id, source_path=f"docs/{doc_id}.md", text="match", score=1.0
+            )
+        ]
 
     def cleanup(self, run_config: RunConfig) -> None:
         _ = run_config

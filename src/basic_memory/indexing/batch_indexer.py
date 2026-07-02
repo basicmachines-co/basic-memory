@@ -28,6 +28,10 @@ from basic_memory.indexing.models import (
 )
 from basic_memory.models import Entity, Relation
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.runtime.contracts import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
+    runtime_file_path_is_markdown_note,
+)
 from basic_memory.services import EntityService
 from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -748,8 +752,8 @@ class BatchIndexer:
 
     def _is_markdown(self, file: IndexInputFile) -> bool:
         if file.content_type is not None:
-            return file.content_type == "text/markdown"
-        return Path(file.path).suffix.lower() in {".md", ".markdown"}
+            return file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+        return runtime_file_path_is_markdown_note(Path(file.path).as_posix())
 
     async def _run_bounded(
         self,

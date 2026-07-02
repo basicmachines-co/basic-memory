@@ -103,6 +103,11 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
         logger.info("Continuing with initialization despite synchronization error")
 
 
+# Strong references for fire-and-forget startup index tasks; the event loop
+# alone would hold only weak references (asyncio.create_task docs).
+_initial_index_tasks: set[asyncio.Task[None]] = set()
+
+
 async def initialize_file_indexing(
     app_config: BasicMemoryConfig,
     quiet: bool = True,
@@ -190,11 +195,14 @@ async def initialize_file_indexing(
         except Exception as e:  # pragma: no cover
             logger.error(f"Error in background project index for project {project.name}: {e}")
 
-    # Create background tasks for all project indexes (non-blocking)
-    index_tasks = [
-        asyncio.create_task(index_project_background(project)) for project in active_projects
-    ]
-    logger.info(f"Created {len(index_tasks)} background indexing tasks")
+    # Create background tasks for all project indexes (non-blocking). The event
+    # loop keeps only weak task references, so hold them in the module-level set
+    # to keep GC from cancelling an index mid-flight.
+    for project in active_projects:
+        index_task = asyncio.create_task(index_project_background(project))
+        _initial_index_tasks.add(index_task)
+        index_task.add_done_callback(_initial_index_tasks.discard)
+    logger.info(f"Created {len(active_projects)} background indexing tasks")
 
     # Don't await the tasks - let them run in background while we continue
 

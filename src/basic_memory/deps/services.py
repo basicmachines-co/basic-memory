@@ -839,6 +839,12 @@ def _log_task_failure(completed: asyncio.Task) -> None:
         logger.exception("Background task failed", error=str(exc))
 
 
+# The event loop holds only weak references to tasks; without a strong reference
+# a suspended background task can be garbage-collected mid-flight and silently
+# never finish (asyncio.create_task docs: "Save a reference to the result").
+_background_tasks: set[asyncio.Task[object]] = set()
+
+
 def _schedule_background_coroutine(
     coroutine: Coroutine[Any, Any, object],
     *,
@@ -851,6 +857,8 @@ def _schedule_background_coroutine(
         return
 
     task = asyncio.create_task(coroutine)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     task.add_done_callback(_log_task_failure)
 
 

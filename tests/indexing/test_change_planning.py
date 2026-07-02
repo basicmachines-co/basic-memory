@@ -96,7 +96,11 @@ def test_plan_file_changes_removes_moved_files_from_new_and_deleted_sets() -> No
     assert report.total_changes == 1
 
 
-def test_plan_file_changes_detects_move_over_existing_path_by_checksum() -> None:
+def test_plan_file_changes_never_moves_onto_existing_indexed_path() -> None:
+    # Regression: target.md was edited in place and its new content happens to
+    # match deleted source.md's checksum. Classifying that as a move would
+    # redirect source.md's entity onto target.md's path and drop target.md's
+    # edit. The edit and the delete must both survive.
     report = plan_file_changes(
         storage_checksum_by_path={"target.md": "source-checksum"},
         db_checksum_by_path={"target.md": "target-checksum"},
@@ -104,11 +108,11 @@ def test_plan_file_changes_detects_move_over_existing_path_by_checksum() -> None
         move_candidates=(FileMoveCandidate(path="source.md", checksum="source-checksum"),),
     )
 
+    assert report.moved_files == {}
+    assert report.modified_files == ["target.md"]
+    assert report.deleted_files == ["source.md"]
     assert report.new_files == []
-    assert report.modified_files == []
-    assert report.deleted_files == []
-    assert report.moved_files == {"source.md": "target.md"}
-    assert report.total_changes == 1
+    assert report.total_changes == 2
 
 
 def test_plan_file_changes_treats_copy_as_new_when_original_path_still_exists() -> None:
@@ -224,8 +228,9 @@ async def test_detect_project_file_changes_loads_store_state_and_plans_moves() -
         "new/moved.md",
         "new.md",
     )
+    # Only genuinely new paths (no indexed row) are eligible move destinations,
+    # so candidate loading excludes modified paths.
     assert store.loaded_move_checksums == {
-        "modified.md": "new-checksum",
         "new/moved.md": "moved-checksum",
         "new.md": "new-file-checksum",
     }
@@ -276,11 +281,11 @@ async def test_change_detector_adapts_entity_repository_with_explicit_sessions(
         "null-checksum.md",
     )
     assert repository.loaded_all_paths is True
+    # Modified and null-checksum paths keep their existing entity rows, so they
+    # are not move destinations and their checksums are not candidate queries.
     assert repository.loaded_move_checksums == (
         "moved-checksum",
-        "new-checksum",
         "new-file-checksum",
-        "now-has-checksum",
     )
     assert len(sessions) == 3
     assert report == ChangeReport(

@@ -48,6 +48,24 @@ def test_resolve_link_texts_matches_permalink_title_and_file_path() -> None:
     }
 
 
+def test_resolve_link_texts_registers_extensionless_alias_for_markdown_suffix() -> None:
+    # Regression: only ".md" used to get the extensionless alias, so a note
+    # named foo.markdown could not be linked as [[folder/foo]].
+    resolved = resolve_link_texts(
+        ["folder/lookup-target"],
+        [
+            LinkResolutionTarget(
+                entity_id=42,
+                permalink=None,
+                title=None,
+                file_path="folder/lookup-target.markdown",
+            )
+        ],
+    )
+
+    assert resolved == {"folder/lookup-target": 42}
+
+
 def test_resolve_link_texts_normalizes_wikilinks_and_aliases() -> None:
     resolved = resolve_link_texts(
         [

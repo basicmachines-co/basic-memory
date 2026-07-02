@@ -153,10 +153,10 @@ async def detect_project_file_changes(
         )
         with logfire.span(
             "change_detector.detect_moves",
-            candidate_count=len(candidate_snapshot.move_target_checksum_by_path),
+            candidate_count=len(candidate_snapshot.new_file_checksum_by_path),
         ):
             move_candidates = await store.load_move_candidates(
-                candidate_snapshot.move_target_checksum_by_path
+                candidate_snapshot.new_file_checksum_by_path
             )
 
         snapshot = ChangeDetectionSnapshot(
