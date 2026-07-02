@@ -15,7 +15,6 @@ from basic_memory.runtime import (
     RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
-    TenantId,
     plan_note_file_delete_job_request,
     plan_note_materialization_job_request,
     runtime_note_content_payload_as_dict,
@@ -60,7 +59,6 @@ class AcceptedNoteMaterializationFailureMarker(Protocol):
 async def enqueue_accepted_note_materialization(
     accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
-    tenant_id: TenantId,
     materialization_enqueuer: AcceptedNoteMaterializationEnqueuer,
     failure_marker: AcceptedNoteMaterializationFailureMarker,
 ) -> AcceptedNoteEnqueueResult:
@@ -69,10 +67,7 @@ async def enqueue_accepted_note_materialization(
 
     try:
         await materialization_enqueuer.enqueue_note_materialization(
-            plan_note_materialization_job_request(
-                tenant_id=tenant_id,
-                materialization=materialization,
-            )
+            plan_note_materialization_job_request(materialization)
         )
         return AcceptedNoteEnqueueResult(
             status_code=accepted.status_code,
@@ -96,7 +91,6 @@ async def enqueue_accepted_note_materialization(
 async def enqueue_accepted_note_write_jobs(
     accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
-    tenant_id: TenantId,
     materialization_enqueuer: AcceptedNoteMaterializationEnqueuer,
     failure_marker: AcceptedNoteMaterializationFailureMarker,
     file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
@@ -104,7 +98,6 @@ async def enqueue_accepted_note_write_jobs(
     """Queue writeback and any separate delete cleanup for an accepted note write."""
     result = await enqueue_accepted_note_materialization(
         accepted,
-        tenant_id=tenant_id,
         materialization_enqueuer=materialization_enqueuer,
         failure_marker=failure_marker,
     )
@@ -114,7 +107,6 @@ async def enqueue_accepted_note_write_jobs(
     return await enqueue_accepted_note_file_delete_request(
         status_code=result.status_code,
         payload=result.payload,
-        tenant_id=tenant_id,
         file_delete=accepted.file_delete,
         file_delete_enqueuer=file_delete_enqueuer,
     )
@@ -123,14 +115,12 @@ async def enqueue_accepted_note_write_jobs(
 async def enqueue_accepted_note_file_delete(
     accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
-    tenant_id: TenantId,
     file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
 ) -> AcceptedNoteEnqueueResult:
     """Queue file cleanup for an already-committed accepted note delete."""
     return await enqueue_accepted_note_file_delete_request(
         status_code=accepted.status_code,
         payload=accepted.payload,
-        tenant_id=tenant_id,
         file_delete=require_accepted_note_file_delete(accepted),
         file_delete_enqueuer=file_delete_enqueuer,
     )
@@ -140,17 +130,13 @@ async def enqueue_accepted_note_file_delete_request(
     *,
     status_code: int,
     payload: RuntimeNoteContentResponsePayload,
-    tenant_id: TenantId,
     file_delete: RuntimePendingNoteFileDelete,
     file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
 ) -> AcceptedNoteEnqueueResult:
     """Queue one accepted note file cleanup request and update response state on failure."""
     try:
         await file_delete_enqueuer.enqueue_note_file_delete(
-            plan_note_file_delete_job_request(
-                tenant_id=tenant_id,
-                file_delete=file_delete,
-            )
+            plan_note_file_delete_job_request(file_delete)
         )
         return AcceptedNoteEnqueueResult(status_code=status_code, payload=payload)
     except Exception as exc:

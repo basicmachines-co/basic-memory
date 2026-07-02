@@ -14,10 +14,7 @@ import pytest
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.index import ProjectIndexCoordinatorResult
-from basic_memory.index import (
-    LOCAL_EVENT_INDEX_TENANT_ID,
-    LocalWatchEventIndexRuntimeFactory,
-)
+from basic_memory.index import LocalWatchEventIndexRuntimeFactory
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
@@ -289,8 +286,6 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
             return original_create_task(coro)
 
         class RecordingProjectIndexRuntimeFactory:
-            tenant_id = LOCAL_EVENT_INDEX_TENANT_ID
-
             async def runtime_for_project(self, project):  # noqa: ANN001
                 return f"runtime:{project.name}"
 

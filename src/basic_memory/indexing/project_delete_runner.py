@@ -220,10 +220,7 @@ async def run_project_delete(
         file_results.append(
             await file_deleter.delete_project_file(
                 plan_note_file_delete_job_request(
-                    tenant_id=request.tenant_id,
-                    file_delete=file_snapshot.to_pending_note_file_delete(
-                        project_id=request.project_id
-                    ),
+                    file_snapshot.to_pending_note_file_delete(project_id=request.project_id)
                 )
             )
         )

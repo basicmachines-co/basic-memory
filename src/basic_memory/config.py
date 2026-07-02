@@ -370,7 +370,7 @@ class BasicMemoryConfig(BaseSettings):
         description="Number of in-process workers that materialize accepted note "
         "writes (write the markdown file + index it) off the accept path. Bounds "
         "concurrent materializations so they don't contend en masse for the DB "
-        "writer under high write load (local runtime; cloud uses PGQ workers).",
+        "writer under high write load (local runtime; cloud uses queue workers).",
         gt=0,
     )
 

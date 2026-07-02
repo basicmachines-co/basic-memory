@@ -21,7 +21,6 @@ from basic_memory.indexing import (
 from basic_memory.runtime import (
     ProjectRuntimeReference,
     RuntimeStorageEventOperation,
-    TenantId,
 )
 
 
@@ -53,7 +52,6 @@ class InlineStorageEventResultRecorder(Protocol):
 class InlineStorageEventIndexRuntime:
     """Dependencies needed to execute storage events inline for one project."""
 
-    tenant_id: TenantId
     project: ProjectRuntimeReference
     checker: IndexFileRunnerChecker
     metadata_source: IndexFileMetadataSource
@@ -76,7 +74,6 @@ class InlineStorageEventOperationProcessor:
 
     async def index_file(self, operation: RuntimeStorageEventOperation) -> None:
         index_request = IndexFileRuntimeRequest.from_storage_event(
-            tenant_id=self.runtime.tenant_id,
             project=self.runtime.project,
             storage_event=operation.storage_event,
             index_embeddings=self.runtime.index_embeddings,

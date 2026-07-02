@@ -29,21 +29,17 @@ from basic_memory.runtime import (
     RuntimeJobId,
     RuntimeObservedIndexFile,
     RuntimeProjectIndexJobRequest,
-    TenantId,
-    WorkflowId,
 )
 
 
-class ProjectIndexWorkflowSource(Protocol):
-    """Minimal source shape for project-index workflow requests."""
+class ProjectIndexRequestSource(Protocol):
+    """Minimal source shape for project-index requests."""
 
-    tenant_id: TenantId
     project_id: ProjectId
     project_external_id: ProjectExternalId
     project_name: ProjectName | None
     project_permalink: ProjectPermalink | None
     project_path: ProjectPath
-    workflow_id: WorkflowId
     force_full: bool
     search: bool
     embeddings: bool
@@ -69,7 +65,7 @@ class ProjectIndexWorkflowStarter(Protocol):
 
     async def start_project_index_workflow(
         self,
-        request: ProjectIndexWorkflowRequest,
+        request: ProjectIndexRequest,
         *,
         total_files: int,
         batch_count: int,
@@ -88,31 +84,32 @@ class ProjectIndexBatchEnqueuer(Protocol):
 
 
 class ProjectIndexFanoutFailureRecorder(Protocol):
-    """Capability that records a project-index fan-out failure."""
+    """Capability that records a project-index fan-out failure.
+
+    Adapters that persist failures against a durable workflow carry that
+    workflow identity themselves; the coordinator only reports what failed.
+    """
 
     async def record_project_index_fanout_failure(
         self,
         *,
-        workflow_id: WorkflowId,
         error_message: str,
         progress: str,
     ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectIndexWorkflowRequest:
-    """Project-index workflow identity and mode flags."""
+class ProjectIndexRequest:
+    """Project-index target identity and mode flags."""
 
-    tenant_id: TenantId
-    workflow_id: WorkflowId
     project: ProjectRuntimeReference
     force_full: bool
     search: bool
     embeddings: bool
 
     @classmethod
-    def from_source(cls, source: ProjectIndexWorkflowSource) -> Self:
-        """Build a workflow request from queue payloads or boundary models."""
+    def from_source(cls, source: ProjectIndexRequestSource) -> Self:
+        """Build a project-index request from queue payloads or boundary models."""
         project_external_id = str(source.project_external_id).strip()
         if not project_external_id:
             raise ValueError(f"Project {source.project_id} is missing external_id")
@@ -126,8 +123,6 @@ class ProjectIndexWorkflowRequest:
             str(source.project_permalink).strip() if source.project_permalink else None
         )
         return cls(
-            tenant_id=source.tenant_id,
-            workflow_id=source.workflow_id,
             project=ProjectRuntimeReference(
                 project_id=source.project_id,
                 project_external_id=project_external_id,
@@ -143,7 +138,6 @@ class ProjectIndexWorkflowRequest:
     def workflow_payload_metadata(self) -> dict[str, object]:
         """Serialize to the existing workflow metadata payload shape."""
         return {
-            "tenant_id": str(self.tenant_id),
             **self.project.workflow_metadata(),
             "force_full": self.force_full,
             "search": self.search,
@@ -176,7 +170,7 @@ class ProjectIndexCoordinatorResult:
 
 def build_project_index_batch_job_plan(
     *,
-    request: ProjectIndexWorkflowRequest,
+    request: ProjectIndexRequest,
     observed_files: Sequence[RuntimeObservedIndexFile],
     batch_size: int,
 ) -> ProjectIndexBatchJobPlan:
@@ -191,9 +185,7 @@ def build_project_index_batch_job_plan(
     batch_count = len(batches)
     batch_requests = tuple(
         RuntimeIndexFileBatchJobRequest(
-            tenant_id=request.tenant_id,
             project=request.project,
-            workflow_id=request.workflow_id,
             batch_index=batch_index,
             batch_count=batch_count,
             file_paths=tuple(target.path for target in batch_targets),
@@ -268,16 +260,14 @@ async def run_project_index_coordinator(
         deleted_paths=change_report.deleted_files,
         batch_size=batch_size,
     )
-    workflow_request = ProjectIndexWorkflowRequest(
-        tenant_id=request.tenant_id,
-        workflow_id=request.workflow_id,
+    index_request = ProjectIndexRequest(
         project=request.project,
         force_full=request.force_full,
         search=request.search,
         embeddings=request.embeddings,
     )
     batch_plan = build_project_index_batch_job_plan(
-        request=workflow_request,
+        request=index_request,
         observed_files=select_project_index_target_files(
             observed_files=observed_files,
             change_report=change_report,
@@ -288,7 +278,7 @@ async def run_project_index_coordinator(
     completion = None
     if workflow_starter is not None:
         completion = await workflow_starter.start_project_index_workflow(
-            workflow_request,
+            index_request,
             total_files=batch_plan.total_files,
             batch_count=batch_plan.batch_count,
             batch_size=batch_size,
@@ -308,7 +298,6 @@ async def run_project_index_coordinator(
     except Exception as exc:
         if fanout_failure_recorder is not None:
             await fanout_failure_recorder.record_project_index_fanout_failure(
-                workflow_id=request.workflow_id,
                 error_message=(
                     "Failed to enqueue project index batch jobs after "
                     f"{enqueued_files}/{batch_plan.total_files} files: {exc}"
@@ -355,11 +344,9 @@ async def sync_project_index_vector_targets(
 
     await run_embedding_index_batch(
         EmbeddingIndexBatchJobRequest(
-            tenant_id=request.tenant_id,
             project_id=request.project.project_id,
             project_path=request.project.project_path,
             entities=vector_targets,
-            workflow_id=request.workflow_id,
         ),
         vector_sync=embedding_vector_sync,
     )

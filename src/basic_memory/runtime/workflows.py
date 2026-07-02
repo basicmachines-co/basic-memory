@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
-from basic_memory.runtime.jobs import JobEntrypoint, RuntimeJobId, WorkflowId
-
-type RuntimeWorkflowBroker = str
+type WorkflowId = UUID
 type RuntimeWorkflowCheckpoint = Mapping[str, object]
 type RuntimeWorkflowMetadata = Mapping[str, object]
 type RuntimeWorkflowMetadataPatch = Mapping[str, object]
@@ -63,52 +60,6 @@ def parse_runtime_workflow_id(job_id: str) -> WorkflowId | None:
         return UUID(job_id)
     except ValueError:
         return None
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeWorkflowTransport:
-    """Queue transport identity stored on workflow metadata."""
-
-    broker: RuntimeWorkflowBroker
-    entrypoint: JobEntrypoint
-
-    def workflow_metadata(self) -> dict[str, object]:
-        """Serialize transport identity for existing workflow metadata contracts."""
-        return {
-            "broker": self.broker,
-            "entrypoint": self.entrypoint,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeQueuedWorkflowMetadata:
-    """Workflow metadata and queued event data for one runtime job handoff."""
-
-    workflow_id: WorkflowId
-    progress: RuntimeWorkflowProgress
-    payload: Mapping[str, object]
-    transport: RuntimeWorkflowTransport
-    phase: RuntimeWorkflowPhase = "queued"
-
-    def workflow_metadata(self) -> dict[str, object]:
-        """Serialize to the existing durable workflow metadata shape."""
-        return {
-            "job_id": str(self.workflow_id),
-            "phase": self.phase,
-            "progress": self.progress,
-            "payload": dict(self.payload),
-            "transport": self.transport.workflow_metadata(),
-        }
-
-    def queued_event_data(self, *, logical_key: str) -> dict[str, object]:
-        """Serialize to the existing queued workflow event payload shape."""
-        return {
-            "logical_key": logical_key,
-            "entrypoint": self.transport.entrypoint,
-            "phase": self.phase,
-            "progress": self.progress,
-            **dict(self.payload),
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,12 +190,17 @@ class RuntimeWorkflowAttemptMetadata:
         self,
         *,
         attempt_number: int,
-        pgq_job_id: RuntimeJobId | None,
+        transport_event_data: Mapping[str, object] | None,
     ) -> dict[str, object]:
-        """Serialize to the existing attempt-started event payload shape."""
+        """Serialize to the existing attempt-started event payload shape.
+
+        Transport identity is opaque to core: runtimes that track queue-level
+        job ids merge them in via ``transport_event_data`` (inserted between
+        ``attempt_number`` and ``phase`` to keep persisted event shapes stable).
+        """
         return {
             "attempt_number": attempt_number,
-            "pgq_job_id": pgq_job_id,
+            **dict(transport_event_data or {}),
             "phase": self.phase,
             "progress": self.progress,
         }
@@ -331,24 +287,3 @@ class RuntimeWorkflowFailureMetadata:
             "progress": self.progress,
             "error_message": self.error_preview,
         }
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeJobStatus:
-    """Unified runtime job status and result information."""
-
-    job_id: str
-    status: RuntimeJobStatusType
-    job_type: str | None = None
-    tenant_id: str | None = None
-    workflow_id: str | None = None
-    image_tag: str | None = None
-    error: str | None = None
-    progress: str | None = None
-    phase: RuntimeWorkflowPhase | None = None
-    checkpoint: RuntimeWorkflowCheckpoint | None = None
-    created_at: datetime | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    result: RuntimeWorkflowResult | None = None
-    index_job_id: str | None = None

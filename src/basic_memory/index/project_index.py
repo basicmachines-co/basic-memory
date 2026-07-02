@@ -11,11 +11,9 @@ from basic_memory.indexing import (
     ProjectIndexMovedEntitySearchRefresher,
     ProjectIndexObservedFileSource,
     RepositoryProjectIndexMovedEntitySearchRefresher,
-    ProjectIndexWorkflowRequest,
+    ProjectIndexRequest,
     ProjectIndexWorkflowStarter,
     StoreProjectIndexMaintenanceRunner,
-    build_project_index_workflow_queued,
-    project_index_workflow_logical_key,
     run_project_index_coordinator,
 )
 
@@ -30,10 +28,8 @@ __all__ = [
     "ProjectIndexMovedEntitySearchRefresher",
     "ProjectIndexObservedFileSource",
     "RepositoryProjectIndexMovedEntitySearchRefresher",
-    "ProjectIndexWorkflowRequest",
+    "ProjectIndexRequest",
     "ProjectIndexWorkflowStarter",
     "StoreProjectIndexMaintenanceRunner",
-    "build_project_index_workflow_queued",
-    "project_index_workflow_logical_key",
     "run_project_index_coordinator",
 ]

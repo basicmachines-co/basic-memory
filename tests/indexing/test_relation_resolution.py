@@ -3,7 +3,6 @@
 from dataclasses import FrozenInstanceError, dataclass
 from datetime import timedelta
 from typing import cast
-from uuid import UUID
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -203,19 +202,16 @@ def build_repository_runtime(
     )
 
 
-def test_resolve_relations_job_request_matches_cloud_queue_identity() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
+def test_resolve_relations_job_request_matches_project_queue_identity() -> None:
     request = ResolveRelationsJobRequest(
-        tenant_id=tenant_id,
         project_id=7,
         project_path="main",
     )
 
     assert RESOLVE_RELATIONS_DEBOUNCE_SECONDS == 10
-    assert request.dedupe_key() == ("resolve-relations:11111111-1111-1111-1111-111111111111:7")
+    assert request.dedupe_key() == "resolve-relations:7"
     assert request.routing_headers({"source": "test"}) == {
         "source": "test",
-        "tenant_id": str(tenant_id),
         "project_id": "7",
     }
     assert request.execute_after == timedelta(seconds=10)
@@ -225,23 +221,18 @@ def test_resolve_relations_job_request_matches_cloud_queue_identity() -> None:
 
 
 def test_project_index_completion_relation_resolution_plan_requires_project_identity() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-
     assert plan_project_index_completion_relation_resolution(
         ProjectIndexRelationResolutionContext(
-            tenant_id=tenant_id,
             project_id="7",
             project_path="main",
         )
     ) == ResolveRelationsJobRequest(
-        tenant_id=tenant_id,
         project_id=7,
         project_path="main",
     )
     assert (
         plan_project_index_completion_relation_resolution(
             ProjectIndexRelationResolutionContext(
-                tenant_id=tenant_id,
                 project_id=None,
                 project_path="main",
             )
@@ -251,7 +242,6 @@ def test_project_index_completion_relation_resolution_plan_requires_project_iden
     assert (
         plan_project_index_completion_relation_resolution(
             ProjectIndexRelationResolutionContext(
-                tenant_id=tenant_id,
                 project_id="7",
                 project_path=None,
             )
@@ -261,7 +251,6 @@ def test_project_index_completion_relation_resolution_plan_requires_project_iden
     with pytest.raises(ValueError):
         plan_project_index_completion_relation_resolution(
             ProjectIndexRelationResolutionContext(
-                tenant_id=tenant_id,
                 project_id="not-an-int",
                 project_path="main",
             )
@@ -270,12 +259,10 @@ def test_project_index_completion_relation_resolution_plan_requires_project_iden
 
 @pytest.mark.asyncio
 async def test_project_index_completion_relation_resolution_runs_shared_pass() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     runtime = StubRelationResolutionRuntime([2, 0], [{10}, set()])
 
     result = await resolve_project_index_completion_relations(
         ProjectIndexRelationResolutionContext(
-            tenant_id=tenant_id,
             project_id=7,
             project_path="main",
         ),
@@ -295,7 +282,6 @@ async def test_project_index_completion_relation_resolution_runs_shared_pass() -
     assert (
         await resolve_project_index_completion_relations(
             ProjectIndexRelationResolutionContext(
-                tenant_id=tenant_id,
                 project_id=None,
                 project_path="main",
             ),
@@ -308,40 +294,21 @@ async def test_project_index_completion_relation_resolution_runs_shared_pass() -
 
 
 def test_index_file_relation_resolution_plan_requires_incremental_processed_file() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-
     assert plan_index_file_relation_resolution(
         IndexFileRelationResolutionContext(
-            tenant_id=tenant_id,
             project_id=7,
             project_path="main",
-            workflow_id=None,
             status=IndexFileJobStatus.processed,
         )
     ) == ResolveRelationsJobRequest(
-        tenant_id=tenant_id,
         project_id=7,
         project_path="main",
     )
     assert (
         plan_index_file_relation_resolution(
             IndexFileRelationResolutionContext(
-                tenant_id=tenant_id,
                 project_id=7,
                 project_path="main",
-                workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
-                status=IndexFileJobStatus.processed,
-            )
-        )
-        is None
-    )
-    assert (
-        plan_index_file_relation_resolution(
-            IndexFileRelationResolutionContext(
-                tenant_id=tenant_id,
-                project_id=7,
-                project_path="main",
-                workflow_id=None,
                 status=IndexFileJobStatus.current,
             )
         )

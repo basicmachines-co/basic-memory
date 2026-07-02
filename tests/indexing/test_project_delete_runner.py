@@ -4,7 +4,6 @@ from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -123,7 +122,6 @@ def project_delete_request(
     delete_notes: bool = True,
 ) -> RuntimeProjectDeleteJobRequest:
     return RuntimeProjectDeleteJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=project_id,
         project_external_id="project-main",
         project_name="Main",
@@ -347,14 +345,12 @@ async def test_run_project_delete_deletes_files_then_hard_deletes_project() -> N
     )
     assert file_deleter.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=request.tenant_id,
             project_id=101,
             entity_id=42,
             file_path="notes/a.md",
             file_checksum="file-sum-a",
         ),
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=request.tenant_id,
             project_id=101,
             entity_id=43,
             file_path="notes/b.md",

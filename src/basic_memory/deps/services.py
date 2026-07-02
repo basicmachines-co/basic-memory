@@ -51,7 +51,6 @@ from basic_memory.cloud import (
     NoteContentQueryService,
 )
 from basic_memory.index import (
-    LOCAL_EVENT_INDEX_TENANT_ID,
     LocalProjectIndexObservation,
     LocalProjectIndexRunner,
     ProjectIndexCoordinatorResult,
@@ -83,7 +82,6 @@ from basic_memory.runtime import (
     RuntimeFileDeleteResult,
     RuntimeFilePath,
     RuntimeNoteFileDeleteJobRequest,
-    TenantId,
     runtime_content_type_is_markdown,
 )
 from basic_memory.schemas import ProjectIndexRunResponse
@@ -379,14 +377,6 @@ class LocalCurrentNoteContentFreshener:
 
 
 # --- Directory Delete Runtime ---
-
-
-async def get_runtime_tenant_id() -> TenantId:
-    """Return the runtime tenant id for local route-owned cleanup requests."""
-    return LOCAL_EVENT_INDEX_TENANT_ID
-
-
-RuntimeTenantIdDep = Annotated[TenantId, Depends(get_runtime_tenant_id)]
 
 
 @dataclass(frozen=True, slots=True)

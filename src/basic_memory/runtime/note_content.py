@@ -10,7 +10,6 @@ from enum import StrEnum
 from typing import Protocol, Self
 from uuid import UUID
 
-from basic_memory.runtime.jobs import TenantId
 from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectId,
@@ -717,7 +716,6 @@ def plan_pending_note_materialization(
 class RuntimeNoteMaterializationJobRequest:
     """Queue-neutral request shape for materializing one accepted note version."""
 
-    tenant_id: TenantId
     project_id: ProjectId
     entity_id: RuntimeEntityId
     db_version: RuntimeNoteContentVersion
@@ -732,19 +730,14 @@ class RuntimeNoteMaterializationJobRequest:
     def dedupe_key(self) -> str:
         """Return the logical materialization queue identity."""
         return (
-            f"materialize-note-file:{self.tenant_id}:{self.project_id}:"
+            f"materialize-note-file:{self.project_id}:"
             f"{self.entity_id}:{self.db_version}:{self.db_checksum}"
         )
 
     def routing_headers(self, headers: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return queue routing headers for the materialization job."""
         routing_headers = dict(headers or {})
-        routing_headers.update(
-            {
-                "tenant_id": str(self.tenant_id),
-                "project_id": str(self.project_id),
-            }
-        )
+        routing_headers["project_id"] = str(self.project_id)
         return routing_headers
 
 
@@ -774,14 +767,11 @@ def plan_note_materialization_cleanup_file_delete(
 
 
 def plan_note_materialization_job_request(
-    *,
-    tenant_id: TenantId,
     materialization: RuntimePendingNoteMaterialization,
 ) -> RuntimeNoteMaterializationJobRequest:
     """Flatten accepted note follow-up work into a queue-neutral materialization request."""
     cleanup = materialization.cleanup_after_write
     return RuntimeNoteMaterializationJobRequest(
-        tenant_id=tenant_id,
         project_id=materialization.project_id,
         entity_id=materialization.entity_id,
         db_version=materialization.db_version,

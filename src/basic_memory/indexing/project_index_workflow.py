@@ -11,7 +11,7 @@ from basic_memory.indexing.models import (
     apply_project_index_batch_job_results,
     project_index_file_outcome_from_job_result,
 )
-from basic_memory.indexing.project_index_coordinator import ProjectIndexWorkflowRequest
+from basic_memory.indexing.project_index_coordinator import ProjectIndexRequest
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCounters,
     apply_project_index_file_outcome,
@@ -22,15 +22,7 @@ from basic_memory.indexing.project_index_progress import (
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
 )
-from basic_memory.runtime import (
-    ProjectName,
-    RuntimeJobId,
-    RuntimeQueuedWorkflowMetadata,
-    RuntimeWorkflowBroker,
-    RuntimeWorkflowTransport,
-    TenantId,
-    WorkflowId,
-)
+from basic_memory.runtime import WorkflowId
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,15 +256,6 @@ class ProjectIndexStaleWorkflowPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectIndexWorkflowQueued:
-    """Portable queued metadata for a project-index workflow handoff."""
-
-    logical_key: str
-    metadata: dict[str, object]
-    queued_event_data: dict[str, object]
-
-
-@dataclass(frozen=True, slots=True)
 class ProjectIndexBatchJobActivity:
     """Unfinished project-index child batch jobs observed by a runtime adapter."""
 
@@ -316,62 +299,6 @@ class ProjectIndexBatchJobActivityUpdate:
     metadata: dict[str, object]
 
 
-def project_index_workflow_logical_key(
-    *,
-    tenant_id: TenantId,
-    project_name: ProjectName | None,
-    force_full: bool,
-    search: bool,
-    embeddings: bool,
-) -> str:
-    """Return the legacy project-index workflow dedupe key."""
-    logical_key = f"index-{tenant_id}-{project_name or 'all'}"
-    if force_full:
-        logical_key = f"{logical_key}-full"
-    if not search:
-        logical_key = f"{logical_key}-emb"
-    elif not embeddings:
-        logical_key = f"{logical_key}-search"
-    return logical_key
-
-
-def build_project_index_workflow_queued(
-    *,
-    request: ProjectIndexWorkflowRequest,
-    transport_broker: RuntimeWorkflowBroker,
-    transport_entrypoint: str,
-) -> ProjectIndexWorkflowQueued:
-    """Build queued workflow metadata before the coordinator starts."""
-    logical_key = project_index_workflow_logical_key(
-        tenant_id=request.tenant_id,
-        project_name=request.project.project_name,
-        force_full=request.force_full,
-        search=request.search,
-        embeddings=request.embeddings,
-    )
-    queued_metadata = RuntimeQueuedWorkflowMetadata(
-        workflow_id=request.workflow_id,
-        progress="queued for index",
-        payload=request.workflow_payload_metadata(),
-        transport=RuntimeWorkflowTransport(
-            broker=transport_broker,
-            entrypoint=transport_entrypoint,
-        ),
-    )
-
-    return ProjectIndexWorkflowQueued(
-        logical_key=logical_key,
-        metadata=queued_metadata.workflow_metadata(),
-        queued_event_data={
-            "logical_key": logical_key,
-            "entrypoint": transport_entrypoint,
-            "phase": "queued",
-            "progress": "queued for index",
-            **request.project.workflow_metadata(),
-        },
-    )
-
-
 def build_project_index_batch_activity_update(
     *,
     metadata: Mapping[str, object],
@@ -391,20 +318,24 @@ def build_project_index_batch_activity_update(
 
 def build_project_index_workflow_start(
     *,
-    request: ProjectIndexWorkflowRequest,
+    request: ProjectIndexRequest,
     total_files: int,
     batch_count: int,
     batch_size: int,
     discovered_at: str,
-    transport_broker: RuntimeWorkflowBroker,
-    transport_entrypoint: str,
-    transport_job_id: RuntimeJobId | None,
+    transport_metadata: Mapping[str, object],
+    transport_event_data: Mapping[str, object],
 ) -> ProjectIndexWorkflowStart:
-    """Build the initial persisted metadata for a project-index workflow."""
+    """Build the initial persisted metadata for a project-index workflow.
+
+    Queue transport identity is opaque to core: the runtime that owns the queue
+    passes its durable ``transport`` metadata dict and any transport fields it
+    wants merged into the attempt event (inserted between the discovery counts
+    and the project identity to keep persisted event shapes stable).
+    """
     counters = initial_project_index_counters(total_files)
     progress = project_index_progress_text(counters)
     payload = request.workflow_payload_metadata()
-    pgq_job_id = str(transport_job_id) if transport_job_id is not None else None
     metadata: dict[str, object] = {
         "phase": "indexing",
         "progress": progress,
@@ -416,11 +347,7 @@ def build_project_index_workflow_start(
             "discovered_at": discovered_at,
         },
         "counters": counters.to_metadata(),
-        "transport": {
-            "broker": transport_broker,
-            "entrypoint": transport_entrypoint,
-            "pgq_job_id": pgq_job_id,
-        },
+        "transport": dict(transport_metadata),
     }
     return ProjectIndexWorkflowStart(
         counters=counters,
@@ -432,7 +359,7 @@ def build_project_index_workflow_start(
             "total_files": total_files,
             "batch_count": batch_count,
             "batch_size": batch_size,
-            "pgq_job_id": pgq_job_id,
+            **dict(transport_event_data),
             "project_id": request.project.project_id,
             "project_name": request.project.project_name,
             "project_permalink": request.project.project_permalink,
@@ -443,14 +370,13 @@ def build_project_index_workflow_start(
 
 def plan_project_index_workflow_start(
     *,
-    request: ProjectIndexWorkflowRequest,
+    request: ProjectIndexRequest,
     total_files: int,
     batch_count: int,
     batch_size: int,
     discovered_at: str,
-    transport_broker: RuntimeWorkflowBroker,
-    transport_entrypoint: str,
-    transport_job_id: RuntimeJobId | None,
+    transport_metadata: Mapping[str, object],
+    transport_event_data: Mapping[str, object],
 ) -> ProjectIndexWorkflowStartPlan:
     """Plan initial workflow metadata and immediate completion for empty projects."""
     workflow_start = build_project_index_workflow_start(
@@ -459,9 +385,8 @@ def plan_project_index_workflow_start(
         batch_count=batch_count,
         batch_size=batch_size,
         discovered_at=discovered_at,
-        transport_broker=transport_broker,
-        transport_entrypoint=transport_entrypoint,
-        transport_job_id=transport_job_id,
+        transport_metadata=transport_metadata,
+        transport_event_data=transport_event_data,
     )
     if total_files == 0:
         return ProjectIndexWorkflowStartPlan.complete(

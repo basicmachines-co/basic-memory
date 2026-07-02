@@ -194,12 +194,10 @@ def test_project_index_metadata_extracts_counters_recorded_batches_and_missing_b
 
 
 def test_project_index_completion_from_metadata_validates_payload() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     workflow_id = UUID("22222222-2222-2222-2222-222222222222")
     counters = ProjectIndexCounters(total=4, processed=4, succeeded=2, missing=1, failed=1)
 
     completion = project_index_completion_from_metadata(
-        tenant_id=tenant_id,
         workflow_id=workflow_id,
         metadata={
             "payload": {
@@ -215,7 +213,6 @@ def test_project_index_completion_from_metadata_validates_payload() -> None:
     )
 
     assert completion == ProjectIndexCompletion(
-        tenant_id=tenant_id,
         project_id="42",
         project_external_id="external-project",
         project_name="Project Name",
@@ -234,10 +231,8 @@ def test_project_index_completion_from_metadata_validates_payload() -> None:
 
 
 def test_project_index_completion_live_update_plan_uses_workflow_completion_facts() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     workflow_id = UUID("22222222-2222-2222-2222-222222222222")
     completion = ProjectIndexCompletion(
-        tenant_id=tenant_id,
         project_id="42",
         project_external_id="external-project",
         project_name="Project Name",
@@ -258,7 +253,6 @@ def test_project_index_completion_live_update_plan_uses_workflow_completion_fact
         completion
     ) == ProjectIndexCompletedLiveUpdatePlan(
         event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
-        tenant_id=tenant_id,
         source="worker",
         project_external_id="external-project",
         project_name="Project Name",
@@ -269,9 +263,7 @@ def test_project_index_completion_live_update_plan_uses_workflow_completion_fact
 
 
 def test_observed_object_index_completion_live_update_plan_requires_web_context() -> None:
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
     context = ObservedObjectIndexCompletionContext(
-        tenant_id=tenant_id,
         project_external_id="external-project",
         project_name="Project Name",
         project_path="project",
@@ -282,7 +274,6 @@ def test_observed_object_index_completion_live_update_plan_requires_web_context(
         context
     ) == ProjectIndexCompletedLiveUpdatePlan(
         event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
-        tenant_id=tenant_id,
         source="worker",
         project_external_id="external-project",
         project_name="Project Name",
@@ -293,7 +284,6 @@ def test_observed_object_index_completion_live_update_plan_requires_web_context(
     assert (
         plan_observed_object_index_completed_live_update(
             ObservedObjectIndexCompletionContext(
-                tenant_id=tenant_id,
                 project_external_id="external-project",
                 project_name="Project Name",
                 project_path="project",
@@ -305,20 +295,6 @@ def test_observed_object_index_completion_live_update_plan_requires_web_context(
     assert (
         plan_observed_object_index_completed_live_update(
             ObservedObjectIndexCompletionContext(
-                tenant_id=tenant_id,
-                project_external_id="external-project",
-                project_name="Project Name",
-                project_path="project",
-                mode=RuntimeStorageFileIndexMode.observed_object,
-                workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
-            )
-        )
-        is None
-    )
-    assert (
-        plan_observed_object_index_completed_live_update(
-            ObservedObjectIndexCompletionContext(
-                tenant_id=tenant_id,
                 project_external_id=None,
                 project_name="Project Name",
                 project_path="project",
@@ -333,18 +309,8 @@ def test_project_index_completion_rejects_missing_required_identity() -> None:
     workflow_id = UUID("22222222-2222-2222-2222-222222222222")
     counters = initial_project_index_counters(0)
 
-    with pytest.raises(RuntimeError, match="tenant is missing"):
-        project_index_completion_from_metadata(
-            tenant_id=None,
-            workflow_id=workflow_id,
-            metadata={"payload": {"project_external_id": "external-project"}},
-            progress="No files found",
-            counters=counters,
-        )
-
     with pytest.raises(RuntimeError, match="project_external_id is missing"):
         project_index_completion_from_metadata(
-            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             workflow_id=workflow_id,
             metadata={"payload": {"project_id": 42}},
             progress="No files found",
@@ -380,7 +346,6 @@ def test_project_index_metadata_rejects_invalid_boundary_shapes() -> None:
 
     with pytest.raises(RuntimeError, match="payload is invalid"):
         project_index_completion_from_metadata(
-            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
             metadata={"payload": "not a payload"},
             progress="No files found",

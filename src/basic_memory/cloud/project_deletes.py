@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -36,7 +35,6 @@ class ProjectDeleteJobEnqueuer(Protocol):
 class ProjectDeleteAcceptanceRequest:
     """Route-level request for accepting a project delete."""
 
-    tenant_id: UUID
     project_external_id: str
     delete_notes: bool
 
@@ -99,7 +97,6 @@ class ProjectDeleteAcceptanceService:
                 )
 
             runtime_request = RuntimeProjectDeleteJobRequest(
-                tenant_id=request.tenant_id,
                 project_id=project.id,
                 project_external_id=project.external_id,
                 project_name=project.name,

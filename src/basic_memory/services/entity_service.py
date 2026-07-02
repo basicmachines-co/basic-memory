@@ -965,7 +965,7 @@ class EntityService(BaseService[EntityModel]):
             if prepared.file_path.as_posix() != previous_file_path.as_posix():
                 # Trigger: a full replacement changed the canonical note path.
                 # Why: the new file has already been written and the entity now points at it.
-                # Outcome: remove the stale old file so local Basic Memory mirrors cloud's PGQ cleanup.
+                # Outcome: remove the stale old file so local Basic Memory mirrors cloud's queued cleanup.
                 if not self._paths_share_storage_target(previous_file_path, prepared.file_path):
                     await self.file_service.delete_file(previous_file_path)
             entity = await self.repository.update(session, entity.id, {"checksum": checksum})

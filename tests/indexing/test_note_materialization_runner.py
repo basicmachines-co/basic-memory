@@ -257,7 +257,6 @@ class FakeContentStore:
 
 def materialization_request() -> RuntimeNoteMaterializationJobRequest:
     return RuntimeNoteMaterializationJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=7,
         entity_id=42,
         db_version=4,
@@ -722,7 +721,6 @@ async def test_run_note_materialization_writes_publishes_and_cleans_previous_fil
     assert actual == result
     assert cleanup.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             file_path="notes/old.md",
@@ -798,7 +796,6 @@ async def test_run_note_materialization_terminal_result_can_enqueue_cleanup() ->
     assert actual == terminal_result
     assert cleanup_enqueuer.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             file_path="notes/old.md",
@@ -836,7 +833,6 @@ async def test_run_note_materialization_cleans_orphaned_file_on_stale_path() -> 
     # The just-written file (not the prepared "old" file) is cleaned up.
     assert cleanup.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             file_path="notes/a.md",
@@ -871,7 +867,6 @@ async def test_run_note_materialization_cleans_orphaned_file_on_missing_note() -
 
     assert cleanup.requests == [
         RuntimeNoteFileDeleteJobRequest(
-            tenant_id=request.tenant_id,
             project_id=request.project_id,
             entity_id=request.entity_id,
             file_path="notes/a.md",

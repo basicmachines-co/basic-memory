@@ -37,8 +37,6 @@ from basic_memory.runtime import (
     RuntimeStorageFileIndexMode,
     RuntimeStorageObjectChecksumSource,
     StorageEtag,
-    TenantId,
-    WorkflowId,
     db_version_from_object_metadata,
     normalize_storage_etag,
     storage_object_checksum_for_index_match,
@@ -238,7 +236,6 @@ class IndexFileJobResult:
 class IndexFileEmbeddingJobContext:
     """Index-file facts needed to decide whether embeddings should be queued."""
 
-    tenant_id: TenantId
     project_id: int
     index_embeddings: bool
     result: IndexFileJobResult
@@ -258,7 +255,6 @@ def plan_index_file_embedding_job(
         raise RuntimeError("index_file processed without an entity checksum")
 
     return EmbeddingIndexJobRequest(
-        tenant_id=context.tenant_id,
         project_id=context.project_id,
         entity_id=context.result.entity_id,
         entity_checksum=context.result.entity_checksum,
@@ -276,12 +272,10 @@ class IndexFileNoteLiveUpdateType(StrEnum):
 class IndexFileNoteLiveUpdateContext:
     """Queue-neutral context needed to plan one note-level file-index update."""
 
-    tenant_id: TenantId
     project_external_id: ProjectExternalId | None
     project_name: ProjectName | None
     file_path: RuntimeFilePath
     mode: RuntimeStorageFileIndexMode
-    workflow_id: WorkflowId | None = None
     object_etag: StorageEtag | None = None
     object_size: int | None = None
 
@@ -291,7 +285,6 @@ class IndexFileNoteLiveUpdatePlan:
     """Typed note-level update that an adapter can publish through its transport."""
 
     event_type: IndexFileNoteLiveUpdateType
-    tenant_id: TenantId
     source: RuntimeNoteChangeSource
     project_external_id: ProjectExternalId
     project_name: ProjectName
@@ -362,9 +355,12 @@ def plan_index_file_note_live_update(
     context: IndexFileNoteLiveUpdateContext,
     result: IndexFileJobResult,
 ) -> IndexFileNoteLiveUpdatePlan | None:
-    """Plan a note-level live update for one externally observed file index."""
-    if context.workflow_id is not None:
-        return None
+    """Plan a note-level live update for one externally observed file index.
+
+    Workflow-scoped bulk indexing must not publish per-note updates — runtimes
+    that track workflow membership (cloud) apply that gate before building this
+    context.
+    """
     if context.mode != RuntimeStorageFileIndexMode.observed_object:
         return None
     if result.status == IndexFileJobStatus.current and result.live_update_source is None:
@@ -407,7 +403,6 @@ def plan_index_file_note_live_update(
     )
     return IndexFileNoteLiveUpdatePlan(
         event_type=event_type,
-        tenant_id=context.tenant_id,
         source=result.live_update_source or DEFAULT_INDEX_FILE_NOTE_LIVE_UPDATE_SOURCE,
         project_external_id=project_external_id,
         project_name=project_name,

@@ -16,7 +16,6 @@ from basic_memory.runtime import (
     RuntimeNoteChangeSource,
     RuntimeStorageFileIndexMode,
     RuntimeWorkflowMetadataPatch,
-    TenantId,
     WorkflowId,
 )
 
@@ -102,7 +101,6 @@ class ProjectIndexFileOutcomeSummary:
 class ProjectIndexCompletion:
     """Workflow completion facts needed by runtime-side live update publishing."""
 
-    tenant_id: TenantId
     project_id: str | None
     project_external_id: ProjectExternalId
     project_name: ProjectName | None
@@ -117,12 +115,10 @@ class ProjectIndexCompletion:
 class ObservedObjectIndexCompletionContext:
     """Project context for one observed-object index completion update."""
 
-    tenant_id: TenantId
     project_external_id: ProjectExternalId | None
     project_name: ProjectName | None
     project_path: ProjectPath
     mode: RuntimeStorageFileIndexMode
-    workflow_id: WorkflowId | None = None
 
 
 class ProjectIndexCompletedLiveUpdateType(StrEnum):
@@ -136,7 +132,6 @@ class ProjectIndexCompletedLiveUpdatePlan:
     """Typed project-index completion update for runtime adapters to publish."""
 
     event_type: ProjectIndexCompletedLiveUpdateType
-    tenant_id: TenantId
     source: RuntimeNoteChangeSource
     project_external_id: ProjectExternalId | None
     project_name: ProjectName | None
@@ -398,7 +393,6 @@ def project_index_progress_state_from_metadata(
 
 def project_index_completion_from_metadata(
     *,
-    tenant_id: TenantId | None,
     workflow_id: WorkflowId,
     metadata: Mapping[str, object],
     progress: str,
@@ -406,13 +400,10 @@ def project_index_completion_from_metadata(
 ) -> ProjectIndexCompletion:
     """Build completion facts from validated workflow metadata."""
     payload = project_index_payload_state_from_metadata(metadata, workflow_id=workflow_id)
-    if tenant_id is None:
-        raise RuntimeError(f"Project index workflow tenant is missing: {workflow_id}")
     if payload.project_external_id is None:
         raise RuntimeError(f"Project index workflow project_external_id is missing: {workflow_id}")
 
     return ProjectIndexCompletion(
-        tenant_id=tenant_id,
         project_id=str(payload.project_id) if payload.project_id is not None else None,
         project_external_id=payload.project_external_id,
         project_name=payload.project_name,
@@ -433,7 +424,6 @@ def plan_project_index_completed_live_update(
 
     return ProjectIndexCompletedLiveUpdatePlan(
         event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
-        tenant_id=completion.tenant_id,
         source=DEFAULT_PROJECT_INDEX_COMPLETED_LIVE_UPDATE_SOURCE,
         project_external_id=completion.project_external_id or None,
         project_name=completion.project_name,
@@ -448,9 +438,12 @@ def plan_project_index_completed_live_update(
 def plan_observed_object_index_completed_live_update(
     context: ObservedObjectIndexCompletionContext,
 ) -> ProjectIndexCompletedLiveUpdatePlan | None:
-    """Plan graph freshness after one webhook-driven file index finishes."""
-    if context.workflow_id is not None:
-        return None
+    """Plan graph freshness after one webhook-driven file index finishes.
+
+    Workflow-scoped bulk indexing must not publish per-file completion updates —
+    runtimes that track workflow membership (cloud) apply that gate before
+    building this context.
+    """
     if context.mode != RuntimeStorageFileIndexMode.observed_object:
         return None
     if not context.project_external_id or not context.project_name:
@@ -458,7 +451,6 @@ def plan_observed_object_index_completed_live_update(
 
     return ProjectIndexCompletedLiveUpdatePlan(
         event_type=ProjectIndexCompletedLiveUpdateType.index_completed,
-        tenant_id=context.tenant_id,
         source=DEFAULT_PROJECT_INDEX_COMPLETED_LIVE_UPDATE_SOURCE,
         project_external_id=context.project_external_id,
         project_name=context.project_name,

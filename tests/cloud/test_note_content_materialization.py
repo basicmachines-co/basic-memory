@@ -145,7 +145,6 @@ async def test_local_materialization_returns_conflict_without_indexing(
 
     assert requests == [
         RuntimeNoteMaterializationJobRequest(
-            tenant_id=note_content_materialization.LOCAL_NOTE_CONTENT_TENANT_ID,
             project_id=7,
             entity_id=42,
             db_version=4,

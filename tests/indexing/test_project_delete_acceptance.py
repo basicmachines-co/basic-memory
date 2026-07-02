@@ -1,7 +1,6 @@
 """Tests for portable project-delete acceptance response values."""
 
 from dataclasses import dataclass
-from uuid import UUID
 
 from basic_memory.indexing.project_delete_acceptance import (
     ProjectDeleteAcceptedProject,
@@ -21,7 +20,6 @@ class ProjectSource:
 
 def project_delete_request(*, delete_notes: bool) -> RuntimeProjectDeleteJobRequest:
     return RuntimeProjectDeleteJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project_id=101,
         project_external_id="project-main",
         project_name="Main",

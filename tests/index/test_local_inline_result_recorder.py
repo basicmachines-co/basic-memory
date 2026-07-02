@@ -5,7 +5,6 @@ Covers #1016: the watcher/inline path must vector-embed newly indexed files
 """
 
 from typing import cast
-from uuid import UUID
 
 from basic_memory.index.local_dependencies import LocalIndexSearchService
 from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
@@ -84,7 +83,6 @@ def _recorder(
     index_embeddings: bool,
 ) -> LocalInlineStorageEventResultRecorder:
     return LocalInlineStorageEventResultRecorder(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project=_project(),
         search_service=cast(LocalIndexSearchService, search),
         relation_cleanup_search_refresher=cast(ProjectIndexMovedEntitySearchRefresher, object()),

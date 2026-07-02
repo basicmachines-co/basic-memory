@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from uuid import UUID
 
 import pytest
 
@@ -181,13 +180,11 @@ async def test_run_index_file_batch_reads_indexes_and_orders_results() -> None:
     reader = FakeReader()
     indexer = FakeIndexer()
     request = RuntimeIndexFileBatchJobRequest(
-        tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
         project=ProjectRuntimeReference(
             project_id=101,
             project_external_id="project-main",
             project_path="main",
         ),
-        workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
         batch_index=0,
         batch_count=1,
         file_paths=(
@@ -244,13 +241,11 @@ async def test_run_index_file_batch_force_full_ignores_observed_checksum_skips()
 
     await run_index_file_batch(
         RuntimeIndexFileBatchJobRequest(
-            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             project=ProjectRuntimeReference(
                 project_id=101,
                 project_external_id="project-main",
                 project_path="main",
             ),
-            workflow_id=UUID("22222222-2222-2222-2222-222222222222"),
             batch_index=0,
             batch_count=1,
             observed_files=(
