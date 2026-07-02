@@ -366,6 +366,58 @@ class TestBasicMemoryConfig:
         loaded = config_manager.load_config()
         assert loaded.default_project == "work"
 
+    def test_load_config_does_not_recreate_phantom_home_dir(
+        self, config_home, monkeypatch, tmp_path
+    ):
+        """Regression for GH#1029: load_config must not recreate ~/basic-memory.
+
+        When BASIC_MEMORY_HOME is unset, loading a config that already specifies
+        a user-chosen project path must not also seed the default ~/basic-memory
+        directory as a side effect of probing env vars.
+        """
+        import json
+        import basic_memory.config
+
+        # HOME is set by config_home; phantom lives at $HOME/basic-memory.
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        monkeypatch.delenv("BASIC_MEMORY_CLOUD_MODE", raising=False)
+
+        phantom = Path(os.environ["HOME"]) / "basic-memory"
+        user_project = config_home / "user" / "vault"
+        # Force the phantom path to live inside tmp_path so the test never touches
+        # the real $HOME (the user may have a real ~/basic-memory vault).
+        # We do this by repointing Path.home() to a fresh tmp dir.
+        phantom_home = tmp_path / "real_home"
+        phantom = phantom_home / "basic-memory"
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: phantom_home))
+
+        config_manager = ConfigManager()
+        config_manager.config_dir = config_home / ".basic-memory"
+        config_manager.config_file = config_manager.config_dir / "config.json"
+        config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+        config_data = {
+            "projects": {"main": {"path": str(user_project), "mode": "local"}},
+            "default_project": "main",
+        }
+        config_manager.config_file.write_text(json.dumps(config_data, indent=2))
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_MTIME = None
+        basic_memory.config._CONFIG_SIZE = None
+
+        assert not phantom.exists()
+
+        loaded = config_manager.load_config()
+
+        # User's project is preserved — never replaced by a phantom seed.
+        assert Path(loaded.projects["main"].path) == user_project
+        assert loaded.default_project == "main"
+        # The phantom ~/basic-memory dir must not have been created as a side effect.
+        assert not phantom.exists(), (
+            f"load_config recreated {phantom} as a side effect of probing env vars "
+            f"(see GH#1029)"
+        )
+
 
 class TestDataDirHelpers:
     """Module-level helpers that resolve the Basic Memory data directory."""
