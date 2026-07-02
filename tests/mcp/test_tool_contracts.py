@@ -120,6 +120,46 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 }
 
 
+# Anthropic directory review requirements (connectors/building/review-criteria):
+# every tool must set annotations.title, read-only tools must set readOnlyHint=True,
+# and write tools must set an explicit readOnlyHint=False plus a destructiveHint.
+EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
+    "build_context": {"readOnlyHint": True},
+    "cloud_info": {"readOnlyHint": True},
+    "fetch": {"readOnlyHint": True},
+    "list_directory": {"readOnlyHint": True},
+    "list_memory_projects": {"readOnlyHint": True},
+    "list_workspaces": {"readOnlyHint": True},
+    "read_content": {"readOnlyHint": True},
+    "read_note": {"readOnlyHint": True},
+    "recent_activity": {"readOnlyHint": True},
+    "release_notes": {"readOnlyHint": True},
+    "schema_diff": {"readOnlyHint": True},
+    "schema_infer": {"readOnlyHint": True},
+    "schema_validate": {"readOnlyHint": True},
+    "search": {"readOnlyHint": True},
+    "search_notes": {"readOnlyHint": True},
+    "view_note": {"readOnlyHint": True},
+    "canvas": {"readOnlyHint": False, "destructiveHint": False},
+    "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
+    "delete_note": {"readOnlyHint": False, "destructiveHint": True},
+    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
+    # edit_note's find_replace/replace_section overwrite existing content, so it is
+    # destructive even though append/prepend are additive.
+    "edit_note": {"readOnlyHint": False, "destructiveHint": True},
+    "move_note": {"readOnlyHint": False, "destructiveHint": False},
+    "write_note": {"readOnlyHint": False, "destructiveHint": True},
+}
+
+# The MCP-UI tools are disabled in tools/__init__.py but register onto the shared
+# server whenever tests import their module directly, so tolerate their presence
+# without requiring it — keeps this contract independent of test execution order.
+OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
+    "read_note_ui": {"readOnlyHint": True},
+    "search_notes_ui": {"readOnlyHint": True},
+}
+
+
 TOOL_FUNCTIONS: dict[str, object] = {
     "build_context": tools.build_context,
     "canvas": tools.canvas,
@@ -161,6 +201,48 @@ def test_mcp_tool_signatures_are_stable():
 
     for tool_name, tool_obj in TOOL_FUNCTIONS.items():
         assert _signature_params(tool_obj) == EXPECTED_TOOL_SIGNATURES[tool_name]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_annotations_meet_directory_requirements():
+    """Every tool's wire-level ToolAnnotations must satisfy Anthropic directory review.
+
+    The directory validator reads ToolAnnotations (not FastMCP's top-level title), so
+    each tool needs annotations.title, an explicit readOnlyHint, and — for write
+    tools — a destructiveHint. openWorldHint is False across the board because every
+    tool operates on the user's own knowledge base.
+    """
+    tool_list = await mcp.list_tools()
+    tools_by_name = {tool.name: tool for tool in tool_list}
+
+    required = set(EXPECTED_TOOL_ANNOTATIONS)
+    optional = set(OPTIONAL_TOOL_ANNOTATIONS)
+    registered = set(tools_by_name)
+    missing = required - registered
+    unexpected = registered - required - optional
+    assert not missing, f"Tools missing from server: {sorted(missing)}"
+    assert not unexpected, (
+        f"Tools without annotation expectations: {sorted(unexpected)} — "
+        "add them to EXPECTED_TOOL_ANNOTATIONS with directory-compliant annotations"
+    )
+
+    all_expected = {**EXPECTED_TOOL_ANNOTATIONS, **OPTIONAL_TOOL_ANNOTATIONS}
+    for tool_name, tool in tools_by_name.items():
+        expected = all_expected[tool_name]
+        # Assert on the protocol-level payload the directory review actually sees.
+        annotations = tool.to_mcp_tool().annotations
+        assert annotations is not None, f"Tool '{tool_name}' has no annotations"
+        assert annotations.title, f"Tool '{tool_name}' is missing annotations.title"
+        assert annotations.readOnlyHint is expected["readOnlyHint"], (
+            f"Tool '{tool_name}' readOnlyHint should be {expected['readOnlyHint']}"
+        )
+        if expected["readOnlyHint"] is False:
+            assert annotations.destructiveHint is expected["destructiveHint"], (
+                f"Tool '{tool_name}' destructiveHint should be {expected['destructiveHint']}"
+            )
+        assert annotations.openWorldHint is False, (
+            f"Tool '{tool_name}' openWorldHint should be False"
+        )
 
 
 @pytest.mark.asyncio

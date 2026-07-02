@@ -108,7 +108,7 @@ def _format_document_for_chatgpt(
     title="Search Knowledge Base",
     description="Search for content across the knowledge base",
     tags={"search"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "Search Knowledge Base", "readOnlyHint": True, "openWorldHint": False},
 )
 async def search(
     query: str,
@@ -172,7 +172,7 @@ async def search(
     title="Fetch Document",
     description="Fetch the full contents of a search result document",
     tags={"search", "notes"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "Fetch Document", "readOnlyHint": True, "openWorldHint": False},
 )
 async def fetch(
     id: str,

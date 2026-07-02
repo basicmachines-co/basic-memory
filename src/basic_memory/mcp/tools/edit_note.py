@@ -307,7 +307,14 @@ Error editing note '{identifier}': {error_message}
     title="Edit Note",
     description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section.",
     tags={"notes"},
-    annotations={"destructiveHint": False, "openWorldHint": False},
+    annotations={
+        "title": "Edit Note",
+        "readOnlyHint": False,
+        # find_replace and replace_section overwrite existing content, so the tool
+        # as a whole is not purely additive even though append/prepend are.
+        "destructiveHint": True,
+        "openWorldHint": False,
+    },
 )
 async def edit_note(
     identifier: str,

@@ -38,7 +38,7 @@ from basic_memory.schemas.search import SearchItemType
     Or standard formats like "7d"
     """,
     tags={"navigation", "notes"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "Recent Activity", "readOnlyHint": True, "openWorldHint": False},
 )
 async def recent_activity(
     type: Annotated[

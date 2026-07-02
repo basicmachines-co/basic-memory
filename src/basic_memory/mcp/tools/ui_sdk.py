@@ -22,7 +22,7 @@ def _text_block(message: str) -> List[ContentBlock]:
     description="Search notes and return an embedded MCP-UI resource (raw HTML).",
     tags={"search", "ui"},
     output_schema=None,
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "Search Notes (UI)", "readOnlyHint": True, "openWorldHint": False},
 )
 async def search_notes_ui(
     query: str,
@@ -98,7 +98,7 @@ async def search_notes_ui(
     description="Read a note and return an embedded MCP-UI resource (raw HTML).",
     tags={"notes", "ui"},
     output_schema=None,
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "Read Note (UI)", "readOnlyHint": True, "openWorldHint": False},
 )
 async def read_note_ui(
     identifier: str,

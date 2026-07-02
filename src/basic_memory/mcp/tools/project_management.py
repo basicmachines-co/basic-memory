@@ -359,7 +359,7 @@ def _format_project_list_json(
     "list_memory_projects",
     title="List Memory Projects",
     tags={"projects"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "List Memory Projects", "readOnlyHint": True, "openWorldHint": False},
 )
 async def list_memory_projects(
     output_format: Literal["text", "json"] = "text",
@@ -503,7 +503,12 @@ async def _resolve_workspace_routing(
     "create_memory_project",
     title="Create Memory Project",
     tags={"projects"},
-    annotations={"destructiveHint": False, "openWorldHint": False},
+    annotations={
+        "title": "Create Memory Project",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def create_memory_project(
     project_name: str,
@@ -647,7 +652,12 @@ async def create_memory_project(
 @mcp.tool(
     title="Delete Project",
     tags={"projects"},
-    annotations={"destructiveHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Delete Project",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": False,
+    },
 )
 async def delete_project(
     project_name: str,

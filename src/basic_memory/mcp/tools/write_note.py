@@ -58,7 +58,13 @@ def _compose_workspace_project_route(
     title="Write Note",
     description="Create a markdown note. If the note already exists, returns an error by default — pass overwrite=True to replace.",
     tags={"notes"},
-    annotations={"destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
+    annotations={
+        "title": "Write Note",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
 )
 async def write_note(
     title: str,

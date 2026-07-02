@@ -20,7 +20,13 @@ from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
     title="Create Canvas",
     description="Create an Obsidian canvas file to visualize concepts and connections.",
     tags={"canvas", "notes"},
-    annotations={"destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Create Canvas",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
 )
 async def canvas(
     nodes: Annotated[List[Dict[str, Any]], BeforeValidator(coerce_list)],

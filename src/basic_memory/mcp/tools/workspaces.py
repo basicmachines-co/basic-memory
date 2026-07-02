@@ -48,7 +48,7 @@ def _workspace_list_response(workspaces: list[WorkspaceInfo]) -> WorkspaceListRe
     title="List Workspaces",
     description="List available cloud workspaces (tenant_id, type, role, and name).",
     tags={"cloud", "projects"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={"title": "List Workspaces", "readOnlyHint": True, "openWorldHint": False},
 )
 async def list_workspaces(
     output_format: Literal["text", "json"] = "text",
