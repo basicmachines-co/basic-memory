@@ -11,10 +11,46 @@ from typing import Any, Dict, List, Optional, cast
 from fastmcp import Context
 from loguru import logger
 
+from basic_memory.mcp.client_info import is_openai_mcp_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.search import SearchResponse, SearchResult
+
+
+_UNSUPPORTED_CLIENT_ERROR = "Unsupported MCP client"
+
+
+def _text_content(payload: dict[str, Any]) -> List[Dict[str, Any]]:
+    return [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]
+
+
+def _unsupported_search_client_response() -> List[Dict[str, Any]]:
+    return _text_content(
+        {
+            "results": [],
+            "error": _UNSUPPORTED_CLIENT_ERROR,
+            "error_message": (
+                "The search compatibility tool is only available to OpenAI MCP clients. "
+                "Use search_notes instead."
+            ),
+        }
+    )
+
+
+def _unsupported_fetch_client_response(identifier: str) -> List[Dict[str, Any]]:
+    return _text_content(
+        {
+            "id": identifier,
+            "title": "Unsupported MCP Client",
+            "text": (
+                "The fetch compatibility tool is only available to OpenAI MCP clients. "
+                "Use read_note instead."
+            ),
+            "url": identifier,
+            "metadata": {"error": _UNSUPPORTED_CLIENT_ERROR},
+        }
+    )
 
 
 def _identifier_for_read_note(identifier: str) -> str:
@@ -124,6 +160,10 @@ async def search(
         List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
         where the JSON body contains `results`, `total_count`, and echo of `query`.
     """
+    if not await is_openai_mcp_client(context):
+        logger.warning("Rejected ChatGPT search request from non-OpenAI MCP client")
+        return _unsupported_search_client_response()
+
     logger.info(f"ChatGPT search request: query='{query}'")
 
     try:
@@ -143,7 +183,7 @@ async def search(
                 "error": "Search failed",
                 "error_details": results[:500],  # Truncate long error messages
             }
-            return [{"type": "text", "text": json.dumps(search_results, ensure_ascii=False)}]
+            return _text_content(search_results)
 
         raw_results = results.get("results", []) if isinstance(results, dict) else []
 
@@ -156,7 +196,7 @@ async def search(
         logger.info(f"Search completed: {len(formatted_results)} results returned")
 
         # Return in MCP content array format as required by OpenAI
-        return [{"type": "text", "text": json.dumps(search_results, ensure_ascii=False)}]
+        return _text_content(search_results)
 
     except Exception as e:
         logger.error(f"ChatGPT search failed for query '{query}': {e}")
@@ -165,7 +205,7 @@ async def search(
             "error": "Internal search error",
             "error_message": str(e)[:200],
         }
-        return [{"type": "text", "text": json.dumps(error_results, ensure_ascii=False)}]
+        return _text_content(error_results)
 
 
 @mcp.tool(
@@ -188,6 +228,10 @@ async def fetch(
         List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
         where the JSON body includes `id`, `title`, `text`, `url`, and metadata.
     """
+    if not await is_openai_mcp_client(context):
+        logger.warning("Rejected ChatGPT fetch request from non-OpenAI MCP client")
+        return _unsupported_fetch_client_response(id)
+
     logger.info(f"ChatGPT fetch request: id='{id}'")
 
     try:
@@ -206,7 +250,7 @@ async def fetch(
         logger.info(f"Fetch completed: id='{id}', content_length={len(document.get('text', ''))}")
 
         # Return in MCP content array format as required by OpenAI
-        return [{"type": "text", "text": json.dumps(document, ensure_ascii=False)}]
+        return _text_content(document)
 
     except Exception as e:
         logger.error(f"ChatGPT fetch failed for id '{id}': {e}")
@@ -217,4 +261,4 @@ async def fetch(
             "url": id,
             "metadata": {"error": "Fetch failed"},
         }
-        return [{"type": "text", "text": json.dumps(error_document, ensure_ascii=False)}]
+        return _text_content(error_document)
