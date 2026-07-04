@@ -120,26 +120,26 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 }
 
 
-# Anthropic directory review requirements (connectors/building/review-criteria):
-# every tool must set annotations.title, read-only tools must set readOnlyHint=True,
-# and write tools must set an explicit readOnlyHint=False plus a destructiveHint.
+# Directory review requirements differ by client, so keep the stricter shared contract:
+# every tool must set annotations.title and explicit readOnlyHint, destructiveHint, and
+# openWorldHint values.
 EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
-    "build_context": {"readOnlyHint": True},
-    "cloud_info": {"readOnlyHint": True},
-    "fetch": {"readOnlyHint": True},
-    "list_directory": {"readOnlyHint": True},
-    "list_memory_projects": {"readOnlyHint": True},
-    "list_workspaces": {"readOnlyHint": True},
-    "read_content": {"readOnlyHint": True},
-    "read_note": {"readOnlyHint": True},
-    "recent_activity": {"readOnlyHint": True},
-    "release_notes": {"readOnlyHint": True},
-    "schema_diff": {"readOnlyHint": True},
-    "schema_infer": {"readOnlyHint": True},
-    "schema_validate": {"readOnlyHint": True},
-    "search": {"readOnlyHint": True},
-    "search_notes": {"readOnlyHint": True},
-    "view_note": {"readOnlyHint": True},
+    "build_context": {"readOnlyHint": True, "destructiveHint": False},
+    "cloud_info": {"readOnlyHint": True, "destructiveHint": False},
+    "fetch": {"readOnlyHint": True, "destructiveHint": False},
+    "list_directory": {"readOnlyHint": True, "destructiveHint": False},
+    "list_memory_projects": {"readOnlyHint": True, "destructiveHint": False},
+    "list_workspaces": {"readOnlyHint": True, "destructiveHint": False},
+    "read_content": {"readOnlyHint": True, "destructiveHint": False},
+    "read_note": {"readOnlyHint": True, "destructiveHint": False},
+    "recent_activity": {"readOnlyHint": True, "destructiveHint": False},
+    "release_notes": {"readOnlyHint": True, "destructiveHint": False},
+    "schema_diff": {"readOnlyHint": True, "destructiveHint": False},
+    "schema_infer": {"readOnlyHint": True, "destructiveHint": False},
+    "schema_validate": {"readOnlyHint": True, "destructiveHint": False},
+    "search": {"readOnlyHint": True, "destructiveHint": False},
+    "search_notes": {"readOnlyHint": True, "destructiveHint": False},
+    "view_note": {"readOnlyHint": True, "destructiveHint": False},
     # canvas falls back to PUT when the file already exists, replacing its content.
     "canvas": {"readOnlyHint": False, "destructiveHint": True},
     # create_memory_project is purely additive: it creates a new project and errors
@@ -161,8 +161,8 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
 # server whenever tests import their module directly, so tolerate their presence
 # without requiring it — keeps this contract independent of test execution order.
 OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
-    "read_note_ui": {"readOnlyHint": True},
-    "search_notes_ui": {"readOnlyHint": True},
+    "read_note_ui": {"readOnlyHint": True, "destructiveHint": False},
+    "search_notes_ui": {"readOnlyHint": True, "destructiveHint": False},
 }
 
 
@@ -211,11 +211,11 @@ def test_mcp_tool_signatures_are_stable():
 
 @pytest.mark.asyncio
 async def test_mcp_tool_annotations_meet_directory_requirements():
-    """Every tool's wire-level ToolAnnotations must satisfy Anthropic directory review.
+    """Every tool's wire-level ToolAnnotations must satisfy app directory review.
 
-    The directory validator reads ToolAnnotations (not FastMCP's top-level title), so
-    each tool needs annotations.title, an explicit readOnlyHint, and — for write
-    tools — a destructiveHint. openWorldHint is False across the board because every
+    Directory validators read ToolAnnotations (not FastMCP's top-level title), so
+    each tool needs annotations.title plus explicit readOnlyHint, destructiveHint,
+    and openWorldHint values. openWorldHint is False across the board because every
     tool operates on the user's own knowledge base.
     """
     tool_list = await mcp.list_tools()
@@ -242,10 +242,9 @@ async def test_mcp_tool_annotations_meet_directory_requirements():
         assert annotations.readOnlyHint is expected["readOnlyHint"], (
             f"Tool '{tool_name}' readOnlyHint should be {expected['readOnlyHint']}"
         )
-        if expected["readOnlyHint"] is False:
-            assert annotations.destructiveHint is expected["destructiveHint"], (
-                f"Tool '{tool_name}' destructiveHint should be {expected['destructiveHint']}"
-            )
+        assert annotations.destructiveHint is expected["destructiveHint"], (
+            f"Tool '{tool_name}' destructiveHint should be {expected['destructiveHint']}"
+        )
         assert annotations.openWorldHint is False, (
             f"Tool '{tool_name}' openWorldHint should be False"
         )

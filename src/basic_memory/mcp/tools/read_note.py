@@ -79,7 +79,12 @@ def _parse_opening_frontmatter(content: str) -> tuple[str, dict | None]:
     tags={"notes"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
-    annotations={"title": "Read Note", "readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Read Note",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def read_note(
     identifier: str,

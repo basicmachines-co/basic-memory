@@ -14,7 +14,12 @@ from basic_memory.mcp.server import mcp
     title="List Directory",
     description="List directory contents with filtering and depth control.",
     tags={"navigation", "notes"},
-    annotations={"title": "List Directory", "readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "List Directory",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def list_directory(
     # `dir_name` is unusual; models reach for directory/folder/path/dir.

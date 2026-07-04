@@ -139,7 +139,12 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     https://docs.basicmemory.com/concepts/memory-urls
     """,
     tags={"navigation", "notes"},
-    annotations={"title": "Build Context", "readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Build Context",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def build_context(
     url: Annotated[

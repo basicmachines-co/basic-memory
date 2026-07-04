@@ -359,7 +359,12 @@ def _format_project_list_json(
     "list_memory_projects",
     title="List Memory Projects",
     tags={"projects"},
-    annotations={"title": "List Memory Projects", "readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "List Memory Projects",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def list_memory_projects(
     output_format: Literal["text", "json"] = "text",

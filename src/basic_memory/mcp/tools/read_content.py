@@ -161,7 +161,12 @@ def optimize_image(img, content_length, max_output_bytes=350000):
         "Memory knowledge base API — see https://docs.basicmemory.com/local/mcp-tools-local"
     ),
     tags={"notes"},
-    annotations={"title": "Read Content", "readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Read Content",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def read_content(
     path: Annotated[
