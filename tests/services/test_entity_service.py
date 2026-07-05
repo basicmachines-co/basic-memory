@@ -397,6 +397,79 @@ async def test_delete_nonexistent_entity(entity_service: EntityService):
 
 
 @pytest.mark.asyncio
+async def test_replace_section_consumes_same_level_siblings(entity_service: EntityService):
+    """replace_section must consume same-level sibling headings when replacement re-authors them.
+
+    Regression for #1012: the original implementation stopped at any `#` heading after
+    the target section, so a replacement that re-defined a sibling (e.g. replaced
+    `## Observations` with content that itself includes `## Description`) left the
+    original sibling duplicated below the replacement. Subsections (`### ...`) under
+    the target must still be preserved.
+    """
+
+    current = (
+        "## Observations\n"
+        "- [status] open\n"
+        "- [priority] high\n"
+        "\n"
+        "## Description\n"
+        "Jamie called in...\n"
+        "\n"
+        "## Relations\n"
+        "- reported_by [[Jamie Rivera]]\n"
+    )
+
+    new_content = (
+        "- [status] resolved\n"
+        "- [resolution] shipped\n"
+        "\n"
+        "## Description\n"
+        "Updated...\n"
+        "\n"
+        "## Resolution\n"
+        "Fix details...\n"
+    )
+
+    result = entity_service.replace_section_content(current, "## Observations", new_content)
+
+    # Replacement content is present.
+    assert "- [status] resolved" in result
+    assert "## Resolution" in result
+    # Replacement re-authored `## Description`; original `Jamie called in...` must be gone.
+    assert "Jamie called in..." not in result
+    assert result.count("## Description") == 1
+    # Original `## Relations` (sibling of `## Observations`) is consumed by the
+    # replacement -- the user is replacing the whole observations block, not appending.
+    assert "reported_by" not in result
+
+
+@pytest.mark.asyncio
+async def test_replace_section_preserves_deeper_subsections(entity_service: EntityService):
+    """replace_section must preserve subsections (strictly deeper headings) under the target."""
+
+    current = (
+        "## Implementation\n"
+        "Top-level summary.\n"
+        "\n"
+        "### Detail A\n"
+        "Detail A body.\n"
+        "\n"
+        "### Detail B\n"
+        "Detail B body.\n"
+    )
+
+    result = entity_service.replace_section_content(
+        current,
+        "## Implementation",
+        "New top-level summary.\n",
+    )
+
+    assert "New top-level summary." in result
+    assert "### Detail A" in result and "Detail A body." in result
+    assert "### Detail B" in result and "Detail B body." in result
+
+
+@pytest.mark.asyncio
 async def test_create_entity_with_special_chars(entity_service: EntityService):
     """Test entity creation with special characters in name and description."""
     name = "TestEntity_$pecial chars & symbols!"  # Note: Using valid path characters
@@ -892,12 +965,15 @@ async def test_edit_entity_replace_section(
         section="## Section 1",
     )
 
-    # Verify section was replaced
+    # Verify section was replaced. Directly-following same-level siblings are
+    # consumed so replacement content can authoritatively re-author them without
+    # leaving the original duplicated (issue #1012).
     file_path = file_service.get_entity_path(updated)
     file_content, _ = await file_service.read_file(file_path)
     assert "New section 1 content" in file_content
     assert "Original section 1 content" not in file_content
-    assert "Original section 2 content" in file_content  # Other sections preserved
+    assert "Original section 2 content" not in file_content  # Same-level sibling consumed
+    assert file_content.count("## Section 2") == 0  # Original sibling gone (replacement can re-author)
 
 
 @pytest.mark.asyncio
@@ -1498,7 +1574,10 @@ async def test_edit_entity_replace_section_strips_duplicate_header(
 
     assert "New content for testing section" in file_content
     assert "Original content" not in file_content
-    assert "## Another Section" in file_content  # Other sections preserved
+    # Directly-following same-level sibling is consumed so replacement content can
+    # re-author it without leaving the original duplicated (issue #1012).
+    assert "## Another Section" not in file_content
+    assert "Other content" not in file_content
 
 
 # Insert before/after section tests

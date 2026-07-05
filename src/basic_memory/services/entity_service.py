@@ -1269,13 +1269,22 @@ class EntityService(BaseService[EntityModel]):
     ) -> str:
         """Replace content under a specific markdown section header.
 
-        This method uses a simple, safe approach: when replacing a section, it only
-        replaces the immediate content under that header until it encounters the next
-        header of ANY level. This means:
+        When replacing a section, we consume the original content under the header until
+        we hit any other heading, with one important refinement: a same-level or
+        higher-level heading that appears **directly** after the target (no intervening
+        subsections) is also consumed, so replacement content can authoritatively
+        re-define that sibling without leaving the original duplicated below the
+        replacement (issue #1012). A strictly deeper heading (`###` under a replaced
+        `##`) is always treated as a subsection and preserved.
+
+        In practice:
 
         - Replacing "# Header" replaces content until "## Subsection" (preserves subsections)
         - Replacing "## Section" replaces content until "### Subsection" (preserves subsections)
-        - More predictable and safer than trying to consume entire hierarchies
+        - Replacing "## Section" consumes a directly-following "## Sibling" or
+          "# Sibling" so replacement content can re-author it
+        - A same-level sibling that appears only after one or more preserved
+          subsections is left untouched (it belongs to the next top-level block)
 
         Args:
             current_content: The current markdown content
@@ -1323,6 +1332,7 @@ class EntityService(BaseService[EntityModel]):
         # Replace the single matching section
         result_lines = []
         section_line_idx = matching_sections[0]
+        section_header_level = len(section_header) - len(section_header.lstrip("#"))
 
         i = 0
         while i < len(lines):
@@ -1335,15 +1345,18 @@ class EntityService(BaseService[EntityModel]):
                 result_lines.append(new_content)
                 i += 1
 
-                # Skip the original section content until next header or end
+                # Consume content directly after the target until we hit a header.
+                # Same-level/higher-level headings here are consumed so the
+                # replacement can re-author them without leaving duplicates below
+                # (issue #1012). Strictly-deeper headings (subsections) stop the
+                # consume run and are preserved.
                 while i < len(lines):
                     next_line = lines[i]
-                    # Stop consuming when we hit any header (preserve subsections)
                     if next_line.startswith("#"):
-                        # We found another header - continue processing from here
-                        break
+                        next_level = len(next_line) - len(next_line.lstrip("#"))
+                        if next_level > section_header_level:
+                            break
                     i += 1
-                # Continue processing from the next header (don't increment i again)
                 continue
 
             # Add all other lines (including subsequent sections)
