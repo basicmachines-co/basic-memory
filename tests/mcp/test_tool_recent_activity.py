@@ -624,6 +624,8 @@ async def test_recent_activity_entity_rows_include_external_id(client, test_grap
 
     result = await recent_activity(project=test_project.name, timeframe="30d")
 
+    assert isinstance(result, str)
+
     assert "Recent Notes & Documents" in result
     uuid_pattern = r"\[id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]"
     entity_lines = [line for line in result.splitlines() if line.strip().startswith("•")]

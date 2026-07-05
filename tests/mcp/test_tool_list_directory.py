@@ -234,6 +234,8 @@ async def test_list_directory_file_rows_include_external_id(client, test_graph, 
 
     result = await list_directory(project=test_project.name, dir_name="/test")
 
+    assert isinstance(result, str)
+
     uuid_pattern = r"\| id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     file_lines = [line for line in result.splitlines() if line.startswith("📄")]
     assert file_lines, f"no file rows in: {result!r}"
