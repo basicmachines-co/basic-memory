@@ -397,6 +397,37 @@ async def test_delete_nonexistent_entity(entity_service: EntityService):
 
 
 @pytest.mark.asyncio
+async def test_delete_entity_succeeds_when_file_cleanup_raises(
+    entity_service: EntityService, monkeypatch: pytest.MonkeyPatch
+):
+    """Single-entity delete must succeed even when the file cannot be removed.
+
+    Regression for #1033: non-markdown entities (note_type='file', sync-conflict
+    files, etc.) hit `delete_entity_file` on a path the file service cannot
+    resolve (cloud storage mismatch, missing local mirror, etc.). The DB row
+    should still be deleted so callers see a 200 instead of a 500.
+    """
+
+    entity_data = EntitySchema(
+        title="FileTypeDeleteTarget",
+        directory="test",
+        note_type="file",
+    )
+    created = await entity_service.create_entity(entity_data)
+
+    async def _raise_on_file_delete(_entity):  # pragma: no cover - exercised via assert below
+        raise FileNotFoundError("simulated: file path not present on this storage target")
+
+    monkeypatch.setattr(entity_service.file_service, "delete_entity_file", _raise_on_file_delete)
+
+    # Delete must return True (caller treats this as success) instead of propagating.
+    assert await entity_service.delete_entity(created.id) is True
+
+    with pytest.raises(EntityNotFoundError):
+        await entity_service.get_by_permalink(_permalink(entity_data))
+
+
+@pytest.mark.asyncio
 async def test_create_entity_with_special_chars(entity_service: EntityService):
     """Test entity creation with special characters in name and description."""
     name = "TestEntity_$pecial chars & symbols!"  # Note: Using valid path characters

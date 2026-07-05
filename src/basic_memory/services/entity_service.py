@@ -805,8 +805,18 @@ class EntityService(BaseService[EntityModel]):
                         exc_info=True,
                     )
 
-            # Delete file
-            await self.file_service.delete_entity_file(entity)
+            # Delete file (best-effort: file may be on a remote/None storage target in cloud mode,
+            # or already gone after a concurrent delete-directory pass). Mirrors the resilience
+            # of delete_directory, which catches per-entity errors instead of failing the batch.
+            try:
+                await self.file_service.delete_entity_file(entity)
+            except Exception:
+                logger.warning(
+                    "File cleanup failed for entity (continuing with DB delete)",
+                    permalink_or_id=permalink_or_id,
+                    file_path=entity.file_path,
+                    exc_info=True,
+                )
 
             # Delete from DB (this will cascade to observations/relations)
             # Trigger: repository.delete returns False when entity is already gone (NoResultFound)
