@@ -221,3 +221,21 @@ async def test_list_directory_shows_file_metadata(client, test_graph, test_proje
     lines = result.split("\n")
     file_lines = [line for line in lines if "📄" in line]
     assert len(file_lines) == 5  # All 5 files from test_graph
+
+
+@pytest.mark.asyncio
+async def test_list_directory_file_rows_include_external_id(client, test_graph, test_project):
+    """File rows carry the note external_id.
+
+    Web-app deep links are built from this id; the hosted MCP link template
+    tells agents to substitute it, so it must be visible in the text output.
+    """
+    import re
+
+    result = await list_directory(project=test_project.name, dir_name="/test")
+
+    uuid_pattern = r"\| id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    file_lines = [line for line in result.splitlines() if line.startswith("📄")]
+    assert file_lines, f"no file rows in: {result!r}"
+    for line in file_lines:
+        assert re.search(uuid_pattern, line), f"file row missing external_id: {line!r}"

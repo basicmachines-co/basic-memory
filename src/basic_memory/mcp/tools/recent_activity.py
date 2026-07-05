@@ -516,7 +516,9 @@ def _format_project_output(
                 folder_path = str(PurePosixPath(entity.file_path).parent)
                 if folder_path and folder_path != ".":
                     folder = f" ({folder_path})"
-            lines.append(f"  • {title}{folder}")
+            # external_id makes rows linkable: hosted MCP appends a web-app
+            # link template that the agent fills with this id on request.
+            lines.append(f"  • {title}{folder} [id: {entity.external_id}]")
 
     # Show observations (categorized insights)
     if observations:

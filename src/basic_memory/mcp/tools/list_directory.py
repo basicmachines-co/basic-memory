@@ -162,6 +162,12 @@ async def list_directory(
                 file_line += f" | {title}"
             if date_str:
                 file_line += f" | {date_str}"
+            # Web-app deep links are built from the note's external_id; hosted
+            # MCP appends a link template that references it, so the id must be
+            # visible in the listing the agent actually reads.
+            external_id = node.get("external_id")
+            if external_id:
+                file_line += f" | id: {external_id}"
 
             output_lines.append(file_line)
 
