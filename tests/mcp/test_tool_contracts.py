@@ -165,6 +165,15 @@ OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "search_notes_ui": {"readOnlyHint": True, "destructiveHint": False},
 }
 
+EXPECTED_EDIT_NOTE_OPERATIONS = [
+    "append",
+    "prepend",
+    "find_replace",
+    "replace_section",
+    "insert_before_section",
+    "insert_after_section",
+]
+
 
 TOOL_FUNCTIONS: dict[str, object] = {
     "build_context": tools.build_context,
@@ -248,6 +257,19 @@ async def test_mcp_tool_annotations_meet_directory_requirements():
         assert annotations.openWorldHint is False, (
             f"Tool '{tool_name}' openWorldHint should be False"
         )
+
+
+@pytest.mark.asyncio
+async def test_edit_note_operation_schema_exposes_supported_operations():
+    """The edit operation is a fixed choice set, not a free-form string."""
+    tool_list = await mcp.list_tools()
+    edit_note_tool = next(tool for tool in tool_list if tool.name == "edit_note")
+
+    input_schema = edit_note_tool.to_mcp_tool().inputSchema
+    operation_schema = input_schema["properties"]["operation"]
+
+    assert operation_schema["type"] == "string"
+    assert operation_schema["enum"] == EXPECTED_EDIT_NOTE_OPERATIONS
 
 
 @pytest.mark.asyncio
