@@ -12,8 +12,17 @@ from typing import Any, Callable, List, Optional, Protocol
 from sqlalchemy import Result
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
+from basic_memory.config import (
+    BasicMemoryConfig,
+    ConfigManager,
+    DatabaseBackend,
+    SemanticVectorBackend,
+)
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
+from basic_memory.repository.milvus_search_repository import (
+    PostgresMilvusSearchRepository,
+    SQLiteMilvusSearchRepository,
+)
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
@@ -96,6 +105,18 @@ class SearchRepository(Protocol):
         """Delete semantic vector chunks and embeddings for one entity."""
         ...
 
+    async def delete_project_vector_rows(self) -> None:
+        """Delete semantic vector chunks and embeddings for this repository project."""
+        ...
+
+    async def delete_stale_vector_rows(self) -> None:
+        """Delete semantic vector rows whose source entities no longer exist."""
+        ...
+
+    async def drop_vector_tables(self) -> None:
+        """Drop or clear backend-specific vector storage."""
+        ...
+
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
@@ -143,20 +164,26 @@ def create_search_repository(
     if config.semantic_search_enabled:
         embedding_provider = create_embedding_provider(config)
 
+    use_milvus = config.semantic_vector_backend == SemanticVectorBackend.MILVUS
+
     if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
-        return PostgresSearchRepository(  # pragma: no cover
+        repository_class = (
+            PostgresMilvusSearchRepository if use_milvus else PostgresSearchRepository
+        )
+        return repository_class(  # pragma: no cover
             session_maker,
             project_id=project_id,
             app_config=app_config,
             embedding_provider=embedding_provider,
         )
-    else:
-        return SQLiteSearchRepository(
-            session_maker,
-            project_id=project_id,
-            app_config=app_config,
-            embedding_provider=embedding_provider,
-        )
+
+    repository_class = SQLiteMilvusSearchRepository if use_milvus else SQLiteSearchRepository
+    return repository_class(
+        session_maker,
+        project_id=project_id,
+        app_config=app_config,
+        embedding_provider=embedding_provider,
+    )
 
 
 __all__ = [

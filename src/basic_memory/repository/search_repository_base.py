@@ -590,6 +590,43 @@ class SearchRepositoryBase(ABC):
             await self._delete_entity_chunks(session, entity_id)
             await session.commit()
 
+    async def delete_project_vector_rows(self) -> None:
+        """Delete this project's derived vector rows using backend cascade semantics."""
+        await self._ensure_vector_tables()
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._prepare_vector_session(session)
+            await session.execute(
+                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                {"project_id": self.project_id},
+            )
+            await session.commit()
+
+    async def delete_stale_vector_rows(self) -> None:
+        """Delete vector rows whose source entities no longer exist."""
+        await self._ensure_vector_tables()
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._prepare_vector_session(session)
+            await session.execute(
+                text(
+                    "DELETE FROM search_vector_chunks "
+                    "WHERE project_id = :project_id "
+                    "AND entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)"
+                ),
+                {"project_id": self.project_id},
+            )
+            await session.commit()
+
+    async def drop_vector_tables(self) -> None:
+        """Drop SQL vector tables for backends whose vectors live in the database."""
+        async with db.scoped_session(self.session_maker) as session:
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_index"))
+            await session.commit()
+        self._vector_tables_initialized = False
+
     # ------------------------------------------------------------------
     # Shared semantic search: guard, text processing, chunking
     # ------------------------------------------------------------------

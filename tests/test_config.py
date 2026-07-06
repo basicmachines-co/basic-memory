@@ -12,6 +12,7 @@ from basic_memory.config import (
     ConfigManager,
     ProjectEntry,
     ProjectMode,
+    SemanticVectorBackend,
     default_fastembed_cache_dir,
     resolve_data_dir,
 )
@@ -1259,6 +1260,28 @@ class TestSemanticSearchConfig:
         """default_search_type rejects unknown values."""
         with pytest.raises(Exception):
             BasicMemoryConfig(default_search_type="invalid")
+
+    def test_semantic_vector_backend_defaults_to_database(self):
+        """Vector storage should stay in the active database by default."""
+        config = BasicMemoryConfig()
+        assert config.semantic_vector_backend == SemanticVectorBackend.DATABASE
+
+    def test_semantic_vector_backend_accepts_milvus(self, tmp_path):
+        """Milvus can be selected without changing the SQL database backend."""
+        config = BasicMemoryConfig(
+            semantic_vector_backend="milvus",
+            milvus_uri=str(tmp_path / "milvus.db"),
+            milvus_token="token",
+        )
+        assert config.semantic_vector_backend == SemanticVectorBackend.MILVUS
+        assert config.milvus_uri == str(tmp_path / "milvus.db")
+        assert config.milvus_token == "token"
+
+    def test_milvus_uri_supports_unprefixed_env_var(self, monkeypatch):
+        """MILVUS_URI should work in addition to BASIC_MEMORY_MILVUS_URI."""
+        monkeypatch.setenv("MILVUS_URI", "./custom-milvus.db")
+        config = BasicMemoryConfig()
+        assert config.milvus_uri == "./custom-milvus.db"
 
 
 class TestFormattingConfig:
