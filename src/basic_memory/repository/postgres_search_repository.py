@@ -1019,7 +1019,15 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         try:
             if session is not None:
-                rows = await run_search(session)
+                # Trigger: caller owns the session and keeps using it after this call.
+                # Why: a tsquery syntax error aborts the whole Postgres transaction, so
+                #   swallowing it and returning [] would poison the caller-owned
+                #   transaction and fail every later query on that session. Postgres
+                #   SAVEPOINT (begin_nested) scopes the failure to the FTS attempt.
+                # Outcome: on syntax error the savepoint rolls back and the caller's
+                #   outer transaction stays usable; the empty-result contract is kept.
+                async with session.begin_nested():
+                    rows = await run_search(session)
             else:
                 async with db.scoped_session(self.session_maker) as owned_session:
                     rows = await run_search(owned_session)

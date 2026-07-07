@@ -264,6 +264,56 @@ async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(
 
 
 @pytest.mark.asyncio
+async def test_postgres_search_tsquery_error_does_not_poison_caller_session(
+    session_maker, test_project
+):
+    """A tsquery syntax error on a caller-owned session must not abort its transaction.
+
+    The search() session param lets callers run FTS inside their own transaction
+    (e.g. LinkResolver during context building). Without a SAVEPOINT, a tsquery
+    syntax error aborts the shared Postgres transaction and every later query on
+    that session fails with "current transaction is aborted". This exercises the
+    real begin_nested() isolation on a caller-owned session.
+    """
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=1,
+            title="Coffee Brewing",
+            content_stems="coffee brewing",
+            content_snippet="coffee brewing snippet",
+            permalink="docs/coffee-brewing",
+            file_path="docs/coffee-brewing.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        # Establish an active transaction the caller expects to keep using.
+        pre = await session.execute(text("SELECT 1"))
+        assert pre.scalar_one() == 1
+
+        # Trailing boolean operator produces an invalid tsquery; this used to abort
+        # the caller's transaction. With the savepoint it returns [] cleanly.
+        results = await repo.search(search_text="coffee AND", session=session)
+        assert results == []
+
+        # Proof the caller-owned transaction survived: a normal query still works,
+        # and a valid FTS query on the same session returns the indexed row.
+        post = await session.execute(text("SELECT 1"))
+        assert post.scalar_one() == 1
+
+        recovered = await repo.search(search_text="coffee", session=session)
+        assert any(r.permalink == "docs/coffee-brewing" for r in recovered)
+
+
+@pytest.mark.asyncio
 async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
     session_maker, test_project
 ):

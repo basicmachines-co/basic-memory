@@ -70,6 +70,43 @@ class TestLegacySyncChangesMigration:
         )
         assert config.index_delay == 5000
 
+    def test_legacy_sync_changes_env_maps_to_index_changes(self, monkeypatch):
+        monkeypatch.setenv("BASIC_MEMORY_SYNC_CHANGES", "false")
+        assert _migrate_legacy_sync_changes({})["index_changes"] == "false"
+
+    def test_legacy_sync_env_overrides_legacy_file_key(self, monkeypatch):
+        # env > file precedence, matching how the new fields resolve in ConfigManager
+        monkeypatch.setenv("BASIC_MEMORY_SYNC_DELAY", "9000")
+        assert _migrate_legacy_sync_changes({"sync_delay": 5000})["index_delay"] == "9000"
+
+    def test_constructed_config_honors_legacy_sync_changes_env(self, monkeypatch):
+        monkeypatch.setenv("BASIC_MEMORY_SYNC_CHANGES", "false")
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+        )
+        assert config.index_changes is False
+
+    def test_constructed_config_honors_legacy_sync_delay_env(self, monkeypatch):
+        monkeypatch.setenv("BASIC_MEMORY_SYNC_DELAY", "5000")
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+        )
+        assert config.index_delay == 5000
+
+    def test_new_index_env_takes_precedence_over_legacy_env(self, monkeypatch):
+        monkeypatch.setenv("BASIC_MEMORY_SYNC_CHANGES", "false")
+        monkeypatch.setenv("BASIC_MEMORY_INDEX_CHANGES", "true")
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+        )
+        assert config.index_changes is True
+
 
 class TestBasicMemoryConfig:
     """Test BasicMemoryConfig behavior with BASIC_MEMORY_HOME environment variable."""

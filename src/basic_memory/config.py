@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, List, Tuple
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Literal, Optional, List, Tuple
 
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -578,6 +578,12 @@ class BasicMemoryConfig(BaseSettings):
         description="Default cloud workspace tenant_id. Set by 'bm cloud workspace set-default'.",
     )
 
+    # Legacy config keys / env vars mapped to their renamed fields.
+    _LEGACY_SYNC_FIELDS: ClassVar[dict[str, str]] = {
+        "index_changes": "sync_changes",
+        "index_delay": "sync_delay",
+    }
+
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_sync_fields(cls, data: Any) -> Any:
@@ -590,12 +596,25 @@ class BasicMemoryConfig(BaseSettings):
         keys and fall back to the new defaults (True / 1000ms), silently
         restarting the watcher or speeding up indexing for users who tuned it.
         The new field takes precedence when both are present.
+
+        Both surfaces must migrate: config.json ships the legacy *dict keys*,
+        while env-var users set ``BASIC_MEMORY_SYNC_CHANGES`` /
+        ``BASIC_MEMORY_SYNC_DELAY``. pydantic-settings ignores those env vars
+        (they aren't model fields), and ConfigManager's env-merge loop only
+        probes ``BASIC_MEMORY_{new field}`` — so without this the env-var
+        rename is silently dropped. Env overrides the legacy file key to match
+        normal env > file precedence; the new field name always wins.
         """
-        if isinstance(data, dict):
-            if "index_changes" not in data and "sync_changes" in data:
-                data["index_changes"] = data["sync_changes"]
-            if "index_delay" not in data and "sync_delay" in data:
-                data["index_delay"] = data["sync_delay"]
+        if not isinstance(data, dict):
+            return data
+        for new_field, legacy_key in cls._LEGACY_SYNC_FIELDS.items():
+            if new_field in data:
+                continue
+            legacy_env_value = os.getenv(f"{cls.model_config['env_prefix']}{legacy_key.upper()}")
+            if legacy_env_value is not None:
+                data[new_field] = legacy_env_value
+            elif legacy_key in data:
+                data[new_field] = data[legacy_key]
         return data
 
     @model_validator(mode="before")
