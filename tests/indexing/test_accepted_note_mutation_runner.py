@@ -68,12 +68,13 @@ class _PreparedMove:
     permalink: str | None
 
 
-@dataclass(frozen=True, slots=True)
-class _FixedClock:
-    instant: datetime
-
-    def now(self) -> datetime:
-        return self.instant
+@pytest.fixture(autouse=True)
+def _freeze_mutation_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the accepted-note mutation wall clock so mutations stamp a fixed instant."""
+    monkeypatch.setattr(
+        "basic_memory.indexing.accepted_note_mutation_runner.accepted_note_mutation_utc_now",
+        lambda: _NOW,
+    )
 
 
 class _MutationSession:
@@ -475,7 +476,6 @@ def _dependencies(
             note_content_accept_repository_result=note_content_accept_repository,
             search_repository_result=search_repository,
         ),
-        clock=_FixedClock(_NOW),
         move_policy=move_policy
         or AcceptedNoteMutationMovePolicy(
             disable_permalinks=False,

@@ -65,20 +65,6 @@ type NoteMaterializationPublishUpdate = (
 )
 
 
-class NoteMaterializationClock(Protocol):
-    """Clock used to timestamp note materialization attempts."""
-
-    def now(self) -> datetime: ...
-
-
-@dataclass(frozen=True, slots=True)
-class SystemNoteMaterializationClock:
-    """System UTC clock for note materialization attempts."""
-
-    def now(self) -> datetime:
-        return note_materialization_utc_now()
-
-
 class NoteMaterializationPublishAction(StrEnum):
     """Post-write DB work selected for a materialized note file."""
 
@@ -391,7 +377,6 @@ class RepositoryNoteMaterializationPreflight:
     session_lock: NoteMaterializationSessionLock = field(
         default_factory=NoopNoteMaterializationSessionLock
     )
-    clock: NoteMaterializationClock = SystemNoteMaterializationClock()
 
     async def prepare_note_materialization(
         self,
@@ -406,7 +391,7 @@ class RepositoryNoteMaterializationPreflight:
 
             entity = await session.get(Entity, request.entity_id)
             note_content = await session.get(NoteContent, request.entity_id)
-            attempted_at = self.clock.now()
+            attempted_at = note_materialization_utc_now()
             preflight_result = plan_note_materialization_preflight(
                 request,
                 entity=entity,

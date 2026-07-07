@@ -184,14 +184,6 @@ class RecordingScopedSession:
         return self.scoped_session
 
 
-@dataclass(frozen=True, slots=True)
-class StaticNoteMaterializationClock:
-    timestamp: datetime
-
-    def now(self) -> datetime:
-        return self.timestamp
-
-
 class RecordingNoteContentRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[AsyncSession, int, dict[str, object]]] = []
@@ -472,10 +464,13 @@ async def test_repository_note_materialization_preflight_marks_current_note_writ
             "basic_memory.indexing.note_materialization_runner.db.scoped_session",
             scoped_session,
         )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.note_materialization_utc_now",
+            lambda: attempted_at,
+        )
         result = await RepositoryNoteMaterializationPreflight(
             session_maker=session_maker,
             session_lock=session_lock,
-            clock=StaticNoteMaterializationClock(attempted_at),
         ).prepare_note_materialization(request)
 
     assert result == NoteMaterializationPreflightResult.prepared(
@@ -494,7 +489,7 @@ async def test_repository_note_materialization_preflight_marks_current_note_writ
 
 
 @pytest.mark.asyncio
-async def test_repository_note_materialization_preflight_uses_scoped_session_and_clock() -> None:
+async def test_repository_note_materialization_preflight_uses_scoped_session_and_now() -> None:
     request = materialization_request()
     attempted_at = datetime(2026, 6, 18, 15, 0, tzinfo=UTC)
     entity = materialization_entity()
@@ -511,9 +506,12 @@ async def test_repository_note_materialization_preflight_uses_scoped_session_and
             "basic_memory.indexing.note_materialization_runner.db.scoped_session",
             scoped_session,
         )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.note_materialization_utc_now",
+            lambda: attempted_at,
+        )
         result = await RepositoryNoteMaterializationPreflight(
             session_maker=session_maker,
-            clock=StaticNoteMaterializationClock(attempted_at),
         ).prepare_note_materialization(request)
 
     assert result.require_prepared_write().attempted_at == attempted_at

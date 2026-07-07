@@ -30,13 +30,6 @@ class VectorSyncBatchProgressCallback(Protocol):
         """Report progress for one vector-sync entity inside a backend batch."""
 
 
-class VectorSyncClock(Protocol):
-    """Monotonic clock used to calculate vector-sync progress timing."""
-
-    def now(self) -> float:
-        """Return a monotonic timestamp in seconds."""
-
-
 class VectorSyncProgressReporter(Protocol):
     """Runtime adapter that records durable vector-sync progress."""
 
@@ -48,12 +41,9 @@ class VectorSyncProgressReporter(Protocol):
         """Persist or publish vector-sync progress."""
 
 
-@dataclass(frozen=True, slots=True)
-class SystemVectorSyncClock:
-    """Production monotonic clock for vector-sync timing."""
-
-    def now(self) -> float:
-        return time.perf_counter()
+def vector_sync_perf_counter() -> float:
+    """Return a monotonic timestamp in seconds for vector-sync progress timing."""
+    return time.perf_counter()
 
 
 class VectorSyncExecutor(Protocol):
@@ -183,7 +173,6 @@ async def run_vector_sync(
     chunk_size: int = VECTOR_SYNC_CHUNK_SIZE,
     project_id: int | None = None,
     progress_reporter: VectorSyncProgressReporter | None = None,
-    clock: VectorSyncClock | None = None,
 ) -> VectorSyncProgress:
     """Sync semantic vectors for entity ids with durable chunk boundaries."""
     if chunk_size <= 0:
@@ -198,9 +187,8 @@ async def run_vector_sync(
     if total == 0:
         return progress_state
 
-    effective_clock = clock or SystemVectorSyncClock()
-    sync_start = effective_clock.now() - progress_state.elapsed_seconds
-    last_callback_at = effective_clock.now()
+    sync_start = vector_sync_perf_counter() - progress_state.elapsed_seconds
+    last_callback_at = vector_sync_perf_counter()
 
     if progress_state.next_index > 0:
         logger.info(f"♻️ [VECTOR] Resuming at entity {progress_state.next_index}/{total}")
@@ -218,7 +206,7 @@ async def run_vector_sync(
             nonlocal last_callback_at
 
             del entity_id, total_count
-            now = effective_clock.now()
+            now = vector_sync_perf_counter()
             previous_entity_seconds = now - last_callback_at
             completed = chunk_start_index + index
 
@@ -241,7 +229,7 @@ async def run_vector_sync(
             progress_state,
             batch_result,
             next_index=chunk_start + len(chunk_entity_ids),
-            elapsed_seconds=effective_clock.now() - sync_start,
+            elapsed_seconds=vector_sync_perf_counter() - sync_start,
         )
         for failed_entity_id in new_failed_entity_ids:
             logger.error(f"❌ [VECTOR] Failed to sync entity {failed_entity_id}")

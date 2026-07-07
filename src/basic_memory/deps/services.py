@@ -57,7 +57,6 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationMovePolicy,
     AcceptedNoteMutationPreparer,
-    SystemAcceptedNoteMutationClock,
     build_default_accepted_note_repositories,
 )
 from basic_memory.indexing.batch_indexer import BatchIndexer
@@ -692,7 +691,6 @@ async def get_note_content_mutation_service(
                 app_config=app_config,
             ),
             write_repositories=accepted_note_repositories,
-            clock=SystemAcceptedNoteMutationClock(),
             move_policy=AcceptedNoteMutationMovePolicy(
                 disable_permalinks=app_config.disable_permalinks,
                 update_permalinks_on_move=app_config.update_permalinks_on_move,

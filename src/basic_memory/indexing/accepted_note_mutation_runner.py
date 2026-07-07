@@ -169,18 +169,9 @@ class AcceptedNoteMutationMovePolicy:
         )
 
 
-class AcceptedNoteMutationClock(Protocol):
-    """Clock capability for accepted-note mutation timestamps."""
-
-    def now(self) -> datetime: ...
-
-
-@dataclass(frozen=True, slots=True)
-class SystemAcceptedNoteMutationClock:
-    """UTC wall clock for accepted-note mutation timestamps."""
-
-    def now(self) -> datetime:
-        return datetime.now(tz=UTC)
+def accepted_note_mutation_utc_now() -> datetime:
+    """Return the current UTC time used to stamp accepted-note mutations."""
+    return datetime.now(tz=UTC)
 
 
 class AcceptedNoteMutationProjectRepository(Protocol):
@@ -291,7 +282,6 @@ class AcceptedNoteMutationDependencies:
     lookup_repositories: AcceptedNoteMutationRepositories
     preparer_factory: AcceptedNoteMutationPreparerFactory
     write_repositories: AcceptedNoteWriteRepositories
-    clock: AcceptedNoteMutationClock
     move_policy: AcceptedNoteMutationMovePolicy
     # Trigger: local runtimes where the filesystem is the source of truth.
     # Why: a DB-first create over a file that exists on disk but is not yet
@@ -450,7 +440,7 @@ async def _run_accepted_note_create(
 ) -> AcceptedNoteMutationChange:
     ensure_accepted_note_markdown_entity(request.data)
 
-    now = dependencies.clock.now()
+    now = accepted_note_mutation_utc_now()
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
     )
@@ -526,7 +516,7 @@ async def _run_accepted_note_update(
 ) -> AcceptedNoteMutationChange:
     ensure_accepted_note_markdown_entity(request.data)
 
-    now = dependencies.clock.now()
+    now = accepted_note_mutation_utc_now()
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
     )
@@ -646,7 +636,7 @@ async def _run_accepted_note_edit(
     request: AcceptedNoteEditMutation,
     dependencies: AcceptedNoteMutationDependencies,
 ) -> AcceptedNoteMutationChange:
-    now = dependencies.clock.now()
+    now = accepted_note_mutation_utc_now()
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
     )
@@ -710,7 +700,7 @@ async def _run_accepted_note_move(
     except ValueError as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
-    now = dependencies.clock.now()
+    now = accepted_note_mutation_utc_now()
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
     )

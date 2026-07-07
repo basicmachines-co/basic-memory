@@ -43,12 +43,6 @@ class IndexingTask[ResultT](Protocol):
         """Execute one fresh task attempt."""
 
 
-class IndexedNoteContentClock(Protocol):
-    """Clock used when indexing rewrites the observed file."""
-
-    def now(self) -> datetime: ...
-
-
 class IndexedNoteContentTimestampProvider[FileInfoT: IndexedNoteContentFileInfo](Protocol):
     """Timestamp provider for indexed note_content reconciliation."""
 
@@ -60,29 +54,15 @@ class IndexedNoteContentTimestampProvider[FileInfoT: IndexedNoteContentFileInfo]
 
 
 @dataclass(frozen=True, slots=True)
-class SystemIndexedNoteContentClock:
-    """System UTC clock for indexed note_content observations."""
-
-    def now(self) -> datetime:
-        return datetime.now(tz=UTC)
-
-
-@dataclass(frozen=True, slots=True)
 class DefaultIndexedNoteContentTimestampProvider:
     """Default timestamp provider for indexed markdown note_content."""
-
-    clock: IndexedNoteContentClock = SystemIndexedNoteContentClock()
 
     def observed_at(
         self,
         indexed: IndexedEntity,
         file_info: IndexedNoteContentFileInfo | None,
     ) -> datetime | None:
-        return indexed_note_content_observed_at(
-            indexed,
-            file_info,
-            clock=self.clock,
-        )
+        return indexed_note_content_observed_at(indexed, file_info)
 
 
 class IndexedNoteContentEntityRepository(Protocol[EntityT]):
@@ -122,11 +102,14 @@ class IndexedNoteContentReconciliationError:
         return self.path, self.message
 
 
+def indexed_note_content_utc_now() -> datetime:
+    """Return the current UTC time used to stamp rewritten indexed observations."""
+    return datetime.now(tz=UTC)
+
+
 def indexed_note_content_observed_at(
     indexed: IndexedEntity,
     file_info: IndexedNoteContentFileInfo | None,
-    *,
-    clock: IndexedNoteContentClock | None = None,
 ) -> datetime | None:
     """Choose the file timestamp that matches an indexed markdown version."""
     if file_info is None:
@@ -135,7 +118,7 @@ def indexed_note_content_observed_at(
     if indexed.checksum != file_info.checksum:
         # Frontmatter rewrites create a new storage object during indexing, so the
         # original file timestamp no longer describes the indexed markdown version.
-        return (clock or SystemIndexedNoteContentClock()).now()
+        return indexed_note_content_utc_now()
 
     return file_info.last_modified
 

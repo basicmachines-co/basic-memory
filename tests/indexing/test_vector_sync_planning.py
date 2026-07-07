@@ -80,10 +80,12 @@ class RecordingVectorSyncProgressReporter:
 
 
 @dataclass(frozen=True, slots=True)
-class StaticVectorSyncClock:
+class SequencePerfCounter:
+    """Stateful stand-in for ``vector_sync_perf_counter`` returning queued values."""
+
     values: list[float]
 
-    def now(self) -> float:
+    def __call__(self) -> float:
         return self.values.pop(0)
 
 
@@ -259,7 +261,9 @@ def test_vector_sync_plan_dedupes_candidates_for_empty_resume() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress() -> None:
+async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     vector_sync = RecordingVectorSync(
         results=[
             BatchSummary(
@@ -274,7 +278,10 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
     )
     logger = RecordingLogger()
     progress_reporter: VectorSyncProgressReporter = RecordingVectorSyncProgressReporter()
-    clock = StaticVectorSyncClock([20.0, 20.0, 23.0])
+    monkeypatch.setattr(
+        "basic_memory.indexing.vector_sync_planning.vector_sync_perf_counter",
+        SequencePerfCounter([20.0, 20.0, 23.0]),
+    )
 
     resumed = await run_vector_sync(
         list(range(1, 126)),
@@ -292,7 +299,6 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
             elapsed_seconds=15.0,
         ),
         project_id=7,
-        clock=clock,
     )
 
     assert isinstance(progress_reporter, RecordingVectorSyncProgressReporter)
@@ -324,19 +330,23 @@ async def test_run_vector_sync_returns_empty_progress_without_executor_call() ->
 
 
 @pytest.mark.asyncio
-async def test_run_vector_sync_logs_periodic_batch_progress() -> None:
+async def test_run_vector_sync_logs_periodic_batch_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     vector_sync = RecordingVectorSync(
         results=[BatchSummary(entities_synced=3)],
         progress_events=[(1, 1, 3)],
     )
     logger = RecordingLogger()
-    clock = StaticVectorSyncClock([0.0, 0.0, 6.5, 8.0])
+    monkeypatch.setattr(
+        "basic_memory.indexing.vector_sync_planning.vector_sync_perf_counter",
+        SequencePerfCounter([0.0, 0.0, 6.5, 8.0]),
+    )
 
     await run_vector_sync(
         [1, 2, 3],
         vector_sync=vector_sync,
         logger=logger,
-        clock=clock,
     )
 
     assert logger.infos[0][0] == (

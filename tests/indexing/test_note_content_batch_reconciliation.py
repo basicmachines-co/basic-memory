@@ -37,14 +37,6 @@ class FakeFileInfo:
         return self.observed_at
 
 
-@dataclass(frozen=True, slots=True)
-class StaticIndexedNoteContentClock:
-    timestamp: datetime
-
-    def now(self) -> datetime:
-        return self.timestamp
-
-
 @dataclass(slots=True)
 class FlakyIndexingTask:
     attempts: int = 0
@@ -220,9 +212,15 @@ def test_indexed_note_content_observed_at_uses_original_timestamp_when_unchanged
     assert result == observed_at
 
 
-def test_indexed_note_content_observed_at_uses_clock_when_frontmatter_rewrites_file() -> None:
+def test_indexed_note_content_observed_at_uses_now_when_frontmatter_rewrites_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     observed_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
     rewritten_at = datetime(2026, 6, 19, 14, 5, tzinfo=UTC)
+    monkeypatch.setattr(
+        "basic_memory.indexing.note_content_batch_reconciliation.indexed_note_content_utc_now",
+        lambda: rewritten_at,
+    )
 
     result = indexed_note_content_observed_at(
         IndexedEntity(
@@ -233,7 +231,6 @@ def test_indexed_note_content_observed_at_uses_clock_when_frontmatter_rewrites_f
             markdown_content="# OK\n",
         ),
         FakeFileInfo(checksum="checksum-ok", observed_at=observed_at),
-        clock=StaticIndexedNoteContentClock(rewritten_at),
     )
 
     assert result == rewritten_at
