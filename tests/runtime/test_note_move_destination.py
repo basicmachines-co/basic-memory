@@ -22,3 +22,25 @@ def test_normalize_note_move_destination_path_rejects_invalid_paths(
 ) -> None:
     with pytest.raises(ValueError, match="Invalid destination path:"):
         normalize_note_move_destination_path(destination_path)
+
+
+@pytest.mark.parametrize(
+    "destination_path",
+    [
+        "../../evil.md",
+        "folder/../../evil.md",
+        "..\\..\\evil.md",
+        "C:/evil.md",
+        "C:\\evil.md",
+        "\\\\host\\share\\evil.md",
+    ],
+)
+def test_normalize_note_move_destination_path_rejects_escapes(destination_path: str) -> None:
+    # These join onto the project root and escape it: ".." traversal (either
+    # separator) and Windows drive/UNC roots (absolute on Windows).
+    with pytest.raises(ValueError, match="Invalid destination path:"):
+        normalize_note_move_destination_path(destination_path)
+
+
+def test_normalize_note_move_destination_path_allows_nested_relative() -> None:
+    assert normalize_note_move_destination_path("a/b/c/note.md") == "a/b/c/note.md"
