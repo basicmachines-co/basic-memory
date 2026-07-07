@@ -46,7 +46,6 @@ from basic_memory.indexing.vector_sync_planning import (
     VectorSyncEntitySource,
     VectorSyncExecutor,
     VectorSyncLogger,
-    VectorSyncProgressReporter,
     plan_vector_sync_progress,
     run_vector_sync,
 )
@@ -150,7 +149,6 @@ class ProjectIndexRuntime:
         entity_ids: Sequence[EntityId],
         *,
         logger: VectorSyncLogger,
-        progress_reporter: VectorSyncProgressReporter | None = None,
         resume_progress: VectorSyncProgress | None = None,
     ) -> VectorSyncProgress:
         """Sync semantic vectors for the given entity ids."""
@@ -158,7 +156,6 @@ class ProjectIndexRuntime:
             entity_ids,
             vector_sync=self.vector_sync,
             logger=logger,
-            progress_reporter=progress_reporter,
             resume_progress=resume_progress,
             project_id=self.project_id,
         )

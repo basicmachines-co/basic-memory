@@ -30,17 +30,6 @@ class VectorSyncBatchProgressCallback(Protocol):
         """Report progress for one vector-sync entity inside a backend batch."""
 
 
-class VectorSyncProgressReporter(Protocol):
-    """Runtime adapter that records durable vector-sync progress."""
-
-    async def report_progress(
-        self,
-        progress: str,
-        vector_progress: VectorSyncProgress,
-    ) -> None:
-        """Persist or publish vector-sync progress."""
-
-
 def vector_sync_perf_counter() -> float:
     """Return a monotonic timestamp in seconds for vector-sync progress timing."""
     return time.perf_counter()
@@ -172,7 +161,6 @@ async def run_vector_sync(
     resume_progress: VectorSyncProgress | None = None,
     chunk_size: int = VECTOR_SYNC_CHUNK_SIZE,
     project_id: int | None = None,
-    progress_reporter: VectorSyncProgressReporter | None = None,
 ) -> VectorSyncProgress:
     """Sync semantic vectors for entity ids with durable chunk boundaries."""
     if chunk_size <= 0:
@@ -233,16 +221,6 @@ async def run_vector_sync(
         )
         for failed_entity_id in new_failed_entity_ids:
             logger.error(f"❌ [VECTOR] Failed to sync entity {failed_entity_id}")
-
-        if progress_reporter is not None:
-            percent_complete = 100.0 * progress_state.next_index / total if total > 0 else 100.0
-            await progress_reporter.report_progress(
-                (
-                    f"Syncing vectors: {progress_state.next_index}/{total} entities "
-                    f"({percent_complete:.1f}%)..."
-                ),
-                progress_state,
-            )
 
     completion_message = (
         f"✅ [VECTOR] Completed: {progress_state.entities_synced}/{total} synced, "
