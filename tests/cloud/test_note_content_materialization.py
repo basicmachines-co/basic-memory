@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
@@ -12,9 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.cloud.note_content_materialization as note_content_materialization
 from basic_memory.cloud.note_content_materialization import (
+    InlineNoteFileDeleteEnqueuer,
     LocalNoteContentMaterializationProvider,
     LocalNoteContentStorage,
 )
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.indexing.models import FileIndexOperation, FileIndexResult
 from basic_memory.runtime.note_content import (
     NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR,
@@ -110,6 +113,62 @@ async def test_local_note_content_storage_writes_accepted_markdown_bytes(tmp_pat
 
     assert (tmp_path / "notes" / "accepted.md").read_bytes() == content.encode("utf-8")
     assert checksum == sha256(content.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_inline_delete_skips_old_path_aliasing_live_file(tmp_path) -> None:
+    """A case-only rename must not delete the note's only file (P0 regression).
+
+    On a case-insensitive filesystem the old and new paths are the same inode, so
+    the checksum guard passes against the just-written new file and the cleanup
+    would delete the note's only copy. A hard link reproduces that same-inode
+    aliasing portably (case variants collide on the very filesystems where the
+    hazard occurs, so distinct hard-linked names stand in for them).
+    """
+    content = b"# Note\n"
+    (tmp_path / "notes").mkdir()
+    live = tmp_path / "notes" / "foo.md"
+    live.write_bytes(content)
+    old_alias = tmp_path / "notes" / "alias.md"
+    os.link(live, old_alias)  # same inode, as a case-only rename produces on APFS/NTFS
+    checksum = sha256(content).hexdigest()
+
+    enqueuer = InlineNoteFileDeleteEnqueuer(LocalNoteContentStorage(FileService(tmp_path)))
+    await enqueuer.enqueue_note_file_delete(
+        RuntimeNoteFileDeleteJobRequest(
+            project_id=1,
+            entity_id=7,
+            file_path="notes/alias.md",
+            file_checksum=checksum,
+            live_file_path="notes/foo.md",
+        )
+    )
+
+    assert live.exists(), "case-only rename deleted the note's only file"
+
+
+@pytest.mark.asyncio
+async def test_inline_delete_removes_genuine_old_file(tmp_path) -> None:
+    """A real rename to a distinct path still cleans up the stale old file."""
+    content = b"# Note\n"
+    (tmp_path / "notes").mkdir()
+    old = tmp_path / "notes" / "old.md"
+    old.write_bytes(content)
+    (tmp_path / "notes" / "new.md").write_bytes(content)
+    checksum = sha256(content).hexdigest()
+
+    enqueuer = InlineNoteFileDeleteEnqueuer(LocalNoteContentStorage(FileService(tmp_path)))
+    await enqueuer.enqueue_note_file_delete(
+        RuntimeNoteFileDeleteJobRequest(
+            project_id=1,
+            entity_id=7,
+            file_path="notes/old.md",
+            file_checksum=checksum,
+            live_file_path="notes/new.md",
+        )
+    )
+
+    assert not old.exists(), "genuine old file was not cleaned up after move"
 
 
 @pytest.mark.asyncio

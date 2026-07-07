@@ -141,6 +141,23 @@ class FileService:
             logger.error("Failed to check file existence", path=str(path), error=str(e))
             raise FileOperationError(f"Failed to check file existence: {e}")
 
+    def paths_share_storage_target(self, left: FilePath, right: FilePath) -> bool:
+        """Return whether two project paths resolve to the same physical file.
+
+        Distinguishes a genuine rename from a case-only rename on a
+        case-insensitive filesystem (APFS/NTFS), where ``Notes/Foo.md`` and
+        ``notes/foo.md`` are the same inode. Returns False when either path is
+        absent (nothing shared to protect) or the check errors.
+        """
+        left_abs = self.base_path / left if isinstance(left, str) else left
+        right_abs = self.base_path / right if isinstance(right, str) else right
+        if not left_abs.exists() or not right_abs.exists():
+            return False
+        try:
+            return left_abs.samefile(right_abs)
+        except OSError:
+            return False
+
     async def ensure_directory(self, path: FilePath) -> None:
         """Ensure directory exists, creating if necessary.
 

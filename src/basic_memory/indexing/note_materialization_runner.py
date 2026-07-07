@@ -677,6 +677,10 @@ def cleanup_file_from_prepared_write(
         entity_id=request.entity_id,
         file_path=prepared_write.cleanup_file_path,
         file_checksum=prepared_write.cleanup_file_checksum,
+        # The write's destination is the note's live path; a local adapter uses it
+        # to skip deleting an old path that aliases the just-written file on a
+        # case-insensitive filesystem (a case-only rename).
+        live_file_path=prepared_write.file_path,
     )
 
 

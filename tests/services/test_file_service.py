@@ -1,5 +1,6 @@
 """Tests for file operations service."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -283,3 +284,37 @@ async def test_read_file_bytes_text_file(tmp_path: Path, file_service: FileServi
 
     content = await file_service.read_file_bytes(test_path)
     assert content == text_content.encode("utf-8")
+
+
+def test_paths_share_storage_target_same_inode(tmp_path: Path):
+    """Two names for the same inode share a storage target.
+
+    A case-only rename on a case-insensitive filesystem is the real-world trigger;
+    a hard link reproduces the same-inode aliasing portably (case variants collide
+    on the case-insensitive filesystems where the hazard actually occurs).
+    """
+    service = FileService(tmp_path)
+    (tmp_path / "notes").mkdir()
+    real = tmp_path / "notes" / "foo.md"
+    real.write_text("x")
+    os.link(real, tmp_path / "notes" / "alias.md")  # distinct name, same inode
+
+    assert service.paths_share_storage_target("notes/foo.md", "notes/alias.md") is True
+
+
+def test_paths_share_storage_target_distinct_files(tmp_path: Path):
+    """Distinct files are not the same storage target."""
+    service = FileService(tmp_path)
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "a.md").write_text("a")
+    (tmp_path / "notes" / "b.md").write_text("b")
+
+    assert service.paths_share_storage_target("notes/a.md", "notes/b.md") is False
+
+
+def test_paths_share_storage_target_missing_path(tmp_path: Path):
+    """A missing path shares nothing to protect."""
+    service = FileService(tmp_path)
+    (tmp_path / "present.md").write_text("x")
+
+    assert service.paths_share_storage_target("present.md", "absent.md") is False

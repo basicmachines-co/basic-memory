@@ -493,6 +493,12 @@ class RuntimePendingNoteFileDelete:
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
     file_checksum: RuntimeFileChecksum | None = None
+    # The note's live path after the move that scheduled this cleanup. Path
+    # comparison here is exact-string (correct for object storage, where
+    # case-different keys are distinct objects); a local adapter re-checks it
+    # against the physical filesystem before deleting, since a case-only rename
+    # on a case-insensitive filesystem aliases old and new onto the same inode.
+    live_file_path: RuntimeFilePath | None = None
 
 
 def plan_previous_note_file_delete(
@@ -515,6 +521,7 @@ def plan_previous_note_file_delete(
         entity_id=entity_id,
         file_path=existing_file_path,
         file_checksum=file_checksum,
+        live_file_path=accepted_file_path,
     )
 
 

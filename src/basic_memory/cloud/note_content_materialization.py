@@ -271,6 +271,23 @@ class InlineNoteFileDeleteEnqueuer:
     storage: LocalNoteContentStorage
 
     async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None:
+        # Trigger: a move scheduled old-path cleanup whose old and new paths differ
+        # only by case (or otherwise alias the same inode) on a case-insensitive
+        # filesystem, so the old path now points at the just-written new file.
+        # Why: the checksum guard cannot tell "old file still present" from "old path
+        # aliases the new file" — both read the same bytes — so deleting the old path
+        # would destroy the note's only copy (then scan reconciliation removes the row).
+        # Outcome: skip the delete entirely; the paths are the same physical file.
+        if request.live_file_path is not None and self.storage.file_service.paths_share_storage_target(
+            request.file_path, request.live_file_path
+        ):
+            logger.info(
+                "Skipping note-file cleanup that aliases the live file (case-only rename)",
+                entity_id=request.entity_id,
+                file_path=request.file_path,
+                live_file_path=request.live_file_path,
+            )
+            return
         await run_note_file_delete(request, storage=self.storage)
 
 

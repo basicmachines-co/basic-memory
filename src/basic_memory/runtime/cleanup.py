@@ -196,6 +196,10 @@ class RuntimeNoteFileDeleteJobRequest:
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
     file_checksum: RuntimeFileChecksum | None = None
+    # Live note path after the move that scheduled this cleanup; a local adapter
+    # skips the delete when it shares a physical file with file_path. Not part of
+    # dedupe_key: it does not change the logical identity of the delete.
+    live_file_path: RuntimeFilePath | None = None
 
     def dedupe_key(self) -> str:
         """Return the logical note-file delete queue identity."""
@@ -220,6 +224,7 @@ def plan_note_file_delete_job_request(
         entity_id=file_delete.entity_id,
         file_path=file_delete.file_path,
         file_checksum=file_delete.file_checksum,
+        live_file_path=file_delete.live_file_path,
     )
 
 
