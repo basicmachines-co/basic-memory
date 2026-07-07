@@ -14,7 +14,12 @@ from basic_memory.mcp.server import mcp
     title="List Directory",
     description="List directory contents with filtering and depth control.",
     tags={"navigation", "notes"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "List Directory",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def list_directory(
     # `dir_name` is unusual; models reach for directory/folder/path/dir.
@@ -157,6 +162,12 @@ async def list_directory(
                 file_line += f" | {title}"
             if date_str:
                 file_line += f" | {date_str}"
+            # Web-app deep links are built from the note's external_id; hosted
+            # MCP appends a link template that references it, so the id must be
+            # visible in the listing the agent actually reads.
+            external_id = node.get("external_id")
+            if external_id:
+                file_line += f" | id: {external_id}"
 
             output_lines.append(file_line)
 

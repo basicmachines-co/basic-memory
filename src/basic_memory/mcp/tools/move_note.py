@@ -360,7 +360,12 @@ delete_note("{identifier}")
     title="Move Note",
     description="Move a note or directory to a new location, updating database and maintaining links.",
     tags={"notes"},
-    annotations={"destructiveHint": False, "openWorldHint": False},
+    annotations={
+        "title": "Move Note",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def move_note(
     identifier: str,

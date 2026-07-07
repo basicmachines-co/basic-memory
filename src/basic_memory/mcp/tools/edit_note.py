@@ -1,6 +1,6 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import TYPE_CHECKING, Annotated, Optional, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Optional
 
 import logfire
 from httpx import HTTPStatusError
@@ -30,6 +30,15 @@ from basic_memory.services.link_resolver import (
     is_workspace_qualified_plain_identifier,
 )
 from basic_memory.utils import normalize_project_reference, validate_project_path
+
+EDIT_OPERATIONS = (
+    "append",
+    "prepend",
+    "find_replace",
+    "replace_section",
+    "insert_before_section",
+    "insert_after_section",
+)
 
 
 def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]:
@@ -307,11 +316,18 @@ Error editing note '{identifier}': {error_message}
     title="Edit Note",
     description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section.",
     tags={"notes"},
-    annotations={"destructiveHint": False, "openWorldHint": False},
+    annotations={
+        "title": "Edit Note",
+        "readOnlyHint": False,
+        # find_replace and replace_section overwrite existing content, so the tool
+        # as a whole is not purely additive even though append/prepend are.
+        "destructiveHint": True,
+        "openWorldHint": False,
+    },
 )
 async def edit_note(
     identifier: str,
-    operation: str,
+    operation: Annotated[str, Field(json_schema_extra={"enum": list(EDIT_OPERATIONS)})],
     # Accept common replacement-content aliases. Models trained on diff/patch
     # APIs reach for new_content/replacement/replace_with on first try.
     content: Annotated[
@@ -505,17 +521,9 @@ async def edit_note(
             )
 
             # Validate operation
-            valid_operations = [
-                "append",
-                "prepend",
-                "find_replace",
-                "replace_section",
-                "insert_before_section",
-                "insert_after_section",
-            ]
-            if operation not in valid_operations:
+            if operation not in EDIT_OPERATIONS:
                 raise ValueError(
-                    f"Invalid operation '{operation}'. Must be one of: {', '.join(valid_operations)}"
+                    f"Invalid operation '{operation}'. Must be one of: {', '.join(EDIT_OPERATIONS)}"
                 )
 
             # Validate required parameters for specific operations

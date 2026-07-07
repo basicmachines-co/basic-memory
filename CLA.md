@@ -4,9 +4,9 @@
 
 By signing this Contributor License Agreement ("Agreement"), you accept and agree to the following terms and conditions
 for your present and future Contributions submitted
-to Basic Machines LLC. Except for the license granted herein to Basic Machines LLC and recipients of software
-distributed by Basic Machines LLC, you reserve all right,
-title, and interest in and to your Contributions.
+to Basic Machines LLC. Except for the copyright assignment and licenses granted herein to Basic Machines LLC and
+recipients of software distributed by Basic Machines LLC, you reserve all other right, title, and interest in and to
+your Contributions.
 
 ### 1. Definitions
 
@@ -36,8 +36,8 @@ Contributions under any license terms, including copyleft, permissive, commercia
 
 Subject to the terms and conditions of this Agreement, You hereby grant to Basic Machines LLC and to recipients of
 software distributed by Basic Machines LLC a perpetual,
-worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to
-make, have made, use, offer to sell, sell, import, and
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable patent license to make, have made, use, offer to sell,
+sell, import, and
 otherwise transfer the Work.
 
 ### 5. Developer Certificate of Origin

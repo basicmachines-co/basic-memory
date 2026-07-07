@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from basic_memory import db
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.db import scoped_session
+from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app
 import logfire
@@ -145,3 +146,4 @@ mcp = FastMCP(
     name="Basic Memory",
     lifespan=lifespan,
 )
+mcp.add_middleware(MCPClientInfoMiddleware())

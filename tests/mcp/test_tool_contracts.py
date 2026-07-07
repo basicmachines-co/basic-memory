@@ -120,6 +120,61 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 }
 
 
+# Directory review requirements differ by client, so keep the stricter shared contract:
+# every tool must set annotations.title and explicit readOnlyHint, destructiveHint, and
+# openWorldHint values.
+EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
+    "build_context": {"readOnlyHint": True, "destructiveHint": False},
+    "cloud_info": {"readOnlyHint": True, "destructiveHint": False},
+    "fetch": {"readOnlyHint": True, "destructiveHint": False},
+    "list_directory": {"readOnlyHint": True, "destructiveHint": False},
+    "list_memory_projects": {"readOnlyHint": True, "destructiveHint": False},
+    "list_workspaces": {"readOnlyHint": True, "destructiveHint": False},
+    "read_content": {"readOnlyHint": True, "destructiveHint": False},
+    "read_note": {"readOnlyHint": True, "destructiveHint": False},
+    "recent_activity": {"readOnlyHint": True, "destructiveHint": False},
+    "release_notes": {"readOnlyHint": True, "destructiveHint": False},
+    "schema_diff": {"readOnlyHint": True, "destructiveHint": False},
+    "schema_infer": {"readOnlyHint": True, "destructiveHint": False},
+    "schema_validate": {"readOnlyHint": True, "destructiveHint": False},
+    "search": {"readOnlyHint": True, "destructiveHint": False},
+    "search_notes": {"readOnlyHint": True, "destructiveHint": False},
+    "view_note": {"readOnlyHint": True, "destructiveHint": False},
+    # canvas falls back to PUT when the file already exists, replacing its content.
+    "canvas": {"readOnlyHint": False, "destructiveHint": True},
+    # create_memory_project is purely additive: it creates a new project and errors
+    # if the target already exists.
+    "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
+    "delete_note": {"readOnlyHint": False, "destructiveHint": True},
+    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
+    # edit_note's find_replace/replace_section overwrite existing content, so it is
+    # destructive even though append/prepend are additive.
+    "edit_note": {"readOnlyHint": False, "destructiveHint": True},
+    # move_note refuses to overwrite an existing destination and preserves all
+    # content — it relocates and propagates links, so no data can be lost. Keeping
+    # it non-destructive lets clients allowlist bulk lifecycle moves.
+    "move_note": {"readOnlyHint": False, "destructiveHint": False},
+    "write_note": {"readOnlyHint": False, "destructiveHint": True},
+}
+
+# The MCP-UI tools are disabled in tools/__init__.py but register onto the shared
+# server whenever tests import their module directly, so tolerate their presence
+# without requiring it — keeps this contract independent of test execution order.
+OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
+    "read_note_ui": {"readOnlyHint": True, "destructiveHint": False},
+    "search_notes_ui": {"readOnlyHint": True, "destructiveHint": False},
+}
+
+EXPECTED_EDIT_NOTE_OPERATIONS = [
+    "append",
+    "prepend",
+    "find_replace",
+    "replace_section",
+    "insert_before_section",
+    "insert_after_section",
+]
+
+
 TOOL_FUNCTIONS: dict[str, object] = {
     "build_context": tools.build_context,
     "canvas": tools.canvas,
@@ -161,6 +216,60 @@ def test_mcp_tool_signatures_are_stable():
 
     for tool_name, tool_obj in TOOL_FUNCTIONS.items():
         assert _signature_params(tool_obj) == EXPECTED_TOOL_SIGNATURES[tool_name]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_annotations_meet_directory_requirements():
+    """Every tool's wire-level ToolAnnotations must satisfy app directory review.
+
+    Directory validators read ToolAnnotations (not FastMCP's top-level title), so
+    each tool needs annotations.title plus explicit readOnlyHint, destructiveHint,
+    and openWorldHint values. openWorldHint is False across the board because every
+    tool operates on the user's own knowledge base.
+    """
+    tool_list = await mcp.list_tools()
+    tools_by_name = {tool.name: tool for tool in tool_list}
+
+    required = set(EXPECTED_TOOL_ANNOTATIONS)
+    optional = set(OPTIONAL_TOOL_ANNOTATIONS)
+    registered = set(tools_by_name)
+    missing = required - registered
+    unexpected = registered - required - optional
+    assert not missing, f"Tools missing from server: {sorted(missing)}"
+    assert not unexpected, (
+        f"Tools without annotation expectations: {sorted(unexpected)} — "
+        "add them to EXPECTED_TOOL_ANNOTATIONS with directory-compliant annotations"
+    )
+
+    all_expected = {**EXPECTED_TOOL_ANNOTATIONS, **OPTIONAL_TOOL_ANNOTATIONS}
+    for tool_name, tool in tools_by_name.items():
+        expected = all_expected[tool_name]
+        # Assert on the protocol-level payload the directory review actually sees.
+        annotations = tool.to_mcp_tool().annotations
+        assert annotations is not None, f"Tool '{tool_name}' has no annotations"
+        assert annotations.title, f"Tool '{tool_name}' is missing annotations.title"
+        assert annotations.readOnlyHint is expected["readOnlyHint"], (
+            f"Tool '{tool_name}' readOnlyHint should be {expected['readOnlyHint']}"
+        )
+        assert annotations.destructiveHint is expected["destructiveHint"], (
+            f"Tool '{tool_name}' destructiveHint should be {expected['destructiveHint']}"
+        )
+        assert annotations.openWorldHint is False, (
+            f"Tool '{tool_name}' openWorldHint should be False"
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_note_operation_schema_exposes_supported_operations():
+    """The edit operation is a fixed choice set, not a free-form string."""
+    tool_list = await mcp.list_tools()
+    edit_note_tool = next(tool for tool in tool_list if tool.name == "edit_note")
+
+    input_schema = edit_note_tool.to_mcp_tool().inputSchema
+    operation_schema = input_schema["properties"]["operation"]
+
+    assert operation_schema["type"] == "string"
+    assert operation_schema["enum"] == EXPECTED_EDIT_NOTE_OPERATIONS
 
 
 @pytest.mark.asyncio

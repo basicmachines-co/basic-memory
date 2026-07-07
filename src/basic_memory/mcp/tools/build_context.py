@@ -134,9 +134,17 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     Format options:
     - "json" (default): Structured JSON with internal fields excluded
     - "text": Compact markdown text for LLM consumption
+
+    Queries the Basic Memory knowledge base API — see
+    https://docs.basicmemory.com/concepts/memory-urls
     """,
     tags={"navigation", "notes"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Build Context",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def build_context(
     url: Annotated[

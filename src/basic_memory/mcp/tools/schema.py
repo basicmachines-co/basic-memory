@@ -207,7 +207,12 @@ def _no_schema_guidance(note_type: str, tool_name: str) -> str:
     title="Validate Schema",
     description="Validate notes against their Picoschema definitions.",
     tags={"schema"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Validate Schema",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def schema_validate(
     note_type: Optional[str] = None,
@@ -322,7 +327,12 @@ async def schema_validate(
     title="Infer Schema",
     description="Analyze existing notes and suggest a Picoschema definition.",
     tags={"schema"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Infer Schema",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def schema_infer(
     note_type: str,
@@ -445,7 +455,12 @@ async def schema_infer(
     title="Schema Diff",
     description="Detect drift between a schema definition and actual note usage.",
     tags={"schema"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Schema Diff",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def schema_diff(
     note_type: str,

@@ -611,3 +611,25 @@ def test_format_project_output_no_more_pages():
     )
     assert "1 items found." in out
     assert "Use page=" not in out
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_entity_rows_include_external_id(client, test_graph, test_project):
+    """Entity rows carry the note external_id for web-app link building.
+
+    The hosted MCP link template tells agents to substitute this id, so it
+    must be visible in the text output they read.
+    """
+    import re
+
+    result = await recent_activity(project=test_project.name, timeframe="30d")
+
+    assert isinstance(result, str)
+
+    assert "Recent Notes & Documents" in result
+    uuid_pattern = r"\[id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]"
+    entity_lines = [line for line in result.splitlines() if line.strip().startswith("•")]
+    assert entity_lines, f"no entity rows in: {result!r}"
+    assert any(re.search(uuid_pattern, line) for line in entity_lines), (
+        f"entity rows missing external_id: {entity_lines!r}"
+    )

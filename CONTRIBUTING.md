@@ -100,29 +100,31 @@ This project is designed for collaborative development between humans and LLMs (
 ## Pull Request Process
 
 1. **Create a Pull Request**: Open a PR against the `main` branch with a clear title and description.
-2. **Sign the Developer Certificate of Origin (DCO)**: All contributions require signing our DCO, which certifies that
-   you have the right to submit your contributions. This will be automatically checked by our CLA assistant when you
-   create a PR.
-3. **PR Description**: Include:
+2. **Sign the Developer Certificate of Origin (DCO)**: All commits require a `Signed-off-by` line certifying that you
+   have the right to submit your contributions. The DCO status check verifies this automatically when you create a PR.
+3. **Accept the Contributor License Agreement (CLA)**: All contributors must also accept the
+   [Contributor License Agreement](CLA.md). The `license/cla` status check verifies this separately from the DCO check.
+4. **PR Description**: Include:
     - What the PR changes
     - Why the change is needed
     - How you tested the changes
     - Any related issues (use "Fixes #123" to automatically close issues)
-4. **Code Review**: Wait for code review and address any feedback.
-5. **CI Checks**: Ensure all CI checks pass.
-6. **Merge**: Once approved, a maintainer will merge your PR.
+5. **Code Review**: Wait for code review and address any feedback.
+6. **CI Checks**: Ensure all CI checks pass.
+7. **Merge**: Once approved, a maintainer will merge your PR.
 
-## Developer Certificate of Origin
+## Developer Certificate of Origin and CLA
 
-By contributing to this project, you agree to the [Developer Certificate of Origin (DCO)](CLA.md). This means you
-certify that:
+Basic Memory requires both a DCO commit sign-off and CLA acceptance for pull requests.
+
+The DCO sign-off means you certify that:
 
 - You have the right to submit your contributions
 - You're not knowingly submitting code with patent or copyright issues
 - Your contributions are provided under the project's license (AGPL-3.0)
 
-This is a lightweight alternative to a Contributor License Agreement and helps ensure that all contributions can be
-properly incorporated into the project and potentially used in commercial applications.
+The CLA is a separate contributor agreement that allows Basic Machines LLC to incorporate, distribute, and relicense
+accepted contributions. The `license/cla` check verifies CLA acceptance, while the DCO check verifies commit sign-off.
 
 ### Signing Your Commits
 

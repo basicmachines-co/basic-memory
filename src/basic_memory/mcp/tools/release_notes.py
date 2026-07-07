@@ -8,7 +8,12 @@ from basic_memory.mcp.server import mcp
     "release_notes",
     title="Release Notes",
     tags={"cloud"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Release Notes",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 def release_notes() -> str:
     """Return the latest product release notes for optional user review."""

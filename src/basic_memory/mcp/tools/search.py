@@ -617,7 +617,12 @@ async def _search_all_projects(
     tags={"search"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Search Notes",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
 )
 async def search_notes(
     # Accept common search-query aliases models reach for from training data.

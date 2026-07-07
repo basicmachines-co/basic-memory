@@ -9,6 +9,14 @@ MCP content array format.
 import json
 import pytest
 from fastmcp import Client
+from mcp import types as mt
+
+
+def openai_mcp_client(mcp_server):
+    return Client(
+        mcp_server,
+        client_info=mt.Implementation(name="openai-mcp", version="1.0.0"),
+    )
 
 
 def extract_mcp_json_content(mcp_result):
@@ -29,7 +37,7 @@ def extract_mcp_json_content(mcp_result):
 async def test_chatgpt_search_basic(mcp_server, app, test_project):
     """Test basic ChatGPT search functionality with MCP content array format."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Create test notes for searching
         await client.call_tool(
             "write_note",
@@ -99,7 +107,7 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
 async def test_chatgpt_search_empty_results(mcp_server, app, test_project):
     """Test ChatGPT search with no matching results."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Search for non-existent content
         search_result = await client.call_tool(
             "search",
@@ -119,7 +127,7 @@ async def test_chatgpt_search_empty_results(mcp_server, app, test_project):
 async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_project):
     """Test ChatGPT search with boolean operators."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
             "write_note",
@@ -164,7 +172,7 @@ async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_proje
 async def test_chatgpt_fetch_document(mcp_server, app, test_project):
     """Test ChatGPT fetch tool for retrieving full document content."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Create a test note
         note_content = """# Advanced Python Techniques
 
@@ -224,7 +232,7 @@ def my_decorator(func):
 async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
     """Test ChatGPT fetch using permalink identifier."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Create a note with known content
         await client.call_tool(
             "write_note",
@@ -268,7 +276,7 @@ async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
 async def test_chatgpt_fetch_nonexistent_document(mcp_server, app, test_project):
     """Test ChatGPT fetch with non-existent document ID."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Try to fetch a non-existent document
         fetch_result = await client.call_tool(
             "fetch",
@@ -294,7 +302,7 @@ async def test_chatgpt_fetch_nonexistent_document(mcp_server, app, test_project)
 async def test_chatgpt_fetch_with_empty_title(mcp_server, app, test_project):
     """Test ChatGPT fetch handles documents with empty or missing titles."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Create a note without a title in the content
         await client.call_tool(
             "write_note",
@@ -329,7 +337,7 @@ async def test_chatgpt_fetch_with_empty_title(mcp_server, app, test_project):
 async def test_chatgpt_search_pagination_default(mcp_server, app, test_project):
     """Test that ChatGPT search uses reasonable pagination defaults."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Create more than 10 notes to test pagination
         for i in range(15):
             await client.call_tool(
@@ -362,7 +370,7 @@ async def test_chatgpt_search_pagination_default(mcp_server, app, test_project):
 async def test_chatgpt_tools_error_handling(mcp_server, app, test_project):
     """Test error handling in ChatGPT tools returns proper MCP format."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Test search with invalid query (if validation exists)
         # Using empty query to potentially trigger an error
         search_result = await client.call_tool(
@@ -385,10 +393,40 @@ async def test_chatgpt_tools_error_handling(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_chatgpt_tools_reject_default_client(mcp_server, app, test_project):
+    """Default FastMCP clients cannot use ChatGPT compatibility tools."""
+
+    async with Client(mcp_server) as client:
+        search_result = await client.call_tool(
+            "search",
+            {
+                "query": "Machine Learning",
+            },
+        )
+
+        search_json = extract_mcp_json_content(search_result)
+        assert search_json["results"] == []
+        assert search_json["error"] == "Unsupported MCP client"
+        assert "search_notes" in search_json["error_message"]
+
+        fetch_result = await client.call_tool(
+            "fetch",
+            {
+                "id": "Machine Learning Fundamentals",
+            },
+        )
+
+        document_json = extract_mcp_json_content(fetch_result)
+        assert document_json["id"] == "Machine Learning Fundamentals"
+        assert document_json["metadata"]["error"] == "Unsupported MCP client"
+        assert "read_note" in document_json["text"]
+
+
+@pytest.mark.asyncio
 async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
     """Test complete workflow: search then fetch, as ChatGPT would use it."""
 
-    async with Client(mcp_server) as client:
+    async with openai_mcp_client(mcp_server) as client:
         # Step 1: Create multiple documents
         docs = [
             {
