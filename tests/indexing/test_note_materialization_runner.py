@@ -727,6 +727,9 @@ async def test_run_note_materialization_writes_publishes_and_cleans_previous_fil
             entity_id=request.entity_id,
             file_path="notes/old.md",
             file_checksum="old-cleanup-sum",
+            # The write destination rides along so a local adapter can skip the
+            # delete when a case-only rename aliases old and new (P0 guard).
+            live_file_path="notes/a.md",
         )
     ]
 

@@ -649,11 +649,16 @@ async def run_note_materialization(
             file_path=exc.file_path,
             file_checksum=exc.actual_checksum,
         )
-    # Any other storage failure (atomic write -> FileWriteError, checksum ->
-    # FileError, post-write stat -> OSError) must also flip the note out of the
-    # "writing" preflight state, or reads/status report an in-progress write that
-    # never completes. FileError/OSError do not subclass FileOperationError.
-    except (FileOperationError, FileError, OSError) as exc:
+    # Any failure after the preflight committed file_write_status="writing" must
+    # flip the note back out of that state, or reads/status report an in-progress
+    # write that never completes. This is deliberately broad: besides storage
+    # failures (atomic write -> FileWriteError, checksum -> FileError, post-write
+    # stat -> OSError; FileError/OSError do not subclass FileOperationError), the
+    # publish phase itself issues DB writes that can raise SQLAlchemy errors
+    # (OperationalError/TimeoutError/IntegrityError) — those previously escaped
+    # here and left the row stuck in "writing". Publish "failed" then re-raise so
+    # the error still surfaces for retry/logging.
+    except Exception as exc:
         await status_publisher.publish_note_materialization_status(
             request,
             NoteMaterializationStatusPublication(

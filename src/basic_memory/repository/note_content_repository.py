@@ -5,11 +5,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository.repository import Repository
+
+
+class NoteContentVersionConflict(Exception):
+    """An accepted note_content write lost an optimistic-concurrency race.
+
+    Raised when a write planned as ``prior_db_version + 1`` cannot land because a
+    concurrent accepted write already advanced the row's ``db_version``. The
+    caller surfaces this as a 409 so the loser retries against fresh state rather
+    than silently clobbering the winner (last-write-wins).
+    """
 
 NOTE_CONTENT_MUTABLE_FIELDS = frozenset(
     {
@@ -209,25 +219,44 @@ class NoteContentRepository(Repository[NoteContent]):
                 )
             return created
 
-        existing.project_id = note_content.project_id
-        existing.external_id = note_content.external_id
-        existing.file_path = note_content.file_path
-        existing.markdown_content = write.markdown_content
-        existing.db_version = write.db_version
-        existing.db_checksum = write.db_checksum
-        existing.file_write_status = "pending"
-        existing.last_source = write.last_source
-        existing.updated_at = write.updated_at
-        existing.last_materialization_error = None
-        existing.last_materialization_attempt_at = None
-
-        await session.flush()
-        updated = await self.select_by_id(session, write.entity_id)
-        if updated is None:  # pragma: no cover
-            raise ValueError(
-                f"Can't find NoteContent for entity {write.entity_id} after accept_write"
+        # Optimistic concurrency guard. write.db_version was planned as
+        # prior_db_version + 1 from a plain read earlier in this transaction, so a
+        # concurrent accepted write could have advanced the row in between. A
+        # conditional UPDATE guarded on the expected prior version is the portable
+        # compare-and-set (with_for_update is a no-op on SQLite; a rowcount check
+        # works on both SQLite and Postgres): if it matches zero rows the write
+        # lost the race and we refuse instead of clobbering the winner. Only guard
+        # updates that were planned against a prior version (db_version > 1);
+        # db_version == 1 is only reached with no prior row, handled above.
+        update_stmt = update(NoteContent).where(NoteContent.entity_id == write.entity_id)
+        if write.db_version > 1:
+            update_stmt = update_stmt.where(NoteContent.db_version == write.db_version - 1)
+        # synchronize_session="evaluate" mirrors the persisted values back onto the
+        # identity-mapped row from the Python .values() (no DB round-trip), which
+        # keeps the returned datetimes tz-aware — SQLite would hand back naive
+        # datetimes on a refresh — and matches the prior ORM-setattr behavior.
+        result = await session.execute(
+            update_stmt.values(
+                project_id=note_content.project_id,
+                external_id=note_content.external_id,
+                file_path=note_content.file_path,
+                markdown_content=write.markdown_content,
+                db_version=write.db_version,
+                db_checksum=write.db_checksum,
+                file_write_status="pending",
+                last_source=write.last_source,
+                updated_at=write.updated_at,
+                last_materialization_error=None,
+                last_materialization_attempt_at=None,
+            ).execution_options(synchronize_session="evaluate")
+        )
+        if write.db_version > 1 and result.rowcount == 0:
+            raise NoteContentVersionConflict(
+                f"note_content for entity {write.entity_id} changed concurrently: "
+                f"expected db_version {write.db_version - 1}"
             )
-        return updated
+
+        return existing
 
     async def update_state_fields(
         self, session: AsyncSession, entity_id: int, **updates: Any

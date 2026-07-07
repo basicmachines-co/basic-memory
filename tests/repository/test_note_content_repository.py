@@ -10,6 +10,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
+    NoteContentVersionConflict,
 )
 from basic_memory.repository.project_repository import ProjectRepository
 
@@ -146,6 +147,51 @@ async def test_accept_write_updates_snapshot_without_forgetting_file_state(
     assert updated.last_materialization_attempt_at is None
     assert updated.file_version == 3
     assert updated.file_checksum == "file-checksum-3"
+
+
+@pytest.mark.asyncio
+async def test_accept_write_rejects_stale_db_version(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+):
+    """A write planned against a stale prior db_version loses the optimistic race."""
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.create(session, build_note_content_payload(sample_entity.id))  # v1
+
+        # First writer advances v1 -> v2.
+        await repository.accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=sample_entity.id,
+                markdown_content="# winner v2",
+                db_version=2,
+                db_checksum="db-checksum-winner",
+                last_source="api",
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+        # A second writer also planned v2 from the now-stale v1 read; the
+        # compare-and-set must refuse it instead of clobbering the winner.
+        with pytest.raises(NoteContentVersionConflict):
+            await repository.accept_write(
+                session,
+                AcceptedNoteContentWrite(
+                    entity_id=sample_entity.id,
+                    markdown_content="# stale loser v2",
+                    db_version=2,
+                    db_checksum="db-checksum-loser",
+                    last_source="mcp",
+                    updated_at=datetime.now(timezone.utc),
+                ),
+            )
+
+        survivor = await repository.get_by_entity_id(session, sample_entity.id)
+        assert survivor is not None
+        assert survivor.markdown_content == "# winner v2"
+        assert survivor.db_checksum == "db-checksum-winner"
 
 
 @pytest.mark.asyncio

@@ -28,7 +28,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     prepare_accepted_note_replace,
 )
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.repository import NoteContentRepository
+from basic_memory.repository import NoteContentRepository, NoteContentVersionConflict
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.entity_repository import EntityRepository
@@ -331,6 +331,14 @@ def accepted_note_integrity_rejection(error: IntegrityError) -> AcceptedNoteMuta
     )
 
 
+def concurrent_write_rejection() -> AcceptedNoteMutationRejection:
+    """Rejection for an accepted write that lost an optimistic-concurrency race."""
+    return AcceptedNoteMutationRejection(
+        kind=AcceptedNoteMutationRejectKind.conflict,
+        detail="The note was modified concurrently. Reload the latest content and retry.",
+    )
+
+
 async def run_accepted_note_create(
     session: AsyncSession,
     *,
@@ -355,6 +363,8 @@ async def run_accepted_note_update(
         return await _run_accepted_note_update(session, request=request, dependencies=dependencies)
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
+    except NoteContentVersionConflict as error:
+        raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
 
 
 async def run_accepted_note_edit(
@@ -368,6 +378,8 @@ async def run_accepted_note_edit(
         return await _run_accepted_note_edit(session, request=request, dependencies=dependencies)
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
+    except NoteContentVersionConflict as error:
+        raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
 
 
 async def run_accepted_note_move(
@@ -381,6 +393,8 @@ async def run_accepted_note_move(
         return await _run_accepted_note_move(session, request=request, dependencies=dependencies)
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
+    except NoteContentVersionConflict as error:
+        raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
 
 
 async def run_accepted_note_delete(
@@ -557,6 +571,28 @@ async def _run_accepted_note_update(
         )
         current_note_content = None
     else:
+        # A PUT replacement can only target a markdown note. A watcher-indexed binary
+        # entity has no markdown note_content to replace, so reject with 415 like the
+        # edit/move paths instead of a permanent-looking 409 content-backfill retry.
+        if not runtime_content_type_is_markdown(entity):
+            reject_accepted_note_mutation(
+                AcceptedNoteMutationRejectKind.unsupported_media_type,
+                "Only markdown note mutations are supported by the note-content path.",
+            )
+        # Local source-of-truth guard: a PUT that renames onto a destination file that
+        # exists on disk but is not yet indexed would overwrite/lose that unindexed
+        # write. Mirror the create/move storage check before committing DB/search to
+        # the new path. Cloud is DB-first (flag is False) and reconciles storage later.
+        if dependencies.verify_storage_absent_on_create:
+            try:
+                await preparer.verify_move_destination_absent(
+                    source_file_path=entity.file_path,
+                    destination_file_path=request.data.file_path,
+                )
+            except EntityAlreadyExistsError as error:
+                reject_accepted_note_mutation(
+                    AcceptedNoteMutationRejectKind.conflict, str(error)
+                )
         current_note_content = await load_required_accepted_note_content(
             session,
             project_id=project.id,
