@@ -87,6 +87,8 @@ class EmbeddingStatus(BaseModel):
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_dimensions: Optional[int] = None
+    embedding_document_prefix_set: bool = False
+    embedding_query_prefix_set: bool = False
 
     # Counts
     total_indexed_entities: int = 0

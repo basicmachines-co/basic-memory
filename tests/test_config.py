@@ -1192,6 +1192,21 @@ class TestSemanticSearchConfig:
         config = BasicMemoryConfig(semantic_embedding_forward_dimensions=True)
         assert config.semantic_embedding_forward_dimensions is True
 
+    def test_semantic_embedding_prefixes_default_to_none(self):
+        """Literal embedding text prefixes should be disabled by default."""
+        config = BasicMemoryConfig()
+        assert config.semantic_embedding_document_prefix is None
+        assert config.semantic_embedding_query_prefix is None
+
+    def test_semantic_embedding_prefixes_can_be_set(self):
+        """Document and query embedding prefixes should be stored independently."""
+        config = BasicMemoryConfig(
+            semantic_embedding_document_prefix="title: none | text: ",
+            semantic_embedding_query_prefix="task: search result | query: ",
+        )
+        assert config.semantic_embedding_document_prefix == "title: none | text: "
+        assert config.semantic_embedding_query_prefix == "task: search result | query: "
+
     def test_semantic_postgres_prepare_concurrency_defaults_to_4(self):
         """Postgres prepare concurrency should default to a conservative window of 4."""
         config = BasicMemoryConfig()

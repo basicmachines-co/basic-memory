@@ -50,6 +50,8 @@ All options can be set in config or as environment variables.
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | Sends `dimensions` to LiteLLM only when supported. Auto is enabled for `text-embedding-3` model strings. |
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto | LiteLLM `input_type` for indexed notes/passages. |
 | `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto | LiteLLM `input_type` for search queries. |
+| `semantic_embedding_document_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_PREFIX` | Unset | Literal text prefix prepended to indexed document chunks before embedding. |
+| `semantic_embedding_query_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX` | Unset | Literal text prefix prepended to search queries before embedding. |
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of text chunks per provider request. |
 | `semantic_embedding_request_concurrency` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_REQUEST_CONCURRENCY` | `4` | Maximum concurrent LiteLLM embedding requests. |
 | `semantic_embedding_sync_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_SYNC_BATCH_SIZE` | `2` | Number of prepared vector jobs flushed through the sync pipeline together. |
@@ -124,9 +126,17 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE=passage
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE=query
 ```
 
-Changing provider, model, dimensions, dimension-forwarding, or document/query
-roles changes Basic Memory's stored vector identity. Rebuild embeddings after
-any of those changes:
+`input_type` is an API parameter. For models that require role text in the
+actual input string, configure literal prefixes instead or in addition:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_PREFIX="title: none | text: "
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX="task: search result | query: "
+```
+
+Changing provider, model, dimensions, dimension-forwarding, document/query roles,
+or prefixes changes Basic Memory's stored vector identity. Rebuild embeddings
+after any of those changes:
 
 ```bash
 bm reindex --embeddings

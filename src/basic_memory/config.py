@@ -308,6 +308,20 @@ class BasicMemoryConfig(BaseSettings):
             "Use with asymmetric embedding models such as Cohere or NVIDIA retrieval models."
         ),
     )
+    semantic_embedding_document_prefix: str | None = Field(
+        default=None,
+        description=(
+            "Optional literal text prefix prepended to indexed document chunks before "
+            "embedding. Use with prefix-sensitive asymmetric embedding models."
+        ),
+    )
+    semantic_embedding_query_prefix: str | None = Field(
+        default=None,
+        description=(
+            "Optional literal text prefix prepended to search queries before embedding. "
+            "Use with prefix-sensitive asymmetric embedding models."
+        ),
+    )
     semantic_embedding_sync_batch_size: int = Field(
         default=2,
         description="Batch size for vector sync orchestration flushes.",

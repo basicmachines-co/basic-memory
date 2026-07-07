@@ -11,7 +11,9 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -104,7 +106,7 @@ def _relation_row(
 
 def _enable_semantic(
     search_repository: SQLiteSearchRepository,
-    embedding_provider: StubEmbeddingProvider | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> None:
     try:
         import sqlite_vec  # noqa: F401
@@ -322,6 +324,20 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
     assert model_changed_result.chunks_skipped == 0
     assert model_changed_result.embedding_jobs_total == model_changed_result.chunks_total
 
+    _enable_semantic(
+        search_repository,
+        PrefixingEmbeddingProvider(
+            StubEmbeddingProviderV2(),
+            document_prefix="doc: ",
+            query_prefix="query: ",
+        ),
+    )
+    prefix_changed_result = await search_repository.sync_entity_vectors_batch([111])
+    assert prefix_changed_result.entities_synced == 1
+    assert prefix_changed_result.entities_skipped == 0
+    assert prefix_changed_result.chunks_skipped == 0
+    assert prefix_changed_result.embedding_jobs_total == prefix_changed_result.chunks_total
+
 
 def test_sqlite_embedding_model_key_includes_litellm_role_settings():
     """LiteLLM role changes should invalidate previously embedded document chunks."""
@@ -362,6 +378,25 @@ def test_sqlite_embedding_model_key_ignores_litellm_api_base():
     assert default_endpoint_key == custom_endpoint_key
     assert "api_base" not in custom_endpoint_key
     assert "token@example.test" not in custom_endpoint_key
+
+
+def test_sqlite_embedding_model_key_includes_literal_prefixes():
+    """Literal prefixes change vector semantics and must invalidate stored chunks."""
+    repo = _make_sqlite_repo_for_unit_tests()
+    repo._embedding_provider = PrefixingEmbeddingProvider(
+        StubEmbeddingProvider(),
+        document_prefix="title: none | text: ",
+        query_prefix="task: search result | query: ",
+    )
+
+    key = repo._embedding_model_key()
+
+    assert key == (
+        "PrefixingEmbeddingProvider:"
+        "StubEmbeddingProvider:stub:4:"
+        'document_prefix="title: none | text: ":'
+        'query_prefix="task: search result | query: "'
+    )
 
 
 @pytest.mark.asyncio

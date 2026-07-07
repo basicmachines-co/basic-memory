@@ -8,12 +8,16 @@ from loguru import logger
 
 from basic_memory.config import BasicMemoryConfig, default_fastembed_cache_dir
 from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.prefixing_provider import (
+    PrefixingEmbeddingProvider,
+    normalize_embedding_prefix,
+)
 
 # Cache key fields are limited to values that change the *identity* of the loaded
 # provider instance (provider, model_name, explicit LiteLLM endpoint/key routing,
-# dimensions, semantic role/input-type settings, batch/request knobs, and the
-# resolved cache dir). Thread/parallel knobs are deliberately excluded - they
-# change ONNX *execution* only, not the loaded weights. Including them caused #872: in a
+# dimensions, semantic role/input-type/prefix settings, batch/request knobs,
+# and the resolved cache dir). Thread/parallel knobs are deliberately excluded -
+# they change ONNX *execution* only, not the loaded weights. Including them caused #872: in a
 # container/cgroup the CPU-derived thread count can drift between calls, producing
 # a fresh cache key and reloading the ~2.3GB model into a CPU arena that never
 # returns memory to the OS.
@@ -26,6 +30,8 @@ type ProviderCacheKey = tuple[
     bool | None,
     int,
     int,
+    str | None,
+    str | None,
     str | None,
     str | None,
     str,
@@ -124,6 +130,8 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         app_config.semantic_embedding_request_concurrency,
         app_config.semantic_embedding_document_input_type,
         app_config.semantic_embedding_query_input_type,
+        normalize_embedding_prefix(app_config.semantic_embedding_document_prefix),
+        normalize_embedding_prefix(app_config.semantic_embedding_query_prefix),
         _resolve_cache_dir(app_config),
     )
 
@@ -224,6 +232,15 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         )
     else:
         raise ValueError(f"Unsupported semantic embedding provider: {provider_name}")
+
+    document_prefix = normalize_embedding_prefix(app_config.semantic_embedding_document_prefix)
+    query_prefix = normalize_embedding_prefix(app_config.semantic_embedding_query_prefix)
+    if document_prefix is not None or query_prefix is not None:
+        provider = PrefixingEmbeddingProvider(
+            provider,
+            document_prefix=document_prefix,
+            query_prefix=query_prefix,
+        )
 
     with _EMBEDDING_PROVIDER_CACHE_LOCK:
         if cached_provider := _EMBEDDING_PROVIDER_CACHE.get(cache_key):

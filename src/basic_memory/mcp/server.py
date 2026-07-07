@@ -83,7 +83,9 @@ async def lifespan(app: FastMCP):
                 f"Semantic search: provider={config.semantic_embedding_provider}, "
                 f"model={config.semantic_embedding_model}, "
                 f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
-                f"batch_size={config.semantic_embedding_batch_size}"
+                f"batch_size={config.semantic_embedding_batch_size}, "
+                f"document_prefix_set={bool(config.semantic_embedding_document_prefix)}, "
+                f"query_prefix_set={bool(config.semantic_embedding_query_prefix)}"
             )
 
         # Log configured projects with their routing mode

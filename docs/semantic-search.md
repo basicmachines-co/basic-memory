@@ -108,6 +108,8 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
 | `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for search queries. |
+| `semantic_embedding_document_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_PREFIX` | Unset | Optional literal text prefix prepended to indexed document chunks before embedding. |
+| `semantic_embedding_query_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX` | Unset | Optional literal text prefix prepended to search queries before embedding. |
 | `semantic_vector_k` | `BASIC_MEMORY_SEMANTIC_VECTOR_K` | `100` | Candidate count for vector nearest-neighbour retrieval. Higher values improve recall at the cost of latency. |
 
 ## Embedding Providers
@@ -189,6 +191,18 @@ For other asymmetric LiteLLM models, set the input types explicitly:
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE=passage
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE=query
 ```
+
+Some asymmetric models require literal role text in the input string rather
+than, or in addition to, an API `input_type` parameter:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_PREFIX="title: none | text: "
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX="task: search result | query: "
+```
+
+The document prefix is prepended to indexed chunks during sync/reindex. The
+query prefix is prepended to search text for vector and hybrid retrieval.
+Prefixes work with `fastembed`, `openai`, and `litellm` providers.
 
 #### Live LiteLLM Validation
 
@@ -334,6 +348,7 @@ bm reindex -p my-project
 - **Model change**: After changing `semantic_embedding_model`
 - **Dimension change**: After changing `semantic_embedding_dimensions`
 - **LiteLLM role change**: After changing `semantic_embedding_document_input_type` or `semantic_embedding_query_input_type`
+- **Literal prefix change**: After changing `semantic_embedding_document_prefix` or `semantic_embedding_query_prefix`
 
 The reindex command shows progress with embedded/skipped/error counts:
 

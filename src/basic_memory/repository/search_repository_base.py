@@ -693,15 +693,16 @@ class SearchRepositoryBase(ABC):
         assert self._embedding_provider is not None
         provider = self._embedding_provider
 
-        provider_identity = f"{provider.model_name}:{provider.dimensions}"
-        from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
-
-        if isinstance(provider, LiteLLMEmbeddingProvider):
-            # Trigger: LiteLLM can change request semantics without changing model/dimensions.
-            # Why: asymmetric providers use role-specific document/query params, and
-            # dimension forwarding changes provider-side output-size behavior.
+        provider_identity_key = getattr(provider, "identity_key", None)
+        if callable(provider_identity_key):
+            # Trigger: providers can change request/input semantics without changing
+            # model/dimensions.
+            # Why: asymmetric providers may use role-specific API params or literal
+            # text-prefix transforms that change stored vector meaning.
             # Outcome: reindex treats those semantic config changes as stale vectors.
-            provider_identity = provider.identity_key()
+            provider_identity = provider_identity_key()
+        else:
+            provider_identity = f"{provider.model_name}:{provider.dimensions}"
 
         return f"{type(provider).__name__}:{provider_identity}"
 

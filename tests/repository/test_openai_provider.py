@@ -15,6 +15,7 @@ from basic_memory.repository.embedding_provider_factory import (
 )
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
+from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
@@ -545,6 +546,69 @@ def test_embedding_provider_factory_creates_new_provider_for_different_cache_key
     provider_b = create_embedding_provider(config_b)
 
     assert provider_a is not provider_b
+
+
+def test_embedding_provider_factory_wraps_provider_when_prefixes_are_configured():
+    """Factory should apply literal prefixes independently of provider backend."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_document_prefix="title: none | text: ",
+        semantic_embedding_query_prefix="task: search result | query: ",
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, PrefixingEmbeddingProvider)
+    assert isinstance(provider.provider, FastEmbedEmbeddingProvider)
+    assert provider.document_prefix == "title: none | text: "
+    assert provider.query_prefix == "task: search result | query: "
+
+
+def test_embedding_provider_factory_reuses_provider_for_same_prefixes():
+    """Prefix fields participate in the process-local provider cache key."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_document_prefix="doc: ",
+        semantic_embedding_query_prefix="query: ",
+    )
+
+    provider_a = create_embedding_provider(config)
+    provider_b = create_embedding_provider(config)
+
+    assert provider_a is provider_b
+
+
+def test_embedding_provider_factory_separates_cache_for_different_prefixes():
+    """Changing literal prefixes should not reuse a stale cached provider."""
+    shared_config = {
+        "env": "test",
+        "projects": {"test-project": "/tmp/basic-memory-test"},
+        "default_project": "test-project",
+        "semantic_search_enabled": True,
+        "semantic_embedding_provider": "fastembed",
+        "semantic_embedding_query_prefix": "query: ",
+    }
+    first_config = BasicMemoryConfig(
+        **shared_config,
+        semantic_embedding_document_prefix="doc: ",
+    )
+    second_config = BasicMemoryConfig(
+        **shared_config,
+        semantic_embedding_document_prefix="document: ",
+    )
+
+    first_provider = create_embedding_provider(first_config)
+    second_provider = create_embedding_provider(second_config)
+
+    assert first_provider is not second_provider
 
 
 def test_embedding_provider_factory_reuses_provider_when_only_thread_knobs_differ():
