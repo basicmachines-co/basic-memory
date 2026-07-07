@@ -121,6 +121,9 @@ def test_plan_accepted_note_content_write_advances_and_cleans_moved_materialized
             entity_id=42,
             file_path="notes/old.md",
             file_checksum="old-file-checksum",
+            # Accepted destination rides along for the local case-only-rename
+            # skip guard (P0).
+            live_file_path="notes/new.md",
         ),
     )
 

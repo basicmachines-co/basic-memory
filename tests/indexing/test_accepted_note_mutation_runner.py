@@ -36,6 +36,7 @@ from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
+from basic_memory.services.exceptions import EntityAlreadyExistsError
 
 
 _NOW = datetime(2026, 6, 20, 14, 30, tzinfo=UTC)
@@ -93,8 +94,10 @@ class _CreatePreparer:
         prepared: _PreparedWrite,
         *,
         prepared_move: _PreparedMove | None = None,
+        move_destination_error: EntityAlreadyExistsError | None = None,
     ) -> None:
         self.prepared = prepared
+        self.move_destination_error = move_destination_error
         self.prepared_move = prepared_move or _PreparedMove(
             file_path=Path(prepared.entity_fields.file_path),
             markdown_content=prepared.markdown_content,
@@ -172,6 +175,8 @@ class _CreatePreparer:
         source_file_path: str,
         destination_file_path: str,
     ) -> None:
+        if self.move_destination_error is not None:
+            raise self.move_destination_error
         return None
 
 
@@ -408,7 +413,12 @@ def _prepared_move() -> _PreparedMove:
     )
 
 
-def _entity(*, file_path: str = "notes/pending.md", permalink: str | None = "accepted") -> Entity:
+def _entity(
+    *,
+    file_path: str = "notes/pending.md",
+    permalink: str | None = "accepted",
+    content_type: str = "text/markdown",
+) -> Entity:
     return Entity(
         id=42,
         external_id="note-123",
@@ -416,7 +426,7 @@ def _entity(*, file_path: str = "notes/pending.md", permalink: str | None = "acc
         title="Pending",
         note_type="note",
         entity_metadata=None,
-        content_type="text/markdown",
+        content_type=content_type,
         permalink=permalink,
         file_path=file_path,
         checksum=None,
@@ -451,6 +461,7 @@ def _dependencies(
     note_content_accept_repository: _NoteContentAcceptRepository,
     search_repository: _SearchRepository,
     move_policy: AcceptedNoteMutationMovePolicy | None = None,
+    verify_storage_absent_on_create: bool = False,
 ) -> AcceptedNoteMutationDependencies:
     return AcceptedNoteMutationDependencies(
         project_repository=project_repository,
@@ -470,6 +481,7 @@ def _dependencies(
             disable_permalinks=False,
             update_permalinks_on_move=False,
         ),
+        verify_storage_absent_on_create=verify_storage_absent_on_create,
     )
 
 
@@ -582,6 +594,109 @@ async def test_run_accepted_note_update_replaces_existing_note_content() -> None
     assert change.payload.title == "Replacement"
     assert change.materialization is not None
     assert change.materialization.db_version == 2
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_rejects_rename_onto_unindexed_storage() -> None:
+    # A PUT that renames the entity onto a path occupied by an on-disk but unindexed
+    # file must reject with 409, mirroring the create/move storage guard, rather than
+    # silently overwriting/losing that write.
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/original.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(
+        prepared,
+        move_destination_error=EntityAlreadyExistsError(
+            "file already exists at destination path: notes/Accepted.md"
+        ),
+    )
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_update(
+            cast(AsyncSession, session),
+            request=AcceptedNoteUpdateMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="api",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+                verify_storage_absent_on_create=True,
+            ),
+        )
+
+    assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.conflict
+    # The write was rejected before any note_content/search persistence ran.
+    assert note_content_accept_repository.calls == []
+    assert search_repository.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_rejects_non_markdown_existing_entity() -> None:
+    # PUTting markdown at a watcher-indexed binary entity has no markdown note_content
+    # to replace; the runner must return 415 (unsupported media type), not a
+    # permanent-looking 409 content-backfill retry.
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/image.png", content_type="image/png")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_update(
+            cast(AsyncSession, session),
+            request=AcceptedNoteUpdateMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="api",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+            ),
+        )
+
+    assert (
+        exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.unsupported_media_type
+    )
+    assert exc_info.value.rejection.kind.http_status_code == 415
+    # Rejected before any note_content load or persistence.
+    assert note_content_lookup_repository.calls == []
+    assert note_content_accept_repository.calls == []
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,9 @@ def test_plan_previous_materialized_note_file_delete_uses_note_content_file_chec
         entity_id=42,
         file_path="notes/old.md",
         file_checksum="12345",
+        # The accepted destination rides along so the local delete adapter can
+        # skip a case-only rename that aliases old and new on disk (P0 guard).
+        live_file_path="notes/new.md",
     )
 
 

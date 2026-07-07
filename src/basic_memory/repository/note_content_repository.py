@@ -3,9 +3,10 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, cast
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models import Entity, NoteContent
@@ -235,20 +236,23 @@ class NoteContentRepository(Repository[NoteContent]):
         # identity-mapped row from the Python .values() (no DB round-trip), which
         # keeps the returned datetimes tz-aware — SQLite would hand back naive
         # datetimes on a refresh — and matches the prior ORM-setattr behavior.
-        result = await session.execute(
-            update_stmt.values(
-                project_id=note_content.project_id,
-                external_id=note_content.external_id,
-                file_path=note_content.file_path,
-                markdown_content=write.markdown_content,
-                db_version=write.db_version,
-                db_checksum=write.db_checksum,
-                file_write_status="pending",
-                last_source=write.last_source,
-                updated_at=write.updated_at,
-                last_materialization_error=None,
-                last_materialization_attempt_at=None,
-            ).execution_options(synchronize_session="evaluate")
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                update_stmt.values(
+                    project_id=note_content.project_id,
+                    external_id=note_content.external_id,
+                    file_path=note_content.file_path,
+                    markdown_content=write.markdown_content,
+                    db_version=write.db_version,
+                    db_checksum=write.db_checksum,
+                    file_write_status="pending",
+                    last_source=write.last_source,
+                    updated_at=write.updated_at,
+                    last_materialization_error=None,
+                    last_materialization_attempt_at=None,
+                ).execution_options(synchronize_session="evaluate")
+            ),
         )
         if write.db_version > 1 and result.rowcount == 0:
             raise NoteContentVersionConflict(

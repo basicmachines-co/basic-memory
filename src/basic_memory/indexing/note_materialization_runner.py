@@ -56,9 +56,7 @@ from basic_memory.runtime.storage import (
     RuntimeFileChecksum,
     RuntimeFilePath,
 )
-from basic_memory.file_utils import FileError
 from basic_memory.models import Entity, NoteContent
-from basic_memory.services.exceptions import FileOperationError
 
 type NoteMaterializationPreflightOutcome = (
     RuntimePreparedNoteWrite | RuntimeNoteMaterializationResult

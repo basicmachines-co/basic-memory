@@ -1680,6 +1680,9 @@ class TestRuntimeContracts:
             entity_id=42,
             file_path="notes/old.md",
             file_checksum="old-checksum",
+            # Accepted destination rides along for the local case-only-rename
+            # skip guard (P0).
+            live_file_path="notes/new.md",
         )
 
     def test_plan_previous_note_file_delete_skips_unmoved_or_unmaterialized_notes(self):
