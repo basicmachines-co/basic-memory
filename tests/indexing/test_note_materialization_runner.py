@@ -201,7 +201,9 @@ class RecordingNoteContentRepository:
         **updates: object,
     ) -> NoteContent | None:
         self.calls.append((session, entity_id, updates))
-        return None
+        # Return a non-None row to signal the update landed; apply_note_content_
+        # update_plan reads this as "applied" (None means the version-guard lost).
+        return NoteContent(entity_id=entity_id)
 
     async def get_by_entity_id(
         self,
@@ -542,6 +544,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
             cast(AsyncSession, session),
             42,
             {
+                "expected_db_version": 4,
                 "file_version": 4,
                 "file_checksum": "new-file-sum",
                 "file_write_status": "synced",
@@ -591,6 +594,7 @@ async def test_repository_note_materialization_status_publisher_records_conflict
             cast(AsyncSession, session),
             42,
             {
+                "expected_db_version": None,
                 "file_write_status": "external_change_detected",
                 "last_materialization_error": "Refusing to overwrite unexpected file",
                 "last_materialization_attempt_at": attempted_at,

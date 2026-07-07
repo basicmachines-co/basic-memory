@@ -492,6 +492,13 @@ class RepositoryNoteMaterializationPublisher:
             if note_content is None:
                 return publish_plan.result
 
+            # The publish plan was computed from note_content read above. Under the
+            # default Noop session lock two materializations for the same entity run
+            # concurrently, so guard every write on this db_version: if a newer
+            # accepted write advanced the row between our read and our write, this
+            # (now older) materialization must not revert the newer file_version.
+            expected_db_version = int(note_content.db_version)
+
             if publish_plan.action is NoteMaterializationPublishAction.stale_file_path:
                 return publish_plan.result
 
@@ -501,6 +508,7 @@ class RepositoryNoteMaterializationPublisher:
                     session,
                     request.entity_id,
                     publish_plan.require_note_content_update(),
+                    expected_db_version=expected_db_version,
                 )
                 return publish_plan.result
 
@@ -519,12 +527,27 @@ class RepositoryNoteMaterializationPublisher:
                     file_checksum=written_file.file_checksum,
                 )
 
-            await apply_note_content_update_plan(
+            applied = await apply_note_content_update_plan(
                 self.repositories.note_content_repository(request.project_id),
                 session,
                 request.entity_id,
                 publish_plan.require_note_content_update(),
+                expected_db_version=expected_db_version,
             )
+            if not applied:
+                # A newer accepted write (and its own materialization) superseded
+                # this one between our read and write; skip the stale file_version
+                # publish and the entity metadata update rather than reverting them.
+                return RuntimeNoteMaterializationResult(
+                    entity_id=request.entity_id,
+                    status=RuntimeNoteMaterializationStatus.stale,
+                    reason=(
+                        "file written but a newer accepted note superseded it "
+                        f"before publish: {request.entity_id}"
+                    ),
+                    file_path=written_file.file_path,
+                    file_checksum=written_file.file_checksum,
+                )
             entity.updated_at = written_file.file_updated_at
             entity.mtime = written_file.file_updated_at.timestamp()
             entity.size = len(prepared_write.markdown_content.encode("utf-8"))

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from typing import Protocol, assert_never
 
+from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -44,9 +45,11 @@ class NoteContentStateUpdateStore(Protocol):
         self,
         session: AsyncSession,
         entity_id: int,
+        *,
+        expected_db_version: int | None = None,
         **updates: object,
     ) -> NoteContent | None:
-        """Update mutable note_content state fields."""
+        """Update mutable note_content state fields, optionally version-guarded."""
 
 
 class NoteContentStore(NoteContentStateUpdateStore, Protocol):
@@ -221,13 +224,22 @@ async def apply_note_content_update_plan(
     session: AsyncSession,
     entity_id: int,
     plan: NoteContentUpdatePlan,
-) -> None:
-    """Apply a non-bootstrap reconciliation decision to the note_content repository."""
+    *,
+    expected_db_version: int | None = None,
+) -> bool:
+    """Apply a non-bootstrap reconciliation decision to the note_content repository.
+
+    The plan was computed from note_content read at ``expected_db_version``; the
+    version-guarded write applies it only while the row is still at that version.
+    Returns False when a concurrent accepted write advanced the row first, so the
+    stale plan is skipped rather than reverting the newer content.
+    """
     match plan:
         case NoteContentFileSynced():
-            await repository.update_state_fields(
+            updated = await repository.update_state_fields(
                 session,
                 entity_id,
+                expected_db_version=expected_db_version,
                 markdown_content=plan.markdown_content,
                 file_version=plan.file_version,
                 file_checksum=plan.file_checksum,
@@ -237,17 +249,19 @@ async def apply_note_content_update_plan(
                 last_materialization_attempt_at=plan.last_materialization_attempt_at,
             )
         case NoteContentFileObserved():
-            await repository.update_state_fields(
+            updated = await repository.update_state_fields(
                 session,
                 entity_id,
+                expected_db_version=expected_db_version,
                 file_version=plan.file_version,
                 file_checksum=plan.file_checksum,
                 file_updated_at=plan.file_updated_at,
             )
         case NoteContentMaterializedCurrent() | NoteContentMaterializedStale():
-            await repository.update_state_fields(
+            updated = await repository.update_state_fields(
                 session,
                 entity_id,
+                expected_db_version=expected_db_version,
                 file_version=plan.file_version,
                 file_checksum=plan.file_checksum,
                 file_write_status=plan.file_write_status,
@@ -263,11 +277,14 @@ async def apply_note_content_update_plan(
             }
             if plan.file_checksum is not None:
                 updates["file_checksum"] = plan.file_checksum
-            await repository.update_state_fields(session, entity_id, **updates)
+            updated = await repository.update_state_fields(
+                session, entity_id, expected_db_version=expected_db_version, **updates
+            )
         case NoteContentPromoted():
-            await repository.update_state_fields(
+            updated = await repository.update_state_fields(
                 session,
                 entity_id,
+                expected_db_version=expected_db_version,
                 markdown_content=plan.markdown_content,
                 db_version=plan.db_version,
                 db_checksum=plan.db_checksum,
@@ -282,6 +299,8 @@ async def apply_note_content_update_plan(
             )
         case _:
             assert_never(plan)
+
+    return updated is not None
 
 
 class NoteContentReconciler:
@@ -342,6 +361,10 @@ class NoteContentReconciler:
                     if note_content is None:
                         raise
 
+            # The plan is computed from the row read above; guard the write on
+            # that db_version so a concurrent accepted API mutation that advanced
+            # the row between our read and write is not silently reverted.
+            expected_db_version = int(note_content.db_version)
             plan = plan_note_content_reconciliation(
                 note_content_state_from_model(note_content),
                 observed,
@@ -349,12 +372,20 @@ class NoteContentReconciler:
             if isinstance(plan, NoteContentBootstrap):
                 raise RuntimeError("Existing note_content cannot bootstrap reconciliation")
 
-            await apply_note_content_update_plan(
+            applied = await apply_note_content_update_plan(
                 self._note_content_repository,
                 session,
                 entity.id,
                 plan,
+                expected_db_version=expected_db_version,
             )
+            if not applied:
+                logger.debug(
+                    "Skipped stale note_content reconcile: a concurrent accepted "
+                    "write advanced db_version {} for entity {}",
+                    expected_db_version,
+                    entity.id,
+                )
 
 
 async def reconcile_note_content_for_entity(

@@ -263,9 +263,22 @@ class NoteContentRepository(Repository[NoteContent]):
         return existing
 
     async def update_state_fields(
-        self, session: AsyncSession, entity_id: int, **updates: Any
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        *,
+        expected_db_version: int | None = None,
+        **updates: Any,
     ) -> Optional[NoteContent]:
-        """Update sync fields and re-align project_id, external_id, and file_path from entity."""
+        """Update sync fields and re-align project_id, external_id, and file_path from entity.
+
+        When ``expected_db_version`` is given the write is a compare-and-set: it
+        only applies while the row is still at that db_version, so a caller that
+        read state at version N (a reconciler, an out-of-order materialization)
+        cannot clobber an accepted API write that advanced the row to N+1 in
+        between. On a lost race it returns None — a benign skip, not a 409 —
+        because a fresh reconcile/materialization will converge the new state.
+        """
         invalid_fields = set(updates) - NOTE_CONTENT_MUTABLE_FIELDS
         if invalid_fields:
             invalid_list = ", ".join(sorted(invalid_fields))
@@ -274,6 +287,34 @@ class NoteContentRepository(Repository[NoteContent]):
         note_content = await self.select_by_id(session, entity_id)
         if note_content is None:
             return None
+
+        if expected_db_version is not None:
+            # Compare-and-set on db_version. Identity fields are read straight
+            # from the entity (rather than mutating the ORM row) so the whole
+            # write is the single conditional UPDATE whose rowcount decides the
+            # race, portably across SQLite and Postgres.
+            entity = await self._load_entity_identity(session, entity_id)
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(NoteContent)
+                    .where(NoteContent.entity_id == entity_id)
+                    .where(NoteContent.db_version == expected_db_version)
+                    .values(
+                        project_id=entity.project_id,
+                        external_id=entity.external_id,
+                        file_path=Path(entity.file_path).as_posix(),
+                        **updates,
+                    )
+                    .execution_options(synchronize_session=False)
+                ),
+            )
+            if result.rowcount == 0:
+                return None
+            # The Core UPDATE bypassed the ORM; refresh so the returned row
+            # reflects the values that actually landed.
+            await session.refresh(note_content)
+            return note_content
 
         await self._align_identity_fields(session, note_content)
         for field_name, value in updates.items():

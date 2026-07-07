@@ -132,6 +132,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
     repository.update_state_fields.assert_awaited_once_with(
         session,
         42,
+        expected_db_version=1,
         markdown_content=markdown_content,
         db_version=2,
         db_checksum=observed_checksum,
@@ -144,6 +145,53 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         last_materialization_error=None,
         last_materialization_attempt_at=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
+    """A concurrent accepted write (guard returns None) makes the reconcile a benign no-op."""
+    observed_at = datetime(2026, 4, 13, 15, 0, tzinfo=UTC)
+    markdown_content = "# Newly observed on disk\n"
+    stale_checksum = await file_utils.compute_checksum("# Older accepted content\n")
+    existing_note_content = SimpleNamespace(
+        db_version=3,
+        db_checksum=stale_checksum,
+        file_version=3,
+        file_checksum=stale_checksum,
+    )
+    repository = SimpleNamespace(
+        get_by_entity_id=AsyncMock(return_value=existing_note_content),
+        create=AsyncMock(),
+        # update_state_fields returns None: the db_version advanced under us.
+        update_state_fields=AsyncMock(return_value=None),
+    )
+    entity = cast(Entity, SimpleNamespace(id=42))
+    session = FakeSession()
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker: object):
+        yield session
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_content_reconciler.db.scoped_session",
+            fake_scoped_session,
+        )
+        # Must not raise even though the guarded write was skipped.
+        await NoteContentReconciler(
+            note_content_repository=cast(Any, repository),
+            session_maker=cast(Any, object()),
+        ).reconcile(
+            entity=entity,
+            markdown_content=markdown_content,
+            observed_at=observed_at,
+            source="file_indexer",
+        )
+
+    repository.create.assert_not_awaited()
+    assert repository.update_state_fields.await_count == 1
+    _, kwargs = repository.update_state_fields.await_args
+    assert kwargs["expected_db_version"] == 3
 
 
 @pytest.mark.asyncio
@@ -171,6 +219,7 @@ async def test_apply_note_content_update_plan_publishes_materialized_current_fil
     repository.update_state_fields.assert_awaited_once_with(
         session,
         42,
+        expected_db_version=None,
         file_version=4,
         file_checksum="written-file-checksum",
         file_write_status="synced",
@@ -202,6 +251,7 @@ async def test_apply_note_content_update_plan_marks_materialization_status() -> 
     repository.update_state_fields.assert_awaited_once_with(
         session,
         42,
+        expected_db_version=None,
         file_write_status="failed",
         last_materialization_error="write failed",
         last_materialization_attempt_at=attempted_at,

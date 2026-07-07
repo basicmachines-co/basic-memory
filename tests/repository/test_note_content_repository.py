@@ -393,6 +393,50 @@ async def test_update_state_fields_realigns_identity_with_entity(
 
 
 @pytest.mark.asyncio
+async def test_update_state_fields_version_guard_skips_stale_write(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+):
+    """A version-guarded update must not land once db_version has advanced past it."""
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.create(session, build_note_content_payload(sample_entity.id))  # v1
+
+        # An accepted write advances the row to db_version 2.
+        await repository.update_state_fields(
+            session, sample_entity.id, db_version=2, db_checksum="db-checksum-2"
+        )
+
+        # A reconciler/materialization that read v1 must lose the race and skip.
+        skipped = await repository.update_state_fields(
+            session,
+            sample_entity.id,
+            expected_db_version=1,
+            file_version=99,
+            file_checksum="stale-file",
+        )
+        assert skipped is None
+
+        # A writer guarded on the current version still applies.
+        applied = await repository.update_state_fields(
+            session,
+            sample_entity.id,
+            expected_db_version=2,
+            file_version=7,
+            file_checksum="fresh-file",
+        )
+        assert applied is not None
+        assert applied.file_version == 7
+
+        current = await repository.get_by_entity_id(session, sample_entity.id)
+        assert current is not None
+        assert current.db_version == 2
+        assert current.file_version == 7  # the stale file_version=99 never landed
+        assert current.file_checksum == "fresh-file"
+
+
+@pytest.mark.asyncio
 async def test_update_state_fields_rejects_invalid_fields(
     session_maker,
     test_project: Project,
