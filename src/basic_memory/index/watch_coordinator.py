@@ -101,6 +101,13 @@ class WatchCoordinator:
             await self._watch_task
         except asyncio.CancelledError:
             logger.info("Local event-index watcher task cancelled successfully")
+        except Exception as exc:
+            # Trigger: the background watcher already died and stored its crash on the task.
+            # Why: awaiting an already-failed task re-raises the stored exception here;
+            #      propagating it would abort the rest of shutdown (e.g. draining
+            #      202-materialization) before cleanup completes.
+            # Outcome: log the prior crash and continue clean shutdown.
+            logger.warning(f"Local event-index watcher had crashed before shutdown: {exc}")
 
         self._watch_task = None
         self._status = WatchStatus.STOPPED

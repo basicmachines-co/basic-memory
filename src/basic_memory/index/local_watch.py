@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from loguru import logger
 from watchfiles.main import FileChange
 
 from basic_memory.ignore_utils import should_ignore_path
@@ -144,9 +145,14 @@ def local_watch_project_change_batches(
             if not local_watch_path_is_under_project(project_root=project_root, path=file_path):
                 continue
 
+            # Trigger: the deepest project containing this path ignores it.
+            # Why: roots are matched deepest-first, so this is the owning project;
+            #      `continue` would fall through to a shallower parent that also
+            #      contains the path and mis-route the ignored child file to it.
+            # Outcome: drop the change entirely instead of routing it to the parent.
             ignore_patterns = ignore_patterns_by_project_root[project_root]
             if should_ignore_path(file_path, project_root, ignore_patterns):
-                continue
+                break
 
             routed_changes[index][1].append((change, path))
             break
@@ -293,8 +299,17 @@ async def run_local_watch_event_indexing(
     if isinstance(runtime, LocalWatchStorageEventIndexRuntime):
         move_processor = runtime.move_processor
         if move_processor is not None:
-            move_result = await move_processor.process_moves(events)
-            events = move_result.remaining_events
-            result = result.with_processed(move_result.processed_moves)
+            # Trigger: move detection/maintenance (run_move_batches) raised for this batch.
+            # Why: a move-processing failure must not drop the unrelated create/modify/delete
+            #      events queued in the same debounce window; move detection is an
+            #      optimization layered on top of ordinary event indexing.
+            # Outcome: log and fall through to index the full batch as-is.
+            try:
+                move_result = await move_processor.process_moves(events)
+            except Exception as exc:
+                logger.warning(f"Local watcher move processing failed, indexing batch as-is: {exc}")
+            else:
+                events = move_result.remaining_events
+                result = result.with_processed(move_result.processed_moves)
 
     return result.add(await run_storage_event_indexing(events, runtime))

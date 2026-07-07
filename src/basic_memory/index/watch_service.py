@@ -19,7 +19,7 @@ from watchfiles import awatch
 from watchfiles.main import Change, FileChange
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
+from basic_memory.config import BasicMemoryConfig, ConfigManager, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns
 from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.index.local_watch import (
@@ -169,7 +169,7 @@ class WatchService:
                     ignore_patterns_by_project_root=ignore_patterns_by_project_root,
                 )
                 change_handlers = [
-                    self.handle_changes(batch.project, set(batch.changes))
+                    self._handle_changes_isolated(batch.project, set(batch.changes))
                     for batch in project_changes
                 ]
                 await asyncio.gather(*change_handlers)
@@ -277,11 +277,32 @@ class WatchService:
         )
 
     def _project_is_configured(self, project: Project) -> bool:
-        """Return whether a project still exists in local config."""
-        return (
-            project.name in self.app_config.projects
-            or project.permalink in self.app_config.projects
-        )
+        """Return whether a project still exists in local config.
+
+        Re-reads current config (via ConfigManager's mtime-validated cache) rather
+        than the startup snapshot captured in self.app_config: a project deleted
+        after the watcher started must not be re-indexed by background sync.
+        """
+        current_projects = ConfigManager().config.projects
+        return project.name in current_projects or project.permalink in current_projects
+
+    async def _handle_changes_isolated(self, project: Project, changes: set[FileChange]) -> None:
+        """Process one project's batch, containing failures to that project.
+
+        Trigger: handle_changes raised (move maintenance, runtime build, indexing).
+        Why: change_handlers are awaited with asyncio.gather, which would otherwise
+             propagate a single project's error and drop every project's batch for
+             this watch cycle.
+        Outcome: log + record the error and continue so other projects still index.
+        """
+        try:
+            await self.handle_changes(project, changes)
+        except Exception as exc:
+            logger.exception(
+                f"Event-index batch failed for project {project.name}: {exc}",
+            )
+            self.state.record_error(str(exc))
+            await self.write_status()
 
     async def handle_changes(self, project: Project, changes: set[FileChange]) -> None:
         """Normalize one project's watchfiles batch and process it through indexing."""

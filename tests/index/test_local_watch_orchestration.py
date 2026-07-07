@@ -1,14 +1,22 @@
 """Tests for local watcher event-index orchestration."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
+import pytest
 from watchfiles import Change
 
+from basic_memory.index.local_moves import (
+    LocalWatchMoveProcessingResult,
+    LocalWatchMoveProcessor,
+)
 from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
     LocalWatchProjectChangeBatch,
+    LocalWatchStorageEventIndexRuntime,
     LocalWatchStorageEventSource,
     local_watch_filter_roots,
     local_watch_path_is_observable,
@@ -17,6 +25,7 @@ from basic_memory.index.local_watch import (
     plan_local_watch_event_index_status_update,
     run_local_watch_event_indexing,
 )
+from basic_memory.runtime.storage import StorageEventPayload
 from basic_memory.index.storage_events import (
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
@@ -112,6 +121,50 @@ async def test_run_local_watch_event_indexing_normalizes_changes_and_dispatches(
 
     assert result.as_dict() == {"processed": 1, "failed": 0, "skipped": 0}
     assert resolver.requested_paths == ["local-project"]
+    assert processor.calls == [("index", "notes/a.md")]
+
+
+@dataclass(slots=True)
+class RaisingMoveProcessor:
+    """Move processor that fails, standing in for a run_move_batches error."""
+
+    async def process_moves(
+        self,
+        events: Sequence[StorageEventPayload],
+    ) -> LocalWatchMoveProcessingResult:
+        raise RuntimeError("move maintenance boom")
+
+
+@pytest.mark.asyncio
+async def test_run_local_watch_event_indexing_contains_move_processing_failure(
+    tmp_path: Path,
+) -> None:
+    """A move-processing failure must not drop the rest of the batch's events."""
+    project_root = tmp_path / "local-project"
+    project_root.mkdir()
+    note_path = project_root / "notes" / "a.md"
+    note_path.parent.mkdir()
+    note_path.write_text("# A\n", encoding="utf-8")
+
+    resolver = RecordingProjectResolver(project_path="local-project")
+    processor = RecordingProcessor()
+
+    result = await run_local_watch_event_indexing(
+        LocalWatchEventIndexRequest(
+            project_root=project_root,
+            project_prefix="local-project",
+            changes=((Change.added, str(note_path)),),
+            event_time="2026-06-20T16:00:00Z",
+        ),
+        runtime=LocalWatchStorageEventIndexRuntime(
+            project_resolver=resolver,
+            operation_processor_factory=RecordingProcessorFactory(processor),
+            move_processor=cast(LocalWatchMoveProcessor, RaisingMoveProcessor()),
+        ),
+    )
+
+    # Move detection failed, but the create event was still indexed as-is.
+    assert result.as_dict() == {"processed": 1, "failed": 0, "skipped": 0}
     assert processor.calls == [("index", "notes/a.md")]
 
 
@@ -270,6 +323,32 @@ def test_local_watch_project_change_batches_route_nested_to_deepest(tmp_path: Pa
             changes=((Change.added, str(child_note)),),
         ),
     )
+
+
+def test_local_watch_project_change_batches_drop_ignored_nested_child_file(
+    tmp_path: Path,
+) -> None:
+    """When the deepest child project ignores a path, drop it instead of routing
+    it up to the parent that also contains it."""
+    parent_root = tmp_path / "parent"
+    child_root = parent_root / "child"
+    child_root.mkdir(parents=True)
+    ignored_note = child_root / "ignored.md"
+    ignored_note.write_text("# Ignored\n", encoding="utf-8")
+    parent = SimpleNamespace(path=str(parent_root))
+    child = SimpleNamespace(path=str(child_root))
+
+    batches = local_watch_project_change_batches(
+        projects=(parent, child),
+        changes=((Change.added, str(ignored_note)),),
+        ignore_patterns_by_project_root={
+            # Parent would happily index it, but the deepest owner (child) ignores it.
+            parent_root.resolve(): set(),
+            child_root.resolve(): {"ignored.md"},
+        },
+    )
+
+    assert batches == ()
 
 
 def test_local_watch_project_change_batches_apply_project_ignore_patterns(tmp_path: Path) -> None:
