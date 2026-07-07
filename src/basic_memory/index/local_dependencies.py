@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from loguru import logger
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -78,6 +79,10 @@ class LocalIndexEntityRepository(
     """Entity repository capabilities needed by local event/project indexing."""
 
     project_id: ProjectId | None
+
+    def select(self, *entities: Any) -> Select:
+        """Project-scoped SELECT builder used for stat-only watermark scans."""
+        ...
 
     async def get_by_file_path(
         self,

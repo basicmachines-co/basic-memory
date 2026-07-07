@@ -9,7 +9,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.indexing.batch_indexer import BatchIndexer, MarkdownOnlyIndexEntitySearchWriter
+from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.input_file_adaptation import (
     IndexContentTypeProvider,
     LoadedIndexFile,
@@ -140,7 +140,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     """Compose the default repository-backed batch index runtime.
 
     Hosted and local runtimes still own storage and session lifecycles. This
-    factory keeps the product indexing stack together: markdown-only search,
+    factory keeps the product indexing stack together: search indexing,
     frontmatter writes, batch indexing, and note_content reconciliation.
     """
     note_content_repository = NoteContentRepository(project_id=project_id)
@@ -148,12 +148,17 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
         note_content_repository=note_content_repository,
         session_maker=session_maker,
     )
+    # Pass the search writer straight through so the project-scan/batch path
+    # search-indexes non-markdown entities (images, PDFs, other files) exactly
+    # like the incremental watcher path (LocalMarkdownFileIndexer.index_regular_file).
+    # Wrapping it in a markdown-only filter here regressed full/startup scans:
+    # non-markdown files were persisted but never added to the search index.
     batch_indexer = BatchIndexer(
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
         relation_repository=relation_repository,
-        search_service=MarkdownOnlyIndexEntitySearchWriter(search_writer),
+        search_service=search_writer,
         file_writer=StorageIndexFileWriter(storage=frontmatter_storage),
         session_maker=session_maker,
     )

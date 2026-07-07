@@ -17,7 +17,11 @@ from basic_memory.indexing.change_planning import (
     plan_file_changes,
     storage_checksums_from_sources,
 )
-from basic_memory.indexing.change_detector import ChangeDetector, detect_project_file_changes
+from basic_memory.indexing.change_detector import (
+    MAX_QUERY_BIND_PARAMETERS,
+    ChangeDetector,
+    detect_project_file_changes,
+)
 from basic_memory.repository import EntityRepository
 
 
@@ -327,3 +331,93 @@ async def test_change_detector_adapts_entity_repository_with_explicit_sessions(
         moved_files={"old/moved.md": "new/moved.md"},
         unchanged_files=["unchanged.md"],
     )
+
+
+class BatchRecordingEntityRepository:
+    """Records each IN() batch so we can prove queries stay under the bind limit."""
+
+    def __init__(self) -> None:
+        self.path_batch_sizes: list[int] = []
+        self.checksum_batch_sizes: list[int] = []
+
+    async def get_by_file_paths(
+        self,
+        session: object,
+        paths: tuple[str, ...],
+    ) -> list[tuple[str, str | None]]:
+        self.path_batch_sizes.append(len(paths))
+        # Echo each requested path back as an indexed row so the merged result
+        # can be checked for completeness across batches.
+        return [(path, f"checksum-{path}") for path in paths]
+
+    async def find_by_checksums(
+        self,
+        session: object,
+        checksums: tuple[str, ...],
+    ) -> tuple[SimpleNamespace, ...]:
+        self.checksum_batch_sizes.append(len(checksums))
+        return tuple(
+            SimpleNamespace(file_path=f"path-{checksum}", checksum=checksum)
+            for checksum in checksums
+        )
+
+    async def get_all_file_paths(self, session: object) -> list[str]:  # pragma: no cover
+        return []
+
+
+@pytest.mark.asyncio
+async def test_load_indexed_file_checksums_batches_beyond_bind_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """More paths than the bind limit must split into multiple capped IN() queries."""
+    repository = BatchRecordingEntityRepository()
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[object]:
+        yield object()
+
+    monkeypatch.setattr(change_detector_module.db, "scoped_session", fake_scoped_session)
+
+    detector = ChangeDetector(cast(EntityRepository, repository), session_maker)
+    paths = tuple(f"notes/file-{index}.md" for index in range(MAX_QUERY_BIND_PARAMETERS + 5))
+
+    result = await detector.load_indexed_file_checksums(paths)
+
+    # Two batches: one full batch at the cap, then the remainder.
+    assert repository.path_batch_sizes == [MAX_QUERY_BIND_PARAMETERS, 5]
+    assert all(size <= MAX_QUERY_BIND_PARAMETERS for size in repository.path_batch_sizes)
+    # Every path survives the merge across batches.
+    assert result == {path: f"checksum-{path}" for path in paths}
+
+
+@pytest.mark.asyncio
+async def test_load_move_candidates_batches_beyond_bind_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """More checksums than the bind limit must split into multiple capped IN() queries."""
+    repository = BatchRecordingEntityRepository()
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[object]:
+        yield object()
+
+    monkeypatch.setattr(change_detector_module.db, "scoped_session", fake_scoped_session)
+
+    detector = ChangeDetector(cast(EntityRepository, repository), session_maker)
+    move_target_checksums = {
+        f"new/file-{index}.md": f"checksum-{index:05d}"
+        for index in range(MAX_QUERY_BIND_PARAMETERS + 5)
+    }
+
+    candidates = await detector.load_move_candidates(move_target_checksums)
+
+    assert repository.checksum_batch_sizes == [MAX_QUERY_BIND_PARAMETERS, 5]
+    assert all(size <= MAX_QUERY_BIND_PARAMETERS for size in repository.checksum_batch_sizes)
+    # Every distinct checksum yields a merged candidate.
+    assert {candidate.checksum for candidate in candidates} == set(move_target_checksums.values())

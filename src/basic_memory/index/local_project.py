@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from loguru import logger
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.file_utils import FileError, compute_checksum
+from basic_memory.file_utils import FileError, FileMetadata, compute_checksum
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.filesystem import local_relative_path_is_filtered
 from basic_memory.index.local_dependencies import (
@@ -68,7 +69,7 @@ from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
     resolve_project_index_completion_relations,
 )
-from basic_memory.models import Project
+from basic_memory.models import Entity, Project
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeJobId,
@@ -82,11 +83,63 @@ from basic_memory.services.exceptions import FileOperationError
 
 type LocalProjectIndexIgnorePatterns = set[str]
 
+# rsync-style unchanged heuristic: treat a file as unchanged when its on-disk
+# size and modification time match the indexed row. The 10ms epsilon absorbs
+# float rounding between the stored `entity.mtime` (a `datetime.timestamp()`
+# round-trip) and a freshly stat'd `st_mtime`.
+_INDEXED_MTIME_MATCH_EPSILON_SECONDS = 0.01
+
 
 class LocalProjectIndexProjectRepository(Protocol):
     """Project lookup capability needed by local project-index runners."""
 
     async def get_by_id(self, session: AsyncSession, project_id: int) -> Project | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class IndexedFileStat:
+    """Indexed stat columns used to decide whether an observed file changed."""
+
+    mtime: float | None
+    size: int | None
+    checksum: str | None
+
+
+class LocalProjectIndexedFileStatSource(Protocol):
+    """Capability that loads indexed mtime/size/checksum rows for a project."""
+
+    async def load_indexed_file_stats(self) -> Mapping[str, IndexedFileStat]: ...
+
+
+class LocalProjectIndexStatRepository(Protocol):
+    """Project-scoped select capability for reading indexed file stat rows."""
+
+    def select(self, *entities: object) -> Select: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryLocalProjectIndexedFileStatSource(LocalProjectIndexedFileStatSource):
+    """Load indexed mtime/size/checksum rows for the project being observed."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: LocalProjectIndexStatRepository
+
+    async def load_indexed_file_stats(self) -> dict[str, IndexedFileStat]:
+        # Only the three stat columns are projected (not full entities) so this
+        # stays a cheap single query even for large projects.
+        query = self.entity_repository.select(
+            Entity.file_path, Entity.mtime, Entity.size, Entity.checksum
+        )
+        async with db.scoped_session(self.session_maker) as session:
+            rows = (await session.execute(query)).all()
+        return {
+            str(row.file_path): IndexedFileStat(
+                mtime=row.mtime,
+                size=row.size,
+                checksum=row.checksum,
+            )
+            for row in rows
+        }
 
 
 def local_project_index_file_paths(
@@ -160,6 +213,7 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
 
     file_service: FileService
     ignore_patterns: LocalProjectIndexIgnorePatterns | None = None
+    indexed_stat_source: LocalProjectIndexedFileStatSource | None = None
 
     async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
         file_paths = await asyncio.to_thread(
@@ -167,11 +221,27 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
             self.file_service.base_path,
             ignore_patterns=self.ignore_patterns,
         )
+        # Trigger: a stat source is wired (local runtime); it is absent in
+        # cloud/tests that observe without a database.
+        # Why: hashing every file on every startup is O(project bytes) and
+        # dominated large-project boot time before the deleted watermark scan.
+        # Its scan reused the stored checksum whenever a file's mtime+size
+        # matched the indexed row instead of re-reading the whole file.
+        # Outcome: unchanged files skip compute_checksum and are classified
+        # unchanged by their stored checksum; new/modified/ambiguous files still
+        # hash so change detection is unaffected.
+        indexed_stats: Mapping[str, IndexedFileStat] = (
+            await self.indexed_stat_source.load_indexed_file_stats()
+            if self.indexed_stat_source is not None
+            else {}
+        )
         observed_files: list[RuntimeObservedIndexFile] = []
         for file_path in file_paths:
             try:
                 metadata = await self.file_service.get_file_metadata(file_path)
-                checksum = await self.file_service.compute_checksum(file_path)
+                checksum = self._reuse_indexed_checksum(file_path, metadata, indexed_stats)
+                if checksum is None:
+                    checksum = await self.file_service.compute_checksum(file_path)
             except (OSError, FileError, FileOperationError) as exc:
                 # Trigger: a path the walk just listed fails stat/checksum
                 # (transient permission or mount error, or deleted mid-scan).
@@ -207,6 +277,33 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
             # The existence probe itself failed; assume the file is present so
             # a read error can never escalate into destructive reconciliation.
             return False
+
+    @staticmethod
+    def _reuse_indexed_checksum(
+        file_path: str,
+        metadata: FileMetadata,
+        indexed_stats: Mapping[str, IndexedFileStat],
+    ) -> str | None:
+        """Return the stored checksum when stat proves the file is unchanged.
+
+        Returns None — forcing a fresh hash — whenever the answer is ambiguous:
+        no indexed row (a new file, still needed for move detection), a null
+        stat column, or a size/mtime mismatch. Only an exact size match plus an
+        mtime within the float epsilon reuses the stored checksum, which then
+        equals the indexed checksum and lands the file in the unchanged set.
+        """
+        indexed = indexed_stats.get(file_path)
+        if indexed is None:
+            return None
+        if indexed.checksum is None or indexed.mtime is None or indexed.size is None:
+            return None
+        if metadata.size != indexed.size:
+            return None
+        if abs(metadata.modified_at.timestamp() - indexed.mtime) > (
+            _INDEXED_MTIME_MATCH_EPSILON_SECONDS
+        ):
+            return None
+        return indexed.checksum
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +470,10 @@ class LocalProjectIndexRuntimeFactory:
         return LocalProjectIndexRuntime(
             observed_file_source=LocalProjectIndexObservedFileSource(
                 dependencies.file_service,
+                indexed_stat_source=RepositoryLocalProjectIndexedFileStatSource(
+                    session_maker=dependencies.session_maker,
+                    entity_repository=dependencies.entity_repository,
+                ),
             ),
             change_detector=ChangeDetector(
                 session_maker=dependencies.session_maker,

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.note_content_batch_reconciliation as batch_reconciliation_module
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.indexing.batch_indexer import BatchIndexer, MarkdownOnlyIndexEntitySearchWriter
+from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.index_batch_runtime import (
     DefaultIndexBatchRuntime,
     IndexBatchRuntime,
@@ -307,7 +307,55 @@ def test_build_default_index_batch_runtime_composes_repository_backed_stack() ->
     assert batch_indexer.entity_repository is entity_repository
     assert batch_indexer.relation_repository is relation_repository
     assert batch_indexer.session_maker is session_maker
-    assert isinstance(batch_indexer.search_service, MarkdownOnlyIndexEntitySearchWriter)
-    assert batch_indexer.search_service.search_writer is search_writer
+    # Regression: the batch/scan path must pass the search writer straight through
+    # (no markdown-only filter) so non-markdown entities get search-indexed the same
+    # way the incremental watcher path does. Wrapping it here dropped images/PDFs/etc.
+    # from the search index on full/startup project scans.
+    assert batch_indexer.search_service is search_writer
     assert isinstance(batch_indexer.file_writer, StorageIndexFileWriter)
     assert batch_indexer.file_writer.storage is storage
+
+
+class _NonMarkdownEntity:
+    """Minimal entity stand-in that reports as a non-markdown (regular) file."""
+
+    id = 30
+    is_markdown = False
+
+
+@pytest.mark.asyncio
+async def test_build_default_index_batch_runtime_search_indexes_non_markdown_entities() -> None:
+    """Regression: the batch/scan search writer must not filter out non-markdown entities.
+
+    The project-scan path previously wrapped the writer in a markdown-only filter, so
+    full/startup scans never search-indexed images/PDFs/other files even though the
+    incremental watcher path did. The composed writer must forward non-markdown entities.
+    """
+
+    @dataclass(slots=True)
+    class RecordingWriter:
+        indexed: list[int] = field(default_factory=list)
+
+        async def index_entity_data(self, entity: Entity, content: str | None = None) -> None:
+            self.indexed.append(entity.id)
+
+    search_writer = RecordingWriter()
+    runtime = build_default_index_batch_runtime(
+        project_id=42,
+        app_config=cast(BasicMemoryConfig, object()),
+        entity_service=cast(EntityService, object()),
+        entity_repository=cast(EntityRepository, object()),
+        relation_repository=cast(RelationRepository, object()),
+        search_writer=search_writer,
+        frontmatter_storage=RecordingFrontmatterStorage(),
+        content_type_provider=PathContentTypeProvider(),
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+    )
+
+    # batch_indexer is typed as the IndexInputBatchExecutor protocol (no writer
+    # attribute); reach the concrete BatchIndexer to exercise its composed writer.
+    await cast(BatchIndexer, runtime.batch_runtime.batch_indexer).search_service.index_entity_data(
+        cast(Entity, _NonMarkdownEntity())
+    )
+
+    assert search_writer.indexed == [30]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import batched
 from typing import Protocol
 
 import logfire
@@ -21,6 +22,12 @@ from basic_memory.indexing.change_planning import (
 )
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRepository
 from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
+
+# SQLite caps a statement at ~999 bind variables and Postgres at ~32767. Each
+# path/checksum in an IN() clause is one variable (plus a couple for the project
+# filter), so a project larger than the cap would raise OperationalError if we
+# sent every value in one query. Chunk IN() lookups well under the SQLite limit.
+MAX_QUERY_BIND_PARAMETERS = 900
 
 
 class ChangeDetectionLogger(Protocol):
@@ -93,10 +100,15 @@ class ChangeDetector:
         if not paths:
             return {}
 
+        checksum_by_path: dict[FileIndexPath, FileIndexChecksum | None] = {}
         async with db.scoped_session(self.session_maker) as session:
-            rows = await self.entity_repository.get_by_file_paths(session, paths)
+            # Batch the IN() lookup so large projects stay under the bind limit.
+            for path_batch in batched(paths, MAX_QUERY_BIND_PARAMETERS):
+                rows = await self.entity_repository.get_by_file_paths(session, path_batch)
+                for row in rows:
+                    checksum_by_path[str(row[0])] = str(row[1]) if row[1] is not None else None
 
-        return {str(row[0]): str(row[1]) if row[1] is not None else None for row in rows}
+        return checksum_by_path
 
     async def load_move_candidates(
         self,
@@ -107,14 +119,20 @@ class ChangeDetector:
             return ()
 
         checksums = sorted(set(move_target_checksums.values()))
+        move_candidates: list[FileMoveCandidate] = []
         async with db.scoped_session(self.session_maker) as session:
-            candidates = await self.entity_repository.find_by_checksums(session, checksums)
+            # Batch the IN() lookup so large projects stay under the bind limit.
+            for checksum_batch in batched(checksums, MAX_QUERY_BIND_PARAMETERS):
+                candidates = await self.entity_repository.find_by_checksums(session, checksum_batch)
+                move_candidates.extend(
+                    FileMoveCandidate(
+                        path=str(candidate.file_path), checksum=str(candidate.checksum)
+                    )
+                    for candidate in candidates
+                    if candidate.checksum
+                )
 
-        return tuple(
-            FileMoveCandidate(path=str(candidate.file_path), checksum=str(candidate.checksum))
-            for candidate in candidates
-            if candidate.checksum
-        )
+        return tuple(move_candidates)
 
     async def load_all_indexed_paths(self) -> tuple[FileIndexPath, ...]:
         """Load all indexed file paths for delete planning."""

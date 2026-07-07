@@ -8,16 +8,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.index.local_dependencies import LocalIndexProjectDependencies
 from basic_memory.index.local_project import (
+    IndexedFileStat,
     LocalProjectIndexBatchEnqueuer,
     LocalProjectIndexObservedFileSource,
     LocalProjectIndexRuntime,
     LocalProjectIndexRuntimeFactory,
+    RepositoryLocalProjectIndexedFileStatSource,
     local_project_index_file_paths,
     run_local_project_index,
     run_local_project_index_for_project,
@@ -2125,6 +2129,11 @@ class RecordingMarkdownFileIndexer:
 class RuntimeFactoryEntityRepository:
     project_id: int | None = 12
 
+    def select(self, *entities: Any) -> Select:
+        # Runtime-factory composition tests never run a watermark scan, so the
+        # stat-projection query builder is unused here.
+        raise NotImplementedError
+
     async def find_by_id(self, session: AsyncSession, entity_id: int) -> Entity | None:
         return None
 
@@ -2291,3 +2300,155 @@ async def test_local_project_index_runtime_factory_composes_inline_runtime(
     assert isinstance(runtime.completion_relation_runtime, RepositoryRelationResolutionRuntime)
     assert isinstance(runtime.batch_enqueuer, LocalProjectIndexBatchEnqueuer)
     assert runtime.batch_size == 3
+
+
+@dataclass(frozen=True)
+class _StaticIndexedFileStatSource:
+    """Return a fixed indexed-stat snapshot for observed-source tests."""
+
+    stats: Mapping[str, IndexedFileStat]
+
+    async def load_indexed_file_stats(self) -> Mapping[str, IndexedFileStat]:
+        return self.stats
+
+
+async def test_local_project_index_observed_source_reuses_checksum_when_stat_matches(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Unchanged files (matching mtime + size) reuse the stored checksum, no re-hash."""
+    (tmp_path / "notes").mkdir()
+    unchanged = tmp_path / "notes" / "unchanged.md"
+    unchanged.write_bytes(b"# Unchanged\n")
+    remtimed = tmp_path / "notes" / "remtimed.md"
+    remtimed_content = b"# Remtimed\n"
+    remtimed.write_bytes(remtimed_content)
+    resized = tmp_path / "notes" / "resized.md"
+    resized_content = b"# Resized\n"
+    resized.write_bytes(resized_content)
+    new = tmp_path / "notes" / "new.md"
+    new_content = b"# New\n"
+    new.write_bytes(new_content)
+
+    unchanged_stat = os.stat(unchanged)
+    remtimed_stat = os.stat(remtimed)
+    resized_stat = os.stat(resized)
+    indexed_stats = {
+        # Stat matches the indexed row exactly -> stored checksum stands in.
+        "notes/unchanged.md": IndexedFileStat(
+            mtime=unchanged_stat.st_mtime,
+            size=unchanged_stat.st_size,
+            checksum="stored-unchanged-checksum",
+        ),
+        # Same size but mtime moved beyond the epsilon -> must re-hash.
+        "notes/remtimed.md": IndexedFileStat(
+            mtime=remtimed_stat.st_mtime - 3600.0,
+            size=remtimed_stat.st_size,
+            checksum="stale-remtimed-checksum",
+        ),
+        # Same mtime but size differs -> must re-hash.
+        "notes/resized.md": IndexedFileStat(
+            mtime=resized_stat.st_mtime,
+            size=resized_stat.st_size + 1,
+            checksum="stale-resized-checksum",
+        ),
+        # notes/new.md is intentionally absent (never indexed) -> must hash.
+    }
+
+    file_service = FileService(tmp_path)
+    original_compute_checksum = file_service.compute_checksum
+    hashed_paths: list[str] = []
+
+    async def tracking_checksum(path):
+        hashed_paths.append(str(path))
+        return await original_compute_checksum(path)
+
+    monkeypatch.setattr(file_service, "compute_checksum", tracking_checksum)
+
+    observed = await LocalProjectIndexObservedFileSource(
+        file_service,
+        ignore_patterns=set(),
+        indexed_stat_source=_StaticIndexedFileStatSource(indexed_stats),
+    ).list_observed_index_files()
+
+    by_path = {target.path: target for target in observed}
+
+    # Unchanged file: stored checksum reused, whole-file hash skipped entirely.
+    assert by_path["notes/unchanged.md"].checksum == "stored-unchanged-checksum"
+    assert by_path["notes/unchanged.md"].size == unchanged_stat.st_size
+    assert "notes/unchanged.md" not in hashed_paths
+
+    # Ambiguous rows (mtime change, size change, missing row) fall back to hashing.
+    assert by_path["notes/remtimed.md"].checksum == sha256(remtimed_content).hexdigest()
+    assert by_path["notes/resized.md"].checksum == sha256(resized_content).hexdigest()
+    assert by_path["notes/new.md"].checksum == sha256(new_content).hexdigest()
+    assert set(hashed_paths) == {"notes/remtimed.md", "notes/resized.md", "notes/new.md"}
+
+
+async def test_local_project_index_observed_source_hashes_without_stat_source(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Without an indexed-stat source (cloud/tests) every file is hashed as before."""
+    (tmp_path / "notes").mkdir()
+    note = tmp_path / "notes" / "a.md"
+    note_content = b"# A\n"
+    note.write_bytes(note_content)
+
+    file_service = FileService(tmp_path)
+    original_compute_checksum = file_service.compute_checksum
+    hashed_paths: list[str] = []
+
+    async def tracking_checksum(path):
+        hashed_paths.append(str(path))
+        return await original_compute_checksum(path)
+
+    monkeypatch.setattr(file_service, "compute_checksum", tracking_checksum)
+
+    observed = await LocalProjectIndexObservedFileSource(
+        file_service,
+        ignore_patterns=set(),
+    ).list_observed_index_files()
+
+    assert observed == (
+        RuntimeObservedIndexFile(
+            path="notes/a.md",
+            checksum=sha256(note_content).hexdigest(),
+            size=len(note_content),
+        ),
+    )
+    assert hashed_paths == ["notes/a.md"]
+
+
+async def test_repository_indexed_file_stat_source_loads_indexed_rows(
+    test_project: Project,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """The repository stat source loads mtime/size/checksum for the project's files."""
+    entity = Entity(
+        permalink=f"{test_project.permalink}/concept/known",
+        title="Known",
+        note_type="test",
+        file_path="concept/known.md",
+        checksum="known-checksum",
+        content_type="text/markdown",
+        mtime=123.5,
+        size=42,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(session, entity)
+
+    stat_source = RepositoryLocalProjectIndexedFileStatSource(
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+    )
+    stats = await stat_source.load_indexed_file_stats()
+
+    assert stats["concept/known.md"] == IndexedFileStat(
+        mtime=123.5,
+        size=42,
+        checksum="known-checksum",
+    )
