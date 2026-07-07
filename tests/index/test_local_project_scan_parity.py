@@ -133,7 +133,8 @@ async def test_local_project_index_observed_file_source_skips_files_missing_afte
         FileService(tmp_path),
     ).list_observed_index_files()
 
+    # A confirmed disappearance is normal churn — dropped silently so delete
+    # reconciliation can retire the indexed rows; only unobservable-but-present
+    # files warn (they are carried through instead).
     assert tuple(file.path for file in observed) == ("keep.md",)
-    assert warnings
-    assert warnings[0][0] == "Skipping local index file that could not be observed"
-    assert warnings[0][1]["path"] == "missing.md"
+    assert not warnings

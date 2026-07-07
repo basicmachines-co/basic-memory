@@ -10,10 +10,15 @@ from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileInd
 
 
 class StorageChecksumSource(Protocol):
-    """Minimal storage-object metadata needed for change planning."""
+    """Minimal storage-object metadata needed for change planning.
+
+    A ``None`` checksum means the file was observed to exist but its content
+    could not be read (transient permission or mount error); it must still
+    count as present so delete reconciliation never removes its indexed rows.
+    """
 
     @property
-    def checksum(self) -> FileIndexChecksum: ...
+    def checksum(self) -> FileIndexChecksum | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +59,7 @@ class ChangeReport:
 class ChangeDetectionSnapshot:
     """Storage and indexed-DB state for one project change-detection pass."""
 
-    storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum]
+    storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None]
     db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None]
     all_db_paths: tuple[FileIndexPath, ...]
     move_candidates: tuple[FileMoveCandidate, ...] = ()
@@ -66,17 +71,21 @@ class ChangeDetectionSnapshot:
 
     @property
     def new_file_checksum_by_path(self) -> dict[FileIndexPath, FileIndexChecksum]:
-        """Return storage objects that do not have an indexed row at the same path."""
+        """Return storage objects that do not have an indexed row at the same path.
+
+        Paths with an unknown (None) checksum are excluded: without content
+        evidence they cannot prove a move, so they stay plain new files.
+        """
         return {
             path: checksum
             for path, checksum in self.storage_checksum_by_path.items()
-            if path not in self.db_checksum_by_path
+            if path not in self.db_checksum_by_path and checksum is not None
         }
 
 
 def storage_checksums_from_sources(
     storage_files: Mapping[FileIndexPath, StorageChecksumSource],
-) -> dict[FileIndexPath, FileIndexChecksum]:
+) -> dict[FileIndexPath, FileIndexChecksum | None]:
     """Extract checksums from storage-object metadata without keeping vendor objects."""
     return {path: file_info.checksum for path, file_info in storage_files.items()}
 
@@ -93,7 +102,7 @@ def plan_change_detection_snapshot(snapshot: ChangeDetectionSnapshot) -> ChangeR
 
 def plan_file_changes(
     *,
-    storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum],
+    storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
     db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
     all_db_paths: Sequence[FileIndexPath],
     move_candidates: Sequence[FileMoveCandidate],
@@ -109,6 +118,9 @@ def plan_file_changes(
         if db_checksum is None:
             new_files.append(path)
             continue
+        # An unknown (None) storage checksum never equals the indexed one, so
+        # an unobservable-but-present file re-enters indexing as modified —
+        # the batch planner re-reads it later — instead of counting as deleted.
         if storage_checksum != db_checksum:
             modified_files.append(path)
             continue
@@ -117,13 +129,16 @@ def plan_file_changes(
     # Move destinations must be paths with no indexed row at all. A modified (or
     # null-checksum) path already has an entity; matching it to a deleted file's
     # checksum would redirect that entity onto the existing path and silently
-    # drop the in-place edit.
+    # drop the in-place edit. Unknown (None) storage checksums carry no content
+    # evidence, so they cannot claim a move candidate either.
+    move_target_checksum_by_path: dict[FileIndexPath, FileIndexChecksum] = {}
+    for path in new_files:
+        storage_checksum = storage_checksum_by_path[path]
+        if path in db_checksum_by_path or storage_checksum is None:
+            continue
+        move_target_checksum_by_path[path] = storage_checksum
     moved_files = plan_moved_files(
-        new_file_checksum_by_path={
-            path: storage_checksum_by_path[path]
-            for path in new_files
-            if path not in db_checksum_by_path
-        },
+        new_file_checksum_by_path=move_target_checksum_by_path,
         storage_paths=storage_paths,
         move_candidates=move_candidates,
     )

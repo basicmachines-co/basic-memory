@@ -58,6 +58,38 @@ def test_plan_change_detection_snapshot_maps_typed_runtime_state() -> None:
     )
 
 
+def test_plan_file_changes_keeps_unobservable_files_out_of_deletes() -> None:
+    """An existing file whose checksum could not be read is modified, not deleted."""
+    report = plan_file_changes(
+        storage_checksum_by_path={
+            "unreadable.md": None,
+            "unreadable-new.md": None,
+        },
+        db_checksum_by_path={"unreadable.md": "indexed-checksum"},
+        all_db_paths=("unreadable.md", "moved-away.md"),
+        move_candidates=(FileMoveCandidate(path="moved-away.md", checksum="indexed-checksum"),),
+    )
+
+    assert report == ChangeReport(
+        new_files=["unreadable-new.md"],
+        modified_files=["unreadable.md"],
+        deleted_files=["moved-away.md"],
+        moved_files={},
+        unchanged_files=[],
+    )
+
+
+def test_new_file_checksum_by_path_excludes_unknown_checksums() -> None:
+    """Unknown checksums carry no content evidence, so they cannot claim a move."""
+    snapshot = ChangeDetectionSnapshot(
+        storage_checksum_by_path={"new.md": "new-checksum", "unreadable.md": None},
+        db_checksum_by_path={},
+        all_db_paths=(),
+    )
+
+    assert snapshot.new_file_checksum_by_path == {"new.md": "new-checksum"}
+
+
 def test_plan_file_changes_detects_new_modified_unchanged_and_deleted_files() -> None:
     report = plan_file_changes(
         storage_checksum_by_path={

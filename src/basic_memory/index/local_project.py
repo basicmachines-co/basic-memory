@@ -76,6 +76,7 @@ from basic_memory.runtime.jobs import (
     RuntimeProjectIndexJobRequest,
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.storage import RuntimeFilePath
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
 
@@ -172,11 +173,22 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
                 metadata = await self.file_service.get_file_metadata(file_path)
                 checksum = await self.file_service.compute_checksum(file_path)
             except (OSError, FileError, FileOperationError) as exc:
+                # Trigger: a path the walk just listed fails stat/checksum
+                # (transient permission or mount error, or deleted mid-scan).
+                # Why: dropping it from the observed snapshot makes delete
+                # reconciliation treat the file as removed and destroy its
+                # entity and search rows even though the file still exists.
+                # Outcome: only a confirmed disappearance falls out of the
+                # snapshot; anything else is carried through with unknown
+                # metadata so the batch planner re-checks it instead.
+                if await self._observed_file_confirmed_missing(file_path):
+                    continue
                 logger.warning(
-                    "Skipping local index file that could not be observed",
+                    "Carrying unobservable local index file through change detection",
                     path=file_path,
                     error=str(exc),
                 )
+                observed_files.append(RuntimeObservedIndexFile(path=file_path))
                 continue
             observed_files.append(
                 RuntimeObservedIndexFile(
@@ -186,6 +198,15 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
                 )
             )
         return tuple(observed_files)
+
+    async def _observed_file_confirmed_missing(self, file_path: RuntimeFilePath) -> bool:
+        """Return True only when storage positively confirms the file is gone."""
+        try:
+            return not await self.file_service.exists(file_path)
+        except FileOperationError:
+            # The existence probe itself failed; assume the file is present so
+            # a read error can never escalate into destructive reconciliation.
+            return False
 
 
 @dataclass(frozen=True, slots=True)

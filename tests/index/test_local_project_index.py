@@ -59,6 +59,7 @@ from basic_memory.runtime.jobs import (
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services import FileService
+from basic_memory.services.exceptions import FileOperationError
 
 
 def test_local_project_index_file_paths_filter_and_sort(tmp_path: Path) -> None:
@@ -113,6 +114,92 @@ async def test_local_project_index_observed_file_source_returns_runtime_targets(
             size=len(regular_content),
         ),
     )
+
+
+async def test_local_project_index_observed_file_source_carries_unreadable_files(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A checksum error on a file that still exists must not look like a delete."""
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "a.md").write_bytes(b"# A\n")
+    (tmp_path / "notes" / "b.md").write_bytes(b"# B\n")
+
+    file_service = FileService(tmp_path)
+    original_compute_checksum = file_service.compute_checksum
+
+    async def flaky_checksum(path):
+        if str(path).endswith("b.md"):
+            raise FileOperationError("transient read failure")
+        return await original_compute_checksum(path)
+
+    monkeypatch.setattr(file_service, "compute_checksum", flaky_checksum)
+
+    observed = await LocalProjectIndexObservedFileSource(
+        file_service,
+        ignore_patterns=set(),
+    ).list_observed_index_files()
+
+    assert [target.path for target in observed] == ["notes/a.md", "notes/b.md"]
+    carried = observed[1]
+    assert carried.checksum is None
+    assert carried.size is None
+
+
+async def test_local_project_index_observed_file_source_drops_confirmed_missing_files(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A file deleted between the walk and observation is a true delete."""
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "a.md").write_bytes(b"# A\n")
+    ghost = tmp_path / "notes" / "ghost.md"
+    ghost.write_bytes(b"# Ghost\n")
+
+    file_service = FileService(tmp_path)
+    original_get_file_metadata = file_service.get_file_metadata
+
+    async def vanishing_metadata(path):
+        if str(path).endswith("ghost.md"):
+            ghost.unlink(missing_ok=True)
+            raise FileNotFoundError(str(path))
+        return await original_get_file_metadata(path)
+
+    monkeypatch.setattr(file_service, "get_file_metadata", vanishing_metadata)
+
+    observed = await LocalProjectIndexObservedFileSource(
+        file_service,
+        ignore_patterns=set(),
+    ).list_observed_index_files()
+
+    assert [target.path for target in observed] == ["notes/a.md"]
+
+
+async def test_local_project_index_observed_file_source_carries_files_when_probe_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """When even the existence probe fails, assume present — never delete."""
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "a.md").write_bytes(b"# A\n")
+
+    file_service = FileService(tmp_path)
+
+    async def failing_metadata(path):
+        raise FileOperationError("mount error")
+
+    async def failing_exists(path):
+        raise FileOperationError("mount error")
+
+    monkeypatch.setattr(file_service, "get_file_metadata", failing_metadata)
+    monkeypatch.setattr(file_service, "exists", failing_exists)
+
+    observed = await LocalProjectIndexObservedFileSource(
+        file_service,
+        ignore_patterns=set(),
+    ).list_observed_index_files()
+
+    assert observed == (RuntimeObservedIndexFile(path="notes/a.md"),)
 
 
 async def test_local_project_index_skips_hidden_markdown_files(
