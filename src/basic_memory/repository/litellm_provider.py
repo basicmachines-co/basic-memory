@@ -93,6 +93,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         request_concurrency: int = 4,
         dimensions: int = 1536,
         api_key: str | None = None,
+        api_base: str | None = None,
         timeout: float = 30.0,
         document_input_type: str | None = None,
         query_input_type: str | None = None,
@@ -103,6 +104,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         self.batch_size = batch_size
         self.request_concurrency = request_concurrency
         self._api_key = api_key
+        self._api_base = api_base
         self._timeout = timeout
         default_document_input_type, default_query_input_type = _default_input_types(model_name)
         self.document_input_type = document_input_type or default_document_input_type
@@ -130,12 +132,13 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
         forward_dimensions = str(
             _should_forward_dimensions(self.model_name, self.forward_dimensions)
         ).lower()
-        return (
+        identity = (
             f"{self.model_name}:{self.dimensions}:"
             f"document_input_type={document_input_type}:"
             f"query_input_type={query_input_type}:"
             f"forward_dimensions={forward_dimensions}"
         )
+        return identity
 
     async def _embed(self, texts: list[str], *, input_type: str | None) -> list[list[float]]:
         if not texts:
@@ -162,6 +165,8 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
                     params["dimensions"] = self.dimensions
                 if self._api_key:
                     params["api_key"] = self._api_key
+                if self._api_base is not None:
+                    params["api_base"] = self._api_base
                 if input_type:
                     params["input_type"] = input_type
 

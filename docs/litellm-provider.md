@@ -44,6 +44,8 @@ All options can be set in config or as environment variables.
 | `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto | Set to `true` to force vector/hybrid support on. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `fastembed` | Set to `litellm` for the LiteLLM provider. |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `bge-small-en-v1.5` | With `litellm`, the default is remapped to `openai/text-embedding-3-small`. |
+| `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
+| `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key passed directly to the LiteLLM provider. When unset, LiteLLM continues to read provider credential env vars such as `OPENAI_API_KEY`. |
 | `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Required for non-default LiteLLM models because vector tables are dimensioned before the first API call. |
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | Sends `dimensions` to LiteLLM only when supported. Auto is enabled for `text-embedding-3` model strings. |
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto | LiteLLM `input_type` for indexed notes/passages. |
@@ -84,6 +86,27 @@ Set this only when your deployment supports it:
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS=true
 ```
 
+## Custom OpenAI-Compatible Endpoints
+
+Set `semantic_embedding_api_base` when an OpenAI-compatible embedding server is
+available somewhere other than the provider's default endpoint. Include the API
+version prefix expected by the server, commonly `/v1`:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=openai/local-embedding-model
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE=http://127.0.0.1:8080/v1
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY=local-key
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=768
+```
+
+`semantic_embedding_api_key` is useful when you want credentials in Basic
+Memory's config instead of the process environment. Leave it unset to preserve
+LiteLLM's normal provider environment lookup, including `OPENAI_API_KEY`. The
+API key can be a placeholder when the local server does not authenticate, but
+LiteLLM or the selected backend may still require it to be present.
+
 ## Asymmetric Models
 
 Some embedding models use different request roles for indexed documents and
@@ -102,8 +125,8 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE=query
 ```
 
 Changing provider, model, dimensions, dimension-forwarding, or document/query
-roles changes the meaning of stored vectors. Rebuild embeddings after any of
-those changes:
+roles changes Basic Memory's stored vector identity. Rebuild embeddings after
+any of those changes:
 
 ```bash
 bm reindex --embeddings
@@ -273,6 +296,13 @@ cat > /tmp/litellm-cases.json <<'JSON'
     "api_key_env": "NVIDIA_NIM_API_KEY",
     "document_input_type": "passage",
     "query_input_type": "query"
+  },
+  {
+    "name": "local-openai-compatible",
+    "model": "openai/local-embedding-model",
+    "dimensions": 768,
+    "api_key_env": "OPENAI_API_KEY",
+    "api_base": "http://127.0.0.1:8080/v1"
   }
 ]
 JSON

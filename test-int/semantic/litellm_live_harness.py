@@ -33,6 +33,7 @@ class LiteLLMLiveCase:
     model: str
     dimensions: int
     api_key_env: str | None = None
+    api_base: str | None = None
     document_input_type: str | None = None
     query_input_type: str | None = None
     forward_dimensions: bool | None = None
@@ -111,6 +112,7 @@ def load_custom_cases(raw: str | None) -> list[LiteLLMLiveCase]:
                 model=_required_string(case_data, "model"),
                 dimensions=dimensions,
                 api_key_env=_optional_string(case_data, "api_key_env"),
+                api_base=_optional_string(case_data, "api_base"),
                 document_input_type=_optional_string(case_data, "document_input_type"),
                 query_input_type=_optional_string(case_data, "query_input_type"),
                 forward_dimensions=_optional_bool(case_data, "forward_dimensions"),
@@ -195,6 +197,7 @@ async def evaluate_case(
         dimensions=case.dimensions,
         batch_size=2,
         api_key=api_key,
+        api_base=case.api_base,
         timeout=60.0,
         document_input_type=case.document_input_type,
         query_input_type=case.query_input_type,

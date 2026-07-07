@@ -1,5 +1,6 @@
 """Factory for creating configured semantic embedding providers."""
 
+import hashlib
 import os
 from threading import Lock
 
@@ -9,16 +10,18 @@ from basic_memory.config import BasicMemoryConfig, default_fastembed_cache_dir
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 
 # Cache key fields are limited to values that change the *identity* of the loaded
-# model (provider, model_name, dimensions, LiteLLM role/input-type/forward-dimension
-# settings, batch/request knobs that affect the LiteLLM identity, and the resolved
-# cache dir). Thread/parallel knobs are deliberately excluded — they change ONNX
-# *execution* only, not the loaded weights. Including them caused #872: in a
+# provider instance (provider, model_name, explicit LiteLLM endpoint/key routing,
+# dimensions, semantic role/input-type settings, batch/request knobs, and the
+# resolved cache dir). Thread/parallel knobs are deliberately excluded - they
+# change ONNX *execution* only, not the loaded weights. Including them caused #872: in a
 # container/cgroup the CPU-derived thread count can drift between calls, producing
 # a fresh cache key and reloading the ~2.3GB model into a CPU arena that never
 # returns memory to the OS.
 type ProviderCacheKey = tuple[
     str,
     str,
+    str | None,
+    str | None,
     int | None,
     bool | None,
     int,
@@ -33,10 +36,17 @@ _EMBEDDING_PROVIDER_CACHE_LOCK = Lock()
 _FASTEMBED_MAX_THREADS = 8
 
 
+def _sensitive_value_digest(value: str | None) -> str | None:
+    """Return a stable non-secret token for process-local cache diagnostics."""
+    if not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _resolve_cache_dir(app_config: BasicMemoryConfig) -> str:
     """Resolve the effective FastEmbed cache dir for this config.
 
-    Uses an explicit ``is not None`` check — an empty string override from
+    Uses an explicit ``is not None`` check - an empty string override from
     config or ``BASIC_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`` is an invalid
     path, not a request to fall back to the default, and FastEmbed's error
     message is clearer than silently swapping in a different directory.
@@ -86,9 +96,9 @@ def _resolve_fastembed_runtime_knobs(
 
 
 def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
-    """Build a stable cache key from model-identity semantic embedding config.
+    """Build a stable cache key from process-local embedding provider config.
 
-    Uses the *resolved* cache dir — not the raw config field — so different
+    Uses the *resolved* cache dir - not the raw config field - so different
     FASTEMBED_CACHE_PATH values produce distinct cache keys even when the
     config field itself is unset.
 
@@ -96,9 +106,18 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
     execution, not which model weights are loaded, and resolving them from the
     runtime CPU budget makes the key drift between calls in a container (#872).
     """
+    provider_name = app_config.semantic_embedding_provider.strip().lower()
+    litellm_api_base_digest = None
+    litellm_api_key_digest = None
+    if provider_name == "litellm":
+        litellm_api_base_digest = _sensitive_value_digest(app_config.semantic_embedding_api_base)
+        litellm_api_key_digest = _sensitive_value_digest(app_config.semantic_embedding_api_key)
+
     return (
-        app_config.semantic_embedding_provider.strip().lower(),
+        provider_name,
         app_config.semantic_embedding_model,
+        litellm_api_base_digest,
+        litellm_api_key_digest,
         app_config.semantic_embedding_dimensions,
         app_config.semantic_embedding_forward_dimensions,
         app_config.semantic_embedding_batch_size,
@@ -130,19 +149,19 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
     # deliberately build it *outside* the lock to avoid serializing every caller
     # behind a single cold start. This opens a by-design TOCTOU window where both
     # threads may construct a provider.
-    # Outcome: the second check-and-set below resolves the race — the first writer
+    # Outcome: the second check-and-set below resolves the race - the first writer
     # wins and the loser's redundant provider is discarded, so the cache still
     # yields a single process-wide singleton per key.
     with _EMBEDDING_PROVIDER_CACHE_LOCK:
         if cached_provider := _EMBEDDING_PROVIDER_CACHE.get(cache_key):
             return cached_provider
 
-    provider_name = app_config.semantic_embedding_provider.strip().lower()
     extra_kwargs: dict = {}
     if app_config.semantic_embedding_dimensions is not None:
         extra_kwargs["dimensions"] = app_config.semantic_embedding_dimensions
 
     provider: EmbeddingProvider
+    provider_name = app_config.semantic_embedding_provider.strip().lower()
     if provider_name == "fastembed":
         # Deferred import: fastembed (and its onnxruntime dep) may not be installed
         from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
@@ -194,6 +213,8 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             )
         provider = LiteLLMEmbeddingProvider(
             model_name=model_name,
+            api_key=app_config.semantic_embedding_api_key,
+            api_base=app_config.semantic_embedding_api_base,
             batch_size=app_config.semantic_embedding_batch_size,
             request_concurrency=app_config.semantic_embedding_request_concurrency,
             document_input_type=app_config.semantic_embedding_document_input_type,
@@ -210,8 +231,8 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         # Trigger: a distinct cache key is being inserted while the cache already
         # holds entries for other keys.
         # Why: the provider is meant to be a process-wide singleton (#872). A second
-        # key means something bypassed reuse — a real config change, or a regression
-        # that reintroduces volatile fields into the key — and each new key reloads
+        # key means something bypassed reuse - a real config change, or a regression
+        # that reintroduces volatile fields into the key - and each new key reloads
         # the ~2.3GB ONNX model into a CPU arena that never releases memory.
         # Outcome: surface the bypass so future leaks are diagnosable from logs.
         if _EMBEDDING_PROVIDER_CACHE:

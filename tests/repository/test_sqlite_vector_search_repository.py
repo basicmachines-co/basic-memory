@@ -347,6 +347,23 @@ def test_sqlite_embedding_model_key_includes_litellm_role_settings():
     assert "query_input_type=query" in passage_query_key
 
 
+def test_sqlite_embedding_model_key_ignores_litellm_api_base():
+    """LiteLLM endpoint routing is not part of stored vector identity."""
+    repo = _make_sqlite_repo_for_unit_tests()
+    repo._embedding_provider = LiteLLMEmbeddingProvider(dimensions=3)
+    default_endpoint_key = repo._embedding_model_key()
+
+    repo._embedding_provider = LiteLLMEmbeddingProvider(
+        dimensions=3,
+        api_base="http://token@example.test/v1",
+    )
+    custom_endpoint_key = repo._embedding_model_key()
+
+    assert default_endpoint_key == custom_endpoint_key
+    assert "api_base" not in custom_endpoint_key
+    assert "token@example.test" not in custom_endpoint_key
+
+
 @pytest.mark.asyncio
 async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scope(monkeypatch):
     """SQLite should batch read-side prepare work but serialize write-side mutations."""

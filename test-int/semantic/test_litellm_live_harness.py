@@ -37,8 +37,8 @@ class WrongRankingProvider(FakeProvider):
         return [[0.0, 1.0], [1.0, 0.0]]
 
 
-def test_load_custom_cases_accepts_roles_and_dimension_forwarding():
-    """Custom JSON should preserve provider-specific role and dimensions options."""
+def test_load_custom_cases_accepts_endpoint_roles_and_dimension_forwarding():
+    """Custom JSON should preserve endpoint, role, and dimensions options."""
     raw = json.dumps(
         [
             {
@@ -46,6 +46,7 @@ def test_load_custom_cases_accepts_roles_and_dimension_forwarding():
                 "model": "azure/basic-memory-embeddings",
                 "dimensions": 512,
                 "api_key_env": "AZURE_API_KEY",
+                "api_base": "https://example.openai.azure.com",
                 "document_input_type": "passage",
                 "query_input_type": "query",
                 "forward_dimensions": True,
@@ -61,6 +62,7 @@ def test_load_custom_cases_accepts_roles_and_dimension_forwarding():
             model="azure/basic-memory-embeddings",
             dimensions=512,
             api_key_env="AZURE_API_KEY",
+            api_base="https://example.openai.azure.com",
             document_input_type="passage",
             query_input_type="query",
             forward_dimensions=True,
@@ -109,6 +111,28 @@ async def test_evaluate_case_reports_metrics_for_valid_provider():
     assert result.min_norm == pytest.approx(1.0)
     assert result.max_norm == pytest.approx(1.0)
     assert result.total_latency_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_case_forwards_api_base_to_provider():
+    """Custom live cases should exercise the configured endpoint."""
+    provider_kwargs: dict[str, object] = {}
+
+    def provider_factory(**kwargs):
+        provider_kwargs.update(kwargs)
+        return FakeProvider(**kwargs)
+
+    await evaluate_case(
+        LiteLLMLiveCase(
+            name="local-provider",
+            model="openai/local-embedding-model",
+            dimensions=2,
+            api_base="http://127.0.0.1:8080/v1",
+        ),
+        provider_factory=provider_factory,
+    )
+
+    assert provider_kwargs["api_base"] == "http://127.0.0.1:8080/v1"
 
 
 @pytest.mark.asyncio

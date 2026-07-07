@@ -101,6 +101,8 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto (`true` when semantic deps are available) | Enable semantic search. Required before vector/hybrid modes work. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
+| `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
+| `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key passed directly to the LiteLLM provider. When unset, LiteLLM continues to read provider credential env vars such as `OPENAI_API_KEY`. |
 | `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. 384 for FastEmbed, 1536 for OpenAI/LiteLLM OpenAI. Required when using a non-default LiteLLM model. |
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | LiteLLM-only override for whether configured dimensions are sent as a provider-side output-size request. |
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
@@ -161,6 +163,20 @@ request for `text-embedding-3` model strings, where LiteLLM/OpenAI support reduc
 dimensions. If an Azure/OpenAI deployment uses an arbitrary LiteLLM model string such as
 `azure/<deployment-name>` and the underlying model supports reduced dimensions, set
 `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS=true`.
+
+For a local or self-hosted OpenAI-compatible embedding server, set the custom
+endpoint explicitly:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=openai/local-embedding-model
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE=http://127.0.0.1:8080/v1
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY=local-key
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=768
+```
+
+Leave `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` unset to keep LiteLLM's normal
+environment credential lookup, including `OPENAI_API_KEY`.
 
 Some retrieval models are asymmetric: indexed passages and search queries must be embedded with different provider parameters. Basic Memory automatically sets LiteLLM `input_type` for known asymmetric model families:
 
@@ -245,7 +261,8 @@ just test-litellm-live --cases-file /tmp/litellm-nvidia-cases.json
 For repeatable local runs, put the same JSON array in a file and pass
 `just test-litellm-live --cases-file path/to/litellm-cases.json`.
 
-When switching providers, models, dimensions, or LiteLLM document/query input types, rebuild embeddings:
+When switching providers, models, dimensions, or LiteLLM document/query input types,
+rebuild embeddings:
 
 ```bash
 bm reindex --embeddings
