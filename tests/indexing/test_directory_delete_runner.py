@@ -13,6 +13,7 @@ from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteAcceptedResult,
     DirectoryDeleteRejected,
     DirectoryDeleteRejectKind,
+    DirectoryFileDeleteEnqueueError,
     RepositoryDirectoryDeleteAcceptanceStore,
     DirectoryDeleteRuntime,
     enqueue_directory_file_delete_jobs,
@@ -43,9 +44,11 @@ class FakeDirectoryDeleteStore:
         *,
         project_id: int | None = 3,
         files: list[RuntimeDirectoryFileSnapshot] | None = None,
+        relation_cleanup_entity_ids: frozenset[int] = frozenset(),
     ) -> None:
         self.project_id = project_id
         self.files = files or []
+        self.relation_cleanup_entity_ids = relation_cleanup_entity_ids
         self.loaded_directories: list[str] = []
         self.deleted_entity_ids: list[tuple[int, ...]] = []
 
@@ -72,9 +75,10 @@ class FakeDirectoryDeleteStore:
         *,
         project_id: int,
         entity_ids: Sequence[int],
-    ) -> None:
+    ) -> frozenset[int]:
         assert project_id == self.project_id
         self.deleted_entity_ids.append(tuple(entity_ids))
+        return self.relation_cleanup_entity_ids
 
 
 class FakeScalarResult:
@@ -322,6 +326,108 @@ async def test_run_directory_delete_reports_skipped_guarded_cleanup() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_directory_delete_continues_past_enqueue_failure() -> None:
+    """One file whose cleanup can't be queued must not abort cleanup of the rest.
+
+    The failing file's entity row is already deleted, so aborting would strand every
+    later file on disk with its DB row gone (sync would then resurrect it). The batch
+    keeps going and the failure is reported as a failed delete, not raised.
+    """
+    files = [
+        directory_snapshot(entity_id=7, file_path="notes/a.md"),
+        directory_snapshot(entity_id=8, file_path="notes/b.md"),
+        directory_snapshot(entity_id=9, file_path="notes/c.md"),
+    ]
+    store = FakeDirectoryDeleteStore(project_id=3, files=files)
+
+    class PartiallyFailingEnqueuer:
+        def __init__(self) -> None:
+            self.attempted: list[str] = []
+
+        async def enqueue_directory_file_delete(
+            self,
+            request: RuntimeNoteFileDeleteJobRequest,
+        ) -> RuntimeFileDeleteResult | None:
+            self.attempted.append(request.file_path)
+            if request.file_path == "notes/b.md":
+                raise DirectoryFileDeleteEnqueueError("queue unavailable for notes/b.md")
+            return None
+
+    enqueuer = PartiallyFailingEnqueuer()
+    result = await run_directory_delete(
+        AsyncSession(),
+        request=DirectoryDeleteAcceptanceRequest(
+            project_external_id="project-123",
+            directory="/notes/",
+        ),
+        runtime=DirectoryDeleteRuntime(store=store, file_delete_enqueuer=enqueuer),
+    )
+
+    # Every file was attempted despite the middle failure.
+    assert enqueuer.attempted == ["notes/a.md", "notes/b.md", "notes/c.md"]
+    # The failing file is reported as a failed delete, not raised out of the batch.
+    assert result.skipped_files == ("notes/b.md",)
+    assert result.skip_reasons == ("queue unavailable for notes/b.md",)
+    payload = result.to_response_payload()
+    assert payload["file_delete_status"] == "pending"
+    assert payload["successful_deletes"] == 2
+    assert payload["failed_deletes"] == 1
+    assert payload["errors"] == ["queue unavailable for notes/b.md"]
+
+
+@pytest.mark.asyncio
+async def test_run_directory_delete_surfaces_relation_cleanup_sources() -> None:
+    """Surviving notes that linked into the deleted directory must be surfaced so the
+    caller can reindex them and drop their now-stale relation rows from search."""
+    files = [directory_snapshot(entity_id=7, file_path="notes/a.md")]
+    store = FakeDirectoryDeleteStore(
+        project_id=3,
+        files=files,
+        relation_cleanup_entity_ids=frozenset({42, 99}),
+    )
+
+    result = await run_directory_delete(
+        AsyncSession(),
+        request=DirectoryDeleteAcceptanceRequest(
+            project_external_id="project-123",
+            directory="/notes/",
+        ),
+        runtime=DirectoryDeleteRuntime(
+            store=store,
+            file_delete_enqueuer=FakeDirectoryFileDeleteEnqueuer(),
+        ),
+    )
+
+    assert result.relation_cleanup_entity_ids == frozenset({42, 99})
+
+
+@pytest.mark.asyncio
+async def test_repository_directory_delete_store_captures_relation_sources() -> None:
+    """The repository store captures incoming relation sources before deleting rows so
+    the surviving (outside-directory) sources can be reindexed after CASCADE."""
+    session = cast(
+        AsyncSession,
+        FakeExecuteSession(
+            [
+                FakeExecuteResult(scalar_values=[42, 99]),  # surviving relation sources
+                FakeExecuteResult(),  # search_index delete
+                FakeExecuteResult(scalar_values=[]),  # vector rows
+                FakeExecuteResult(),  # entity delete
+            ]
+        ),
+    )
+    store = RepositoryDirectoryDeleteAcceptanceStore()
+
+    relation_cleanup_entity_ids = await store.delete_directory_entities(
+        session,
+        project_id=3,
+        entity_ids=[7, 8],
+    )
+
+    assert relation_cleanup_entity_ids == frozenset({42, 99})
+
+
+@pytest.mark.asyncio
 async def test_run_directory_delete_rejects_unknown_project() -> None:
     with pytest.raises(DirectoryDeleteRejected) as exc_info:
         await run_directory_delete(
@@ -364,9 +470,10 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                         )()
                     ]
                 ),
-                FakeExecuteResult(),
-                FakeExecuteResult(scalar_values=[]),
-                FakeExecuteResult(),
+                FakeExecuteResult(scalar_values=[]),  # surviving relation sources
+                FakeExecuteResult(),  # search_index delete
+                FakeExecuteResult(scalar_values=[]),  # vector rows
+                FakeExecuteResult(),  # entity delete
             ]
         ),
     )
@@ -382,7 +489,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
         project_id=3,
         directory="notes",
     )
-    await store.delete_directory_entities(
+    relation_cleanup_entity_ids = await store.delete_directory_entities(
         session,
         project_id=3,
         entity_ids=[7],
@@ -398,7 +505,8 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
             size=42,
         )
     ]
-    assert len(fake_session.queries) == 5
+    assert relation_cleanup_entity_ids == frozenset()
+    assert len(fake_session.queries) == 6
 
 
 @pytest.mark.asyncio
@@ -409,8 +517,9 @@ async def test_repository_directory_delete_store_clears_vectors_before_entities(
         AsyncSession,
         FakeExecuteSession(
             [
-                FakeExecuteResult(),
-                FakeExecuteResult(),
+                FakeExecuteResult(scalar_values=[]),  # surviving relation sources
+                FakeExecuteResult(),  # search_index delete
+                FakeExecuteResult(),  # entity delete
             ]
         ),
     )
@@ -447,7 +556,9 @@ async def test_repository_directory_delete_store_clears_vectors_before_entities(
         entity_ids=[7, 8],
     )
 
-    assert vector_calls == [(session, 3, (7, 8), 1)]
+    # Vector rows are cleared after the relation-source select and search_index delete
+    # (2 queries so far) but before the entity delete, so CASCADE cannot race the rows.
+    assert vector_calls == [(session, 3, (7, 8), 2)]
     statements = [str(query) for query, _ in fake_session.queries]
-    assert "DELETE FROM search_index" in statements[0]
-    assert "DELETE FROM entity" in statements[1]
+    assert "DELETE FROM search_index" in statements[1]
+    assert "DELETE FROM entity" in statements[2]

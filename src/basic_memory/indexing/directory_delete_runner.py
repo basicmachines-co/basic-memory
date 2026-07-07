@@ -11,7 +11,7 @@ from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.project_index_maintenance import delete_project_index_vector_rows
-from basic_memory.models import Entity, NoteContent, Project
+from basic_memory.models import Entity, NoteContent, Project, Relation
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeDirectoryFileSnapshot,
@@ -76,6 +76,10 @@ class DirectoryDeleteAcceptance:
 
     project_id: ProjectId
     files: tuple[RuntimeDirectoryFileSnapshot, ...]
+    # Surviving entities OUTSIDE the deleted directory that linked into it: their
+    # search_index relation rows go stale once the deleted rows disappear, so the
+    # caller reindexes these sources to drop the dangling relation rows.
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
 
     @property
     def deleted_files(self) -> tuple[RuntimeFilePath, ...]:
@@ -107,8 +111,12 @@ class DirectoryDeleteAcceptanceStore(Protocol):
         *,
         project_id: ProjectId,
         entity_ids: Sequence[int],
-    ) -> None:
-        """Delete the accepted entity rows."""
+    ) -> frozenset[int]:
+        """Delete the accepted entity rows and return surviving relation sources.
+
+        The returned ids are entities OUTSIDE the deleted set whose relations pointed
+        into it; their search rows need reindexing to drop now-dangling relations.
+        """
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,9 +191,28 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         *,
         project_id: ProjectId,
         entity_ids: Sequence[int],
-    ) -> None:
+    ) -> frozenset[int]:
         if not entity_ids:
-            return
+            return frozenset()
+        deleted_entity_ids = tuple(entity_ids)
+
+        # Capture surviving sources before the delete: Relation.to_id CASCADE will drop
+        # the relation table rows for incoming links from entities outside the directory,
+        # but those sources own the matching search_index relation rows and are never in
+        # the deleted set, so the caller must reindex them to clear the stale rows.
+        surviving_relation_sources = await session.execute(
+            select(Relation.from_id)
+            .where(
+                Relation.project_id == project_id,
+                Relation.to_id.in_(deleted_entity_ids),
+                Relation.from_id.not_in(deleted_entity_ids),
+            )
+            .distinct()
+        )
+        relation_cleanup_entity_ids = frozenset(
+            int(source_id) for source_id in surviving_relation_sources.scalars()
+        )
+
         await session.execute(
             text(
                 """
@@ -193,14 +220,15 @@ class RepositoryDirectoryDeleteAcceptanceStore:
                 WHERE project_id = :project_id AND entity_id IN :entity_ids
                 """
             ).bindparams(bindparam("entity_ids", expanding=True)),
-            {"project_id": project_id, "entity_ids": tuple(entity_ids)},
+            {"project_id": project_id, "entity_ids": deleted_entity_ids},
         )
         await delete_project_index_vector_rows(
             session,
             project_id=project_id,
-            entity_ids=tuple(entity_ids),
+            entity_ids=deleted_entity_ids,
         )
-        await session.execute(delete(Entity).where(Entity.id.in_(entity_ids)))
+        await session.execute(delete(Entity).where(Entity.id.in_(deleted_entity_ids)))
+        return relation_cleanup_entity_ids
 
 
 def normalize_directory_delete_path(directory: str) -> RuntimeFilePath:
@@ -228,6 +256,9 @@ class DirectoryDeleteAcceptedResult:
     # "missing" results count as successful (the file is already gone).
     skipped_files: tuple[RuntimeFilePath, ...] = ()
     skip_reasons: tuple[str, ...] = ()
+    # Surviving source entities whose relations pointed into the deleted directory;
+    # the caller reindexes these to clear now-stale relation rows from search.
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
 
     @classmethod
     def complete(cls) -> "DirectoryDeleteAcceptedResult":
@@ -241,6 +272,7 @@ class DirectoryDeleteAcceptedResult:
         deleted_files: Sequence[RuntimeFilePath],
         skipped_files: Sequence[RuntimeFilePath] = (),
         skip_reasons: Sequence[str] = (),
+        relation_cleanup_entity_ids: frozenset[int] = frozenset(),
     ) -> "DirectoryDeleteAcceptedResult":
         """Return the response after DB rows were deleted and cleanup was queued."""
         return cls(
@@ -248,6 +280,7 @@ class DirectoryDeleteAcceptedResult:
             file_delete_status="pending",
             skipped_files=tuple(skipped_files),
             skip_reasons=tuple(skip_reasons),
+            relation_cleanup_entity_ids=relation_cleanup_entity_ids,
         )
 
     @classmethod
@@ -298,27 +331,61 @@ class DirectoryFileDeleteEnqueuer(Protocol):
     ) -> RuntimeFileDeleteResult | None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class DirectoryFileDeleteEnqueueFailure:
+    """One accepted file whose cleanup could not be queued or run inline."""
+
+    file_path: RuntimeFilePath
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryFileDeleteEnqueueOutcome:
+    """Aggregate of one directory delete's per-file cleanup enqueue attempts."""
+
+    results: tuple[RuntimeFileDeleteResult, ...] = ()
+    failures: tuple[DirectoryFileDeleteEnqueueFailure, ...] = ()
+
+
 async def enqueue_directory_file_delete_jobs(
     *,
     project_id: ProjectId,
     files: Sequence[RuntimeDirectoryFileSnapshot],
     enqueuer: DirectoryFileDeleteEnqueuer,
-) -> list[RuntimeFileDeleteResult]:
+) -> DirectoryFileDeleteEnqueueOutcome:
     """Queue guarded cleanup jobs for files accepted by a directory delete.
 
     Returns the inline cleanup results (local runtime); deferred/queued cleanups
-    (cloud runtime) contribute nothing here.
+    (cloud runtime) contribute nothing here. Per-file enqueue failures are collected
+    rather than raised so one unqueueable file does not abort cleanup of the rest.
     """
     results: list[RuntimeFileDeleteResult] = []
+    failures: list[DirectoryFileDeleteEnqueueFailure] = []
     for file_snapshot in files:
-        result = await enqueuer.enqueue_directory_file_delete(
-            plan_note_file_delete_job_request(
-                file_snapshot.to_pending_note_file_delete(project_id=project_id)
+        # Trigger: one file's guarded delete/enqueue raises (unreadable file, queue down).
+        # Why: the entity row is already deleted, so aborting the batch strands every
+        #   remaining file on disk with its DB row gone; sync then resurrects them.
+        # Outcome: record the failure, keep going, and report it as a failed delete.
+        try:
+            result = await enqueuer.enqueue_directory_file_delete(
+                plan_note_file_delete_job_request(
+                    file_snapshot.to_pending_note_file_delete(project_id=project_id)
+                )
             )
-        )
+        except DirectoryFileDeleteEnqueueError as exc:
+            failures.append(
+                DirectoryFileDeleteEnqueueFailure(
+                    file_path=file_snapshot.file_path,
+                    reason=str(exc),
+                )
+            )
+            continue
         if result is not None:
             results.append(result)
-    return results
+    return DirectoryFileDeleteEnqueueOutcome(
+        results=tuple(results),
+        failures=tuple(failures),
+    )
 
 
 async def accept_directory_delete(
@@ -357,12 +424,16 @@ async def accept_directory_delete(
     if not file_snapshots:
         return DirectoryDeleteAcceptance(project_id=project_id, files=())
 
-    await store.delete_directory_entities(
+    relation_cleanup_entity_ids = await store.delete_directory_entities(
         session,
         project_id=project_id,
         entity_ids=[snapshot.entity_id for snapshot in file_snapshots],
     )
-    return DirectoryDeleteAcceptance(project_id=project_id, files=file_snapshots)
+    return DirectoryDeleteAcceptance(
+        project_id=project_id,
+        files=file_snapshots,
+        relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+    )
 
 
 async def finish_directory_delete_acceptance(
@@ -375,25 +446,27 @@ async def finish_directory_delete_acceptance(
     if not accepted.files:
         return DirectoryDeleteAcceptedResult.complete()
 
-    try:
-        file_results = await enqueue_directory_file_delete_jobs(
-            project_id=accepted.project_id,
-            files=accepted.files,
-            enqueuer=enqueuer,
-        )
-    except DirectoryFileDeleteEnqueueError as exc:
-        return DirectoryDeleteAcceptedResult.failed(
-            deleted_files=accepted.deleted_files,
-            error=str(exc),
-        )
+    outcome = await enqueue_directory_file_delete_jobs(
+        project_id=accepted.project_id,
+        files=accepted.files,
+        enqueuer=enqueuer,
+    )
 
-    # A guarded delete that skipped a file (checksum changed) left it on disk even
-    # though its DB row is gone; surface those instead of reporting a clean success.
-    skipped = [r for r in file_results if r.status == RuntimeDeleteStatus.skipped]
+    # Both a guarded skip (checksum changed) and an enqueue failure leave the file on
+    # disk while its DB row is gone; surface both as failed deletes instead of reporting
+    # a clean success that later reappears when sync re-indexes the stranded file.
+    skipped = [r for r in outcome.results if r.status == RuntimeDeleteStatus.skipped]
+    skipped_files = tuple(r.file_path for r in skipped) + tuple(
+        failure.file_path for failure in outcome.failures
+    )
+    skip_reasons = tuple(r.reason for r in skipped) + tuple(
+        failure.reason for failure in outcome.failures
+    )
     return DirectoryDeleteAcceptedResult.pending(
         deleted_files=accepted.deleted_files,
-        skipped_files=tuple(r.file_path for r in skipped),
-        skip_reasons=tuple(r.reason for r in skipped),
+        skipped_files=skipped_files,
+        skip_reasons=skip_reasons,
+        relation_cleanup_entity_ids=accepted.relation_cleanup_entity_ids,
     )
 
 

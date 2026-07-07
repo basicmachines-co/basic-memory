@@ -116,10 +116,12 @@ class FakeDirectoryDeleteStore:
         *,
         project_id: int,
         entity_ids,
-    ) -> None:
+    ) -> frozenset[int]:
         assert session is not None
         assert project_id == 3
         assert list(entity_ids) == [7]
+        # No surviving relation sources point into this directory in the fixture.
+        return frozenset()
 
 
 class FakeDirectoryFileDeleteEnqueuer:
