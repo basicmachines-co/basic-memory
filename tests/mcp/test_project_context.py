@@ -3199,9 +3199,7 @@ async def test_resolver_refreshes_index_on_miss(monkeypatch):
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
 
     # By external_id (the project_id routing path that failed in the field)
-    resolved = await resolve_workspace_project_identifier(
-        "22222222-2222-4222-8222-222222222222"
-    )
+    resolved = await resolve_workspace_project_identifier("22222222-2222-4222-8222-222222222222")
     assert resolved.project.permalink == "manual"
     assert calls == [False, True]
 

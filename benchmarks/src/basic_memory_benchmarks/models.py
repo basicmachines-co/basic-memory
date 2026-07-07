@@ -177,8 +177,12 @@ class ProviderDiagnosis(BaseModel):
     truly_missed: int = 0
     # Derived shares over answerable questions (0.0 when answerable == 0):
     qa_accuracy: float = 0.0  # correct / answerable
-    retrieval_ceiling: float = 0.0  # (correct + retrieved_but_unused) / answerable — max QA if answerer were perfect
-    answerer_gap: float = 0.0  # retrieved_but_unused / answerable — headroom left on the table by the answerer
+    retrieval_ceiling: float = (
+        0.0  # (correct + retrieved_but_unused) / answerable — max QA if answerer were perfect
+    )
+    answerer_gap: float = (
+        0.0  # retrieved_but_unused / answerable — headroom left on the table by the answerer
+    )
     retrieval_gap: float = 0.0  # truly_missed / answerable — headroom that needs better retrieval
     answerer_failure_share: float = 0.0  # retrieved_but_unused / (answerable failures) — of what we got wrong, how much was the answerer
     recall_field: str = "recall_at_10"

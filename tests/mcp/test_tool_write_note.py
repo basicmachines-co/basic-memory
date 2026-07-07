@@ -19,29 +19,38 @@ from basic_memory.utils import normalize_newlines
 
 def test_write_note_workspace_project_route_passthrough_without_workspace():
     """Without workspace, the project string passes through unchanged."""
-    assert _compose_workspace_project_route(
-        workspace=None,
-        project="my-project",
-        project_id=None,
-    ) == "my-project"
+    assert (
+        _compose_workspace_project_route(
+            workspace=None,
+            project="my-project",
+            project_id=None,
+        )
+        == "my-project"
+    )
 
 
 def test_write_note_workspace_project_route_combines_workspace_and_project():
     """workspace + project are joined as 'workspace/project'."""
-    assert _compose_workspace_project_route(
-        workspace="acme",
-        project="docs",
-        project_id=None,
-    ) == "acme/docs"
+    assert (
+        _compose_workspace_project_route(
+            workspace="acme",
+            project="docs",
+            project_id=None,
+        )
+        == "acme/docs"
+    )
 
 
 def test_write_note_workspace_project_route_passes_qualified_project_unchanged():
     """A pre-qualified 'workspace/project' string passes through when workspace is None."""
-    assert _compose_workspace_project_route(
-        workspace=None,
-        project="acme/docs",
-        project_id=None,
-    ) == "acme/docs"
+    assert (
+        _compose_workspace_project_route(
+            workspace=None,
+            project="acme/docs",
+            project_id=None,
+        )
+        == "acme/docs"
+    )
 
 
 @pytest.mark.parametrize(
