@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -72,32 +71,12 @@ class NoteMaterializationClock(Protocol):
     def now(self) -> datetime: ...
 
 
-class NoteMaterializationSessionProvider(Protocol):
-    """Session provider for note materialization persistence."""
-
-    def open_session(
-        self,
-        session_maker: async_sessionmaker[AsyncSession],
-    ) -> AbstractAsyncContextManager[AsyncSession]: ...
-
-
 @dataclass(frozen=True, slots=True)
 class SystemNoteMaterializationClock:
     """System UTC clock for note materialization attempts."""
 
     def now(self) -> datetime:
         return note_materialization_utc_now()
-
-
-@dataclass(frozen=True, slots=True)
-class DefaultNoteMaterializationSessionProvider:
-    """Default session provider for local note materialization persistence."""
-
-    def open_session(
-        self,
-        session_maker: async_sessionmaker[AsyncSession],
-    ) -> AbstractAsyncContextManager[AsyncSession]:
-        return db.scoped_session(session_maker)
 
 
 class NoteMaterializationPublishAction(StrEnum):
@@ -412,16 +391,13 @@ class RepositoryNoteMaterializationPreflight:
     session_lock: NoteMaterializationSessionLock = field(
         default_factory=NoopNoteMaterializationSessionLock
     )
-    session_provider: NoteMaterializationSessionProvider = (
-        DefaultNoteMaterializationSessionProvider()
-    )
     clock: NoteMaterializationClock = SystemNoteMaterializationClock()
 
     async def prepare_note_materialization(
         self,
         request: RuntimeNoteMaterializationJobRequest,
     ) -> NoteMaterializationPreflightResult:
-        async with self.session_provider.open_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker) as session:
             await self.session_lock.lock_note_materialization(
                 session,
                 project_id=request.project_id,
@@ -457,9 +433,6 @@ class RepositoryNoteMaterializationPublisher:
     session_lock: NoteMaterializationSessionLock = field(
         default_factory=NoopNoteMaterializationSessionLock
     )
-    session_provider: NoteMaterializationSessionProvider = (
-        DefaultNoteMaterializationSessionProvider()
-    )
     repositories: NoteContentRepositories = field(
         default_factory=build_default_note_content_repositories
     )
@@ -470,7 +443,7 @@ class RepositoryNoteMaterializationPublisher:
         prepared_write: RuntimePreparedNoteWrite,
         written_file: RuntimeWrittenFileState,
     ) -> RuntimeNoteMaterializationResult:
-        async with self.session_provider.open_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker) as session:
             await self.session_lock.lock_note_materialization(
                 session,
                 project_id=request.project_id,
@@ -563,9 +536,6 @@ class RepositoryNoteMaterializationStatusPublisher:
     session_lock: NoteMaterializationSessionLock = field(
         default_factory=NoopNoteMaterializationSessionLock
     )
-    session_provider: NoteMaterializationSessionProvider = (
-        DefaultNoteMaterializationSessionProvider()
-    )
     repositories: NoteContentRepositories = field(
         default_factory=build_default_note_content_repositories
     )
@@ -575,7 +545,7 @@ class RepositoryNoteMaterializationStatusPublisher:
         request: RuntimeNoteMaterializationJobRequest,
         publication: NoteMaterializationStatusPublication,
     ) -> None:
-        async with self.session_provider.open_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker) as session:
             await self.session_lock.lock_note_materialization(
                 session,
                 project_id=request.project_id,

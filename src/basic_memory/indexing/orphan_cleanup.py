@@ -1,7 +1,6 @@
 """Project-index cleanup for entities whose source files disappeared."""
 
 from collections.abc import Collection, Sequence
-from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -9,26 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.runtime.storage import RuntimeFilePath
-
-
-class OrphanCleanupSessionProvider(Protocol):
-    """Session provider for orphan entity cleanup."""
-
-    def open_session(
-        self,
-        session_maker: async_sessionmaker[AsyncSession],
-    ) -> AbstractAsyncContextManager[AsyncSession]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class DefaultOrphanCleanupSessionProvider:
-    """Default session provider for local orphan entity cleanup."""
-
-    def open_session(
-        self,
-        session_maker: async_sessionmaker[AsyncSession],
-    ) -> AbstractAsyncContextManager[AsyncSession]:
-        return db.scoped_session(session_maker)
 
 
 class OrphanIndexedEntity(Protocol):
@@ -91,11 +70,10 @@ async def cleanup_orphan_entities[EntityT: OrphanIndexedEntity](
     entity_repository: OrphanEntityRepository[EntityT],
     search_service: OrphanSearchIndex[EntityT],
     current_paths: Collection[RuntimeFilePath],
-    session_provider: OrphanCleanupSessionProvider = (DefaultOrphanCleanupSessionProvider()),
     logger: OrphanCleanupLogger | None = None,
 ) -> OrphanEntityCleanupResult:
     """Remove indexed entities whose source path is absent from the current file set."""
-    async with session_provider.open_session(session_maker) as session:
+    async with db.scoped_session(session_maker) as session:
         db_paths = set(await entity_repository.get_all_file_paths(session))
 
     orphan_paths = tuple(sorted(db_paths - set(current_paths)))
@@ -111,7 +89,7 @@ async def cleanup_orphan_entities[EntityT: OrphanIndexedEntity](
     skipped_missing_paths: list[RuntimeFilePath] = []
     skipped_changed_paths: list[RuntimeFilePath] = []
     for orphan_path in orphan_paths:
-        async with session_provider.open_session(session_maker) as session:
+        async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_file_path(session, orphan_path)
             if entity is None:
                 skipped_missing_paths.append(orphan_path)

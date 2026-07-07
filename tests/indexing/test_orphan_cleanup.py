@@ -5,6 +5,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import cast
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.orphan_cleanup import cleanup_orphan_entities
@@ -74,10 +75,12 @@ async def fake_session_scope(
 
 
 @dataclass(slots=True)
-class RecordingOrphanCleanupSessionProvider:
+class RecordingScopedSession:
+    """Stand-in for ``db.scoped_session`` that records each open."""
+
     opened_session_makers: list[async_sessionmaker[AsyncSession]] = field(default_factory=list)
 
-    def open_session(
+    def __call__(
         self,
         session_maker: async_sessionmaker[AsyncSession],
     ) -> AbstractAsyncContextManager[AsyncSession]:
@@ -92,16 +95,19 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
     )
     search_service = RecordingSearchService()
     logger = RecordingLogger()
-    session_provider = RecordingOrphanCleanupSessionProvider()
+    scoped_session = RecordingScopedSession()
 
-    result = await cleanup_orphan_entities(
-        session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        entity_repository=repository,
-        search_service=search_service,
-        current_paths={"notes/current.md"},
-        session_provider=session_provider,
-        logger=logger,
-    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.orphan_cleanup.db.scoped_session", scoped_session
+        )
+        result = await cleanup_orphan_entities(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            entity_repository=repository,
+            search_service=search_service,
+            current_paths={"notes/current.md"},
+            logger=logger,
+        )
 
     assert result.orphan_paths == ()
     assert result.deleted_paths == ()
@@ -113,25 +119,28 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
     assert logger.warning_calls == []
 
 
-async def test_cleanup_orphan_entities_uses_session_provider_for_each_db_step() -> None:
+async def test_cleanup_orphan_entities_uses_scoped_session_for_each_db_step() -> None:
     session_maker = cast(async_sessionmaker[AsyncSession], object())
-    session_provider = RecordingOrphanCleanupSessionProvider()
+    scoped_session = RecordingScopedSession()
     repository = FakeEntityRepository(
         file_paths=["notes/delete.md"],
         entities_by_path={"notes/delete.md": FakeEntity(id=10)},
     )
     search_service = RecordingSearchService()
 
-    result = await cleanup_orphan_entities(
-        session_maker=session_maker,
-        entity_repository=repository,
-        search_service=search_service,
-        current_paths=set(),
-        session_provider=session_provider,
-    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.orphan_cleanup.db.scoped_session", scoped_session
+        )
+        result = await cleanup_orphan_entities(
+            session_maker=session_maker,
+            entity_repository=repository,
+            search_service=search_service,
+            current_paths=set(),
+        )
 
     assert result.deleted_paths == ("notes/delete.md",)
-    assert session_provider.opened_session_makers == [session_maker, session_maker]
+    assert scoped_session.opened_session_makers == [session_maker, session_maker]
 
 
 async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
@@ -152,16 +161,19 @@ async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
     )
     search_service = RecordingSearchService()
     logger = RecordingLogger()
-    session_provider = RecordingOrphanCleanupSessionProvider()
+    scoped_session = RecordingScopedSession()
 
-    result = await cleanup_orphan_entities(
-        session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        entity_repository=repository,
-        search_service=search_service,
-        current_paths={"notes/current.md"},
-        session_provider=session_provider,
-        logger=logger,
-    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.orphan_cleanup.db.scoped_session", scoped_session
+        )
+        result = await cleanup_orphan_entities(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            entity_repository=repository,
+            search_service=search_service,
+            current_paths={"notes/current.md"},
+            logger=logger,
+        )
 
     assert result.orphan_paths == (
         "notes/changed.md",

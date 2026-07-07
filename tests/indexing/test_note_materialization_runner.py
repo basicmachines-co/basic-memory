@@ -170,11 +170,13 @@ class FakeScopedSession:
 
 
 @dataclass(slots=True)
-class RecordingNoteMaterializationSessionProvider:
+class RecordingScopedSession:
+    """Stand-in for ``db.scoped_session`` that yields a fake session and records opens."""
+
     scoped_session: FakeScopedSession
     opened_session_makers: list[async_sessionmaker[AsyncSession]]
 
-    def open_session(
+    def __call__(
         self,
         session_maker: async_sessionmaker[AsyncSession],
     ) -> AbstractAsyncContextManager[AsyncSession]:
@@ -460,17 +462,21 @@ async def test_repository_note_materialization_preflight_marks_current_note_writ
     session = FakeRepositorySession(entity=entity, note_content=note_content)
     session_lock = FakeSessionLock()
     session_maker = cast(async_sessionmaker[AsyncSession], object())
-    session_provider = RecordingNoteMaterializationSessionProvider(
+    scoped_session = RecordingScopedSession(
         scoped_session=FakeScopedSession(session),
         opened_session_makers=[],
     )
 
-    result = await RepositoryNoteMaterializationPreflight(
-        session_maker=session_maker,
-        session_lock=session_lock,
-        session_provider=session_provider,
-        clock=StaticNoteMaterializationClock(attempted_at),
-    ).prepare_note_materialization(request)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        result = await RepositoryNoteMaterializationPreflight(
+            session_maker=session_maker,
+            session_lock=session_lock,
+            clock=StaticNoteMaterializationClock(attempted_at),
+        ).prepare_note_materialization(request)
 
     assert result == NoteMaterializationPreflightResult.prepared(
         plan_prepared_note_write(
@@ -488,26 +494,30 @@ async def test_repository_note_materialization_preflight_marks_current_note_writ
 
 
 @pytest.mark.asyncio
-async def test_repository_note_materialization_preflight_uses_session_provider_and_clock() -> None:
+async def test_repository_note_materialization_preflight_uses_scoped_session_and_clock() -> None:
     request = materialization_request()
     attempted_at = datetime(2026, 6, 18, 15, 0, tzinfo=UTC)
     entity = materialization_entity()
     note_content = materialization_note_content()
     session = FakeRepositorySession(entity=entity, note_content=note_content)
     session_maker = cast(async_sessionmaker[AsyncSession], object())
-    session_provider = RecordingNoteMaterializationSessionProvider(
+    scoped_session = RecordingScopedSession(
         scoped_session=FakeScopedSession(session),
         opened_session_makers=[],
     )
 
-    result = await RepositoryNoteMaterializationPreflight(
-        session_maker=session_maker,
-        session_provider=session_provider,
-        clock=StaticNoteMaterializationClock(attempted_at),
-    ).prepare_note_materialization(request)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        result = await RepositoryNoteMaterializationPreflight(
+            session_maker=session_maker,
+            clock=StaticNoteMaterializationClock(attempted_at),
+        ).prepare_note_materialization(request)
 
     assert result.require_prepared_write().attempted_at == attempted_at
-    assert session_provider.opened_session_makers == [session_maker]
+    assert scoped_session.opened_session_makers == [session_maker]
 
 
 @pytest.mark.asyncio
@@ -520,16 +530,21 @@ async def test_repository_note_materialization_publisher_updates_current_written
     session = FakeRepositorySession(entity=entity, note_content=note_content)
     session_lock = FakeSessionLock()
     repository = RecordingNoteContentRepository()
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
 
-    result = await RepositoryNoteMaterializationPublisher(
-        session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        session_lock=session_lock,
-        session_provider=RecordingNoteMaterializationSessionProvider(
-            scoped_session=FakeScopedSession(session),
-            opened_session_makers=[],
-        ),
-        repositories=RecordingNoteContentRepositories(repository),
-    ).publish_written_file_state(request, prepared, written)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        result = await RepositoryNoteMaterializationPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            session_lock=session_lock,
+            repositories=RecordingNoteContentRepositories(repository),
+        ).publish_written_file_state(request, prepared, written)
 
     assert result == RuntimeNoteMaterializationResult(
         entity_id=42,
@@ -569,24 +584,29 @@ async def test_repository_note_materialization_status_publisher_records_conflict
     )
     session_lock = FakeSessionLock()
     repository = RecordingNoteContentRepository()
-
-    await RepositoryNoteMaterializationStatusPublisher(
-        session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        session_lock=session_lock,
-        session_provider=RecordingNoteMaterializationSessionProvider(
-            scoped_session=FakeScopedSession(session),
-            opened_session_makers=[],
-        ),
-        repositories=RecordingNoteContentRepositories(repository),
-    ).publish_note_materialization_status(
-        request,
-        NoteMaterializationStatusPublication(
-            file_write_status="external_change_detected",
-            attempted_at=attempted_at,
-            actual_file_checksum="external-sum",
-            error_message="Refusing to overwrite unexpected file",
-        ),
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
     )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        await RepositoryNoteMaterializationStatusPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            session_lock=session_lock,
+            repositories=RecordingNoteContentRepositories(repository),
+        ).publish_note_materialization_status(
+            request,
+            NoteMaterializationStatusPublication(
+                file_write_status="external_change_detected",
+                attempted_at=attempted_at,
+                actual_file_checksum="external-sum",
+                error_message="Refusing to overwrite unexpected file",
+            ),
+        )
 
     assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
     assert repository.calls == [
