@@ -40,25 +40,6 @@ class StorageEventOperationProcessorFactory(Protocol):
         """Return the operation processor for one resolved project."""
 
 
-class StorageEventBucketProcessor(Protocol):
-    """Process normalized storage events for one storage bucket."""
-
-    async def process_bucket_events(
-        self,
-        bucket_name: StorageBucketName,
-        events: tuple[StorageEventPayload, ...],
-    ) -> RuntimeStorageEventProcessingResult:
-        """Process one bucket's storage events and return aggregate counts."""
-
-    async def bucket_failed(
-        self,
-        bucket_name: StorageBucketName,
-        events: tuple[StorageEventPayload, ...],
-        exc: Exception,
-    ) -> None:
-        """Record a bucket failure. Returning lets the source runner count it."""
-
-
 @dataclass(frozen=True, slots=True)
 class StorageEventBucketResolution(Generic[BucketContextT]):
     """Bucket resolution result for provider-neutral source orchestration."""
@@ -119,43 +100,11 @@ class StorageEventIndexRuntime:
 
 
 @dataclass(frozen=True, slots=True)
-class StorageEventSourceIndexRuntime:
-    """Runtime dependencies needed to process a normalized storage event source."""
-
-    bucket_processor: StorageEventBucketProcessor
-
-
-@dataclass(frozen=True, slots=True)
 class StorageEventBucketIndexRuntime(Generic[BucketContextT]):
     """Runtime dependencies for resolving and processing bucket-context batches."""
 
     bucket_resolver: StorageEventBucketContextResolver[BucketContextT]
     bucket_processor: StorageEventBucketContextProcessor[BucketContextT]
-
-
-async def run_storage_event_source_indexing(
-    source: StorageEventSource,
-    runtime: StorageEventSourceIndexRuntime,
-) -> RuntimeStorageEventProcessingResult:
-    """Route normalized storage event batches by bucket and aggregate bucket results."""
-    result = RuntimeStorageEventProcessingResult.empty()
-
-    for bucket_name, events in source.events_by_bucket().items():
-        if not events:
-            continue
-        try:
-            bucket_result = await runtime.bucket_processor.process_bucket_events(
-                bucket_name,
-                events,
-            )
-        except Exception as exc:
-            await runtime.bucket_processor.bucket_failed(bucket_name, events, exc)
-            result = result.with_failed(len(events))
-            continue
-
-        result = result.add(bucket_result)
-
-    return result
 
 
 async def run_storage_event_bucket_indexing(

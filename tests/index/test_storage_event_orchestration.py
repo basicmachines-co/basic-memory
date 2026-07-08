@@ -8,15 +8,12 @@ from basic_memory.index.storage_events import (
     StorageEventBucketContextProcessor,
     StorageEventBucketContextResolver,
     StorageEventBucketIndexRuntime,
-    StorageEventBucketProcessor,
     StorageEventBucketResolution,
     StorageEventIndexRuntime,
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
-    StorageEventSourceIndexRuntime,
     run_storage_event_bucket_indexing,
     run_storage_event_indexing,
-    run_storage_event_source_indexing,
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
@@ -119,31 +116,6 @@ class StaticStorageEventSource:
         return self.events_by_bucket_result
 
 
-@dataclass(slots=True)
-class RecordingBucketProcessor(StorageEventBucketProcessor):
-    fail_bucket: StorageBucketName | None = None
-    calls: list[tuple[StorageBucketName, tuple[str, ...]]] = field(default_factory=list)
-    failures: list[tuple[StorageBucketName, int, str]] = field(default_factory=list)
-
-    async def process_bucket_events(
-        self,
-        bucket_name: StorageBucketName,
-        events: tuple[StorageEventPayload, ...],
-    ) -> RuntimeStorageEventProcessingResult:
-        self.calls.append((bucket_name, tuple(event.object_key for event in events)))
-        if bucket_name == self.fail_bucket:
-            raise RuntimeError("bucket failed")
-        return RuntimeStorageEventProcessingResult.from_counts(processed=len(events))
-
-    async def bucket_failed(
-        self,
-        bucket_name: StorageBucketName,
-        events: tuple[StorageEventPayload, ...],
-        exc: Exception,
-    ) -> None:
-        self.failures.append((bucket_name, len(events), str(exc)))
-
-
 @dataclass(frozen=True, slots=True)
 class BucketRuntimeContext:
     runtime_name: str
@@ -192,75 +164,6 @@ class RecordingBucketContextProcessor(StorageEventBucketContextProcessor[BucketR
         exc: Exception,
     ) -> None:
         self.failures.append((bucket_name, len(events), str(exc)))
-
-
-@pytest.mark.asyncio
-async def test_run_storage_event_source_indexing_routes_bucket_batches_in_order() -> None:
-    processor = RecordingBucketProcessor()
-
-    result = await run_storage_event_source_indexing(
-        StaticStorageEventSource(
-            {
-                "alpha-bucket": (
-                    storage_event(key="alpha/notes/a.md"),
-                    storage_event(key="alpha/notes/b.md"),
-                ),
-                "beta-bucket": (storage_event(key="beta/notes/c.md"),),
-            }
-        ),
-        StorageEventSourceIndexRuntime(bucket_processor=processor),
-    )
-
-    assert result.as_dict() == {"processed": 3, "failed": 0, "skipped": 0}
-    assert processor.calls == [
-        ("alpha-bucket", ("alpha/notes/a.md", "alpha/notes/b.md")),
-        ("beta-bucket", ("beta/notes/c.md",)),
-    ]
-    assert processor.failures == []
-
-
-@pytest.mark.asyncio
-async def test_run_storage_event_source_indexing_ignores_empty_bucket_batches() -> None:
-    processor = RecordingBucketProcessor()
-
-    result = await run_storage_event_source_indexing(
-        StaticStorageEventSource(
-            {
-                "empty-bucket": (),
-                "alpha-bucket": (storage_event(key="alpha/notes/a.md"),),
-            }
-        ),
-        StorageEventSourceIndexRuntime(bucket_processor=processor),
-    )
-
-    assert result.as_dict() == {"processed": 1, "failed": 0, "skipped": 0}
-    assert processor.calls == [("alpha-bucket", ("alpha/notes/a.md",))]
-    assert processor.failures == []
-
-
-@pytest.mark.asyncio
-async def test_run_storage_event_source_indexing_counts_bucket_failures() -> None:
-    processor = RecordingBucketProcessor(fail_bucket="alpha-bucket")
-
-    result = await run_storage_event_source_indexing(
-        StaticStorageEventSource(
-            {
-                "alpha-bucket": (
-                    storage_event(key="alpha/notes/a.md"),
-                    storage_event(key="alpha/notes/b.md"),
-                ),
-                "beta-bucket": (storage_event(key="beta/notes/c.md"),),
-            }
-        ),
-        StorageEventSourceIndexRuntime(bucket_processor=processor),
-    )
-
-    assert result.as_dict() == {"processed": 1, "failed": 2, "skipped": 0}
-    assert processor.calls == [
-        ("alpha-bucket", ("alpha/notes/a.md", "alpha/notes/b.md")),
-        ("beta-bucket", ("beta/notes/c.md",)),
-    ]
-    assert processor.failures == [("alpha-bucket", 2, "bucket failed")]
 
 
 @pytest.mark.asyncio
