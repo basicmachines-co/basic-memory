@@ -10,21 +10,11 @@ from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.indexing.link_resolution import LinkText
+from basic_memory.indexing.link_resolution import LinkText, resolve_project_link_texts
 from basic_memory.models import Entity, Relation
 
 type ForwardReferenceEntityId = int
 type ForwardReferenceRelationId = int
-
-
-class ForwardReferenceLinkResolver(Protocol):
-    """Capability that resolves link text to exact entity ids."""
-
-    async def resolve_link_texts(
-        self,
-        link_texts: Sequence[LinkText],
-    ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
-        """Return exact target ids keyed by input link text."""
 
 
 class UnresolvedForwardReference(Protocol):
@@ -156,13 +146,17 @@ class RepositoryForwardReferenceResolutionRuntime:
     """Resolve link text and persist exact relation targets with explicit sessions."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    link_resolver: ForwardReferenceLinkResolver
+    project_id: int
 
     async def resolve_forward_reference_link_texts(
         self,
         link_texts: Sequence[LinkText],
     ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
-        return await self.link_resolver.resolve_link_texts(link_texts)
+        return await resolve_project_link_texts(
+            link_texts,
+            session_maker=self.session_maker,
+            project_id=self.project_id,
+        )
 
     async def apply_forward_reference_updates(
         self,

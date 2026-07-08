@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.forward_reference_resolution as forward_resolution_module
 from basic_memory.indexing.forward_reference_resolution import (
-    ForwardReferenceLinkResolver,
     ForwardReferenceResolutionPlan,
     ForwardReferenceResolutionRun,
     ForwardReferenceUpdate,
@@ -51,19 +50,6 @@ class RecordingForwardReferenceRuntime:
         updates: Sequence[ForwardReferenceUpdate],
     ) -> None:
         self.applied_updates = tuple(updates)
-
-
-@dataclass(slots=True)
-class RecordingForwardReferenceLinkResolver:
-    resolved_targets: dict[str, int | None]
-    calls: list[tuple[str, ...]]
-
-    async def resolve_link_texts(
-        self,
-        link_texts: Sequence[str],
-    ) -> dict[str, int | None]:
-        self.calls.append(tuple(link_texts))
-        return self.resolved_targets
 
 
 class RecordingForwardReferenceEntityRefreshRuntime:
@@ -250,22 +236,36 @@ async def test_run_forward_reference_resolution_skips_apply_without_updates() ->
 
 
 @pytest.mark.asyncio
-async def test_repository_forward_reference_runtime_uses_link_resolver() -> None:
-    calls: list[tuple[str, ...]] = []
-    link_resolver: ForwardReferenceLinkResolver = RecordingForwardReferenceLinkResolver(
-        resolved_targets={"Target": 20, "Missing": None},
-        calls=calls,
+async def test_repository_forward_reference_runtime_resolves_project_link_texts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    calls: list[tuple[tuple[str, ...], object, int]] = []
+
+    async def fake_resolve_project_link_texts(
+        link_texts: Sequence[str],
+        *,
+        session_maker: async_sessionmaker[AsyncSession],
+        project_id: int,
+    ) -> dict[str, int | None]:
+        calls.append((tuple(link_texts), session_maker, project_id))
+        return {"Target": 20, "Missing": None}
+
+    monkeypatch.setattr(
+        forward_resolution_module,
+        "resolve_project_link_texts",
+        fake_resolve_project_link_texts,
     )
 
     runtime = RepositoryForwardReferenceResolutionRuntime(
-        session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        link_resolver=link_resolver,
+        session_maker=session_maker,
+        project_id=7,
     )
 
     result = await runtime.resolve_forward_reference_link_texts(("Target", "Missing"))
 
     assert result == {"Target": 20, "Missing": None}
-    assert calls == [("Target", "Missing")]
+    assert calls == [(("Target", "Missing"), session_maker, 7)]
 
 
 @pytest.mark.asyncio
@@ -309,10 +309,6 @@ async def test_repository_forward_reference_runtime_applies_updates(
 ) -> None:
     session_maker = cast(async_sessionmaker[AsyncSession], object())
     session = FakeForwardReferenceSession()
-    link_resolver: ForwardReferenceLinkResolver = RecordingForwardReferenceLinkResolver(
-        resolved_targets={},
-        calls=[],
-    )
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -325,7 +321,7 @@ async def test_repository_forward_reference_runtime_applies_updates(
 
     runtime = RepositoryForwardReferenceResolutionRuntime(
         session_maker=session_maker,
-        link_resolver=link_resolver,
+        project_id=7,
     )
 
     await runtime.apply_forward_reference_updates(
@@ -355,11 +351,6 @@ async def test_repository_forward_reference_runtime_applies_updates(
 async def test_repository_forward_reference_runtime_skips_empty_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    link_resolver: ForwardReferenceLinkResolver = RecordingForwardReferenceLinkResolver(
-        resolved_targets={},
-        calls=[],
-    )
-
     @asynccontextmanager
     async def fake_scoped_session(
         _scoped_session_maker: async_sessionmaker[AsyncSession],
@@ -371,7 +362,7 @@ async def test_repository_forward_reference_runtime_skips_empty_updates(
 
     runtime = RepositoryForwardReferenceResolutionRuntime(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
-        link_resolver=link_resolver,
+        project_id=7,
     )
 
     await runtime.apply_forward_reference_updates(())

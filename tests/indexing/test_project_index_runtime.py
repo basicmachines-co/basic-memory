@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.forward_reference_resolution import (
-    ForwardReferenceLinkResolver,
     ForwardReferenceUpdate,
 )
 from basic_memory.indexing.progress import VectorSyncProgress
@@ -146,12 +145,6 @@ class NoopEntityIndexer:
         raise AssertionError(msg)
 
 
-@dataclass(slots=True)
-class NoopForwardReferenceLinkResolver:
-    async def resolve_link_texts(self, link_texts: Sequence[str]) -> dict[str, int | None]:
-        return {}
-
-
 def make_runtime(
     *,
     vector_entity_source: RecordingVectorEntitySource | None = None,
@@ -181,7 +174,6 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
     vector_sync = NoopVectorSync()
     entity_repository = NoopEntityRepository()
     entity_indexer = NoopEntityIndexer()
-    link_resolver: ForwardReferenceLinkResolver = NoopForwardReferenceLinkResolver()
 
     runtime = build_default_project_index_runtime(
         project_id=7,
@@ -189,7 +181,6 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
         vector_sync=vector_sync,
         entity_repository=entity_repository,
         entity_indexer=entity_indexer,
-        link_resolver=link_resolver,
     )
 
     assert isinstance(runtime, ProjectIndexRuntime)
@@ -208,7 +199,8 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
         runtime.forward_reference_resolution_runtime,
         RepositoryForwardReferenceResolutionRuntime,
     )
-    assert runtime.forward_reference_resolution_runtime.link_resolver is link_resolver
+    assert runtime.forward_reference_resolution_runtime.session_maker is session_maker
+    assert runtime.forward_reference_resolution_runtime.project_id == 7
     assert isinstance(
         runtime.forward_reference_entity_refresher,
         RepositoryForwardReferenceEntityRefreshRuntime,
