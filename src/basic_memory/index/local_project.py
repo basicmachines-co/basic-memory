@@ -334,6 +334,18 @@ class LocalProjectIndexObservation:
         return len(self.observed_files)
 
 
+class LocalProjectIndexRuntimeProvider(Protocol):
+    """Minimal factory shape needed to run a local project-index request.
+
+    A structural seam so callers in higher layers (e.g. services/initialization,
+    which declares its own matching InitialProjectIndexRuntimeFactory Protocol)
+    can supply a runtime factory without importing the concrete
+    LocalProjectIndexRuntimeFactory from this module.
+    """
+
+    async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime: ...
+
+
 def local_project_embedding_vector_sync(
     dependencies: LocalIndexProjectDependencies,
 ) -> EmbeddingBatchVectorSync | None:
@@ -508,7 +520,7 @@ class LocalProjectIndexRuntimeFactory:
 async def run_local_project_index_for_project(
     project: Project,
     *,
-    runtime_factory: LocalProjectIndexRuntimeFactory,
+    runtime_factory: LocalProjectIndexRuntimeProvider,
     force_full: bool = False,
     embeddings: bool = True,
 ) -> ProjectIndexCoordinatorResult:
