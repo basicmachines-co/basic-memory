@@ -1173,19 +1173,37 @@ async def read_runtime_file_checksum(
     return await reader.compute_checksum(file_path)
 
 
+def runtime_file_conflict(
+    actual_checksum: RuntimeFileChecksum | None,
+    expected_checksum: RuntimeFileChecksum | None,
+    file_path: RuntimeFilePath,
+) -> RuntimeFileConflict | None:
+    """Return a conflict when a present file does not match the expected checksum.
+
+    An absent file (``actual_checksum is None``) never conflicts. A present file
+    conflicts unless the caller expected exactly that checksum — a ``None``
+    expectation (a fresh note that assumes no file) always conflicts with a
+    present file.
+    """
+    if actual_checksum is None:
+        return None
+    if expected_checksum is None or actual_checksum != expected_checksum:
+        return RuntimeFileConflict(
+            file_path=file_path,
+            expected_checksum=expected_checksum,
+            actual_checksum=actual_checksum,
+        )
+    return None
+
+
 async def assert_runtime_file_matches_expected(
     reader: RuntimeFileChecksumReader,
     expected: RuntimeExpectedFileState,
 ) -> None:
     """Raise when a guarded write would overwrite an unexpected runtime file."""
     actual_checksum = await read_runtime_file_checksum(reader, expected.file_path)
-    if actual_checksum is None:
-        return
-    if expected.expected_checksum is None or actual_checksum != expected.expected_checksum:
-        raise RuntimeFileConflictError(
-            RuntimeFileConflict(
-                file_path=expected.file_path,
-                expected_checksum=expected.expected_checksum,
-                actual_checksum=actual_checksum,
-            )
-        )
+    conflict = runtime_file_conflict(
+        actual_checksum, expected.expected_checksum, expected.file_path
+    )
+    if conflict is not None:
+        raise RuntimeFileConflictError(conflict)

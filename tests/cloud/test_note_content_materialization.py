@@ -548,6 +548,54 @@ async def test_recover_stuck_materializations_does_not_overwrite_unexpected_file
 
 
 @pytest.mark.asyncio
+async def test_recover_stuck_materializations_publishes_already_written_file(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+    file_service: FileService,
+) -> None:
+    """A crash after the file write but before publish is recovered, not a conflict.
+
+    The row is left 'writing' with file_checksum None while the correct accepted
+    content is already on disk. Recovery must recognise the same content, skip the
+    redundant write, and publish to 'synced' instead of raising an external-change
+    conflict — the arguably-more-common crash location the guard alone mishandles.
+    """
+    markdown_content = "# Recovered\n\nThe file was written before the crash.\n"
+    await _seed_stuck_note_content(
+        session_maker,
+        project_id=test_project.id,
+        entity_id=sample_entity.id,
+        markdown_content=markdown_content,
+        db_version=1,
+        db_checksum="db-checksum-1",
+        file_write_status="writing",
+    )
+    # Simulate the crash-after-write-before-publish window: the accepted content
+    # is already on disk while the row still reads 'writing' (file_checksum None).
+    target = file_service.base_path / sample_entity.file_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(markdown_content, encoding="utf-8")
+
+    recovered = await recover_stuck_materializations(
+        session_maker=session_maker,
+        file_service=file_service,
+        project_id=test_project.id,
+    )
+
+    assert recovered == 1
+    assert target.read_text(encoding="utf-8") == markdown_content
+
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        row = await repository.get_by_entity_id(session, sample_entity.id)
+    assert row is not None
+    assert row.file_write_status == "synced"
+    assert row.file_checksum is not None
+    assert row.file_version == 1
+
+
+@pytest.mark.asyncio
 async def test_run_recovery_materialization_does_not_revert_newer_accepted_version(
     session_maker,
     test_project: Project,

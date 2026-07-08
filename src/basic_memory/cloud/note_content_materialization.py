@@ -129,12 +129,15 @@ async def drain_pending_materializations() -> None:
 # --- Startup Recovery ---
 # accept_write marks note_content "pending", then the materialization preflight
 # flips it to "writing" before the file is written and the publisher records
-# "synced". If the process dies between those points the row is stuck forever and
-# the source-of-truth markdown file is never written. On the next startup we
-# re-drive every stuck row. The db_version compare-and-set guard in the preflight
-# and publisher makes this unconditionally safe: an older recovery attempt can
-# never overwrite a newer accepted write or its file, so recovery re-materializes
-# without first checking whether some other writer already caught up.
+# "synced". If the process dies anywhere between those points the row is stuck
+# forever: the crash may land before the file write (nothing on disk) or after it
+# but before publish (the correct accepted file is already on disk, row still
+# "writing"). On the next startup we re-drive every stuck row. The write path
+# short-circuits when the accepted content is already on disk, so the
+# crash-after-write case publishes to "synced" instead of tripping the
+# external-change guard. The db_version compare-and-set guard in the preflight and
+# publisher makes recovery unconditionally safe: an older recovery attempt can
+# never overwrite a newer accepted write or its file.
 
 # Synthetic provenance stamped on recovered writes so operators can tell a
 # crash-recovery materialization apart from a normal accept-path write in logs
