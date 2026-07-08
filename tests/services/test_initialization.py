@@ -405,3 +405,49 @@ async def test_initialize_app_no_precedence_warning_when_not_conflicting(
         "ensure_frontmatter_on_sync=True overrides disable_permalinks=True" in message
         for message in warnings
     )
+
+
+@pytest.mark.asyncio
+async def test_recover_project_materializations_writes_stuck_file(
+    session_maker,
+    test_project,
+    sample_entity,
+):
+    """Startup recovery re-writes a note whose file write a crash left unfinished."""
+    from datetime import UTC, datetime
+
+    from basic_memory.repository.note_content_repository import (
+        AcceptedNoteContentWrite,
+        NoteContentRepository,
+    )
+    from basic_memory.services.initialization import recover_project_materializations
+
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=sample_entity.id,
+                markdown_content="# Recovered on startup\n",
+                db_version=1,
+                db_checksum="db-checksum-1",
+                last_source="api",
+                updated_at=datetime.now(UTC),
+            ),
+        )
+        row = await repository.select_by_id(session, sample_entity.id)
+        assert row is not None
+        row.file_write_status = "writing"
+        await session.flush()
+
+    await recover_project_materializations(test_project, session_maker)
+
+    from pathlib import Path
+
+    written = Path(test_project.path) / sample_entity.file_path
+    assert written.read_text(encoding="utf-8") == "# Recovered on startup\n"
+
+    async with db.scoped_session(session_maker) as session:
+        row = await repository.get_by_entity_id(session, sample_entity.id)
+    assert row is not None
+    assert row.file_write_status == "synced"

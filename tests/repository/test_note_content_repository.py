@@ -635,3 +635,92 @@ async def test_note_content_file_path_lookup_prefers_entity_with_current_path(
 
     assert found is not None
     assert found.entity_id == current_entity.id
+
+
+@pytest.mark.asyncio
+async def test_find_stuck_materializations_returns_only_writing_and_pending(
+    session_maker,
+    test_project: Project,
+    entity_repository: EntityRepository,
+):
+    """The startup-recovery query returns only rows whose file write never finished."""
+    repository = NoteContentRepository(project_id=test_project.id)
+
+    statuses = {
+        "writing": "writing",
+        "pending": "pending",
+        "synced": "synced",
+        "failed": "failed",
+        "external": "external_change_detected",
+    }
+    entity_ids: dict[str, int] = {}
+    async with db.scoped_session(session_maker) as session:
+        for name, status in statuses.items():
+            entity = await entity_repository.create(
+                session,
+                {
+                    "title": f"Note {name}",
+                    "note_type": "test",
+                    "permalink": f"project/note-{name}",
+                    "file_path": f"notes/{name}.md",
+                    "content_type": "text/markdown",
+                    "created_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            )
+            entity_ids[name] = entity.id
+            payload = build_note_content_payload(entity.id)
+            payload["file_write_status"] = status
+            await repository.create(session, payload)
+
+        stuck = await repository.find_stuck_materializations(session)
+
+    stuck_ids = {row.entity_id for row in stuck}
+    assert stuck_ids == {entity_ids["writing"], entity_ids["pending"]}
+
+
+@pytest.mark.asyncio
+async def test_find_stuck_materializations_is_project_scoped(
+    session_maker,
+    config_home,
+):
+    """A stuck row in another project must not leak into this project's recovery sweep."""
+    project_repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        project_a = await project_repository.create(
+            session,
+            {
+                "name": "stuck-project-a",
+                "path": str(config_home / "stuck-project-a"),
+                "is_active": True,
+            },
+        )
+        project_b = await project_repository.create(
+            session,
+            {
+                "name": "stuck-project-b",
+                "path": str(config_home / "stuck-project-b"),
+                "is_active": True,
+            },
+        )
+        entity_b = await EntityRepository(project_id=project_b.id).create(
+            session,
+            {
+                "title": "Other project stuck note",
+                "note_type": "test",
+                "permalink": "stuck-project-b/note",
+                "file_path": "notes/note.md",
+                "content_type": "text/markdown",
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+        payload = build_note_content_payload(entity_b.id)
+        payload["file_write_status"] = "writing"
+        await NoteContentRepository(project_id=project_b.id).create(session, payload)
+
+        stuck_a = await NoteContentRepository(project_id=project_a.id).find_stuck_materializations(
+            session
+        )
+
+    assert stuck_a == []

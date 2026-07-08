@@ -7,6 +7,7 @@ to ensure consistent application startup across all entry points.
 import asyncio
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 
@@ -20,6 +21,8 @@ from basic_memory.repository import (
 )
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
     from basic_memory.index.local_project import LocalProjectIndexRuntime
 
 
@@ -49,6 +52,43 @@ async def run_initial_project_index(
         f"enqueued_batches={result.enqueued_batches}",
         f"deleted_files={result.deleted_files}",
     )
+
+
+async def recover_project_materializations(
+    project: Project,
+    session_maker: "async_sessionmaker[AsyncSession]",
+) -> None:
+    """Re-drive note materializations a crash left stuck for one project.
+
+    A local note write returns before its markdown file is written; a crash
+    between accepting the DB snapshot and writing the file leaves note_content
+    stuck in writing/pending and the source-of-truth file missing. Runs once at
+    startup, before the watch service serves, so the file is (re)written and then
+    picked up by the initial project index. Non-fatal: a recovery failure must not
+    block startup, so it is logged and startup continues.
+    """
+    from basic_memory.cloud.note_content_materialization import recover_stuck_materializations
+    from basic_memory.services.file_service import FileService
+
+    try:
+        # FileService needs only base_path to write the accepted markdown bytes;
+        # the markdown_processor/app_config are unused on the materialization path.
+        file_service = FileService(Path(project.path))
+        recovered = await recover_stuck_materializations(
+            session_maker=session_maker,
+            file_service=file_service,
+            project_id=project.id,
+        )
+        if recovered:
+            logger.info(
+                "Recovered stuck note materializations on startup",
+                project=project.name,
+                recovered=recovered,
+            )
+    except Exception as e:  # pragma: no cover - defensive startup guard
+        logger.error(
+            f"Error recovering stuck materializations for project {project.name}: {e}"
+        )
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
@@ -176,6 +216,12 @@ async def initialize_file_indexing(
     if skip:
         active_projects = [p for p in active_projects if p.name not in skip]
         logger.info(f"Skipping projects that are not locally indexable: {skip}")
+
+    # Recover materializations a crash left stuck (writing/pending) before serving.
+    # Runs synchronously here so the source-of-truth files are re-written before the
+    # initial project index scans them; bounded by the count of stuck rows.
+    for project in active_projects:
+        await recover_project_materializations(project, session_maker)
 
     # Start indexing for all projects as background tasks (non-blocking)
     async def index_project_background(project: Project):

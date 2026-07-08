@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional, cast
+from typing import Any, Mapping, Optional, Sequence, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
@@ -325,6 +325,23 @@ class NoteContentRepository(Repository[NoteContent]):
         if updated is None:  # pragma: no cover
             raise ValueError(f"Can't find NoteContent for entity {entity_id} after update")
         return updated
+
+    async def find_stuck_materializations(
+        self, session: AsyncSession
+    ) -> Sequence[NoteContent]:
+        """Return accepted notes whose file write never completed.
+
+        ``accept_write`` marks a row ``pending`` and the materialization preflight
+        flips it to ``writing`` before the file is written and the publisher records
+        ``synced``/``written``. A process crash between those points leaves the row
+        stuck in ``writing``/``pending`` forever and the source-of-truth markdown
+        file never (re)materialized. Startup recovery re-drives exactly these rows;
+        the db_version compare-and-set guard in the publisher keeps the retry safe
+        (an older recovery attempt can never revert a newer accepted write).
+        """
+        query = self.select().where(NoteContent.file_write_status.in_(("writing", "pending")))
+        result = await session.execute(query)
+        return list(result.scalars().all())
 
     async def delete_by_entity_id(self, session: AsyncSession, entity_id: int) -> bool:
         """Delete note_content by entity identifier."""

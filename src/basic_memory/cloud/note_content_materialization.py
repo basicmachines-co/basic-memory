@@ -30,6 +30,7 @@ from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteResponse,
     RuntimeNoteContentResponsePayload,
+    RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
     plan_accepted_note_response,
@@ -123,6 +124,107 @@ async def drain_pending_materializations() -> None:
     the loop alive and don't need it.
     """
     await _materialization_pool.join()
+
+
+# --- Startup Recovery ---
+# accept_write marks note_content "pending", then the materialization preflight
+# flips it to "writing" before the file is written and the publisher records
+# "synced". If the process dies between those points the row is stuck forever and
+# the source-of-truth markdown file is never written. On the next startup we
+# re-drive every stuck row. The db_version compare-and-set guard in the preflight
+# and publisher makes this unconditionally safe: an older recovery attempt can
+# never overwrite a newer accepted write or its file, so recovery re-materializes
+# without first checking whether some other writer already caught up.
+
+# Synthetic provenance stamped on recovered writes so operators can tell a
+# crash-recovery materialization apart from a normal accept-path write in logs
+# and object metadata.
+RECOVERY_NOTE_CHANGE_SOURCE = "note-content-materialization-recovery"
+RECOVERY_NOTE_ACTOR_NAME = "startup-recovery"
+
+
+async def run_recovery_materialization(
+    request: RuntimeNoteMaterializationJobRequest,
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    file_service: FileService,
+) -> RuntimeNoteMaterializationResult:
+    """Re-drive one stuck materialization through the standard guarded write path.
+
+    Uses the same preflight/writer/publisher/status-publisher as an accept-path
+    write, so the db_version and file-conflict guards apply unchanged. No cleanup
+    paths: a recovery request carries no old-file move, so nothing is deleted.
+    """
+    storage = LocalNoteContentStorage(file_service)
+    return await run_note_materialization(
+        request,
+        preflight=RepositoryNoteMaterializationPreflight(session_maker=session_maker),
+        writer=ContentStoreNoteMaterializationFileWriter(storage),
+        publisher=RepositoryNoteMaterializationPublisher(session_maker=session_maker),
+        status_publisher=RepositoryNoteMaterializationStatusPublisher(session_maker=session_maker),
+        cleanup_enqueuer=InlineNoteFileDeleteEnqueuer(storage),
+    )
+
+
+async def recover_stuck_materializations(
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    file_service: FileService,
+    project_id: int,
+) -> int:
+    """Re-drive every note materialization stuck in writing/pending for a project.
+
+    Meant to run once per project at startup, before serving. Non-fatal per row:
+    a single row that raises is logged and skipped so one poisoned note cannot
+    block startup recovery for the rest of the project. Returns the number of rows
+    that reached a written file state.
+    """
+    async with db.scoped_session(session_maker) as session:
+        stuck_rows = await NoteContentRepository(
+            project_id=project_id
+        ).find_stuck_materializations(session)
+
+    if not stuck_rows:
+        return 0
+
+    logger.info(
+        "Recovering stuck note materializations",
+        project_id=project_id,
+        stuck_count=len(stuck_rows),
+    )
+    recovered = 0
+    for row in stuck_rows:
+        # Rebuild the queue request from the row's own accepted db_version/db_checksum
+        # so the preflight guard matches the current accepted state; if a newer write
+        # has since advanced the row, the guard trips and this attempt no-ops.
+        request = RuntimeNoteMaterializationJobRequest(
+            project_id=project_id,
+            entity_id=row.entity_id,
+            db_version=int(row.db_version),
+            db_checksum=str(row.db_checksum),
+            actor_name=RECOVERY_NOTE_ACTOR_NAME,
+            source=RECOVERY_NOTE_CHANGE_SOURCE,
+        )
+        try:
+            result = await run_recovery_materialization(
+                request,
+                session_maker=session_maker,
+                file_service=file_service,
+            )
+        except Exception:
+            # Trigger: one row's materialization raised (storage/DB error).
+            # Why: recovery is best-effort startup cleanup; the version guard makes
+            # a later retry safe, so one bad row must not abort the whole sweep.
+            # Outcome: log and continue to the next stuck row.
+            logger.exception(
+                "Failed to recover stuck note materialization",
+                project_id=project_id,
+                entity_id=row.entity_id,
+            )
+            continue
+        if result.status is RuntimeNoteMaterializationStatus.written:
+            recovered += 1
+    return recovered
 
 
 def note_content_payload_file_path(
