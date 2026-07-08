@@ -29,7 +29,6 @@ from basic_memory.indexing.forward_reference_resolution import (
     run_forward_reference_resolution,
 )
 from basic_memory.indexing.progress import VectorSyncProgress
-from basic_memory.indexing.project_index_progress import ProjectIndexMetadataReporter
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteBatchStore,
     ProjectIndexDeleteRun,
@@ -165,14 +164,12 @@ class ProjectIndexRuntime:
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexMoveRun:
         """Apply moved-file updates for the current project."""
         return await run_project_index_move_batches(
             moved_files=dict(moved_files),
             batch_size=batch_size,
             move_store=self.move_store,
-            metadata_reporter=metadata_reporter,
         )
 
     async def run_delete_batches(
@@ -180,14 +177,12 @@ class ProjectIndexRuntime:
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexDeleteRun:
         """Delete file-backed entities for the current project."""
         return await run_project_index_delete_batches(
             deleted_paths=list(deleted_paths),
             batch_size=batch_size,
             delete_store=self.delete_store,
-            metadata_reporter=metadata_reporter,
         )
 
     async def resolve_forward_references(self) -> ProjectIndexForwardReferenceRun:

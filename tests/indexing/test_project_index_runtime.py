@@ -30,7 +30,6 @@ from basic_memory.indexing.forward_reference_resolution import (
     RepositoryForwardReferenceRelationSource,
     RepositoryForwardReferenceResolutionRuntime,
 )
-from basic_memory.runtime.workflows import RuntimeWorkflowMetadataPatch
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,14 +80,6 @@ class RecordingDeleteStore:
             deleted_entities=len(delete_batch.paths),
             relation_cleanup_entity_ids=frozenset({100 + delete_batch.completed_batches}),
         )
-
-
-@dataclass(slots=True)
-class RecordingProjectIndexMetadataReporter:
-    progress_updates: list[RuntimeWorkflowMetadataPatch] = field(default_factory=list)
-
-    async def report_progress(self, progress: RuntimeWorkflowMetadataPatch) -> None:
-        self.progress_updates.append(progress)
 
 
 @dataclass(slots=True)
@@ -246,19 +237,16 @@ def test_project_index_runtime_plans_vector_sync_candidates() -> None:
 async def test_project_index_runtime_delegates_move_and_delete_batches() -> None:
     move_store = RecordingMoveStore()
     delete_store = RecordingDeleteStore()
-    metadata_reporter = RecordingProjectIndexMetadataReporter()
 
     runtime = make_runtime(move_store=move_store, delete_store=delete_store)
 
     move_run = await runtime.run_move_batches(
         moved_files={"old.md": "new.md", "a.md": "b.md"},
         batch_size=1,
-        metadata_reporter=metadata_reporter,
     )
     delete_run = await runtime.run_delete_batches(
         deleted_paths=["gone.md", "missing.md"],
         batch_size=2,
-        metadata_reporter=metadata_reporter,
     )
 
     assert [
@@ -273,26 +261,6 @@ async def test_project_index_runtime_delegates_move_and_delete_batches() -> None
     assert delete_store.batches[0].paths == ("gone.md", "missing.md")
     assert delete_run.total_deleted_entities == 2
     assert delete_run.relation_cleanup_entity_ids == frozenset({101})
-    assert metadata_reporter.progress_updates == [
-        {
-            "moved_files": 2,
-            "completed_batches": 1,
-            "total_batches": 2,
-            "updated_files": 1,
-        },
-        {
-            "moved_files": 2,
-            "completed_batches": 2,
-            "total_batches": 2,
-            "updated_files": 2,
-        },
-        {
-            "deleted_files": 2,
-            "completed_batches": 1,
-            "total_batches": 1,
-            "deleted_entities": 2,
-        },
-    ]
 
 
 @pytest.mark.asyncio

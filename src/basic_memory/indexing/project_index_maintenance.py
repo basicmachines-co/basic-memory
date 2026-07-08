@@ -10,7 +10,6 @@ from sqlalchemy import bindparam, case, column, delete, select, table, text, upd
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.indexing.project_index_progress import ProjectIndexMetadataReporter
 from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.repository.project_repository import _load_sqlite_vec_on_session
 from basic_memory.runtime.storage import ProjectId
@@ -24,7 +23,6 @@ class ProjectIndexMaintenanceRunner(Protocol):
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexMoveRun: ...
 
     async def run_delete_batches(
@@ -32,7 +30,6 @@ class ProjectIndexMaintenanceRunner(Protocol):
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexDeleteRun: ...
 
 
@@ -666,13 +663,11 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexMoveRun:
         return await run_project_index_move_batches(
             moved_files=moved_files,
             batch_size=batch_size,
             move_store=self.move_store,
-            metadata_reporter=metadata_reporter,
         )
 
     async def run_delete_batches(
@@ -680,13 +675,11 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        metadata_reporter: ProjectIndexMetadataReporter | None = None,
     ) -> ProjectIndexDeleteRun:
         return await run_project_index_delete_batches(
             deleted_paths=deleted_paths,
             batch_size=batch_size,
             delete_store=self.delete_store,
-            metadata_reporter=metadata_reporter,
         )
 
 
@@ -776,7 +769,6 @@ async def run_project_index_move_batches(
     moved_files: Mapping[str, str],
     batch_size: int,
     move_store: ProjectIndexMoveBatchStore,
-    metadata_reporter: ProjectIndexMetadataReporter | None = None,
 ) -> ProjectIndexMoveRun:
     """Apply project-index move maintenance through a storage adapter."""
     move_plan = build_project_index_move_batch_plan(
@@ -807,8 +799,6 @@ async def run_project_index_move_batches(
             total_batches=move_plan.batch_count,
             updated_files=total_updated,
         )
-        if metadata_reporter is not None:
-            await metadata_reporter.report_progress(progress.workflow_metadata())
         records.append(
             ProjectIndexMoveBatchRecord(
                 batch=move_batch,
@@ -832,7 +822,6 @@ async def run_project_index_delete_batches(
     deleted_paths: Sequence[str],
     batch_size: int,
     delete_store: ProjectIndexDeleteBatchStore,
-    metadata_reporter: ProjectIndexMetadataReporter | None = None,
 ) -> ProjectIndexDeleteRun:
     """Apply project-index delete maintenance through a storage adapter."""
     delete_plan = build_project_index_delete_batch_plan(
@@ -863,8 +852,6 @@ async def run_project_index_delete_batches(
                 total_batches=delete_plan.batch_count,
                 deleted_entities=total_deleted,
             )
-            if metadata_reporter is not None:
-                await metadata_reporter.report_progress(progress.workflow_metadata())
 
         records.append(
             ProjectIndexDeleteBatchRecord(

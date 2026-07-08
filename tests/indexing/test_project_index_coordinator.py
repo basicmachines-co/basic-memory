@@ -68,7 +68,6 @@ class EmptyProjectIndexMaintenanceRunner:
         *,
         moved_files: Mapping[str, str],
         batch_size: int,
-        metadata_reporter: object | None = None,
     ) -> ProjectIndexMoveRun:
         return ProjectIndexMoveRun(
             total_moves=len(moved_files),
@@ -81,7 +80,6 @@ class EmptyProjectIndexMaintenanceRunner:
         *,
         deleted_paths: Sequence[str],
         batch_size: int,
-        metadata_reporter: object | None = None,
     ) -> ProjectIndexDeleteRun:
         return ProjectIndexDeleteRun(
             total_deletes=len(deleted_paths),

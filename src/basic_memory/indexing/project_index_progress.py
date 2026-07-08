@@ -3,7 +3,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
 
 from pydantic import Field, StrictInt, StrictStr, ValidationError, model_validator
 
@@ -16,16 +15,9 @@ from basic_memory.runtime.storage import (
     ProjectPermalink,
     RuntimeNoteChangeSource,
 )
-from basic_memory.runtime.workflows import RuntimeWorkflowMetadataPatch, WorkflowId
+from basic_memory.runtime.workflows import WorkflowId
 
 PROJECT_INDEX_PROGRESS_EVENT_INTERVAL = 50
-
-
-class ProjectIndexMetadataReporter(Protocol):
-    """Runtime adapter that records project-index workflow metadata progress."""
-
-    async def report_progress(self, progress: RuntimeWorkflowMetadataPatch) -> None:
-        """Persist or publish one metadata progress patch."""
 
 
 class ProjectIndexFileOutcome(StrEnum):
