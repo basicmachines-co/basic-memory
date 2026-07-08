@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -43,11 +44,13 @@ from basic_memory.indexing.vector_sync_planning import (
     RepositoryVectorSyncEntitySource,
     VectorSyncEntitySource,
     VectorSyncExecutor,
-    VectorSyncLogger,
     plan_vector_sync_progress,
     run_vector_sync,
 )
 from basic_memory.runtime.storage import ProjectId
+
+if TYPE_CHECKING:  # pragma: no cover
+    from loguru import Logger
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,7 +149,7 @@ class ProjectIndexRuntime:
         self,
         entity_ids: Sequence[EntityId],
         *,
-        logger: VectorSyncLogger,
+        logger: Logger,
         resume_progress: VectorSyncProgress | None = None,
     ) -> VectorSyncProgress:
         """Sync semantic vectors for the given entity ids."""

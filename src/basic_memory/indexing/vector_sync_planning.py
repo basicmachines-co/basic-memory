@@ -1,9 +1,11 @@
 """Portable vector-sync planning helpers."""
 
+from __future__ import annotations
+
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,6 +17,9 @@ from basic_memory.indexing.progress import (
     initialize_vector_sync_progress,
 )
 from basic_memory.runtime.storage import ProjectId
+
+if TYPE_CHECKING:  # pragma: no cover
+    from loguru import Logger
 
 type CheckpointPhase = str | None
 type EntityId = int
@@ -44,16 +49,6 @@ class VectorSyncExecutor(Protocol):
         progress_callback: VectorSyncBatchProgressCallback | None = None,
     ) -> VectorSyncBatchSummary:
         """Refresh vector chunks for one batch of entities."""
-
-
-class VectorSyncLogger(Protocol):
-    """Logging surface needed by the portable vector-sync runner."""
-
-    def info(self, message: str, **kwargs: object) -> None:
-        """Record vector-sync progress."""
-
-    def error(self, message: str, **kwargs: object) -> None:
-        """Record vector-sync failures."""
 
 
 class VectorSyncEntitySource(Protocol):
@@ -157,7 +152,7 @@ async def run_vector_sync(
     entity_ids: Sequence[EntityId],
     *,
     vector_sync: VectorSyncExecutor,
-    logger: VectorSyncLogger,
+    logger: Logger,
     resume_progress: VectorSyncProgress | None = None,
     chunk_size: int = VECTOR_SYNC_CHUNK_SIZE,
     project_id: int | None = None,
@@ -233,6 +228,8 @@ async def run_vector_sync(
     if project_id is None:
         logger.info(completion_message)
     else:
-        logger.info(completion_message, project_id=project_id)
+        # Attach project_id as structured context so the completion log stays
+        # queryable; passing it as a format arg would silently drop it.
+        logger.bind(project_id=project_id).info(completion_message)
 
     return progress_state

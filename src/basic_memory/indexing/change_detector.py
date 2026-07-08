@@ -30,14 +30,6 @@ from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileInd
 MAX_QUERY_BIND_PARAMETERS = 900
 
 
-class ChangeDetectionLogger(Protocol):
-    """Logger shape used by change-detection orchestration."""
-
-    def debug(self, message: str) -> object: ...
-
-    def info(self, message: str) -> object: ...
-
-
 class ChangeDetectionStore(Protocol):
     """Indexed project state needed to classify storage changes."""
 
@@ -83,14 +75,9 @@ class ChangeDetector:
     async def detect_all_changes(
         self,
         storage_files: Mapping[FileIndexPath, StorageChecksumSource],
-        bound_logger: ChangeDetectionLogger | None = None,
     ) -> ChangeReport:
         """Detect all storage-vs-database changes for this repository's project."""
-        return await detect_project_file_changes(
-            storage_files,
-            store=self,
-            bound_logger=bound_logger,
-        )
+        return await detect_project_file_changes(storage_files, store=self)
 
     async def load_indexed_file_checksums(
         self,
@@ -145,11 +132,8 @@ async def detect_project_file_changes(
     storage_files: Mapping[FileIndexPath, StorageChecksumSource],
     *,
     store: ChangeDetectionStore,
-    bound_logger: ChangeDetectionLogger | None = None,
 ) -> ChangeReport:
     """Detect project file changes from storage metadata and indexed state."""
-    log = bound_logger or logger
-
     with logfire.span(
         "change_detector.detect_all_changes",
         s3_file_count=len(storage_files),
@@ -159,7 +143,7 @@ async def detect_project_file_changes(
 
         with logfire.span("change_detector.get_db_checksums", path_count=len(storage_paths)):
             db_checksums = await store.load_indexed_file_checksums(storage_paths)
-            log.debug(f"[CHANGE] Fetched {len(db_checksums)} checksums from DB")
+            logger.debug(f"[CHANGE] Fetched {len(db_checksums)} checksums from DB")
 
         with logfire.span("change_detector.detect_deletes"):
             all_db_paths = await store.load_all_indexed_paths()
@@ -186,10 +170,10 @@ async def detect_project_file_changes(
         report = plan_change_detection_snapshot(snapshot)
 
         for old_path, new_path in report.moved_files.items():
-            log.debug(f"[CHANGE] Detected move: {old_path} -> {new_path}")
-        log.info(f"[CHANGE] Move detection: found {len(report.moved_files)} moved files")
-        log.info(f"[CHANGE] Delete detection: found {len(report.deleted_files)} deleted files")
-        log.info(
+            logger.debug(f"[CHANGE] Detected move: {old_path} -> {new_path}")
+        logger.info(f"[CHANGE] Move detection: found {len(report.moved_files)} moved files")
+        logger.info(f"[CHANGE] Delete detection: found {len(report.deleted_files)} deleted files")
+        logger.info(
             f"[CHANGE] Detection complete: {len(report.new_files)} new, "
             f"{len(report.modified_files)} modified, "
             f"{len(report.deleted_files)} deleted, {len(report.moved_files)} moved, "

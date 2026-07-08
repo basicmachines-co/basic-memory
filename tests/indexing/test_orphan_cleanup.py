@@ -1,14 +1,31 @@
 """Tests for project-index orphan entity cleanup."""
 
-from collections.abc import AsyncIterator, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.orphan_cleanup import cleanup_orphan_entities
+
+if TYPE_CHECKING:
+    from loguru import Record
+
+
+@contextmanager
+def capture_logs() -> Iterator[list[Record]]:
+    """Capture loguru records emitted while the block runs."""
+    records: list[Record] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        yield records
+    finally:
+        logger.remove(sink_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,18 +72,6 @@ class RecordingSearchService:
         self.deleted_entities.append(entity)
 
 
-@dataclass(slots=True)
-class RecordingLogger:
-    info_calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
-    warning_calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
-
-    def info(self, message: str, **kwargs: object) -> None:
-        self.info_calls.append((message, kwargs))
-
-    def warning(self, message: str, **kwargs: object) -> None:
-        self.warning_calls.append((message, kwargs))
-
-
 @asynccontextmanager
 async def fake_session_scope(
     _session_maker: async_sessionmaker[AsyncSession],
@@ -94,10 +99,9 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
         entities_by_path={},
     )
     search_service = RecordingSearchService()
-    logger = RecordingLogger()
     scoped_session = RecordingScopedSession()
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
+    with capture_logs() as records, pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
             "basic_memory.indexing.orphan_cleanup.db.scoped_session", scoped_session
         )
@@ -106,7 +110,6 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
             entity_repository=repository,
             search_service=search_service,
             current_paths={"notes/current.md"},
-            logger=logger,
         )
 
     assert result.orphan_paths == ()
@@ -115,8 +118,8 @@ async def test_cleanup_orphan_entities_returns_empty_result_when_storage_matches
     assert repository.get_calls == []
     assert repository.delete_calls == []
     assert search_service.deleted_entities == []
-    assert logger.info_calls == []
-    assert logger.warning_calls == []
+    # No orphans means the cleanup returns before emitting any diagnostics.
+    assert records == []
 
 
 async def test_cleanup_orphan_entities_uses_scoped_session_for_each_db_step() -> None:
@@ -160,10 +163,9 @@ async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
         changed_paths={"notes/changed.md"},
     )
     search_service = RecordingSearchService()
-    logger = RecordingLogger()
     scoped_session = RecordingScopedSession()
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
+    with capture_logs() as records, pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
             "basic_memory.indexing.orphan_cleanup.db.scoped_session", scoped_session
         )
@@ -172,7 +174,6 @@ async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
             entity_repository=repository,
             search_service=search_service,
             current_paths={"notes/current.md"},
-            logger=logger,
         )
 
     assert result.orphan_paths == (
@@ -195,10 +196,17 @@ async def test_cleanup_orphan_entities_deletes_only_stale_entity_rows() -> None:
         (10, "notes/delete.md"),
     ]
     assert search_service.deleted_entities == [delete_entity]
-    assert logger.warning_calls == [
+    warnings = [record for record in records if record["level"].name == "WARNING"]
+    infos = [record for record in records if record["level"].name == "INFO"]
+    assert [(record["message"], record["extra"]) for record in warnings] == [
         ("Skipping orphan cleanup: entity no longer exists", {"file_path": "notes/missing.md"})
     ]
-    assert logger.info_calls[-1] == (
+    # The changed path logs its own info before the final summary.
+    assert (infos[0]["message"], infos[0]["extra"]) == (
+        "Skipping orphan cleanup: entity path changed",
+        {"entity_id": 11, "file_path": "notes/changed.md"},
+    )
+    assert (infos[-1]["message"], infos[-1]["extra"]) == (
         "Deleted orphan entities during project reindex",
         {"orphan_paths": 3, "deleted_files": 1},
     )
