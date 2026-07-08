@@ -58,24 +58,6 @@ class ProjectIndexMovedEntitySearchRefresher(Protocol):
         """Refresh search rows for moved entity ids."""
 
 
-class ProjectIndexMoveBatchStore(Protocol):
-    """Capability that applies one project-index move-maintenance batch."""
-
-    async def apply_project_index_move_batch(
-        self,
-        move_batch: ProjectIndexMoveBatch,
-    ) -> ProjectIndexMoveBatchResult: ...
-
-
-class ProjectIndexDeleteBatchStore(Protocol):
-    """Capability that applies one project-index delete-maintenance batch."""
-
-    async def apply_project_index_delete_batch(
-        self,
-        delete_batch: ProjectIndexDeleteBatch,
-    ) -> ProjectIndexDeleteBatchResult: ...
-
-
 @dataclass(frozen=True, slots=True)
 class ProjectIndexMovedFile:
     """One indexed file move that may need storage-backed metadata repair."""
@@ -655,8 +637,8 @@ class RepositoryProjectIndexMaintenanceStore:
 class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
     """Run project-index maintenance through explicit move/delete batch stores."""
 
-    move_store: ProjectIndexMoveBatchStore
-    delete_store: ProjectIndexDeleteBatchStore
+    move_store: RepositoryProjectIndexMaintenanceStore
+    delete_store: RepositoryProjectIndexMaintenanceStore
 
     async def run_move_batches(
         self,
@@ -768,7 +750,7 @@ async def run_project_index_move_batches(
     *,
     moved_files: Mapping[str, str],
     batch_size: int,
-    move_store: ProjectIndexMoveBatchStore,
+    move_store: RepositoryProjectIndexMaintenanceStore,
 ) -> ProjectIndexMoveRun:
     """Apply project-index move maintenance through a storage adapter."""
     move_plan = build_project_index_move_batch_plan(
@@ -821,7 +803,7 @@ async def run_project_index_delete_batches(
     *,
     deleted_paths: Sequence[str],
     batch_size: int,
-    delete_store: ProjectIndexDeleteBatchStore,
+    delete_store: RepositoryProjectIndexMaintenanceStore,
 ) -> ProjectIndexDeleteRun:
     """Apply project-index delete maintenance through a storage adapter."""
     delete_plan = build_project_index_delete_batch_plan(

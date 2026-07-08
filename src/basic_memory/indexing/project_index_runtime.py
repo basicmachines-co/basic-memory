@@ -30,9 +30,7 @@ from basic_memory.indexing.forward_reference_resolution import (
 )
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.project_index_maintenance import (
-    ProjectIndexDeleteBatchStore,
     ProjectIndexDeleteRun,
-    ProjectIndexMoveBatchStore,
     ProjectIndexMoveRun,
     RepositoryProjectIndexMaintenanceStore,
     run_project_index_delete_batches,
@@ -108,8 +106,8 @@ class ProjectIndexRuntime:
     project_id: ProjectId
     vector_sync: VectorSyncExecutor
     vector_entity_source: VectorSyncEntitySource
-    move_store: ProjectIndexMoveBatchStore
-    delete_store: ProjectIndexDeleteBatchStore
+    move_store: RepositoryProjectIndexMaintenanceStore
+    delete_store: RepositoryProjectIndexMaintenanceStore
     forward_reference_relation_source: ForwardReferenceRelationSource
     forward_reference_resolution_runtime: ForwardReferenceResolutionRuntime
     forward_reference_entity_refresher: ForwardReferenceEntityRefreshRuntime

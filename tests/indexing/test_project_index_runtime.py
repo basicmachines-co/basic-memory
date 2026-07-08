@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -54,31 +55,58 @@ class RecordingVectorEntitySource:
         return set(entity_ids & self.markdown_filter)
 
 
-@dataclass(slots=True)
-class RecordingMoveStore:
-    batches: list[ProjectIndexMoveBatch] = field(default_factory=list)
+def _make_maintenance_store() -> RepositoryProjectIndexMaintenanceStore:
+    """Build the concrete maintenance store with a never-used session maker.
 
-    async def apply_project_index_move_batch(
-        self,
+    The runtime facade only ever holds a RepositoryProjectIndexMaintenanceStore, so
+    these tests inject the real concrete and monkeypatch its batch methods when they
+    need to observe delegation without a database.
+    """
+    return RepositoryProjectIndexMaintenanceStore(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        project_id=7,
+    )
+
+
+def _recording_move_store(
+    monkeypatch: pytest.MonkeyPatch,
+    recorded: list[ProjectIndexMoveBatch],
+) -> RepositoryProjectIndexMaintenanceStore:
+    async def fake_apply_move_batch(
+        _self: RepositoryProjectIndexMaintenanceStore,
         move_batch: ProjectIndexMoveBatch,
     ) -> ProjectIndexMoveBatchResult:
-        self.batches.append(move_batch)
+        recorded.append(move_batch)
         return ProjectIndexMoveBatchResult(updated_files=len(move_batch.targets))
 
+    monkeypatch.setattr(
+        RepositoryProjectIndexMaintenanceStore,
+        "apply_project_index_move_batch",
+        fake_apply_move_batch,
+    )
+    return _make_maintenance_store()
 
-@dataclass(slots=True)
-class RecordingDeleteStore:
-    batches: list[ProjectIndexDeleteBatch] = field(default_factory=list)
 
-    async def apply_project_index_delete_batch(
-        self,
+def _recording_delete_store(
+    monkeypatch: pytest.MonkeyPatch,
+    recorded: list[ProjectIndexDeleteBatch],
+) -> RepositoryProjectIndexMaintenanceStore:
+    async def fake_apply_delete_batch(
+        _self: RepositoryProjectIndexMaintenanceStore,
         delete_batch: ProjectIndexDeleteBatch,
     ) -> ProjectIndexDeleteBatchResult:
-        self.batches.append(delete_batch)
+        recorded.append(delete_batch)
         return ProjectIndexDeleteBatchResult(
             deleted_entities=len(delete_batch.paths),
             relation_cleanup_entity_ids=frozenset({100 + delete_batch.completed_batches}),
         )
+
+    monkeypatch.setattr(
+        RepositoryProjectIndexMaintenanceStore,
+        "apply_project_index_delete_batch",
+        fake_apply_delete_batch,
+    )
+    return _make_maintenance_store()
 
 
 @dataclass(slots=True)
@@ -148,8 +176,8 @@ class NoopEntityIndexer:
 def make_runtime(
     *,
     vector_entity_source: RecordingVectorEntitySource | None = None,
-    move_store: RecordingMoveStore | None = None,
-    delete_store: RecordingDeleteStore | None = None,
+    move_store: RepositoryProjectIndexMaintenanceStore | None = None,
+    delete_store: RepositoryProjectIndexMaintenanceStore | None = None,
     relation_source: RecordingForwardReferenceRelationSource | None = None,
     resolution_runtime: RecordingForwardReferenceResolutionRuntime | None = None,
     refresher: RecordingForwardReferenceEntityRefresher | None = None,
@@ -158,8 +186,8 @@ def make_runtime(
         project_id=7,
         vector_sync=NoopVectorSync(),
         vector_entity_source=vector_entity_source or RecordingVectorEntitySource(),
-        move_store=move_store or RecordingMoveStore(),
-        delete_store=delete_store or RecordingDeleteStore(),
+        move_store=move_store or _make_maintenance_store(),
+        delete_store=delete_store or _make_maintenance_store(),
         forward_reference_relation_source=relation_source
         or RecordingForwardReferenceRelationSource(relations=()),
         forward_reference_resolution_runtime=resolution_runtime
@@ -226,9 +254,13 @@ def test_project_index_runtime_plans_vector_sync_candidates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_project_index_runtime_delegates_move_and_delete_batches() -> None:
-    move_store = RecordingMoveStore()
-    delete_store = RecordingDeleteStore()
+async def test_project_index_runtime_delegates_move_and_delete_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded_move_batches: list[ProjectIndexMoveBatch] = []
+    recorded_delete_batches: list[ProjectIndexDeleteBatch] = []
+    move_store = _recording_move_store(monkeypatch, recorded_move_batches)
+    delete_store = _recording_delete_store(monkeypatch, recorded_delete_batches)
 
     runtime = make_runtime(move_store=move_store, delete_store=delete_store)
 
@@ -243,14 +275,14 @@ async def test_project_index_runtime_delegates_move_and_delete_batches() -> None
 
     assert [
         [(target.old_path, target.new_path) for target in batch.targets]
-        for batch in move_store.batches
+        for batch in recorded_move_batches
     ] == [
         [("old.md", "new.md")],
         [("a.md", "b.md")],
     ]
     assert move_run.total_moves == 2
     assert move_run.total_updated_files == 2
-    assert delete_store.batches[0].paths == ("gone.md", "missing.md")
+    assert recorded_delete_batches[0].paths == ("gone.md", "missing.md")
     assert delete_run.total_deleted_entities == 2
     assert delete_run.relation_cleanup_entity_ids == frozenset({101})
 

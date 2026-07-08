@@ -31,30 +31,63 @@ from basic_memory.indexing.project_index_maintenance import (
 )
 
 
-@dataclass(slots=True)
-class RecordingMoveBatchStore:
-    results: list[ProjectIndexMoveBatchResult]
-    batches: list[ProjectIndexMoveBatch] = field(default_factory=list)
+def _stub_move_store(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    results: list[ProjectIndexMoveBatchResult],
+    recorded: list[ProjectIndexMoveBatch],
+) -> RepositoryProjectIndexMaintenanceStore:
+    """Build a real store whose move-batch apply returns canned results.
 
-    async def apply_project_index_move_batch(
-        self,
+    The orchestration under test only cares that each batch produces a result and
+    is recorded in order, so we monkeypatch the single SQL method rather than drive
+    a real database — the store is otherwise the same concrete used in production.
+    """
+    result_iter = iter(results)
+
+    async def fake_apply_move_batch(
+        _self: RepositoryProjectIndexMaintenanceStore,
         move_batch: ProjectIndexMoveBatch,
     ) -> ProjectIndexMoveBatchResult:
-        self.batches.append(move_batch)
-        return self.results.pop(0)
+        recorded.append(move_batch)
+        return next(result_iter)
+
+    monkeypatch.setattr(
+        RepositoryProjectIndexMaintenanceStore,
+        "apply_project_index_move_batch",
+        fake_apply_move_batch,
+    )
+    return RepositoryProjectIndexMaintenanceStore(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        project_id=1,
+    )
 
 
-@dataclass(slots=True)
-class RecordingDeleteBatchStore:
-    results: list[ProjectIndexDeleteBatchResult]
-    batches: list[ProjectIndexDeleteBatch] = field(default_factory=list)
+def _stub_delete_store(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    results: list[ProjectIndexDeleteBatchResult],
+    recorded: list[ProjectIndexDeleteBatch],
+) -> RepositoryProjectIndexMaintenanceStore:
+    """Build a real store whose delete-batch apply returns canned results."""
+    result_iter = iter(results)
 
-    async def apply_project_index_delete_batch(
-        self,
+    async def fake_apply_delete_batch(
+        _self: RepositoryProjectIndexMaintenanceStore,
         delete_batch: ProjectIndexDeleteBatch,
     ) -> ProjectIndexDeleteBatchResult:
-        self.batches.append(delete_batch)
-        return self.results.pop(0)
+        recorded.append(delete_batch)
+        return next(result_iter)
+
+    monkeypatch.setattr(
+        RepositoryProjectIndexMaintenanceStore,
+        "apply_project_index_delete_batch",
+        fake_apply_delete_batch,
+    )
+    return RepositoryProjectIndexMaintenanceStore(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        project_id=1,
+    )
 
 
 class FakeProjectIndexScalarResult:
@@ -232,8 +265,12 @@ def test_project_index_maintenance_batch_plans_require_positive_batch_size() -> 
 
 
 @pytest.mark.asyncio
-async def test_project_index_move_runner_applies_batches_and_reports_progress() -> None:
-    store = RecordingMoveBatchStore(
+async def test_project_index_move_runner_applies_batches_and_reports_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded_batches: list[ProjectIndexMoveBatch] = []
+    store = _stub_move_store(
+        monkeypatch,
         results=[
             ProjectIndexMoveBatchResult(
                 updated_files=1,
@@ -246,7 +283,8 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
                 updated_files=1,
                 moved_entity_ids=frozenset({11}),
             ),
-        ]
+        ],
+        recorded=recorded_batches,
     )
 
     run = await run_project_index_move_batches(
@@ -259,7 +297,7 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
         move_store=store,
     )
 
-    assert store.batches == [
+    assert recorded_batches == [
         ProjectIndexMoveBatch(
             completed_batches=1,
             targets=(
@@ -284,8 +322,12 @@ async def test_project_index_move_runner_applies_batches_and_reports_progress() 
 
 
 @pytest.mark.asyncio
-async def test_project_index_delete_runner_applies_batches_and_reports_progress() -> None:
-    store = RecordingDeleteBatchStore(
+async def test_project_index_delete_runner_applies_batches_and_reports_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded_batches: list[ProjectIndexDeleteBatch] = []
+    store = _stub_delete_store(
+        monkeypatch,
         results=[
             ProjectIndexDeleteBatchResult(
                 deleted_entities=1,
@@ -296,7 +338,8 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
                 deleted_entities=0,
                 missing_paths=("notes/c.md",),
             ),
-        ]
+        ],
+        recorded=recorded_batches,
     )
 
     run = await run_project_index_delete_batches(
@@ -305,7 +348,7 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
         delete_store=store,
     )
 
-    assert store.batches == [
+    assert recorded_batches == [
         ProjectIndexDeleteBatch(
             completed_batches=1,
             paths=("notes/a.md", "notes/b.md"),
@@ -326,15 +369,25 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
 
 
 @pytest.mark.asyncio
-async def test_store_project_index_maintenance_runner_delegates_to_batch_stores() -> None:
-    move_store = RecordingMoveBatchStore(results=[ProjectIndexMoveBatchResult(updated_files=1)])
-    delete_store = RecordingDeleteBatchStore(
+async def test_store_project_index_maintenance_runner_delegates_to_batch_stores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded_move_batches: list[ProjectIndexMoveBatch] = []
+    recorded_delete_batches: list[ProjectIndexDeleteBatch] = []
+    move_store = _stub_move_store(
+        monkeypatch,
+        results=[ProjectIndexMoveBatchResult(updated_files=1)],
+        recorded=recorded_move_batches,
+    )
+    delete_store = _stub_delete_store(
+        monkeypatch,
         results=[
             ProjectIndexDeleteBatchResult(
                 deleted_entities=1,
                 relation_cleanup_entity_ids=frozenset({99}),
             )
-        ]
+        ],
+        recorded=recorded_delete_batches,
     )
     runner = StoreProjectIndexMaintenanceRunner(
         move_store=move_store,
@@ -351,7 +404,7 @@ async def test_store_project_index_maintenance_runner_delegates_to_batch_stores(
     )
 
     assert move_run.total_updated_files == 1
-    assert move_store.batches == [
+    assert recorded_move_batches == [
         ProjectIndexMoveBatch(
             completed_batches=1,
             targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
@@ -359,7 +412,7 @@ async def test_store_project_index_maintenance_runner_delegates_to_batch_stores(
     ]
     assert delete_run.total_deleted_entities == 1
     assert delete_run.relation_cleanup_entity_ids == frozenset({99})
-    assert delete_store.batches == [
+    assert recorded_delete_batches == [
         ProjectIndexDeleteBatch(
             completed_batches=1,
             paths=("notes/deleted.md",),
