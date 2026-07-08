@@ -797,11 +797,11 @@ async def test_persist_accepted_note_write_plans_content_and_refreshes_search() 
 
 
 @pytest.mark.asyncio
-async def test_delete_accepted_note_entity_uses_session_protocol() -> None:
+async def test_delete_accepted_note_entity_deletes_via_session() -> None:
     session = _DeleteSession()
     entity = _entity()
 
-    await delete_accepted_note_entity(session, entity=entity)
+    await delete_accepted_note_entity(cast(AsyncSession, session), entity=entity)
 
     assert session.deleted == [entity]
 

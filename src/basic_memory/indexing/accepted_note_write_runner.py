@@ -220,12 +220,6 @@ class AcceptedNoteDeleteEntitySource(RuntimeDeletedNoteFileDeleteEntitySource, P
     """Entity identity required to delete one accepted note row."""
 
 
-class AcceptedNoteDeleteSession(Protocol):
-    """Session capability for deleting one accepted note entity."""
-
-    async def delete(self, instance: object, /) -> None: ...
-
-
 class AcceptedPendingEntityRepository(Protocol):
     """Repository capability for inserting one pending accepted entity."""
 
@@ -720,7 +714,7 @@ async def persist_accepted_note_write(
 
 
 async def delete_accepted_note_entity(
-    session: AcceptedNoteDeleteSession,
+    session: AsyncSession,
     *,
     entity: AcceptedNoteDeleteEntitySource,
 ) -> None:
