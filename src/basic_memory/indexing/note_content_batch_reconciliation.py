@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.indexing.file_index_planning import FileIndexPath
 from basic_memory.indexing.models import IndexedEntity
+from basic_memory.indexing.note_content_reconciler import NoteContentReconcileFileReader
 
 
 class IndexedNoteContentEntity(Protocol):
@@ -175,6 +176,7 @@ class IndexedNoteContentReconciliationTask[
     note_content_reconciler: IndexedNoteContentReconciler[EntityT]
     timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT]
     source: str
+    file_reader: NoteContentReconcileFileReader | None = None
 
     async def run(self) -> IndexedNoteContentReconciliationError | None:
         if self.indexed.markdown_content is None:
@@ -187,14 +189,35 @@ class IndexedNoteContentReconciliationTask[
                 f"Entity {self.indexed.entity_id} not found after indexing",
             )
 
+        # --- Resolve the markdown version to reconcile ---
+        # indexed.markdown_content is a SCAN-TIME snapshot. Between the scan and
+        # this reconcile a note materialization can rewrite the file to a newer
+        # accepted db_version; promoting the snapshot would revert that write and
+        # the db_version compare-and-set guard cannot catch it (the stale snapshot
+        # still promotes cleanly to a fresh version).
+        if self.file_reader is not None:
+            # Trigger: a filesystem reader is configured (local indexing path).
+            # Why: re-read the file so we reconcile the CURRENT accepted content,
+            #   not the possibly-stale scan snapshot.
+            # Outcome: fresh content + its last_modified drive reconciliation.
+            fresh = await self.file_reader.get_file(self.indexed.path)
+            if fresh.content is None:
+                # File was removed between scan and reconcile; nothing to promote.
+                return None
+            markdown_content = fresh.content.decode("utf-8")
+            observed_at = fresh.last_modified
+        else:
+            markdown_content = self.indexed.markdown_content
+            observed_at = self.timestamp_provider.observed_at(
+                self.indexed,
+                self.file_infos.get(self.indexed.path),
+            )
+
         try:
             await self.note_content_reconciler.reconcile(
                 entity=entity,
-                markdown_content=self.indexed.markdown_content,
-                observed_at=self.timestamp_provider.observed_at(
-                    self.indexed,
-                    self.file_infos.get(self.indexed.path),
-                ),
+                markdown_content=markdown_content,
+                observed_at=observed_at,
                 source=self.source,
             )
             return None
@@ -218,6 +241,7 @@ async def reconcile_indexed_note_content_batch[
     timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT],
     max_concurrent: int,
     source: str = "index",
+    file_reader: NoteContentReconcileFileReader | None = None,
 ) -> tuple[IndexedNoteContentReconciliationError, ...]:
     """Hydrate note_content rows for indexed markdown entities after batch indexing."""
     markdown_entities = tuple(
@@ -242,6 +266,7 @@ async def reconcile_indexed_note_content_batch[
                 note_content_reconciler=note_content_reconciler,
                 timestamp_provider=timestamp_provider,
                 source=source,
+                file_reader=file_reader,
             )
             for indexed in markdown_entities
         ],

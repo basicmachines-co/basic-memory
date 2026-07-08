@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -66,6 +67,42 @@ from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
+
+
+@dataclass(frozen=True, slots=True)
+class FileServiceReconcileFile:
+    """Canonical file state re-read at batch reconcile time."""
+
+    content: bytes | None
+    last_modified: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class FileServiceNoteContentReconcileFileReader:
+    """Filesystem-backed reader that re-reads canonical markdown at reconcile time.
+
+    Batch reconciliation indexes a scan-time snapshot of each file. A note
+    materialization can rewrite the same file to a newer accepted version between
+    the scan and reconcile; re-reading here lets reconciliation promote the
+    current file instead of reverting to the stale snapshot.
+    """
+
+    file_service: FileService
+
+    async def get_file(self, path: RuntimeFilePath) -> FileServiceReconcileFile:
+        """Return current file bytes and mtime, or None content when the file is gone."""
+        try:
+            content = await self.file_service.read_file_bytes(path)
+        except FileOperationError as exc:
+            # Trigger: the file was deleted between scan and reconcile.
+            # Why: a missing file has no content to promote; surface None so the
+            #   batch task skips reconciliation instead of failing the whole batch.
+            # Outcome: caller treats None content as "nothing to reconcile".
+            if isinstance(exc.__cause__, FileNotFoundError):
+                return FileServiceReconcileFile(content=None, last_modified=None)
+            raise
+        metadata = await self.file_service.get_file_metadata(path)
+        return FileServiceReconcileFile(content=content, last_modified=metadata.modified_at)
 
 
 class LocalIndexEntityRepository(
@@ -598,6 +635,7 @@ async def build_local_index_project_dependencies(
         frontmatter_storage=file_service,
         content_type_provider=file_service,
         session_maker=session_maker,
+        file_reader=FileServiceNoteContentReconcileFileReader(file_service=file_service),
     )
     file_indexer = build_local_markdown_file_indexer(
         project_id=project.id,

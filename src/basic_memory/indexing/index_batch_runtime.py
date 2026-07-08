@@ -31,7 +31,10 @@ from basic_memory.indexing.note_content_batch_reconciliation import (
     IndexedNoteContentTimestampProvider,
     reconcile_indexed_note_content_batch,
 )
-from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
+from basic_memory.indexing.note_content_reconciler import (
+    NoteContentReconcileFileReader,
+    NoteContentReconciler,
+)
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository, RelationRepository
 from basic_memory.runtime.storage import ProjectId
@@ -62,6 +65,12 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
     note_content_reconciler: IndexedNoteContentReconciler[EntityT]
     timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT]
     note_content_source: str = "index"
+    # Optional canonical-file reader. When set, batch reconciliation re-reads each
+    # file at reconcile time instead of trusting the scan snapshot, so a note
+    # materialization that rewrote the file between scan and reconcile is not
+    # reverted. Local indexing passes a filesystem reader; cloud leaves this None
+    # to avoid doubling S3 reads (it can opt in later).
+    file_reader: NoteContentReconcileFileReader | None = None
 
     async def index_loaded_files(
         self,
@@ -90,6 +99,7 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
             timestamp_provider=self.timestamp_provider,
             max_concurrent=metadata_update_max_concurrent or max_concurrent,
             source=self.note_content_source,
+            file_reader=self.file_reader,
         )
         result.errors.extend(error.as_tuple() for error in note_content_errors)
         result.search_indexed = count_search_indexed_entities(result.indexed)
@@ -136,6 +146,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     frontmatter_storage: IndexFrontmatterStorage,
     content_type_provider: IndexContentTypeProvider,
     session_maker: async_sessionmaker[AsyncSession],
+    file_reader: NoteContentReconcileFileReader | None = None,
 ) -> DefaultIndexBatchRuntime[FileInfoT]:
     """Compose the default repository-backed batch index runtime.
 
@@ -170,6 +181,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
             session_maker=session_maker,
             note_content_reconciler=note_content_reconciler,
             timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
+            file_reader=file_reader,
         ),
         note_content_reconciler=note_content_reconciler,
     )
