@@ -24,6 +24,8 @@ type MilvusClientFactory = Callable[..., Any]
 _COLLECTION_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MILVUS_ID_MAX_LENGTH = 128
 _MILVUS_TEXT_MAX_LENGTH = 65535
+_MILVUS_MARKER_COLUMNS = {"chunk_id", "project_id", "embedding_dims", "updated_at"}
+_SQL_VECTOR_COLUMNS = {"embedding"}
 
 
 def _load_milvus_symbols() -> tuple[MilvusClientFactory, Any]:
@@ -170,8 +172,9 @@ class MilvusVectorSearchMixin(SearchRepositoryBase):
         embedding_columns = await self._table_columns(
             session, table_name="search_vector_embeddings", dialect_name=dialect_name
         )
-        marker_columns = {"chunk_id", "project_id", "embedding_dims", "updated_at"}
-        marker_mismatch = bool(embedding_columns) and not marker_columns.issubset(embedding_columns)
+        marker_mismatch = bool(embedding_columns) and not self._is_milvus_marker_table(
+            embedding_columns
+        )
         if marker_mismatch:
             # Trigger: switching from sqlite-vec/pgvector to Milvus leaves a vector
             # storage table under the marker table name.
@@ -277,6 +280,11 @@ class MilvusVectorSearchMixin(SearchRepositoryBase):
                 """
             )
         )
+
+    @staticmethod
+    def _is_milvus_marker_table(columns: set[str]) -> bool:
+        """Return whether search_vector_embeddings is the Milvus SQL marker table."""
+        return _MILVUS_MARKER_COLUMNS.issubset(columns) and not (_SQL_VECTOR_COLUMNS & columns)
 
     @staticmethod
     def _dialect_name(session: AsyncSession) -> str:
@@ -415,6 +423,7 @@ class MilvusVectorSearchMixin(SearchRepositoryBase):
             anns_field="embedding",
             limit=candidate_limit,
             filter=f"project_id == {int(self.project_id)}",
+            search_params={"metric_type": "COSINE"},
             output_fields=["chunk_id", "entity_id", "chunk_key", "chunk_text"],
         )
         return self._milvus_search_rows(raw_results)
@@ -650,8 +659,8 @@ class MilvusVectorSearchMixin(SearchRepositoryBase):
         self._vector_tables_initialized = False
 
     def _distance_to_similarity(self, distance: float) -> float:
-        """Milvus COSINE search returns higher scores for better matches."""
-        return max(0.0, min(1.0, distance))
+        """Convert Milvus COSINE distance to Basic Memory's higher-is-better score."""
+        return max(0.0, min(1.0, 1.0 - distance))
 
 
 class SQLiteMilvusSearchRepository(MilvusVectorSearchMixin, SQLiteSearchRepository):
