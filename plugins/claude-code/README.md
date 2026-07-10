@@ -87,8 +87,9 @@ highest: user-level `settings.json` → project `settings.json` → project
 `primaryProject` wins over the user-level default. (This mirrors Claude Code's
 own sources: `settings.local.json` is project-scoped only, so there is no
 user-level `settings.local.json`.) The hooks resolve the project settings from
-the nearest `.claude` directory at or above the working directory, so a mapping
-in the repo root still applies when Claude starts in a subdirectory.
+the nearest ancestor directory (including the working directory) whose `.claude`
+folder contains a `settings.json` or `settings.local.json`, so a mapping in the
+repo root still applies when Claude starts in a subdirectory.
 
 To enable the capture reflexes, also set `"outputStyle": "basic-memory"` in your
 settings (or select it via `/config`).
