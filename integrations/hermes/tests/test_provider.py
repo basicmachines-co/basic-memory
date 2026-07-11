@@ -321,6 +321,57 @@ def test_initialize_shuts_down_existing_actor_before_reinitializing(bm, monkeypa
     assert p._initialized is True
 
 
+def test_shutdown_clears_session_scoped_state(bm, monkeypatch, tmp_path):
+    """shutdown() must clear _session_note_id, _first_user_msg, and
+    _session_id so the next initialize() does not append turns into the
+    previous session's transcript.
+
+    Regression test for the Codex review finding on PR #1046:
+    without this, reusing a provider singleton causes the next session
+    to write into the prior session note and lose its opening message.
+    """
+
+    class _FakeActor:
+        def __init__(self, argv):
+            self.argv = argv
+
+        def start(self, timeout=25.0):
+            return None
+
+        def shutdown(self, timeout=5.0):
+            pass
+
+        def list_tools(self):
+            return [{"name": name} for name in bm._HERMES_TO_BM.values()]
+
+    monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
+    monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bm")
+    monkeypatch.setattr(bm, "_BmMcpActor", _FakeActor)
+    monkeypatch.setattr(bm.BasicMemoryProvider, "_ensure_local_project", lambda self: None)
+    monkeypatch.setattr(bm.BasicMemoryProvider, "_verify_project_registered", lambda self: True)
+    monkeypatch.setattr(bm.BasicMemoryProvider, "_server_argv", lambda self: ["/fake/bm", "mcp"])
+
+    p = bm.BasicMemoryProvider()
+    p.initialize(session_id="first", hermes_home=str(tmp_path))
+
+    # Set session-scoped state (as would happen during a real session)
+    p._session_note_id = "test/hermes-sessions/session-old"
+    p._first_user_msg = "old first message"
+    p._session_started_at = None  # doesn't matter — shutdown clears the important fields
+    p._session_id = "first"
+
+    p.shutdown()
+
+    # After shutdown, session-scoped state must be cleared
+    assert p._session_note_id is None, (
+        "_session_note_id not cleared — next session would append, not create"
+    )
+    assert p._first_user_msg is None, (
+        "_first_user_msg not cleared — next session would lose its opening message"
+    )
+    assert p._session_id == "", "_session_id not cleared"
+
+
 def test_register_also_registers_bundled_skill(bm):
     """Plugin's bundled SKILL.md should auto-register when `hermes plugins install`
     drops the repo into ~/.hermes/plugins/. Avoids the manual symlink step."""

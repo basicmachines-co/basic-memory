@@ -966,6 +966,15 @@ class BasicMemoryProvider(MemoryProvider):
                 logger.debug("actor shutdown: %s", e)
         self._actor = None
         self._initialized = False
+        # Clear session-scoped state so the next initialize() starts fresh.
+        # Without this, reusing a provider singleton across sessions causes
+        # the first turn of the next session to append to the prior session's
+        # transcript (_session_note_id) and lose the opening user message
+        # (_first_user_msg), matching the Codex review on PR #1046.
+        self._session_note_id = None
+        self._first_user_msg = None
+        self._session_started_at = None
+        self._session_id = ""
 
     # ---- Tool surface ----
     def system_prompt_block(self) -> str:
