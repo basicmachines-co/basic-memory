@@ -817,6 +817,17 @@ class BasicMemoryProvider(MemoryProvider):
 
     # ---- Lifecycle ----
     def initialize(self, session_id: str, **kwargs: Any) -> None:
+        # Hermes may initialize memory providers repeatedly in long-lived
+        # gateway/dashboard processes. Each initialization starts a bm MCP
+        # stdio child; if we overwrite _actor without shutting it down, those
+        # children accumulate and retain hundreds of MB each. Make re-init
+        # idempotent from a process-lifecycle perspective.
+        if self._actor is not None or self._initialized:
+            try:
+                self.shutdown()
+            except Exception as e:
+                logger.debug("basic-memory: shutdown before reinitialize failed: %s", e)
+
         self._session_id = session_id or ""
         self._hermes_home = kwargs.get("hermes_home") or os.path.expanduser("~/.hermes")
         cfg = _load_config(self._hermes_home)
@@ -1806,6 +1817,8 @@ def _register_via_plugin_manager(
 # ---------------------------------------------------------------------------
 
 _active_providers: list[BasicMemoryProvider] = []
+_provider_singleton: BasicMemoryProvider | None = None
+_provider_singleton_lock = threading.Lock()
 
 
 def _atexit_cleanup() -> None:
@@ -1825,9 +1838,22 @@ atexit.register(_atexit_cleanup)
 
 
 def register(ctx: Any) -> None:
-    """Register basic-memory as a memory provider plugin."""
-    provider = BasicMemoryProvider()
-    _active_providers.append(provider)
+    """Register basic-memory as a memory provider plugin.
+
+    Hermes can call plugin register() more than once inside the same
+    long-lived process (gateway/dashboard command discovery, session startup,
+    cron runs). A fresh provider owns a fresh bm MCP subprocess, so creating
+    a new provider on every register leaks bm mcp children until process exit.
+    Reuse one provider per process and let initialize() refresh its session
+    state.
+    """
+    global _provider_singleton
+    with _provider_singleton_lock:
+        if _provider_singleton is None:
+            _provider_singleton = BasicMemoryProvider()
+            _active_providers.append(_provider_singleton)
+        provider = _provider_singleton
+
     ctx.register_memory_provider(provider)
 
     # Bundle the user-facing skill so `hermes plugins install` wires it up

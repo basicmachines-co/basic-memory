@@ -58,6 +58,20 @@ def bm():
     return _plugin
 
 
+@pytest.fixture(autouse=True)
+def reset_plugin_lifecycle_state():
+    """Keep module-level provider singletons isolated between tests."""
+    if hasattr(_plugin, "_active_providers"):
+        _plugin._active_providers.clear()
+    if hasattr(_plugin, "_provider_singleton"):
+        setattr(_plugin, "_provider_singleton", None)
+    yield
+    if hasattr(_plugin, "_active_providers"):
+        _plugin._active_providers.clear()
+    if hasattr(_plugin, "_provider_singleton"):
+        setattr(_plugin, "_provider_singleton", None)
+
+
 # ---- Synthetic MCP CallToolResult objects (no MCP SDK needed at test time) ----
 
 

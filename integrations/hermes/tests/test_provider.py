@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -107,7 +106,7 @@ def test_handle_tool_call_dispatches(bm):
     actor.call.return_value = json.dumps({"results": []})
     p._actor = actor
 
-    out = p.handle_tool_call("bm_search", {"query": "hi", "limit": 3})
+    p.handle_tool_call("bm_search", {"query": "hi", "limit": 3})
     actor.call.assert_called_once()
     bm_tool, bm_args = actor.call.call_args[0][:2]
     assert bm_tool == "search_notes"
@@ -269,13 +268,57 @@ def test_get_config_schema_shape(bm):
     }.issubset(keys)
 
 
-def test_register_appends_to_active_providers(bm):
-    fake_ctx = MagicMock()
-    bm._active_providers.clear()
-    bm.register(fake_ctx)
-    fake_ctx.register_memory_provider.assert_called_once()
-    assert len(bm._active_providers) == 1
-    bm._active_providers.clear()
+def test_register_reuses_single_provider_per_process(bm):
+    """Repeated plugin registration must not create providers that each own a bm mcp child."""
+    first_ctx = MagicMock()
+    second_ctx = MagicMock()
+
+    bm.register(first_ctx)
+    bm.register(second_ctx)
+
+    first_provider = first_ctx.register_memory_provider.call_args.args[0]
+    second_provider = second_ctx.register_memory_provider.call_args.args[0]
+    assert first_provider is second_provider
+    assert bm._provider_singleton is first_provider
+    assert bm._active_providers == [first_provider]
+
+
+def test_initialize_shuts_down_existing_actor_before_reinitializing(bm, monkeypatch, tmp_path):
+    """Repeated initialize() calls must not orphan the previous bm mcp actor."""
+    actors = []
+
+    class _FakeActor:
+        def __init__(self, argv):
+            self.argv = argv
+            self.shutdown_calls = 0
+            actors.append(self)
+
+        def start(self, timeout=25.0):
+            return None
+
+        def shutdown(self, timeout=5.0):
+            self.shutdown_calls += 1
+
+        def list_tools(self):
+            return [{"name": name} for name in bm._HERMES_TO_BM.values()]
+
+    monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
+    monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bm")
+    monkeypatch.setattr(bm, "_BmMcpActor", _FakeActor)
+    monkeypatch.setattr(bm.BasicMemoryProvider, "_ensure_local_project", lambda self: None)
+    monkeypatch.setattr(bm.BasicMemoryProvider, "_verify_project_registered", lambda self: True)
+    monkeypatch.setattr(bm.BasicMemoryProvider, "_server_argv", lambda self: ["/fake/bm", "mcp"])
+
+    p = bm.BasicMemoryProvider()
+    p.initialize(session_id="first", hermes_home=str(tmp_path))
+    first_actor = p._actor
+    p.initialize(session_id="second", hermes_home=str(tmp_path))
+
+    assert len(actors) == 2
+    assert first_actor is actors[0]
+    assert actors[0].shutdown_calls == 1
+    assert p._actor is actors[1]
+    assert p._initialized is True
 
 
 def test_register_also_registers_bundled_skill(bm):
