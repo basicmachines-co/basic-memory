@@ -51,7 +51,7 @@ Categorized, atomic facts: `- [category] content #optional-tag`
 - **Categories are queryable** — searching by category finds every note carrying that kind of fact.
 - Tags add cross-cutting findability: `- [risk] no SLA on the API #vendor #reliability`.
 
-In this system, observations do double duty: they're facts, and they're the **fields** schemas validate. A Task schema requiring `status` means every task note carries `- [status] ...` as an observation.
+In this system, observations do double duty: they're facts, and they're the **fields** schemas validate — for scalar, enum, and array fields. A Task schema requiring `status` means every task note carries `- [status] ...` as an observation. (Entity-reference fields validate against relations instead — see below.)
 
 ## Relations
 
@@ -79,7 +79,7 @@ schema:
 - `?` suffix = optional field
 - `(enum)` = fixed value list — use for anything status-like
 - `(array)` = list field
-- A capitalized type name (`Person`, `Project`) = relation to another entity type
+- A capitalized type name (`Person`, `Project`) makes it a **relation field**, validated against the note's Relations section (the relation type must equal the field name: `- project [[Target Note]]`) — it creates a graph edge, not an observation
 - Every field gets a comma-then-description: it's documentation the next assistant reads
 
 ## Creating a schema
@@ -115,7 +115,7 @@ Key points:
 
 - **`validation: warn`, not `error`** — warn logs issues without blocking writes. Start every schema on warn; a new user fighting rejected writes will abandon the system. Move a schema to `error` only if something automated consumes the notes and malformed ones break it.
 - **Content notes declare their type** via `note_type` matching the schema's entity (e.g. `note_type="task"`).
-- **Fields must appear as observations** in the note body (`- [status] open`) to satisfy validation — frontmatter-only values don't count. Putting them in both places gives you metadata search *and* schema validation.
+- **Scalar, enum, and array fields must appear as observations** in the note body (`- [status] open`) to satisfy validation — frontmatter-only values don't count. Putting them in both places gives you metadata search *and* schema validation. **Entity-reference fields are different**: they're satisfied by a relation, not an observation — a line in `## Relations` whose type matches the field name (`project?: Project` is satisfied by `- project [[Kitchen Renovation]]`).
 - **Version in metadata** — bump on breaking changes (new required field, removed field, type change). Additive optional fields don't need a bump.
 
 ## Validation & drift

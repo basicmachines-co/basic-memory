@@ -32,7 +32,7 @@ Projects/
 - **Project schema:** `status(enum): [active, paused, done]` · `goal` · `target_date?`
 - **Naming:** tasks get short imperative titles (`Renew car registration`); completed tasks can be retitled with a date prefix (`2026-07-12 — Renew car registration`) when archived, so archives sort chronologically.
 - **Index:** yes — the Task Board is usually the single most-used note in the system. Open items only; done tasks drop off the board (search finds them).
-- **Bidirectional rule:** task ↔ project, both directions.
+- **Bidirectional rule:** task ↔ project, both directions. The `project?: Project` field is a relation field — satisfied by `- project [[Project Name]]` in the task's Relations (the relation type must match the field name for validation).
 - **Key workflow to document:** closing a task (set status, add close date, update board, move to archive folder if using one).
 - **Expansions:** meeting notes with action items that become tasks; a weekly-review note; recurring-task conventions.
 
