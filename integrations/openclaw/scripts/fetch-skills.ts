@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -82,6 +83,9 @@ function main() {
     const meta = parseFrontmatter(content)
 
     const outDir = resolve(SKILLS_DIR, dir)
+    // Clear any previously generated copy so files deleted or renamed in
+    // the source skill don't survive as stale artifacts in the package.
+    rmSync(outDir, { recursive: true, force: true })
     mkdirSync(outDir, { recursive: true })
     writeFileSync(resolve(outDir, "SKILL.md"), content)
 
