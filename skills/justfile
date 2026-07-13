@@ -9,6 +9,11 @@ validate:
 # Skills are markdown-only, so validation is the build check.
 check: validate
 
+# Package skills into zips under ../dist: dist/skills/*.zip (Agent Skills) +
+# dist/skills-openai/*.zip (adds agents/openai.yaml for ChatGPT/Codex).
+dist: validate
+    python3 {{repo_root}}/scripts/build_skills_dist.py
+
 # Show available recipes
 default:
     @just --list
