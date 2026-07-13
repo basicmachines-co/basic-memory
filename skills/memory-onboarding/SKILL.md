@@ -95,8 +95,9 @@ Build in this order — later items reference earlier ones:
 2. **Templates** → `Templates/`, one per note type, matching the schema exactly.
 3. **Instruction notes** → per-domain rules notes, then the **startup router** last (it links everything). Full anatomy and a worked example in `references/conventions.md`.
 4. **Index notes** → one per domain that needs one (tables of contents; not every domain does).
-5. **Seed notes** → 2–3 REAL notes per domain using the examples collected in Phase 1. Never seed with placeholder data — real notes teach the format and are immediately useful; fake ones are noise the user must delete.
-6. **Validate** → run `schema_validate` on the seed notes; fix anything it flags. Read back the router and one instruction note to confirm links resolve.
+5. **Migrate existing notes** *(restructure path)* → execute the approved old→new mapping from Phase 2 before seeding anything: move each existing note to its new home, set its note type, add the observations its schema requires, and update indexes as notes land. Archive what doesn't fit — never delete. Phase 3 is not done while anything still sits unorganized at the root.
+6. **Seed notes** → 2–3 REAL notes per domain using the examples collected in Phase 1. Never seed with placeholder data — real notes teach the format and are immediately useful; fake ones are noise the user must delete.
+7. **Validate** → run `schema_validate` on the seed notes AND any migrated notes; fix anything it flags. Read back the router and one instruction note to confirm links resolve.
 
 Follow the write discipline in `references/conventions.md` throughout — most importantly: search before creating anything, use exact folder casing, and watch write results for duplicate-suffixed permalinks (`-1`, `-2`).
 
