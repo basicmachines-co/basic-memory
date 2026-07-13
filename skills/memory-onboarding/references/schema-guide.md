@@ -120,9 +120,9 @@ Key points:
 
 ## Validation & drift
 
-- `schema_validate(noteType="Task")` — check all notes of a type; also works on a single note. Reports missing required fields, unknown fields, type mismatches, invalid enum values.
-- `schema_diff(noteType="Task")` — finds drift: fields notes use that the schema doesn't define (candidates to add as optional), and schema fields nobody uses (candidates to drop).
-- `schema_infer(noteType="Task")` — when notes of a type already exist without a schema, infer one from their actual structure instead of designing from scratch.
+- `schema_validate(note_type="Task")` — check all notes of a type; also works on a single note. Reports missing required fields, unknown fields, type mismatches, invalid enum values.
+- `schema_diff(note_type="Task")` — finds drift: fields notes use that the schema doesn't define (candidates to add as optional), and schema fields nobody uses (candidates to drop).
+- `schema_infer(note_type="Task")` — when notes of a type already exist without a schema, infer one from their actual structure instead of designing from scratch.
 
 Evolution loop: `schema_diff` → edit the schema note (append changelog row, bump version if breaking) → `schema_validate` → fix outliers. Suggest the user run this monthly-ish once the system has real volume.
 
