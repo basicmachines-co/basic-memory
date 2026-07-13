@@ -47,7 +47,7 @@ If you can't determine the platform, show the stub and this table and let the us
 
 ## The router reference must be durable
 
-Inside the stub, reference the router by **title** or **`memory://` path** — never paste a raw permalink string copied from a tool result. Permalinks can regenerate when notes are rewritten; the stub is the one piece of the system that isn't a note and won't be caught by note-level maintenance, so it must use the most durable reference form available.
+Inside the stub, reference the router by **title** or **`memory://` path** — never paste a raw permalink string copied from a tool result. A recreated note derives a fresh permalink, and the stub is the one piece of the system that isn't a note and won't be caught by note-level maintenance — so it must use the most durable reference form available.
 
 ## Verification test
 

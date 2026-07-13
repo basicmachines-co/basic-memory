@@ -84,14 +84,14 @@ An index is a note containing a table of contents for one domain — one row per
 
 Rules:
 - **Update the index as part of any change to its members** — a stale index is worse than none, because it gets trusted.
-- **Full overwrite, not section-append.** When updating an index with `write_note`, always rewrite the whole note (read → modify → overwrite). Section-level append operations on tables create duplicate sections and rows.
+- **Full overwrite, not section edits.** When updating an index with `write_note`, always rewrite the whole note (read → modify → overwrite). Piecemeal section edits on tables are easy to get wrong — duplicated or mis-scoped sections — while a full overwrite is deterministic.
 - Not every domain needs one. Indexes earn their keep where the user will ask "show me all X with status Y" or wants a glanceable board. Journals and reference notes usually don't need one — search covers them.
 
 ## Linking discipline
 
 - **Bidirectional links for paired entities.** If a task note links its project, the project note links its tasks. If a device links its owner, the owner links the device. One-directional links rot: graph traversal from the unlinked side finds nothing. Make "both directions, always" a rule for whichever entity pairs the user's system has.
 - **Relations sections for typed links, inline wiki-links for prose.** `- part_of [[Kitchen Renovation]]` in Relations; "discussed with [[Dana Reyes]]" in the body. Both create graph edges.
-- **Reference notes by title or `memory://` path — never by raw permalink strings.** Permalinks can be regenerated when notes are rewritten or moved between projects; hardcoded permalink strings silently break. `[[Title]]` resolves by title and `memory://` URLs match on path, so both survive.
+- **Reference notes by title or `memory://` path — never by raw permalink strings.** A permalink is derived from the note's title and location, so a note that gets recreated or re-derived ends up with a different one and hardcoded strings silently break. `[[Title]]` resolves by title and `memory://` URLs match on path, so both survive reorganization.
 - **Link targets may not exist yet.** `[[Future Note]]` is valid and resolves when the note is created — use this to sketch structure ahead of content.
 
 ## Write discipline
@@ -111,7 +111,7 @@ Keep a "Known Failure Modes" section in the startup router and **add to it whene
 
 - Duplicate notes from skipping search-before-create (or from name-search using semantic instead of title matching)
 - Wrong-casing paths creating parallel folder trees
-- Section-append on index tables creating duplicate sections
+- Piecemeal section edits mangling index tables (duplicated or mis-scoped sections)
 - Second changelog table created by overwriting without reading first
 - Writes landing in the wrong project when project isn't passed explicitly
 

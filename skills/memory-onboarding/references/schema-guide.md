@@ -113,14 +113,14 @@ description. Status moves open → in-progress → done; blocked is a holding st
 
 Key points:
 
-- **`validation: warn`, not `error`** — warn logs issues without blocking writes. Start every schema on warn; a new user fighting rejected writes will abandon the system. Move a schema to `error` only if something automated consumes the notes and malformed ones break it.
+- **`validation: warn`, not `strict`** — the modes are `warn`, `strict`, and `off`. Warn logs findings without blocking anything; `strict` escalates the same findings to errors. Start every schema on warn — a new user fighting rejected writes will abandon the system. Move a schema to `strict` only if something automated consumes the notes and malformed ones break it.
 - **Content notes declare their type** via `note_type` matching the schema's entity (e.g. `note_type="task"`).
 - **Scalar, enum, and array fields must appear as observations** in the note body (`- [status] open`) to satisfy validation — frontmatter-only values don't count. Putting them in both places gives you metadata search *and* schema validation. **Entity-reference fields are different**: they're satisfied by a relation, not an observation — a line in `## Relations` whose type matches the field name (`project?: Project` is satisfied by `- project [[Kitchen Renovation]]`).
 - **Version in metadata** — bump on breaking changes (new required field, removed field, type change). Additive optional fields don't need a bump.
 
 ## Validation & drift
 
-- `schema_validate(note_type="task")` — check all notes of a type; also works on a single note. Reports missing required fields, unknown fields, type mismatches, invalid enum values.
+- `schema_validate(note_type="task")` — check all notes of a type, or a single note via `identifier=`. It reports **missing required fields** and **invalid enum values** — that's the whole contract. Fields the schema doesn't declare are only counted as informational "unmatched" metadata (schemas are a subset, not a straitjacket), and scalar values are not type-checked, so a clean validate doesn't guarantee more than required-field presence and enum conformance. Use `schema_diff` to surface undeclared fields.
 - `schema_diff(note_type="task")` — finds drift: fields notes use that the schema doesn't define (candidates to add as optional), and schema fields nobody uses (candidates to drop).
 - `schema_infer(note_type="task")` — when notes of a type already exist without a schema, infer one from their actual structure instead of designing from scratch.
 
