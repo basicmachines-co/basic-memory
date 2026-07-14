@@ -23,7 +23,9 @@ Rules that apply before anything else:
 1. Every Basic Memory call (read, search, write, list) uses project "{project-name}" explicitly.
 2. At the start of every session, before any knowledge-base work, read the note
    "Startup Router" (memory://instructions/startup-router) and follow its dispatch
-   table for the task at hand. Take no write actions until the notes it lists are loaded.
+   table for the task at hand. If that reference doesn't resolve, search for the
+   note by title before doing anything else. Take no write actions until the
+   notes it lists are loaded.
 3. Folder paths use exact casing as given in the instruction notes.
 4. Before overwriting any existing note, read it in full first.
 5. When unsure where something belongs, ask me instead of guessing.
@@ -47,7 +49,7 @@ If you can't determine the platform, show the stub and this table and let the us
 
 ## The router reference must be durable
 
-Inside the stub, reference the router by **title** or **`memory://` path** — never paste a raw permalink string copied from a tool result. A recreated note derives a fresh permalink, and the stub is the one piece of the system that isn't a note and won't be caught by note-level maintenance — so it must use the most durable reference form available.
+Inside the stub, give the router's **title and `memory://` path together, with a title-search fallback** — never a raw permalink string copied from a tool result. No single identifier is unconditionally durable: a retitled note breaks title lookups, a recreated note derives a fresh permalink, and a moved note's path changes when `update_permalinks_on_move` is enabled (it defaults to off). The stub is the one piece of the system that isn't a note and won't be caught by note-level maintenance, so it carries both identifiers plus the fallback — that combination self-heals when any one of them goes stale.
 
 ## Verification test
 
