@@ -23,6 +23,7 @@ from basic_memory.runtime.storage import (
     RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
+    RuntimeNoteContentVersionInput,
     runtime_content_type_is_markdown,
 )
 
@@ -245,17 +246,22 @@ class RuntimeMaterializedNoteSource(Protocol):
 
 
 class RuntimeNoteContentDbVersionSource(Protocol):
-    """Minimal note_content row shape needed to advance accepted DB versions."""
+    """Minimal note_content row shape needed to advance accepted DB versions.
+
+    db_version stays input-typed on purpose: downstream runtimes replay these
+    values from persisted job payloads where a driver may deliver a string, so
+    the version helpers coerce instead of trusting the declared shape.
+    """
 
     @property
-    def db_version(self) -> RuntimeNoteContentVersion: ...
+    def db_version(self) -> RuntimeNoteContentVersionInput: ...
 
 
 class RuntimeNoteContentVersionSource(RuntimeNoteContentDbVersionSource, Protocol):
     """Minimal note_content row shape needed to compare accepted DB versions."""
 
     @property
-    def db_checksum(self) -> RuntimeNoteContentChecksum: ...
+    def db_checksum(self) -> object: ...
 
 
 class RuntimeAcceptedNoteContentWriteSource(
@@ -561,7 +567,7 @@ def next_runtime_note_content_version(
     """Return the next accepted DB version for a note_content write."""
     if current_note_content is None:
         return 1
-    return current_note_content.db_version + 1
+    return int(current_note_content.db_version) + 1
 
 
 def accepted_note_file_path_conflicts(
@@ -761,8 +767,8 @@ def note_content_matches_materialization_request(
 ) -> bool:
     """Return whether note_content still matches one queued materialization request."""
     return (
-        note_content.db_version == request.db_version
-        and note_content.db_checksum == request.db_checksum
+        int(note_content.db_version) == request.db_version
+        and str(note_content.db_checksum) == request.db_checksum
     )
 
 

@@ -15,7 +15,7 @@ from basic_memory.runtime.note_content import (
 
 @dataclass(frozen=True, slots=True)
 class _NoteContentState:
-    db_version: int
+    db_version: int | str
     db_checksum: str
     last_source: str | None
     file_checksum: str | None = None
@@ -78,6 +78,15 @@ def test_next_runtime_note_content_version_advances_existing_rows() -> None:
     assert (
         next_runtime_note_content_version(
             _NoteContentState(db_version=4, db_checksum="db-checksum", last_source=None)
+        )
+        == 5
+    )
+
+
+def test_next_runtime_note_content_version_accepts_db_string_values() -> None:
+    assert (
+        next_runtime_note_content_version(
+            _NoteContentState(db_version="4", db_checksum="db-checksum", last_source=None)
         )
         == 5
     )

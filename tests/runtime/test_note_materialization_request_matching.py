@@ -10,8 +10,8 @@ from basic_memory.runtime.note_content import (
 
 @dataclass(frozen=True, slots=True)
 class _NoteContentVersion:
-    db_version: int
-    db_checksum: str
+    db_version: int | str
+    db_checksum: object
 
 
 def _request(
@@ -33,6 +33,14 @@ def _request(
 
 def test_note_content_matches_materialization_request_accepts_matching_row():
     note_content = _NoteContentVersion(db_version=4, db_checksum="12345")
+
+    assert note_content_matches_materialization_request(note_content, _request())
+
+
+def test_note_content_matches_materialization_request_with_coerced_runtime_values():
+    # Replayed job payloads can deliver a string db_version / non-str checksum;
+    # matching coerces instead of silently treating the row as stale.
+    note_content = _NoteContentVersion(db_version="4", db_checksum=12345)
 
     assert note_content_matches_materialization_request(note_content, _request())
 
