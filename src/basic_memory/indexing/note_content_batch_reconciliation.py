@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, TypeVar
@@ -36,34 +36,18 @@ class IndexedNoteContentFileInfo(Protocol):
 
 EntityT = TypeVar("EntityT", bound=IndexedNoteContentEntity)
 
+# Injected timestamp seam: choose the observation time for one indexed markdown
+# version. The default is indexed_note_content_observed_at below.
+type IndexedNoteContentObservedAt[FileInfoT: IndexedNoteContentFileInfo] = Callable[
+    [IndexedEntity, FileInfoT | None], datetime | None
+]
+
 
 class IndexingTask[ResultT](Protocol):
     """Retryable indexing follow-up task."""
 
     async def run(self) -> ResultT:
         """Execute one fresh task attempt."""
-
-
-class IndexedNoteContentTimestampProvider[FileInfoT: IndexedNoteContentFileInfo](Protocol):
-    """Timestamp provider for indexed note_content reconciliation."""
-
-    def observed_at(
-        self,
-        indexed: IndexedEntity,
-        file_info: FileInfoT | None,
-    ) -> datetime | None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class DefaultIndexedNoteContentTimestampProvider:
-    """Default timestamp provider for indexed markdown note_content."""
-
-    def observed_at(
-        self,
-        indexed: IndexedEntity,
-        file_info: IndexedNoteContentFileInfo | None,
-    ) -> datetime | None:
-        return indexed_note_content_observed_at(indexed, file_info)
 
 
 class IndexedNoteContentEntityRepository(Protocol[EntityT]):
@@ -174,7 +158,7 @@ class IndexedNoteContentReconciliationTask[
     entity_by_id: Mapping[int, EntityT]
     file_infos: Mapping[FileIndexPath, FileInfoT]
     note_content_reconciler: IndexedNoteContentReconciler[EntityT]
-    timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT]
+    timestamp_provider: IndexedNoteContentObservedAt[FileInfoT]
     source: str
     file_reader: NoteContentReconcileFileReader | None = None
 
@@ -208,7 +192,7 @@ class IndexedNoteContentReconciliationTask[
             observed_at = fresh.last_modified
         else:
             markdown_content = self.indexed.markdown_content
-            observed_at = self.timestamp_provider.observed_at(
+            observed_at = self.timestamp_provider(
                 self.indexed,
                 self.file_infos.get(self.indexed.path),
             )
@@ -238,8 +222,8 @@ async def reconcile_indexed_note_content_batch[
     entity_repository: IndexedNoteContentEntityRepository[EntityT],
     session_maker: async_sessionmaker[AsyncSession],
     note_content_reconciler: IndexedNoteContentReconciler[EntityT],
-    timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT],
     max_concurrent: int,
+    timestamp_provider: IndexedNoteContentObservedAt[FileInfoT] = indexed_note_content_observed_at,
     source: str = "index",
     file_reader: NoteContentReconcileFileReader | None = None,
 ) -> tuple[IndexedNoteContentReconciliationError, ...]:

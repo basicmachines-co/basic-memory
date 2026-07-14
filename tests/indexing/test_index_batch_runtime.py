@@ -120,16 +120,14 @@ class RecordingNoteContentReconciler:
             raise RuntimeError(f"note_content failed for {entity.id}")
 
 
-@dataclass(slots=True)
-class RecordingIndexedNoteContentTimestampProvider:
-    def observed_at(
-        self,
-        indexed: IndexedEntity,
-        file_info: FakeFileInfo | None,
-    ) -> datetime | None:
-        _ = indexed
-        assert file_info is not None
-        return file_info.last_modified
+def recording_indexed_note_content_timestamps(
+    indexed: IndexedEntity,
+    file_info: FakeFileInfo | None,
+) -> datetime | None:
+    """Test stand-in for the injected IndexedNoteContentObservedAt callable."""
+    _ = indexed
+    assert file_info is not None
+    return file_info.last_modified
 
 
 @pytest.mark.asyncio
@@ -193,7 +191,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
         entity_repository=repository,
         session_maker=session_maker,
         note_content_reconciler=reconciler,
-        timestamp_provider=RecordingIndexedNoteContentTimestampProvider(),
+        timestamp_provider=recording_indexed_note_content_timestamps,
     )
     files = {
         "ok.md": FakeFileInfo(

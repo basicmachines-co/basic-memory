@@ -24,11 +24,11 @@ from basic_memory.indexing.models import (
     StorageIndexFileWriter,
 )
 from basic_memory.indexing.note_content_batch_reconciliation import (
-    DefaultIndexedNoteContentTimestampProvider,
     IndexedNoteContentEntity,
     IndexedNoteContentEntityRepository,
+    IndexedNoteContentObservedAt,
     IndexedNoteContentReconciler,
-    IndexedNoteContentTimestampProvider,
+    indexed_note_content_observed_at,
     reconcile_indexed_note_content_batch,
 )
 from basic_memory.indexing.note_content_reconciler import (
@@ -63,7 +63,7 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
     entity_repository: IndexedNoteContentEntityRepository[EntityT]
     session_maker: async_sessionmaker[AsyncSession]
     note_content_reconciler: IndexedNoteContentReconciler[EntityT]
-    timestamp_provider: IndexedNoteContentTimestampProvider[FileInfoT]
+    timestamp_provider: IndexedNoteContentObservedAt[FileInfoT] = indexed_note_content_observed_at
     note_content_source: str = "index"
     # Optional canonical-file reader. When set, batch reconciliation re-reads each
     # file at reconcile time instead of trusting the scan snapshot, so a note
@@ -155,6 +155,5 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
         entity_repository=entity_repository,
         session_maker=session_maker,
         note_content_reconciler=note_content_reconciler,
-        timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
         file_reader=file_reader,
     )

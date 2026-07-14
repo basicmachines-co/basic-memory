@@ -17,7 +17,6 @@ import basic_memory.indexing.note_content_batch_reconciliation as batch_reconcil
 from basic_memory import db, file_utils
 from basic_memory.indexing.models import IndexedEntity
 from basic_memory.indexing.note_content_batch_reconciliation import (
-    DefaultIndexedNoteContentTimestampProvider,
     indexed_note_content_observed_at,
     reconcile_indexed_note_content_batch,
     run_indexing_tasks_with_retries,
@@ -73,10 +72,12 @@ class FlakyIndexingTask:
 
 
 @dataclass(slots=True)
-class RecordingIndexedNoteContentTimestampProvider:
+class RecordingIndexedNoteContentTimestamps:
+    """Recording stand-in for the injected IndexedNoteContentObservedAt callable."""
+
     calls: list[tuple[str, FakeFileInfo | None]]
 
-    def observed_at(
+    def __call__(
         self,
         indexed: IndexedEntity,
         file_info: FakeFileInfo | None,
@@ -110,7 +111,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
     repository = FakeEntityRepository([FakeEntity(id=42), FakeEntity(id=43)])
     reconcile = AsyncMock()
     observed_at = datetime(2026, 6, 19, 14, 0, tzinfo=UTC)
-    timestamp_provider = RecordingIndexedNoteContentTimestampProvider(calls=[])
+    timestamp_provider = RecordingIndexedNoteContentTimestamps(calls=[])
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -308,7 +309,7 @@ async def test_batch_reader_skips_reconcile_when_file_removed(
         entity_repository=repository,
         session_maker=session_maker,
         note_content_reconciler=cast(Any, SimpleNamespace(reconcile=reconcile)),
-        timestamp_provider=RecordingIndexedNoteContentTimestampProvider(calls=[]),
+        timestamp_provider=RecordingIndexedNoteContentTimestamps(calls=[]),
         max_concurrent=1,
         source="index",
         file_reader=StubReconcileFileReader(StubReconcileFile(content=None, last_modified=None)),
@@ -384,7 +385,6 @@ async def test_batch_reader_reconciles_fresh_content_not_scan_snapshot(
         entity_repository=EntityRepository(project_id=test_project.id),
         session_maker=session_maker,
         note_content_reconciler=reconciler,
-        timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
         max_concurrent=1,
         source="index",
         file_reader=reader,
@@ -460,7 +460,6 @@ async def test_batch_without_reader_reverts_to_scan_snapshot(
         entity_repository=EntityRepository(project_id=test_project.id),
         session_maker=session_maker,
         note_content_reconciler=reconciler,
-        timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
         max_concurrent=1,
         source="index",
     )
