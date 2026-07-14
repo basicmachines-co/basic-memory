@@ -139,31 +139,49 @@ def get_scoped_session_factory(
 @asynccontextmanager
 async def scoped_session(
     session_maker: async_sessionmaker[AsyncSession],
+    session: AsyncSession | None = None,
 ) -> AsyncGenerator[AsyncSession, None]:
     """
     Get a scoped session with proper lifecycle management.
 
+    This is the one shared session-scope seam for services and indexing code.
+    It covers both real usage variants:
+
+    - ``session`` provided: the caller-owned session is yielded unchanged and
+      the caller keeps commit/rollback ownership (composed multi-step writes).
+    - ``session`` omitted: a fresh task-scoped session is opened that commits
+      on success, rolls back on error, and always closes.
+
     Args:
         session_maker: Session maker to create scoped sessions from
+        session: Optional caller-owned session to reuse instead of opening one
     """
+    # Trigger: the caller already owns a transaction and passes its session in.
+    # Why: nested scopes must not commit or roll back mid-way through the
+    # caller's composed write; transaction ownership stays with the opener.
+    # Outcome: yield the session untouched and let the outermost scope finish it.
+    if session is not None:
+        yield session
+        return
+
     factory = get_scoped_session_factory(session_maker)
-    session = factory()
+    owned_session = factory()
     try:
         # Only enable foreign keys for SQLite (Postgres has them enabled by default)
         # Detect database type from session's bind (engine) dialect
-        engine = session.get_bind()
+        engine = owned_session.get_bind()
         dialect_name = engine.dialect.name
 
         if dialect_name == "sqlite":
-            await session.execute(text("PRAGMA foreign_keys=ON"))
+            await owned_session.execute(text("PRAGMA foreign_keys=ON"))
 
-        yield session
-        await session.commit()
+        yield owned_session
+        await owned_session.commit()
     except Exception:
-        await session.rollback()
+        await owned_session.rollback()
         raise
     finally:
-        await session.close()
+        await owned_session.close()
         await factory.remove()
 
 

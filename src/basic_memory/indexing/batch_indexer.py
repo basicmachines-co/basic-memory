@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncIterator, Awaitable, Callable, Mapping, TypeVar
+from typing import Awaitable, Callable, Mapping, TypeVar
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -100,18 +99,6 @@ class BatchIndexer:
         self.file_writer = file_writer
         self.session_maker = session_maker
 
-    @asynccontextmanager
-    async def _session_scope(
-        self, session: AsyncSession | None = None
-    ) -> AsyncIterator[AsyncSession]:
-        """Use the caller's session or open a service-owned transaction."""
-        if session is not None:
-            yield session
-            return
-
-        async with db.scoped_session(self.session_maker) as owned_session:
-            yield owned_session
-
     async def index_files(
         self,
         files: Mapping[str, IndexInputFile],
@@ -184,7 +171,7 @@ class BatchIndexer:
                 max_concurrent=max_concurrent,
             )
 
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             refreshed_entities = await self.entity_repository.find_by_ids(
                 session, [prepared.entity_id for prepared in prepared_entities.values()]
             )
@@ -257,7 +244,7 @@ class BatchIndexer:
             path=file.path,
             entity_id=persisted.entity.id,
         ):
-            async with self._session_scope() as session:
+            async with db.scoped_session(self.session_maker) as session:
                 refreshed = await self.entity_repository.find_by_ids(session, [persisted.entity.id])
         if len(refreshed) != 1:  # pragma: no cover
             raise ValueError(f"Failed to reload indexed entity for {file.path}")
@@ -283,7 +270,7 @@ class BatchIndexer:
 
     async def _get_file_path_to_permalink_map(self) -> dict[str, str | None]:
         """Load current file-path to permalink mappings in a service-owned session."""
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             permalink_by_path: dict[str, str | None] = {
                 path: permalink
                 for path, permalink in (
@@ -444,7 +431,7 @@ class BatchIndexer:
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
                 session, file.path, load_relations=False
             )
@@ -465,7 +452,7 @@ class BatchIndexer:
             )
 
             try:
-                async with self._session_scope() as session:
+                async with db.scoped_session(self.session_maker) as session:
                     created = await self.entity_repository.add(session, entity)
                 entity_id = created.id
             except IntegrityError as exc:
@@ -478,7 +465,7 @@ class BatchIndexer:
                         and "file_path" in message
                     )
                 ):
-                    async with self._session_scope() as session:
+                    async with db.scoped_session(self.session_maker) as session:
                         existing = await self.entity_repository.get_by_file_path(
                             session,
                             file.path,
@@ -494,7 +481,7 @@ class BatchIndexer:
         else:
             entity_id = existing.id
 
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             updated = await self.entity_repository.update(
                 session,
                 entity_id,
@@ -542,7 +529,7 @@ class BatchIndexer:
                     # link text, mismatching this with the sync_service forward-reference
                     # path and producing confidently-wrong graph edges. See
                     # sync_service.resolve_forward_references for the same change.
-                    async with self._session_scope() as session:
+                    async with db.scoped_session(self.session_maker) as session:
                         resolved_entity = await self.entity_service.link_resolver.resolve_link(
                             relation.to_name, strict=True, session=session
                         )
@@ -550,7 +537,7 @@ class BatchIndexer:
                         return 0
 
                     try:
-                        async with self._session_scope() as session:
+                        async with db.scoped_session(self.session_maker) as session:
                             await self.relation_repository.update(
                                 session,
                                 relation.id,
@@ -560,7 +547,7 @@ class BatchIndexer:
                                 },
                             )
                     except IntegrityError:
-                        async with self._session_scope() as session:
+                        async with db.scoped_session(self.session_maker) as session:
                             await self.relation_repository.delete(session, relation.id)
                     return 1
                 except Exception as exc:  # pragma: no cover - defensive logging
@@ -586,7 +573,7 @@ class BatchIndexer:
 
     async def _find_unresolved_relations_for_entity(self, entity_id: int):
         """Load unresolved relations for one entity in a service-owned session."""
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             return await self.relation_repository.find_unresolved_relations_for_entity(
                 session, entity_id
             )
@@ -626,7 +613,7 @@ class BatchIndexer:
         resolve_relations: bool = True,
         reload_entity: bool = True,
     ) -> _PersistedMarkdownFile:
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
                 session,
                 prepared.file.path,

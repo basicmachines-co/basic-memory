@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -122,12 +121,6 @@ class WatchService:
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)
 
-    @asynccontextmanager
-    async def _session_scope(self) -> AsyncIterator[AsyncSession]:
-        """Open a service-owned transaction."""
-        async with db.scoped_session(self.session_maker) as session:
-            yield session
-
     async def _schedule_restart(self, stop_event: asyncio.Event) -> None:
         """Schedule a watch cycle restart so project config changes are observed."""
         await asyncio.sleep(self.app_config.watch_project_reload_interval)
@@ -178,7 +171,7 @@ class WatchService:
 
     async def _select_projects_to_watch(self) -> list[Project]:
         """Return locally syncable projects that this watcher instance owns."""
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             projects = await self.project_repository.get_active_projects(session)
 
         if self.constrained_project:

@@ -1,12 +1,11 @@
 """Service for managing entities in the database."""
 
 from collections.abc import Callable
-from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncIterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import frontmatter
 import yaml
@@ -218,18 +217,6 @@ class EntityService(BaseService[EntityModel]):
         # Default returns None for local/CLI usage. Cloud overrides this to read from UserContext.
         self.get_user_id: Callable[[], Optional[str]] = lambda: None
 
-    @asynccontextmanager
-    async def _session_scope(
-        self, session: AsyncSession | None = None
-    ) -> AsyncIterator[AsyncSession]:
-        """Use the caller's session or open a service-owned transaction."""
-        if session is not None:
-            yield session
-            return
-
-        async with db.scoped_session(self.session_maker) as owned_session:
-            yield owned_session
-
     async def detect_file_path_conflicts(
         self,
         file_path: str,
@@ -258,7 +245,7 @@ class EntityService(BaseService[EntityModel]):
 
         # Load only file paths. Conflict detection is on the hot write path and
         # does not need observations or relations.
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             existing_paths = await self.repository.get_all_file_paths(active_session)
 
         # Use the enhanced conflict detection utility
@@ -287,7 +274,7 @@ class EntityService(BaseService[EntityModel]):
         file_path_str = Path(file_path).as_posix()
 
         # Check for potential file path conflicts before resolving permalink
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             conflicts = await self.detect_file_path_conflicts(
                 file_path_str, skip_check=skip_conflict_check, session=active_session
             )
@@ -881,7 +868,7 @@ class EntityService(BaseService[EntityModel]):
     async def create_entity_with_content(self, schema: EntitySchema) -> EntityWriteResult:
         """Create a new entity and return both the entity row and written markdown."""
         logger.debug(f"Creating entity: {schema.title}")
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             # --- Prepare Accepted State ---
             # Derive the canonical markdown/entity fields before touching the filesystem.
             prepared = await self.prepare_create_entity_content(schema, session=session)
@@ -925,7 +912,7 @@ class EntityService(BaseService[EntityModel]):
             f"Updating entity with permalink: {entity.permalink} content-type: {schema.content_type}"
         )
 
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             # --- Read Current File State ---
             # Full replacements merge with existing frontmatter, so local mode still needs the current
             # file contents as input to the prepare step.
@@ -1026,7 +1013,7 @@ class EntityService(BaseService[EntityModel]):
             # Trigger: repository.delete returns False when entity is already gone (NoResultFound)
             # Why: concurrent delete_directory requests can race to delete the same entity
             # Outcome: treat as success since the entity is deleted either way
-            async with self._session_scope() as session:
+            async with db.scoped_session(self.session_maker) as session:
                 deleted = await self.repository.delete(session, entity.id)
             if not deleted:
                 logger.info("Entity already removed from DB", entity_id=permalink_or_id)
@@ -1039,7 +1026,7 @@ class EntityService(BaseService[EntityModel]):
     async def get_by_permalink(self, permalink: str) -> EntityModel:
         """Get entity by type and name combination."""
         logger.debug(f"Getting entity by permalink: {permalink}")
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             db_entity = await self.repository.get_by_permalink(session, permalink)
         if not db_entity:
             raise EntityNotFoundError(f"Entity not found: {permalink}")
@@ -1048,18 +1035,18 @@ class EntityService(BaseService[EntityModel]):
     async def get_entities_by_id(self, ids: List[int]) -> Sequence[EntityModel]:
         """Get specific entities and their relationships."""
         logger.debug(f"Getting entities: {ids}")
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             return await self.repository.find_by_ids(session, ids)
 
     async def get_entities_by_permalinks(self, permalinks: List[str]) -> Sequence[EntityModel]:
         """Get specific nodes and their relationships."""
         logger.debug(f"Getting entities permalinks: {permalinks}")
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             return await self.repository.find_by_permalinks(session, permalinks)
 
     async def delete_entity_by_file_path(self, file_path: Union[str, Path]) -> None:
         """Delete entity by file path."""
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             await self.repository.delete_by_file_path(session, str(file_path))
 
     async def create_entity_from_markdown(
@@ -1089,7 +1076,7 @@ class EntityService(BaseService[EntityModel]):
             model.created_by = user_id
             model.last_updated_by = user_id
 
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             # Use UPSERT to handle conflicts cleanly
             try:
                 return await self.repository.upsert_entity(active_session, model)
@@ -1112,7 +1099,7 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             if existing_entity is not None:
                 db_entity = await self.repository.get_by_id(
                     active_session,
@@ -1196,7 +1183,7 @@ class EntityService(BaseService[EntityModel]):
         session: AsyncSession | None = None,
     ) -> EntityModel:
         """Create/update entity and relations from parsed markdown."""
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             if is_new:
                 created = await self.create_entity_from_markdown(
                     file_path, markdown, session=active_session
@@ -1234,7 +1221,7 @@ class EntityService(BaseService[EntityModel]):
         entity_id = entity.id
         logger.debug(f"Updating relations for entity: {entity.file_path}")
 
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             # Clear existing relations first
             await self.relation_repository.delete_outgoing_relations_from_entity(
                 active_session, entity_id
@@ -1344,7 +1331,7 @@ class EntityService(BaseService[EntityModel]):
         # Title-only links are ambiguous because Basic Memory allows duplicate titles.
         # Collapse them to self only when the title lookup proves this source is the sole candidate;
         # otherwise leave the relation unresolved so we do not create a wrong permanent edge.
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             title_matches = await self.repository.get_by_title(
                 active_session, clean_target, load_relations=False
             )
@@ -1412,7 +1399,7 @@ class EntityService(BaseService[EntityModel]):
 
         file_path = Path(entity.file_path)
         current_content, _ = await self.file_service.read_file(file_path)
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             # --- Prepare Against Explicit Base Content ---
             # The edit operation is the semantic step; file/DB writes below are just persistence of that
             # accepted result.
@@ -1777,7 +1764,7 @@ class EntityService(BaseService[EntityModel]):
             updates["checksum"] = new_checksum
 
             # 9. Update database
-            async with self._session_scope() as session:
+            async with db.scoped_session(self.session_maker) as session:
                 updated_entity = await self.repository.update(session, entity.id, updates)
                 if not updated_entity:
                     raise ValueError(f"Failed to update entity in database: {entity.id}")
@@ -1831,7 +1818,7 @@ class EntityService(BaseService[EntityModel]):
         destination_directory = destination_directory.strip("/")
 
         # Find all entities in the source directory
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entities = await self.repository.find_by_directory_prefix(session, source_directory)
 
         if not entities:
@@ -1916,7 +1903,7 @@ class EntityService(BaseService[EntityModel]):
         directory = directory.strip("/")
 
         # Find all entities in the directory
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entities = await self.repository.find_by_directory_prefix(session, directory)
 
         if not entities:

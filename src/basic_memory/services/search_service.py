@@ -3,10 +3,9 @@
 import asyncio
 import ast
 import re
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, AsyncIterator, List, Optional, Set, Dict
+from typing import Any, List, Optional, Set, Dict
 
 from dateparser import parse
 from fastapi import BackgroundTasks
@@ -126,18 +125,6 @@ class SearchService:
         self.file_service = file_service
         self.session_maker = session_maker
 
-    @asynccontextmanager
-    async def _session_scope(
-        self, session: AsyncSession | None = None
-    ) -> AsyncIterator[AsyncSession]:
-        """Use the caller's session or open a service-owned transaction."""
-        if session is not None:
-            yield session
-            return
-
-        async with db.scoped_session(self.session_maker) as owned_session:
-            yield owned_session
-
     async def init_search_index(self):
         """Create FTS5 virtual table if it doesn't exist."""
         await self.repository.init_search_index()
@@ -165,7 +152,7 @@ class SearchService:
 
         # Reindex all entities
         logger.debug("Indexing entities")
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
         for entity in entities:
             await self.index_entity(entity, background_tasks)
@@ -561,7 +548,7 @@ class SearchService:
 
     async def sync_entity_vectors(self, entity_id: int) -> None:
         """Refresh vector chunks for one entity in repositories that support semantic indexing."""
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entity = await self.entity_repository.find_by_id(session, entity_id)
         if entity is None:
             await self._clear_entity_vectors(entity_id)
@@ -586,7 +573,7 @@ class SearchService:
                 entities_failed=0,
             )
 
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entities_by_id = {
                 entity.id: entity
                 for entity in await self.entity_repository.find_by_ids(session, entity_ids)
@@ -680,7 +667,7 @@ class SearchService:
         Returns:
             dict with stats: total_entities, embedded, skipped, errors
         """
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
         entity_ids = [entity.id for entity in entities]
 

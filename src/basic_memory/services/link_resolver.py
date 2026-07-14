@@ -1,8 +1,7 @@
 """Service and helpers for resolving markdown links and permalink-like identifiers."""
 
 import uuid as uuid_mod
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional, Tuple, Dict
+from typing import Any, Optional, Tuple, Dict
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -99,18 +98,6 @@ class LinkResolver:
         self._entity_repository_cache: Dict[int, EntityRepository] = {}
         self._search_service_cache: Dict[int, SearchService] = {}
 
-    @asynccontextmanager
-    async def _session_scope(
-        self, session: AsyncSession | None = None
-    ) -> AsyncIterator[AsyncSession]:
-        """Use the caller's session or open a service-owned transaction."""
-        if session is not None:
-            yield session
-            return
-
-        async with db.scoped_session(self.session_maker) as owned_session:
-            yield owned_session
-
     async def resolve_link(
         self,
         link_text: str,
@@ -137,7 +124,7 @@ class LinkResolver:
         explicit_project_reference = "::" in clean_text
         clean_text = normalize_project_reference(clean_text)
 
-        async with self._session_scope(session) as active_session:
+        async with db.scoped_session(self.session_maker, session) as active_session:
             # --- External ID Resolution ---
             # Try external_id first if identifier looks like a UUID.
             # Canonicalize to lowercase-hyphen form so uppercase or unhyphenated

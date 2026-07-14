@@ -3,9 +3,8 @@
 import fnmatch
 import logging
 import os
-from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import AsyncIterator, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -45,17 +44,11 @@ class DirectoryService:
         self.entity_repository = entity_repository
         self.session_maker = session_maker
 
-    @asynccontextmanager
-    async def _session_scope(self) -> AsyncIterator[AsyncSession]:
-        """Open a service-owned transaction."""
-        async with db.scoped_session(self.session_maker) as session:
-            yield session
-
     async def get_directory_tree(self) -> DirectoryNode:
         """Build a hierarchical directory tree from indexed files."""
 
         # Get all files from DB (flat list)
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entity_rows = await self.entity_repository.find_all(session)
 
         # Create a root directory node
@@ -130,7 +123,7 @@ class DirectoryService:
             DirectoryNode tree containing only folders (type="directory")
         """
         # Get unique directories without loading entities
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             directories = await self.entity_repository.get_distinct_directories(session)
 
         # Create a root directory node
@@ -196,7 +189,7 @@ class DirectoryService:
         # Optimize: Query only entities in the target directory
         # instead of loading the entire tree
         dir_prefix = dir_name.lstrip("/")
-        async with self._session_scope() as session:
+        async with db.scoped_session(self.session_maker) as session:
             entity_rows = await self.entity_repository.find_by_directory_prefix(session, dir_prefix)
 
         # Build a partial tree from only the relevant entities

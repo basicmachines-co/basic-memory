@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 
 from loguru import logger
@@ -102,13 +101,11 @@ class ContextService:
         self.link_resolver = link_resolver
         self.session_maker = session_maker
 
-    @asynccontextmanager
-    async def _session_scope(self) -> AsyncIterator[AsyncSession]:
-        """Open a service-owned transaction for core repository reads."""
+    def _require_session_maker(self) -> async_sessionmaker[AsyncSession]:
+        """Fail fast when a session-opening path runs without a session maker."""
         if self.session_maker is None:  # pragma: no cover
             raise ValueError("session_maker is required for ContextService")
-        async with db.scoped_session(self.session_maker) as session:
-            yield session
+        return self.session_maker
 
     async def build_context(
         self,
@@ -189,7 +186,7 @@ class ContextService:
                         )
 
                         if not primary and self.link_resolver:
-                            async with self._session_scope() as session:
+                            async with db.scoped_session(self._require_session_maker()) as session:
                                 entity = await self.link_resolver.resolve_link(
                                     path,
                                     use_search=True,
@@ -251,7 +248,7 @@ class ContextService:
                     phase="load_observations",
                     result_count=len(entity_ids),
                 ):
-                    async with self._session_scope() as session:
+                    async with db.scoped_session(self._require_session_maker()) as session:
                         observations_by_entity = await self.observation_repository.find_by_entities(
                             session, entity_ids
                         )
