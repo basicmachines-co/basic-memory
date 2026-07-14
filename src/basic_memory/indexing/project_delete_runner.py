@@ -114,6 +114,7 @@ async def load_project_file_snapshots(
         select(
             Entity.id,
             Entity.file_path,
+            Entity.checksum,
             NoteContent.file_checksum,
         )
         .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
@@ -124,10 +125,31 @@ async def load_project_file_snapshots(
         RuntimeProjectFileSnapshot(
             entity_id=int(row.id),
             file_path=str(row.file_path),
-            file_checksum=str(row.file_checksum) if row.file_checksum is not None else None,
+            # Non-markdown entities have no note_content row, so their accepted
+            # state is the indexed entity checksum. Without the fallback the
+            # guarded per-file delete sees checksum None, skips every non-note
+            # file, and the project hard-delete strands those objects in storage.
+            # Rows with neither checksum still skip (nothing safe to guard on).
+            file_checksum=project_file_snapshot_checksum(
+                note_file_checksum=row.file_checksum,
+                entity_checksum=row.checksum,
+            ),
         )
         for row in result.all()
     ]
+
+
+def project_file_snapshot_checksum(
+    *,
+    note_file_checksum: str | None,
+    entity_checksum: str | None,
+) -> str | None:
+    """Choose the accepted delete-guard checksum for one project file snapshot."""
+    if note_file_checksum is not None:
+        return str(note_file_checksum)
+    if entity_checksum is not None:
+        return str(entity_checksum)
+    return None
 
 
 @dataclass(frozen=True, slots=True)

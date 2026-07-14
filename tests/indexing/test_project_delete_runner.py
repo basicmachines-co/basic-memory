@@ -206,6 +206,57 @@ async def test_repository_project_delete_preflight_snapshots_inactive_project_fi
 
 
 @pytest.mark.asyncio
+async def test_repository_project_delete_preflight_guards_non_note_files_with_entity_checksum(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Non-markdown entities have no note_content row; their snapshot must fall
+    back to Entity.checksum or the guarded per-file delete skips them and the
+    hard-deleted project strands the objects in storage."""
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    async with project_delete_session_maker() as session:
+        session.add(
+            Entity(
+                title="diagram.png",
+                note_type="file",
+                entity_metadata={},
+                content_type="image/png",
+                project_id=project.id,
+                permalink=None,
+                file_path="assets/diagram.png",
+                checksum="binary-sum",
+                mtime=datetime(2026, 5, 22, 12, 0, tzinfo=UTC).timestamp(),
+                size=1024,
+            )
+        )
+        # A row with neither checksum still snapshots None (nothing safe to guard on).
+        session.add(
+            Entity(
+                title="unindexed.bin",
+                note_type="file",
+                entity_metadata={},
+                content_type="application/octet-stream",
+                project_id=project.id,
+                permalink=None,
+                file_path="assets/unindexed.bin",
+                checksum=None,
+                mtime=datetime(2026, 5, 22, 12, 0, tzinfo=UTC).timestamp(),
+                size=8,
+            )
+        )
+        await session.commit()
+
+    result = await RepositoryProjectDeletePreflight(
+        session_maker=project_delete_session_maker
+    ).prepare_project_delete(project_delete_request(project_id=project.id))
+
+    snapshots = {snapshot.file_path: snapshot for snapshot in result.file_snapshots}
+    assert snapshots["assets/diagram.png"].file_checksum == "binary-sum"
+    assert snapshots["assets/unindexed.bin"].file_checksum is None
+    # The markdown note keeps its accepted note_content checksum.
+    assert snapshots["notes/a.md"].file_checksum == "file-sum"
+
+
+@pytest.mark.asyncio
 async def test_repository_project_delete_preflight_skips_active_project(
     project_delete_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
