@@ -63,10 +63,6 @@ from basic_memory.index.local_project import (
     ProjectIndexScheduler,
 )
 
-# Re-exported lifecycle hook: the API, MCP, and one-shot CLI lifespans drain
-# scheduled background work through the composition root before shutting down
-# the database.
-from basic_memory.index.local_schedulers import drain_background_tasks as drain_background_tasks
 from basic_memory.index.local_schedulers import (
     EntityVectorSyncScheduler,
     LocalEntityVectorSyncScheduler,

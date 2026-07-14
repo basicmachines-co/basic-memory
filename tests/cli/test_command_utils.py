@@ -2,7 +2,7 @@
 
 import basic_memory.cloud.note_content_materialization as note_content_materialization
 import basic_memory.db as db
-import basic_memory.deps.services as deps_services
+import basic_memory.index.local_schedulers as local_schedulers
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 
 
@@ -27,7 +27,7 @@ def test_run_with_cleanup_drains_pending_work_before_db_shutdown(monkeypatch):
         "drain_pending_materializations",
         fake_drain_materializations,
     )
-    monkeypatch.setattr(deps_services, "drain_background_tasks", fake_drain_background)
+    monkeypatch.setattr(local_schedulers, "drain_background_tasks", fake_drain_background)
     monkeypatch.setattr(db, "shutdown_db", fake_shutdown)
 
     async def work() -> int:
