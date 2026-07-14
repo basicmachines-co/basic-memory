@@ -17,6 +17,10 @@ from basic_memory.schemas.v2.graph import (
     GraphResponse,
     OrphanEntitiesResponse,
 )
+from basic_memory.schemas.v2.project_index import (
+    ProjectIndexResponse,
+    ProjectIndexStartedResponse,
+)
 from basic_memory.schemas.v2.resource import (
     CreateResourceRequest,
     UpdateResourceRequest,
@@ -37,6 +41,8 @@ __all__ = [
     "GraphNode",
     "GraphResponse",
     "OrphanEntitiesResponse",
+    "ProjectIndexResponse",
+    "ProjectIndexStartedResponse",
     "CreateResourceRequest",
     "UpdateResourceRequest",
     "ResourceResponse",

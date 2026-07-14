@@ -381,6 +381,44 @@ async def test_project_index_uses_event_indexer_not_sync_service(
 
 
 @pytest.mark.asyncio
+async def test_project_index_foreground_response_payload_snapshot(
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+):
+    """The typed response union must keep the foreground payload byte-identical."""
+    note_path = Path(test_project.path) / "incoming" / "index-snapshot.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Index Snapshot\n\nOne indexable file.\n", encoding="utf-8")
+
+    response = await client.post(
+        f"{v2_projects_url}/{test_project.external_id}/index",
+        params={"run_in_background": False},
+    )
+
+    assert response.status_code == 200
+    assert response.content == (
+        b'{"total_files":1,"enqueued_files":1,"enqueued_batches":1,"deleted_files":0}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_index_background_response_payload_snapshot(
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+):
+    """The typed response union must keep the background payload byte-identical."""
+    response = await client.post(f"{v2_projects_url}/{test_project.external_id}/index")
+
+    assert response.status_code == 200
+    expected_message = f"Filesystem indexing initiated for project '{test_project.name}'"
+    assert response.content == (
+        f'{{"status":"index_started","message":"{expected_message}"}}'.encode()
+    )
+
+
+@pytest.mark.asyncio
 async def test_project_status_uses_event_index_report_not_sync_service(
     client: AsyncClient,
     test_project: Project,

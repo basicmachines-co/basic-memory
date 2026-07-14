@@ -80,6 +80,10 @@ from basic_memory.runtime.jobs import (
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import RuntimeFilePath
 from basic_memory.schemas.project_index import ProjectIndexRunResponse
+from basic_memory.schemas.v2.project_index import (
+    ProjectIndexResponse,
+    ProjectIndexStartedResponse,
+)
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
 
@@ -741,16 +745,13 @@ class ProjectIndexRouteRequest:
     run_in_background: bool
 
 
-type ProjectIndexRouteResult = ProjectIndexRunResponse | dict[str, str]
-
-
 class ProjectIndexCommand(Protocol):
     """Handle a project-index route request."""
 
     async def index_project(
         self,
         request: ProjectIndexRouteRequest,
-    ) -> ProjectIndexRouteResult: ...
+    ) -> ProjectIndexResponse: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -761,7 +762,7 @@ class LocalProjectIndexCommand:
     async def index_project(
         self,
         request: ProjectIndexRouteRequest,
-    ) -> ProjectIndexRouteResult:
+    ) -> ProjectIndexResponse:
         if request.run_in_background:
             self.project_index_scheduler.schedule_project_index(
                 project_id=request.project_id,
@@ -772,10 +773,9 @@ class LocalProjectIndexCommand:
                 f"(force_full={request.force_full})"
             )
 
-            return {
-                "status": "index_started",
-                "message": (f"Filesystem indexing initiated for project '{request.project_name}'"),
-            }
+            return ProjectIndexStartedResponse(
+                message=f"Filesystem indexing initiated for project '{request.project_name}'",
+            )
 
         result = await self.project_index_runner.index_project(
             request.project_id,

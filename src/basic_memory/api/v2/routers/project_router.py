@@ -38,7 +38,11 @@ from basic_memory.schemas.project_info import (
     ProjectInfoResponse,
     ProjectStatusResponse,
 )
-from basic_memory.schemas.v2 import ProjectResolveRequest, ProjectResolveResponse
+from basic_memory.schemas.v2 import (
+    ProjectIndexResponse,
+    ProjectResolveRequest,
+    ProjectResolveResponse,
+)
 from basic_memory.utils import normalize_project_path, generate_permalink
 
 router = APIRouter(prefix="/projects", tags=["project_management-v2"])
@@ -231,14 +235,14 @@ async def synchronize_projects(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{project_id}/index")
+@router.post("/{project_id}/index", response_model=ProjectIndexResponse)
 async def index_project(
     project_index_command: ProjectIndexCommandDep,
     project_config: ProjectConfigV2ExternalDep,
     project_internal_id: ProjectExternalIdPathDep,
     force_full: bool = Query(False, description="Request a full project index run"),
     run_in_background: bool = Query(True, description="Run in background"),
-):
+) -> ProjectIndexResponse:
     """Run project-wide indexing through the event-index coordinator."""
     return await project_index_command.index_project(
         ProjectIndexRouteRequest(
