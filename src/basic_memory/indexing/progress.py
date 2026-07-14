@@ -84,15 +84,25 @@ class VectorSyncProgress(CheckpointModel):
         )
 
     def to_checkpoint_state(self) -> dict[str, object]:
-        """Serialize vector progress into JSON-friendly workflow metadata."""
-        rounded = self.model_copy(
-            update={
-                "embed_seconds_total": round(self.embed_seconds_total, 3),
-                "write_seconds_total": round(self.write_seconds_total, 3),
-                "elapsed_seconds": round(self.elapsed_seconds, 3),
-            }
-        )
-        return rounded.model_dump(mode="json")
+        """Serialize vector progress into JSON-friendly workflow metadata.
+
+        Constructed (not model_copy'd) on purpose: batch folds assign next_index
+        directly and without_entity_ids() drops the plan without revalidating,
+        so the write path must re-run the dedupe/clamp validators to keep the
+        persisted invariant next_index <= len(entity_ids) that external
+        checkpoint readers rely on.
+        """
+        return VectorSyncProgress(
+            entity_ids=list(self.entity_ids),
+            next_index=self.next_index,
+            entities_synced=self.entities_synced,
+            entities_failed=self.entities_failed,
+            failed_entity_ids=list(self.failed_entity_ids),
+            embedding_jobs_total=self.embedding_jobs_total,
+            embed_seconds_total=round(self.embed_seconds_total, 3),
+            write_seconds_total=round(self.write_seconds_total, 3),
+            elapsed_seconds=round(self.elapsed_seconds, 3),
+        ).model_dump(mode="json")
 
     @classmethod
     def from_checkpoint_state(cls, state: object) -> VectorSyncProgress:

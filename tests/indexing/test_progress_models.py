@@ -107,6 +107,26 @@ def test_vector_sync_progress_without_entity_ids_keeps_counters_only() -> None:
     assert compact.failed_entity_ids == [22]
 
 
+def test_vector_sync_progress_checkpoint_write_reruns_dedupe_and_clamp() -> None:
+    """Post-construction mutation must not leak an unclamped offset into the checkpoint."""
+    progress = VectorSyncProgress(entity_ids=[11, 22], next_index=1)
+    apply_vector_sync_batch_result(
+        progress,
+        BatchSummary(entities_synced=1, entities_failed=0),
+        next_index=5,
+        elapsed_seconds=1.0,
+    )
+
+    # The in-memory offset keeps the raw batch value; the persisted document clamps.
+    assert progress.next_index == 5
+    assert progress.to_checkpoint_state()["next_index"] == 2
+
+    compact = progress.without_entity_ids()
+
+    assert compact.next_index == 5
+    assert compact.to_checkpoint_state()["next_index"] == 0
+
+
 def test_vector_sync_progress_recovers_empty_progress_from_missing_or_invalid_state() -> None:
     missing = VectorSyncProgress.from_checkpoint_state(None)
     invalid = VectorSyncProgress.from_checkpoint_state({"entity_ids": "not a list"})
