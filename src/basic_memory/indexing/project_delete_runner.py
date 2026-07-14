@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Protocol, Self
 
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -63,10 +65,23 @@ class ProjectDeleteFileDeleter(Protocol):
     ) -> RuntimeFileDeleteResult: ...
 
 
+class ProjectHardDeleteOutcome(StrEnum):
+    """Typed result of the guarded project hard-delete step."""
+
+    deleted = "deleted"
+    missing = "missing"
+    # The project was reactivated between preflight and the hard-delete
+    # transaction; the row was left untouched.
+    reactivated = "reactivated"
+
+
 class ProjectHardDeleter(Protocol):
     """Capability that hard-deletes the project row after file cleanup."""
 
-    async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool: ...
+    async def hard_delete_project(
+        self,
+        request: RuntimeProjectDeleteJobRequest,
+    ) -> ProjectHardDeleteOutcome: ...
 
 
 class ProjectDeleteRepository(Protocol):
@@ -172,11 +187,33 @@ class RepositoryProjectHardDeleter:
         default_factory=DefaultProjectDeleteRepositories
     )
 
-    async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool:
+    async def hard_delete_project(
+        self,
+        request: RuntimeProjectDeleteJobRequest,
+    ) -> ProjectHardDeleteOutcome:
         async with db.scoped_session(self.session_maker) as session:
-            return await self.repositories.project_repository().delete(
+            # Trigger: the project was reactivated while the per-file cleanup loop ran.
+            # Why: preflight checked is_active once, potentially long before this
+            #   transaction; hard-deleting a reactivated project destroys live data.
+            # Outcome: re-verify inside the delete transaction (row-locked where the
+            #   backend supports FOR UPDATE) and abort instead of deleting.
+            project = await session.get(Project, request.project_id, with_for_update=True)
+            if project is None:
+                return ProjectHardDeleteOutcome.missing
+            if project.is_active:
+                logger.warning(
+                    "Aborting project hard delete: project was reactivated after preflight",
+                    project_id=request.project_id,
+                    project_external_id=request.project_external_id,
+                )
+                return ProjectHardDeleteOutcome.reactivated
+
+            deleted = await self.repositories.project_repository().delete(
                 session,
                 request.project_id,
+            )
+            return (
+                ProjectHardDeleteOutcome.deleted if deleted else ProjectHardDeleteOutcome.missing
             )
 
 
@@ -202,10 +239,13 @@ async def run_project_delete(
             )
         )
 
-    deleted_project = await hard_deleter.hard_delete_project(request)
-    if deleted_project:
+    hard_delete_outcome = await hard_deleter.hard_delete_project(request)
+    if hard_delete_outcome is ProjectHardDeleteOutcome.deleted:
         status = RuntimeDeleteStatus.deleted
         reason = f"project deleted: {request.project_id}"
+    elif hard_delete_outcome is ProjectHardDeleteOutcome.reactivated:
+        status = RuntimeDeleteStatus.skipped
+        reason = f"project reactivated before hard delete: {request.project_id}"
     else:
         status = RuntimeDeleteStatus.missing
         reason = f"project already absent: {request.project_id}"
@@ -214,7 +254,7 @@ async def run_project_delete(
         project_id=request.project_id,
         project_external_id=request.project_external_id,
         status=status,
-        deleted_project=deleted_project,
+        deleted_project=hard_delete_outcome is ProjectHardDeleteOutcome.deleted,
         file_results=file_results,
         reason=reason,
     )

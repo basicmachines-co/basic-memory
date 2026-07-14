@@ -13,6 +13,7 @@ from basic_memory.indexing.project_delete_runner import (
     DefaultProjectDeleteRepositories,
     ProjectDeletePreflightResult,
     ProjectDeleteRepositories,
+    ProjectHardDeleteOutcome,
     RepositoryProjectDeletePreflight,
     RepositoryProjectHardDeleter,
     run_project_delete,
@@ -76,13 +77,16 @@ class FakeProjectFileDeleter:
 
 
 class FakeProjectHardDeleter:
-    def __init__(self, *, deleted: bool) -> None:
-        self.deleted = deleted
+    def __init__(self, *, outcome: ProjectHardDeleteOutcome) -> None:
+        self.outcome = outcome
         self.requests: list[RuntimeProjectDeleteJobRequest] = []
 
-    async def hard_delete_project(self, request: RuntimeProjectDeleteJobRequest) -> bool:
+    async def hard_delete_project(
+        self,
+        request: RuntimeProjectDeleteJobRequest,
+    ) -> ProjectHardDeleteOutcome:
         self.requests.append(request)
-        return self.deleted
+        return self.outcome
 
 
 class FakeProjectDeleteRepository:
@@ -233,32 +237,83 @@ async def test_repository_project_hard_deleter_deletes_project(
     project = await create_project_with_note(project_delete_session_maker, is_active=False)
     request = project_delete_request(project_id=project.id)
 
-    deleted = await RepositoryProjectHardDeleter(
+    outcome = await RepositoryProjectHardDeleter(
         session_maker=project_delete_session_maker
     ).hard_delete_project(request)
 
     async with project_delete_session_maker() as session:
         stored_project = await session.get(Project, project.id)
 
-    assert deleted is True
+    assert outcome is ProjectHardDeleteOutcome.deleted
     assert stored_project is None
+
+
+@pytest.mark.asyncio
+async def test_repository_project_hard_deleter_reports_missing_project(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    request = project_delete_request(project_id=42)
+
+    outcome = await RepositoryProjectHardDeleter(
+        session_maker=project_delete_session_maker
+    ).hard_delete_project(request)
+
+    assert outcome is ProjectHardDeleteOutcome.missing
+
+
+@pytest.mark.asyncio
+async def test_repository_project_hard_deleter_aborts_when_project_reactivated(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """A project reactivated between preflight and hard delete must survive.
+
+    Preflight checks is_active once, and the guarded per-file loop can run long;
+    without a re-check inside the hard-delete transaction a concurrent
+    reactivation is destroyed.
+    """
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    request = project_delete_request(project_id=project.id)
+
+    preflight = await RepositoryProjectDeletePreflight(
+        session_maker=project_delete_session_maker
+    ).prepare_project_delete(request)
+    assert preflight.terminal_result is None
+
+    # The user reactivates the project while file cleanup is still running.
+    async with project_delete_session_maker() as session:
+        stored_project = await session.get(Project, project.id)
+        assert stored_project is not None
+        stored_project.is_active = True
+        await session.commit()
+
+    outcome = await RepositoryProjectHardDeleter(
+        session_maker=project_delete_session_maker
+    ).hard_delete_project(request)
+
+    async with project_delete_session_maker() as session:
+        surviving_project = await session.get(Project, project.id)
+
+    assert outcome is ProjectHardDeleteOutcome.reactivated
+    assert surviving_project is not None
+    assert surviving_project.is_active is True
 
 
 @pytest.mark.asyncio
 async def test_repository_project_hard_deleter_uses_repository_provider(
     project_delete_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
-    request = project_delete_request(project_id=42)
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    request = project_delete_request(project_id=project.id)
     repository = FakeProjectDeleteRepository(deleted=False)
     repositories: ProjectDeleteRepositories = FakeProjectDeleteRepositories(repository)
 
-    deleted = await RepositoryProjectHardDeleter(
+    outcome = await RepositoryProjectHardDeleter(
         session_maker=project_delete_session_maker,
         repositories=repositories,
     ).hard_delete_project(request)
 
-    assert deleted is False
-    assert repository.entity_ids == [42]
+    assert outcome is ProjectHardDeleteOutcome.missing
+    assert repository.entity_ids == [project.id]
 
 
 def test_default_project_delete_repositories_builds_project_repository() -> None:
@@ -279,7 +334,7 @@ async def test_run_project_delete_deletes_files_then_hard_deletes_project() -> N
             ),
         ]
     )
-    hard_deleter = FakeProjectHardDeleter(deleted=True)
+    hard_deleter = FakeProjectHardDeleter(outcome=ProjectHardDeleteOutcome.deleted)
 
     result = await run_project_delete(
         request,
@@ -344,7 +399,7 @@ async def test_run_project_delete_returns_terminal_preflight_result() -> None:
         reason="project is active: 101",
     )
     file_deleter = FakeProjectFileDeleter([])
-    hard_deleter = FakeProjectHardDeleter(deleted=True)
+    hard_deleter = FakeProjectHardDeleter(outcome=ProjectHardDeleteOutcome.deleted)
 
     result = await run_project_delete(
         request,
@@ -386,7 +441,7 @@ async def test_run_project_delete_preserves_file_counts_when_project_disappears(
             )
         ),
         file_deleter=file_deleter,
-        hard_deleter=FakeProjectHardDeleter(deleted=False),
+        hard_deleter=FakeProjectHardDeleter(outcome=ProjectHardDeleteOutcome.missing),
     )
 
     assert result == RuntimeProjectDeleteResult(
@@ -398,4 +453,42 @@ async def test_run_project_delete_preserves_file_counts_when_project_disappears(
         skipped_files=0,
         missing_files=1,
         reason="project already absent: 101",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_project_delete_reports_skipped_when_project_reactivated() -> None:
+    """A hard delete aborted by reactivation must report skipped, not the
+    misleading 'project already absent' outcome."""
+    request = project_delete_request()
+    file_deleter = FakeProjectFileDeleter(
+        [RuntimeFileDeleteResult.deleted(entity_id=42, file_path="notes/a.md")]
+    )
+
+    result = await run_project_delete(
+        request,
+        preflight=FakeProjectDeletePreflight(
+            ProjectDeletePreflightResult.ready(
+                [
+                    project_file_snapshot(
+                        entity_id=42,
+                        file_path="notes/a.md",
+                        file_checksum="file-sum",
+                    )
+                ]
+            )
+        ),
+        file_deleter=file_deleter,
+        hard_deleter=FakeProjectHardDeleter(outcome=ProjectHardDeleteOutcome.reactivated),
+    )
+
+    assert result == RuntimeProjectDeleteResult(
+        project_id=101,
+        project_external_id="project-main",
+        status=RuntimeDeleteStatus.skipped,
+        deleted_project=False,
+        deleted_files=1,
+        skipped_files=0,
+        missing_files=0,
+        reason="project reactivated before hard delete: 101",
     )
