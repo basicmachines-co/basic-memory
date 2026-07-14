@@ -151,60 +151,22 @@ class FileIndexResult:
         *,
         file_path: str,
         entity_id: int,
-        external_id: object,
-        title: object,
-        permalink: object,
+        external_id: str,
+        title: str,
+        permalink: str | None,
         checksum: str,
         operation: FileIndexOperation,
     ) -> FileIndexResult:
-        """Validate entity fields loaded for a completed file-index result."""
+        """Build a completed file-index result from loaded entity fields."""
         return cls(
             file_path=file_path,
             entity_id=entity_id,
-            external_id=_required_file_index_result_text(
-                external_id,
-                field_name="external_id",
-                file_path=file_path,
-            ),
-            title=_required_file_index_result_text(
-                title,
-                field_name="title",
-                file_path=file_path,
-            ),
-            permalink=_optional_file_index_result_text(
-                permalink,
-                field_name="permalink",
-                file_path=file_path,
-            ),
+            external_id=external_id,
+            title=title,
+            permalink=permalink,
             checksum=checksum,
             operation=operation,
         )
-
-
-def _required_file_index_result_text(
-    value: object,
-    *,
-    field_name: str,
-    file_path: str,
-) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise RuntimeError(f"Indexed entity for {file_path} is missing {field_name}")
-    return value.strip()
-
-
-def _optional_file_index_result_text(
-    value: object,
-    *,
-    field_name: str,
-    file_path: str,
-) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise RuntimeError(f"Indexed entity for {file_path} has invalid {field_name}")
-    if not value.strip():
-        raise RuntimeError(f"Indexed entity for {file_path} has blank {field_name}")
-    return value.strip()
 
 
 class IndexFileJobStatus(StrEnum):
@@ -435,11 +397,11 @@ def plan_index_file_note_live_update(
 
 
 def _required_index_file_note_live_update_text(
-    value: object,
+    value: str | None,
     *,
     field_name: str,
 ) -> str:
-    if not isinstance(value, str) or not value.strip():
+    if value is None or not value.strip():
         raise RuntimeError(f"Observed_object index_file result is missing {field_name}")
     return value.strip()
 
@@ -459,31 +421,26 @@ class CurrentMaterializedNoteEntity:
         cls,
         *,
         entity_id: int,
-        external_id: object,
-        title: object,
-        permalink: object,
-        checksum: object,
+        external_id: str,
+        title: str,
+        permalink: str | None,
+        checksum: RuntimeFileChecksum | None,
         file_path: str,
     ) -> CurrentMaterializedNoteEntity:
-        """Validate entity fields loaded for a current materialized note."""
+        """Build current materialized note identity from loaded entity fields.
+
+        The entity permalink is nullable in the ORM, but a current markdown note
+        must carry one for its live-update identity, so a missing permalink is a
+        broken index row rather than a plannable state.
+        """
+        if permalink is None:
+            raise RuntimeError(f"Current entity for {file_path} is missing permalink")
         return cls(
             entity_id=entity_id,
-            external_id=_required_current_materialized_note_text(
-                external_id,
-                field_name="external_id",
-                file_path=file_path,
-            ),
-            title=_required_current_materialized_note_text(
-                title,
-                field_name="title",
-                file_path=file_path,
-            ),
-            permalink=_required_current_materialized_note_text(
-                permalink,
-                field_name="permalink",
-                file_path=file_path,
-            ),
-            checksum=str(checksum) if checksum is not None else None,
+            external_id=external_id,
+            title=title,
+            permalink=permalink,
+            checksum=checksum,
         )
 
 
@@ -518,17 +475,6 @@ class IndexedFileLiveUpdatePlan:
     actor_name: str | None = None
     live_update_source: RuntimeNoteChangeSource | None = None
     operation: FileIndexOperation | None = None
-
-
-def _required_current_materialized_note_text(
-    value: object,
-    *,
-    field_name: str,
-    file_path: str,
-) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise RuntimeError(f"Current entity for {file_path} is missing {field_name}")
-    return value.strip()
 
 
 def plan_current_materialized_note_result(
