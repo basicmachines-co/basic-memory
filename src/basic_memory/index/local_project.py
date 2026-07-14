@@ -57,6 +57,7 @@ from basic_memory.indexing.project_index_coordinator import (
     run_project_index_coordinator,
 )
 from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexDeletePathVerifier,
     ProjectIndexMaintenanceRunner,
     ProjectIndexMovedEntitySearchRefresher,
     RepositoryProjectIndexMaintenanceStore,
@@ -393,6 +394,34 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
 
 
 @dataclass(frozen=True, slots=True)
+class LocalProjectIndexDeletePathVerifier(ProjectIndexDeletePathVerifier):
+    """Probe the local filesystem before applying scan-planned index deletes."""
+
+    file_service: FileService
+
+    async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
+        confirmed_paths: set[str] = set()
+        for path in paths:
+            # Trigger: the existence probe itself fails (permission/mount error).
+            # Why: without a positive confirmation of absence, deleting would
+            # turn a transient storage error into destroyed entity rows.
+            # Outcome: leave the path out of the confirmed set; the next scan
+            # reconciles it once the probe works again.
+            try:
+                still_absent = not await self.file_service.exists(path)
+            except FileOperationError as exc:
+                logger.warning(
+                    "Skipping planned index delete: existence probe failed",
+                    path=path,
+                    error=str(exc),
+                )
+                continue
+            if still_absent:
+                confirmed_paths.add(path)
+        return frozenset(confirmed_paths)
+
+
+@dataclass(frozen=True, slots=True)
 class LocalProjectIndexRuntime:
     """Dependencies for running project-wide local indexing through core fanout."""
 
@@ -556,6 +585,9 @@ class LocalProjectIndexRuntimeFactory:
             project_id=dependencies.project_id,
             move_content_updater=LocalProjectIndexMoveContentUpdater(
                 entity_service=dependencies.entity_service,
+                file_service=dependencies.file_service,
+            ),
+            delete_path_verifier=LocalProjectIndexDeletePathVerifier(
                 file_service=dependencies.file_service,
             ),
         )

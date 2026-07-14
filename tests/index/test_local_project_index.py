@@ -18,6 +18,7 @@ from basic_memory.index.local_dependencies import LocalIndexProjectDependencies
 from basic_memory.index.local_project import (
     IndexedFileStat,
     LocalProjectIndexBatchEnqueuer,
+    LocalProjectIndexDeletePathVerifier,
     LocalProjectIndexObservedFileSource,
     LocalProjectIndexRuntime,
     LocalProjectIndexRuntimeFactory,
@@ -664,6 +665,104 @@ permalink: changing
     assert entity.observations[0].content == "This is the modified content"
     assert note_content is not None
     assert "This is the modified content" in note_content.markdown_content
+
+
+async def test_local_project_index_delete_path_verifier_confirms_only_probed_absent_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Only a positive absence probe confirms a planned delete; probe failures skip."""
+    (tmp_path / "present.md").write_bytes(b"# Present\n")
+
+    file_service = FileService(tmp_path)
+    original_exists = file_service.exists
+
+    async def flaky_exists(path):
+        if str(path).endswith("flaky.md"):
+            raise FileOperationError("mount error")
+        return await original_exists(path)
+
+    monkeypatch.setattr(file_service, "exists", flaky_exists)
+
+    verifier = LocalProjectIndexDeletePathVerifier(file_service=file_service)
+    confirmed = await verifier.confirm_deleted_paths(("present.md", "absent.md", "flaky.md"))
+
+    assert confirmed == frozenset({"absent.md"})
+
+
+@dataclass(slots=True)
+class RecreatingObservedFileSource:
+    """Recreate a file after the scan snapshot, simulating a concurrent accepted write."""
+
+    source: ProjectIndexObservedFileSource
+    file_path: Path
+    content: bytes
+
+    async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
+        observed = await self.source.list_observed_index_files()
+        self.file_path.write_bytes(self.content)
+        return observed
+
+
+async def test_local_project_index_delete_batch_spares_file_recreated_after_snapshot(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """An entity whose file reappears after the scan snapshot must survive delete batches."""
+    del config_manager
+
+    note_path = project_config.home / "late.md"
+    note_content = b"# Late\n\nAccepted while the scan was running.\n"
+    note_path.write_bytes(note_content)
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        entity_before = await entity_repository.get_by_file_path(session, "late.md")
+    assert entity_before is not None
+
+    # The file is gone when the snapshot is captured, then written again before
+    # the delete batch applies — the write_note accept/materialize race.
+    note_path.unlink()
+    runtime_factory = LocalProjectIndexRuntimeFactory(batch_size=10)
+    runtime = await runtime_factory.runtime_for_project(test_project)
+    racing_runtime = LocalProjectIndexRuntime(
+        observed_file_source=RecreatingObservedFileSource(
+            source=runtime.observed_file_source,
+            file_path=note_path,
+            content=note_content,
+        ),
+        change_detector=runtime.change_detector,
+        maintenance_runner=runtime.maintenance_runner,
+        moved_entity_search_refresher=runtime.moved_entity_search_refresher,
+        batch_enqueuer=runtime.batch_enqueuer,
+        completion_relation_runtime=runtime.completion_relation_runtime,
+        batch_size=runtime.batch_size,
+    )
+
+    second = await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            project=ProjectRuntimeReference.from_project(test_project),
+        ),
+        runtime=racing_runtime,
+    )
+
+    assert second.deleted_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        entity_after = await entity_repository.get_by_file_path(session, "late.md")
+
+    assert entity_after is not None
+    assert entity_after.id == entity_before.id
 
 
 @dataclass(slots=True)

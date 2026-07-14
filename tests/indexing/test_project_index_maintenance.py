@@ -400,6 +400,7 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
             ProjectIndexDeleteBatchResult(
                 deleted_entities=0,
                 missing_paths=("notes/c.md",),
+                skipped_paths=("notes/d.md",),
             ),
         ],
         recorded=recorded_batches,
@@ -428,6 +429,7 @@ async def test_project_index_delete_runner_applies_batches_and_reports_progress(
         records=run.records,
     )
     assert run.missing_paths == ("notes/b.md", "notes/c.md")
+    assert run.skipped_paths == ("notes/d.md",)
     assert run.records[1].progress is None
 
 
@@ -674,6 +676,107 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
     assert "UPDATE search_index" in str(session.statements[4])
     assert "search_index.type" in str(session.statements[5])
     assert "permalink" in str(session.statements[5])
+
+
+@dataclass(frozen=True, slots=True)
+class StaticDeletePathVerifier:
+    """Confirm only the configured paths as still absent from storage."""
+
+    confirmed: frozenset[str]
+
+    async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
+        return frozenset(path for path in paths if path in self.confirmed)
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_skips_deletes_for_reappeared_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A path present in storage again at apply time must survive the delete batch."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md"},
+                ]
+            ),
+            FakeProjectIndexResult(scalar_values=[]),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        delete_path_verifier=StaticDeletePathVerifier(confirmed=frozenset({"notes/a.md"})),
+    )
+
+    result = await store.apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/a.md", "notes/reappeared.md"),
+        )
+    )
+
+    assert result == ProjectIndexDeleteBatchResult(
+        deleted_entities=1,
+        skipped_paths=("notes/reappeared.md",),
+    )
+    # Only the confirmed path was queried and deleted.
+    assert any("DELETE FROM entity" in str(statement) for statement in session.statements)
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_skips_whole_batch_when_nothing_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no planned delete is re-confirmed absent, the database is not touched."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(results=[])
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        delete_path_verifier=StaticDeletePathVerifier(confirmed=frozenset()),
+    )
+
+    result = await store.apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/a.md", "notes/b.md"),
+        )
+    )
+
+    assert result == ProjectIndexDeleteBatchResult(
+        deleted_entities=0,
+        skipped_paths=("notes/a.md", "notes/b.md"),
+    )
+    assert session.statements == []
 
 
 @pytest.mark.asyncio

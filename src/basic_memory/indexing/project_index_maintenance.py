@@ -59,6 +59,34 @@ class ProjectIndexMovedEntitySearchRefresher(Protocol):
         """Refresh search rows for moved entity ids."""
 
 
+class ProjectIndexDeletePathVerifier(Protocol):
+    """Capability that re-confirms scan-planned delete paths at apply time.
+
+    Delete plans come from a storage snapshot that is stale by the time the
+    batch applies; a note accepted and materialized after the snapshot would
+    otherwise be destroyed. Implementations return only the paths whose
+    absence they can positively confirm right now.
+    """
+
+    async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
+        """Return the subset of paths confirmed absent from storage."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class TrustPlannedProjectIndexDeleteVerifier(ProjectIndexDeletePathVerifier):
+    """Confirm every planned delete without re-probing storage.
+
+    Cloud/S3 runtimes treat the scan's storage listing as authoritative and
+    have no cheap per-path existence probe at apply time, so they keep the
+    plan's verdict unchanged. Runtimes with a live filesystem (local) inject
+    a probing verifier instead.
+    """
+
+    async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
+        return frozenset(paths)
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectIndexMovedFile:
     """One indexed file move that may need storage-backed metadata repair."""
@@ -214,6 +242,7 @@ class ProjectIndexDeleteBatchResult:
     deleted_entities: int
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
     missing_paths: tuple[str, ...] = ()
+    skipped_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +268,13 @@ class ProjectIndexDeleteRun:
         """Return every deleted path that the runtime could not find."""
         return tuple(
             missing_path for record in self.records for missing_path in record.result.missing_paths
+        )
+
+    @property
+    def skipped_paths(self) -> tuple[str, ...]:
+        """Return every planned delete path skipped because it is present again."""
+        return tuple(
+            skipped_path for record in self.records for skipped_path in record.result.skipped_paths
         )
 
 
@@ -414,6 +450,7 @@ class RepositoryProjectIndexMaintenanceStore:
     session_maker: async_sessionmaker[AsyncSession]
     project_id: ProjectId
     move_content_updater: ProjectIndexMoveContentUpdater | None = None
+    delete_path_verifier: ProjectIndexDeletePathVerifier = TrustPlannedProjectIndexDeleteVerifier()
 
     async def apply_project_index_move_batch(
         self,
@@ -599,11 +636,38 @@ class RepositoryProjectIndexMaintenanceStore:
         if not delete_batch.paths:
             return ProjectIndexDeleteBatchResult(deleted_entities=0)
 
+        # Trigger: a planned delete path exists in storage again at apply time.
+        # Why: the plan compares a storage snapshot against a later DB read, so
+        #      a note accepted and materialized in between is planned as deleted;
+        #      applying it would destroy the accepted entity, search, and vector
+        #      rows with no recovery.
+        # Outcome: only positively re-confirmed absences are deleted; skipped
+        #          paths are reported and the next scan picks the file up as
+        #          modified.
+        confirmed_paths = await self.delete_path_verifier.confirm_deleted_paths(
+            delete_batch.paths
+        )
+        skipped_paths = tuple(
+            deleted_path
+            for deleted_path in delete_batch.paths
+            if deleted_path not in confirmed_paths
+        )
+        if skipped_paths:
+            logger.warning(
+                "Skipping planned index deletes for paths present in storage again",
+                paths=skipped_paths,
+            )
+        if not confirmed_paths:
+            return ProjectIndexDeleteBatchResult(
+                deleted_entities=0,
+                skipped_paths=skipped_paths,
+            )
+
         async with db.scoped_session(self.session_maker) as session:
             target_result = await session.execute(
                 select(Entity.id, Entity.file_path).where(
                     Entity.project_id == self.project_id,
-                    Entity.file_path.in_(tuple(delete_batch.paths)),
+                    Entity.file_path.in_(tuple(confirmed_paths)),
                 )
             )
             target_rows = target_result.mappings().all()
@@ -611,7 +675,12 @@ class RepositoryProjectIndexMaintenanceStore:
             if not target_rows:
                 return ProjectIndexDeleteBatchResult(
                     deleted_entities=0,
-                    missing_paths=tuple(delete_batch.paths),
+                    missing_paths=tuple(
+                        deleted_path
+                        for deleted_path in delete_batch.paths
+                        if deleted_path in confirmed_paths
+                    ),
+                    skipped_paths=skipped_paths,
                 )
 
             deleted_entity_ids = tuple(int(row["id"]) for row in target_rows)
@@ -629,8 +698,9 @@ class RepositoryProjectIndexMaintenanceStore:
             missing_paths=tuple(
                 deleted_path
                 for deleted_path in delete_batch.paths
-                if deleted_path not in deleted_found_paths
+                if deleted_path in confirmed_paths and deleted_path not in deleted_found_paths
             ),
+            skipped_paths=skipped_paths,
         )
 
 
