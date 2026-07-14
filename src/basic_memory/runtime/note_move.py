@@ -25,11 +25,7 @@ def normalize_note_move_destination_path(destination_path: str) -> RuntimeFilePa
     # and a rooted path ("\\evil.md") both report is_absolute() == False, yet joining
     # either onto a base path on a Windows host discards or rewrites the base.
     windows_path = PureWindowsPath(accepted_path)
-    if (
-        accepted_path.startswith(("/", "\\"))
-        or windows_path.drive
-        or windows_path.is_absolute()
-    ):
+    if accepted_path.startswith(("/", "\\")) or windows_path.drive or windows_path.is_absolute():
         raise ValueError(f"Invalid destination path: {destination_path}")
 
     # Reject traversal under either separator convention: PurePosixPath splits on

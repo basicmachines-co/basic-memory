@@ -234,9 +234,7 @@ class RepositoryProjectHardDeleter:
                 session,
                 request.project_id,
             )
-            return (
-                ProjectHardDeleteOutcome.deleted if deleted else ProjectHardDeleteOutcome.missing
-            )
+            return ProjectHardDeleteOutcome.deleted if deleted else ProjectHardDeleteOutcome.missing
 
 
 async def run_project_delete(
