@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.forward_reference_resolution import (
-    ForwardReferenceEntityRefreshFailure,
     ForwardReferenceEntityRefreshRun,
     ForwardReferenceEntityRefreshRuntime,
     ForwardReferenceRelationSource,
@@ -33,10 +32,10 @@ from basic_memory.indexing.relation_resolution import (
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteRun,
+    ProjectIndexMaintenanceRunner,
     ProjectIndexMoveRun,
     RepositoryProjectIndexMaintenanceStore,
-    run_project_index_delete_batches,
-    run_project_index_move_batches,
+    StoreProjectIndexMaintenanceRunner,
 )
 from basic_memory.indexing.vector_sync_planning import (
     CheckpointPhase,
@@ -60,46 +59,6 @@ class ProjectIndexForwardReferenceRun:
     resolution: ForwardReferenceResolutionRun
     refresh: ForwardReferenceEntityRefreshRun
 
-    @property
-    def initial_count(self) -> int:
-        """Return how many unresolved relations were considered."""
-        return self.resolution.unresolved_before
-
-    @property
-    def unique_link_text_count(self) -> int:
-        """Return how many unique unresolved link texts were considered."""
-        return len(self.resolution.link_texts)
-
-    @property
-    def resolved_link_text_count(self) -> int:
-        """Return how many unique link texts resolved to a target."""
-        return self.resolution.resolved_link_text_count
-
-    @property
-    def resolved_count(self) -> int:
-        """Return how many relation rows were updated."""
-        return self.resolution.resolved_count
-
-    @property
-    def remaining_count(self) -> int:
-        """Return how many initially unresolved relation rows remain unresolved."""
-        return self.resolution.remaining_count
-
-    @property
-    def entity_ids_to_refresh(self) -> frozenset[EntityId]:
-        """Return exact target entities selected for search refresh."""
-        return self.resolution.entity_ids_to_refresh
-
-    @property
-    def successful_reindexed_entity_ids(self) -> frozenset[EntityId]:
-        """Return target entities whose search rows were refreshed."""
-        return self.refresh.successful_entity_ids
-
-    @property
-    def refresh_failures(self) -> tuple[ForwardReferenceEntityRefreshFailure, ...]:
-        """Return target entities whose search refresh raised."""
-        return self.refresh.failures
-
 
 @dataclass(frozen=True, slots=True)
 class ProjectIndexRuntime:
@@ -108,8 +67,7 @@ class ProjectIndexRuntime:
     project_id: ProjectId
     vector_sync: VectorSyncExecutor
     vector_entity_source: VectorSyncEntitySource
-    move_store: RepositoryProjectIndexMaintenanceStore
-    delete_store: RepositoryProjectIndexMaintenanceStore
+    maintenance: ProjectIndexMaintenanceRunner
     forward_reference_relation_source: ForwardReferenceRelationSource
     forward_reference_resolution_runtime: ForwardReferenceResolutionRuntime
     forward_reference_entity_refresher: ForwardReferenceEntityRefreshRuntime
@@ -168,10 +126,9 @@ class ProjectIndexRuntime:
         batch_size: int,
     ) -> ProjectIndexMoveRun:
         """Apply moved-file updates for the current project."""
-        return await run_project_index_move_batches(
-            moved_files=dict(moved_files),
+        return await self.maintenance.run_move_batches(
+            moved_files=moved_files,
             batch_size=batch_size,
-            move_store=self.move_store,
         )
 
     async def run_delete_batches(
@@ -181,10 +138,9 @@ class ProjectIndexRuntime:
         batch_size: int,
     ) -> ProjectIndexDeleteRun:
         """Delete file-backed entities for the current project."""
-        return await run_project_index_delete_batches(
-            deleted_paths=list(deleted_paths),
+        return await self.maintenance.run_delete_batches(
+            deleted_paths=deleted_paths,
             batch_size=batch_size,
-            delete_store=self.delete_store,
         )
 
     async def resolve_forward_references(self) -> ProjectIndexForwardReferenceRun:
@@ -227,8 +183,10 @@ def build_default_project_index_runtime(
         project_id=project_id,
         vector_sync=vector_sync,
         vector_entity_source=vector_entity_source,
-        move_store=maintenance_store,
-        delete_store=maintenance_store,
+        maintenance=StoreProjectIndexMaintenanceRunner(
+            move_store=maintenance_store,
+            delete_store=maintenance_store,
+        ),
         forward_reference_relation_source=RepositoryForwardReferenceRelationSource(
             session_maker=session_maker,
             project_id=project_id,

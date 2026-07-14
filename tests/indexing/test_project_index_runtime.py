@@ -23,6 +23,7 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMoveBatch,
     ProjectIndexMoveBatchResult,
     RepositoryProjectIndexMaintenanceStore,
+    StoreProjectIndexMaintenanceRunner,
 )
 from basic_memory.indexing.vector_sync_planning import RepositoryVectorSyncEntitySource
 from basic_memory.indexing.forward_reference_resolution import (
@@ -188,8 +189,10 @@ def make_runtime(
         project_id=7,
         vector_sync=NoopVectorSync(),
         vector_entity_source=vector_entity_source or RecordingVectorEntitySource(),
-        move_store=move_store or _make_maintenance_store(),
-        delete_store=delete_store or _make_maintenance_store(),
+        maintenance=StoreProjectIndexMaintenanceRunner(
+            move_store=move_store or _make_maintenance_store(),
+            delete_store=delete_store or _make_maintenance_store(),
+        ),
         forward_reference_relation_source=relation_source
         or RecordingForwardReferenceRelationSource(relations=()),
         forward_reference_resolution_runtime=resolution_runtime
@@ -219,8 +222,9 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
     assert isinstance(runtime.vector_entity_source, RepositoryVectorSyncEntitySource)
     assert runtime.vector_entity_source.session_maker is session_maker
     assert runtime.vector_entity_source.project_id == 7
-    assert isinstance(runtime.move_store, RepositoryProjectIndexMaintenanceStore)
-    assert runtime.move_store is runtime.delete_store
+    assert isinstance(runtime.maintenance, StoreProjectIndexMaintenanceRunner)
+    assert isinstance(runtime.maintenance.move_store, RepositoryProjectIndexMaintenanceStore)
+    assert runtime.maintenance.move_store is runtime.maintenance.delete_store
     assert isinstance(
         runtime.forward_reference_relation_source,
         RepositoryForwardReferenceRelationSource,
@@ -335,11 +339,11 @@ async def test_project_index_runtime_resolves_forward_refs_and_refreshes_targets
         ),
     )
     assert set(refresher.calls) == {100, 200}
-    assert run.initial_count == 3
-    assert run.unique_link_text_count == 3
-    assert run.resolved_link_text_count == 2
-    assert run.resolved_count == 2
-    assert run.remaining_count == 1
-    assert run.entity_ids_to_refresh == frozenset({100, 200})
-    assert run.successful_reindexed_entity_ids == frozenset({100})
-    assert [failure.entity_id for failure in run.refresh_failures] == [200]
+    assert run.resolution.unresolved_before == 3
+    assert run.resolution.link_texts == ("Target", "Broken", "Fails")
+    assert run.resolution.resolved_link_text_count == 2
+    assert run.resolution.resolved_count == 2
+    assert run.resolution.remaining_count == 1
+    assert run.resolution.entity_ids_to_refresh == frozenset({100, 200})
+    assert run.refresh.successful_entity_ids == frozenset({100})
+    assert [failure.entity_id for failure in run.refresh.failures] == [200]
