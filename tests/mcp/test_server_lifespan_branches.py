@@ -69,9 +69,7 @@ async def test_mcp_lifespan_drains_pending_work_before_db_shutdown(config_manage
 
 
 @pytest.mark.asyncio
-async def test_mcp_lifespan_drains_queued_materializations_on_shutdown(
-    config_manager, monkeypatch
-):
+async def test_mcp_lifespan_drains_queued_materializations_on_shutdown(config_manager, monkeypatch):
     """A materialization still queued at lifespan exit completes before the exit
     returns, so one-shot MCP runs never lose an accepted write."""
     pool = note_content_materialization._MaterializationWorkerPool()
@@ -86,7 +84,7 @@ async def test_mcp_lifespan_drains_queued_materializations_on_shutdown(
         materialized.set()
 
     async with lifespan(mcp):
-        pool.submit(queued_write(), workers=1)
+        pool.submit(queued_write(), workers=1, key=(1, 1))
 
     assert materialized.is_set()
     await pool.aclose()

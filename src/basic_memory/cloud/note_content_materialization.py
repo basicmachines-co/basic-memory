@@ -33,6 +33,7 @@ from basic_memory.runtime.note_content import (
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
+    RuntimePendingNoteMaterialization,
     plan_accepted_note_response,
     plan_note_materialization_job_request,
 )
@@ -44,65 +45,89 @@ from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
 
+# The (project_id, entity_id) identity that pins all of one note's queued
+# materializations to a single worker.
+type _NoteRoutingKey = tuple[int, int]
+
+
 class _MaterializationWorkerPool:
     """Bounded in-process worker pool that drains queued note materializations.
 
     Mirrors the cloud's queue worker model locally: the accept enqueues a
-    materialization and returns; a fixed number of workers pull from the queue
-    and run them. Bounding concurrency to `workers` is the point — fire-and-forget
-    `create_task` let every deferred file write + index run at once, and at high
-    write load they contended en masse for the single SQLite writer and the event
-    loop, collapsing the tail (p99) and throughput
+    materialization and returns; a fixed number of workers pull from per-worker
+    queues and run them. Bounding concurrency to `workers` is the point —
+    fire-and-forget `create_task` let every deferred file write + index run at
+    once, and at high write load they contended en masse for the single SQLite
+    writer and the event loop, collapsing the tail (p99) and throughput
     (benchmarks/docs/write-load-benchmark.md). With N workers only N
-    materializations are in flight; the rest wait in the queue and drain over
+    materializations are in flight; the rest wait in the queues and drain over
     time, so the accept path stays light AND the writer isn't thrashed.
+
+    Jobs are routed to a worker by their note identity (project_id, entity_id),
+    so all jobs for one note run on the same worker FIFO in submission order.
+    Materializations for the same note must never run concurrently: the older
+    job's file write changes the on-disk checksum, so the newer job's writer
+    guard reads unexpected content and publishes a false
+    external_change_detected on the LATEST accepted row — the note is never
+    materialized and is falsely flagged as conflicted.
     """
 
     def __init__(self) -> None:
-        self._queue: asyncio.Queue[Coroutine[Any, Any, object]] | None = None
+        self._queues: list[asyncio.Queue[Coroutine[Any, Any, object]]] = []
         self._workers: list[asyncio.Task[None]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    def submit(self, work: Coroutine[Any, Any, object], *, workers: int) -> None:
+    def submit(
+        self,
+        work: Coroutine[Any, Any, object],
+        *,
+        workers: int,
+        key: _NoteRoutingKey,
+    ) -> None:
         self._ensure_workers(workers)
-        assert self._queue is not None
-        self._queue.put_nowait(work)
+        self._queues[self._worker_index(key)].put_nowait(work)
+
+    def _worker_index(self, key: _NoteRoutingKey) -> int:
+        # hash() of an int tuple is stable within one process, which is all
+        # routing needs: a job only has to serialize against other jobs queued
+        # in the same process lifetime.
+        return hash(key) % len(self._queues)
 
     def _ensure_workers(self, workers: int) -> None:
         # Trigger: first submit, or submit on a different event loop than the one
         # the workers were bound to (e.g. a fresh per-test loop).
-        # Why: workers are long-lived tasks bound to one loop; reusing a queue
-        # whose workers live on a dead loop would hang. Outcome: (re)create the
-        # queue + `workers` worker tasks on the current running loop. Orphaned
-        # workers on a closed loop are already dead, so dropping them is safe.
+        # Why: workers are long-lived tasks bound to one loop; reusing queues
+        # whose workers live on a dead loop would hang. Outcome: (re)create one
+        # queue + worker task pair per worker on the current running loop.
+        # Orphaned workers on a closed loop are already dead, so dropping them
+        # is safe.
         loop = asyncio.get_running_loop()
-        if self._queue is not None and self._loop is loop:
+        if self._queues and self._loop is loop:
             return
         self._loop = loop
-        self._queue = asyncio.Queue()
-        self._workers = [asyncio.create_task(self._run()) for _ in range(max(1, workers))]
+        self._queues = [asyncio.Queue() for _ in range(max(1, workers))]
+        self._workers = [asyncio.create_task(self._run(queue)) for queue in self._queues]
 
-    async def _run(self) -> None:
-        assert self._queue is not None
+    async def _run(self, queue: asyncio.Queue[Coroutine[Any, Any, object]]) -> None:
         while True:
-            work = await self._queue.get()
+            work = await queue.get()
             try:
                 await work
             except Exception:  # pragma: no cover - defensive worker guard
                 logger.exception("Local note materialization failed")
             finally:
-                self._queue.task_done()
+                queue.task_done()
 
     async def join(self) -> None:
-        """Block until every queued materialization has completed (tests)."""
-        if self._queue is not None:
-            await self._queue.join()
+        """Block until every queued materialization has completed."""
+        for queue in self._queues:
+            await queue.join()
 
     async def aclose(self) -> None:
         """Cancel workers and reset the pool (clean test teardown / shutdown)."""
         workers = self._workers
         self._workers = []
-        self._queue = None
+        self._queues = []
         self._loop = None
         for worker in workers:
             worker.cancel()
@@ -185,9 +210,9 @@ async def recover_stuck_materializations(
     that reached a written file state.
     """
     async with db.scoped_session(session_maker) as session:
-        stuck_rows = await NoteContentRepository(
-            project_id=project_id
-        ).find_stuck_materializations(session)
+        stuck_rows = await NoteContentRepository(project_id=project_id).find_stuck_materializations(
+            session
+        )
 
     if not stuck_rows:
         return 0
@@ -385,8 +410,11 @@ class InlineNoteFileDeleteEnqueuer:
         # aliases the new file" — both read the same bytes — so deleting the old path
         # would destroy the note's only copy (then scan reconciliation removes the row).
         # Outcome: skip the delete entirely; the paths are the same physical file.
-        if request.live_file_path is not None and self.storage.file_service.paths_share_storage_target(
-            request.file_path, request.live_file_path
+        if (
+            request.live_file_path is not None
+            and self.storage.file_service.paths_share_storage_target(
+                request.file_path, request.live_file_path
+            )
         ):
             logger.info(
                 "Skipping note-file cleanup that aliases the live file (case-only rename)",
@@ -435,22 +463,28 @@ class LocalNoteContentMaterializationProvider:
         tests can assert file/search state synchronously — never make the
         production path synchronous to "simplify" this.
         """
-        if accepted.materialization is None:
+        materialization = accepted.materialization
+        if materialization is None:
             return accepted
         if self.test_mode:
             return await self._materialize_write_now(accepted)
-        self._schedule_materialization(accepted)
+        self._schedule_materialization(accepted, materialization)
         return accepted
 
     def _schedule_materialization(
         self,
         accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
+        materialization: RuntimePendingNoteMaterialization,
     ) -> None:
         # Hand the materialization to the bounded worker pool instead of spawning
         # an unbounded task per write — see _MaterializationWorkerPool for why.
+        # Keyed on the note's identity so two quick writes to the same note run
+        # sequentially on one worker instead of racing the writer guard into a
+        # false external_change_detected on the newer accepted row.
         _materialization_pool.submit(
             self._materialize_write_now(accepted),
             workers=self.materialization_workers,
+            key=(materialization.project_id, materialization.entity_id),
         )
 
     async def _materialize_write_now(
