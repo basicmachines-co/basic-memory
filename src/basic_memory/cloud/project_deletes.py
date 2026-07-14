@@ -8,12 +8,10 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing.project_delete_acceptance import (
-    ProjectDeleteAcceptedProject,
-    ProjectDeleteAcceptedResult,
-)
+from basic_memory.indexing.project_delete_acceptance import ProjectDeleteAcceptedResult
 from basic_memory.models import Project
 from basic_memory.runtime.jobs import RuntimeJobId, RuntimeProjectDeleteJobRequest
+from basic_memory.schemas.project_info import ProjectItem
 
 
 class ProjectDeleteAcceptanceError(Exception):
@@ -106,7 +104,13 @@ class ProjectDeleteAcceptanceService:
                 project_path=project.path,
                 delete_notes=request.delete_notes,
             )
-            old_project = ProjectDeleteAcceptedProject.from_source(project)
+            old_project = ProjectItem(
+                id=project.id,
+                external_id=project.external_id,
+                name=project.name,
+                path=project.path,
+                is_default=project.is_default or False,
+            )
             project.is_active = False
             await session.commit()
 

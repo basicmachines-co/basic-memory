@@ -3,55 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol, Self
+from typing import Literal, Self
 
 from basic_memory.runtime.jobs import RuntimeJobId, RuntimeProjectDeleteJobRequest
+from basic_memory.schemas.project_info import ProjectItem
 
 type ProjectDeleteAcceptedStatus = Literal["success"]
 type ProjectDeleteAcceptedDeletionStatus = Literal["pending"]
 type ProjectDeleteAcceptedFileStatus = Literal["pending", "skipped"]
-
-
-class ProjectDeleteAcceptedProjectSource(Protocol):
-    """Minimal project row shape needed for accepted-delete responses."""
-
-    id: int
-    external_id: str
-    name: str
-    path: str
-    is_default: bool | None
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectDeleteAcceptedProject:
-    """Project snapshot returned as ``old_project`` after a soft delete."""
-
-    id: int
-    external_id: str
-    name: str
-    path: str
-    is_default: bool
-
-    @classmethod
-    def from_source(cls, source: ProjectDeleteAcceptedProjectSource) -> Self:
-        """Snapshot the Basic Memory project fields exposed by delete responses."""
-        return cls(
-            id=source.id,
-            external_id=source.external_id,
-            name=source.name,
-            path=source.path,
-            is_default=source.is_default or False,
-        )
-
-    def to_response_payload(self) -> dict[str, object]:
-        """Serialize to the existing Basic Memory project response shape."""
-        return {
-            "id": self.id,
-            "external_id": self.external_id,
-            "name": self.name,
-            "path": self.path,
-            "is_default": self.is_default,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +20,7 @@ class ProjectDeleteAcceptedResult:
     project_name: str
     job_id: RuntimeJobId
     file_delete_status: ProjectDeleteAcceptedFileStatus
-    old_project: ProjectDeleteAcceptedProject
+    old_project: ProjectItem
     status: ProjectDeleteAcceptedStatus = "success"
     deletion_status: ProjectDeleteAcceptedDeletionStatus = "pending"
     background: bool = True
@@ -72,7 +31,7 @@ class ProjectDeleteAcceptedResult:
         *,
         request: RuntimeProjectDeleteJobRequest,
         job_id: RuntimeJobId,
-        old_project: ProjectDeleteAcceptedProject,
+        old_project: ProjectItem,
     ) -> Self:
         """Build the accepted response for a queued project cleanup job."""
         return cls(
@@ -91,6 +50,11 @@ class ProjectDeleteAcceptedResult:
             "file_delete_status": self.file_delete_status,
             "background": self.background,
             "job_id": str(self.job_id),
-            "old_project": self.old_project.to_response_payload(),
+            # ProjectItem also carries cloud-hosting metadata (display_name,
+            # is_private) that the accepted-delete response has never included;
+            # serialize only the persisted project fields so bytes stay stable.
+            "old_project": self.old_project.model_dump(
+                include={"id", "external_id", "name", "path", "is_default"}
+            ),
             "new_project": None,
         }

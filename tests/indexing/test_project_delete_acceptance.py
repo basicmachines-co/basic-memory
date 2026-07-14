@@ -1,22 +1,8 @@
 """Tests for portable project-delete acceptance response values."""
 
-from dataclasses import dataclass
-
-from basic_memory.indexing.project_delete_acceptance import (
-    ProjectDeleteAcceptedProject,
-    ProjectDeleteAcceptedResult,
-)
+from basic_memory.indexing.project_delete_acceptance import ProjectDeleteAcceptedResult
 from basic_memory.runtime.jobs import RuntimeProjectDeleteJobRequest
-
-
-# Not frozen: ProjectDeleteAcceptedProjectSource declares plain (writable) attribute members.
-@dataclass(slots=True)
-class ProjectSource:
-    id: int
-    external_id: str
-    name: str
-    path: str
-    is_default: bool | None
+from basic_memory.schemas.project_info import ProjectItem
 
 
 def project_delete_request(*, delete_notes: bool) -> RuntimeProjectDeleteJobRequest:
@@ -29,48 +15,26 @@ def project_delete_request(*, delete_notes: bool) -> RuntimeProjectDeleteJobRequ
     )
 
 
-def test_project_delete_accepted_project_snapshots_basic_memory_shape() -> None:
-    project = ProjectDeleteAcceptedProject.from_source(
-        ProjectSource(
-            id=101,
-            external_id="project-main",
-            name="Main",
-            path="basic-memory",
-            is_default=None,
-        )
-    )
-
-    assert project == ProjectDeleteAcceptedProject(
+def old_project_item() -> ProjectItem:
+    return ProjectItem(
         id=101,
         external_id="project-main",
         name="Main",
         path="basic-memory",
         is_default=False,
     )
-    assert project.to_response_payload() == {
-        "id": 101,
-        "external_id": "project-main",
-        "name": "Main",
-        "path": "basic-memory",
-        "is_default": False,
-    }
 
 
 def test_project_delete_accepted_result_serializes_existing_pending_response() -> None:
-    old_project = ProjectDeleteAcceptedProject(
-        id=101,
-        external_id="project-main",
-        name="Main",
-        path="basic-memory",
-        is_default=False,
-    )
-
     result = ProjectDeleteAcceptedResult.queued(
         request=project_delete_request(delete_notes=True),
         job_id=123,
-        old_project=old_project,
+        old_project=old_project_item(),
     )
 
+    # Exact snapshot of the accepted-delete response contract: old_project must
+    # carry only the persisted project fields, never ProjectItem's cloud-hosting
+    # metadata (display_name, is_private).
     assert result.to_response_payload() == {
         "message": "Project 'Main' deletion queued",
         "status": "success",
@@ -93,13 +57,7 @@ def test_project_delete_accepted_result_marks_file_delete_skipped() -> None:
     result = ProjectDeleteAcceptedResult.queued(
         request=project_delete_request(delete_notes=False),
         job_id="job-1",
-        old_project=ProjectDeleteAcceptedProject(
-            id=101,
-            external_id="project-main",
-            name="Main",
-            path="basic-memory",
-            is_default=False,
-        ),
+        old_project=old_project_item(),
     )
 
     assert result.file_delete_status == "skipped"

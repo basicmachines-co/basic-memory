@@ -12,6 +12,7 @@ from basic_memory.cloud.project_deletes import (
 from basic_memory.models import Base as BasicMemoryBase
 from basic_memory.models import Project
 from basic_memory.runtime.jobs import RuntimeJobId, RuntimeProjectDeleteJobRequest
+from basic_memory.schemas.project_info import ProjectItem
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -35,7 +36,8 @@ async def tenant_session_maker() -> AsyncGenerator[async_sessionmaker[AsyncSessi
 async def create_project(
     session_maker: async_sessionmaker[AsyncSession],
     *,
-    is_default: bool = False,
+    # None mirrors the nullable column default; the accepted response maps it to False.
+    is_default: bool | None = None,
 ) -> Project:
     async with session_maker() as session:
         project = Project(
@@ -106,7 +108,13 @@ async def test_project_delete_acceptance_soft_deletes_and_queues_runtime_request
     ]
     assert result.to_response_payload()["job_id"] == "123"
     assert result.to_response_payload()["file_delete_status"] == "pending"
-    assert result.old_project.external_id == "project-main"
+    assert result.old_project == ProjectItem(
+        id=project.id,
+        external_id="project-main",
+        name="Main",
+        path="basic-memory",
+        is_default=False,
+    )
 
 
 @pytest.mark.asyncio
