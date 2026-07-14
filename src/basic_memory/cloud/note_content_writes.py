@@ -76,11 +76,17 @@ class NoteContentMutationActorResolver(Protocol):
     ) -> NoteContentMutationActorContext: ...
 
 
+# Route adapters place error.detail directly into the HTTP response body, so it
+# is either a plain message string or an already-serialized structured detail
+# (currently only the base-checksum conflict wire dict, issue #1445).
+type NoteContentMutationErrorDetail = str | dict[str, str | None]
+
+
 class NoteContentMutationServiceError(Exception):
     """Structured note-content mutation service error for route adapters."""
 
-    def __init__(self, status_code: int, detail: str) -> None:
-        super().__init__(detail)
+    def __init__(self, status_code: int, detail: NoteContentMutationErrorDetail) -> None:
+        super().__init__(str(detail))
         self.status_code = status_code
         self.detail = detail
 
@@ -89,9 +95,12 @@ def note_content_mutation_error_from_rejection(
     rejection: AcceptedNoteMutationRejection,
 ) -> NoteContentMutationServiceError:
     """Map core accepted-note mutation rejections into route-facing errors."""
+    detail = rejection.detail
+    # This mapping is the wire boundary: typed rejection details serialize to the
+    # JSON dict that HTTP routes place verbatim into the 4xx response body.
     return NoteContentMutationServiceError(
         rejection.kind.http_status_code,
-        rejection.detail,
+        detail if isinstance(detail, str) else detail.as_json_dict(),
     )
 
 
@@ -216,10 +225,19 @@ class NoteContentMutationService:
         data: EntitySchema,
         user_profile_id: UUID | None,
         source: str,
+        base_checksum: str | None = None,
         actor_kind: str | None = None,
         actor_name: str | None = None,
     ) -> AcceptedNoteChange:
-        """PUT a markdown note by creating or replacing accepted DB state."""
+        """PUT a markdown note by creating or replacing accepted DB state.
+
+        ``base_checksum`` is an optional optimistic-concurrency precondition: the
+        db_checksum the caller last synced. When supplied, the update runner
+        rejects the write with a structured 409 if the accepted checksum has
+        moved, so the caller rebases instead of clobbering the newer write
+        (issue #1445). It stays optional so callers without a synced base still
+        write.
+        """
         actor_context = self._resolve_actor(
             "update",
             user_profile_id=user_profile_id,
@@ -245,6 +263,7 @@ class NoteContentMutationService:
                             actor_name=actor_context.actor_name,
                         ),
                         source=actor_context.source,
+                        base_checksum=base_checksum,
                     ),
                     dependencies=self.mutation_dependencies,
                 )

@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.accepted_note_mutation_runner import (
+    AcceptedNoteBaseChecksumConflict,
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
@@ -597,6 +598,209 @@ async def test_run_accepted_note_update_replaces_existing_note_content() -> None
 
 
 @pytest.mark.asyncio
+async def test_run_accepted_note_update_accepts_matching_base_checksum() -> None:
+    # The caller's synced base ("old-checksum" in the fixture) still matches the
+    # accepted row, so the precondition holds and the replace lands unchanged.
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    change = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+            base_checksum="old-checksum",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+            preparer_factory=preparer_factory,
+            pending_entity_repository=pending_entity_repository,
+            note_content_accept_repository=note_content_accept_repository,
+            search_repository=search_repository,
+        ),
+    )
+
+    assert change.status_code == 200
+    assert note_content_accept_repository.calls[0][1].db_version == 2
+    assert note_content_accept_repository.calls[0][1].markdown_content == "# Replacement\n"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_rejects_stale_base_checksum() -> None:
+    # The accepted row advanced past the caller's synced base: reject with the
+    # current checksum in the structured detail so the client rebases instead of
+    # clobbering the newer write (issue #1445).
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_update(
+            cast(AsyncSession, session),
+            request=AcceptedNoteUpdateMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="api",
+                base_checksum="stale-checksum",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+            ),
+        )
+
+    rejection = exc_info.value.rejection
+    assert rejection.kind is AcceptedNoteMutationRejectKind.conflict
+    assert rejection.kind.http_status_code == 409
+    assert isinstance(rejection.detail, AcceptedNoteBaseChecksumConflict)
+    assert rejection.detail.db_checksum == "old-checksum"
+    assert rejection.detail.as_json_dict() == {
+        "message": "Note changed since your last sync",
+        "db_checksum": "old-checksum",
+    }
+    # Rejected before any replacement prepare or persistence ran.
+    assert preparer.replace_calls == []
+    assert note_content_accept_repository.calls == []
+    assert search_repository.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_rejects_base_checksum_when_entity_missing() -> None:
+    # A base_checksum with no addressed entity means the note was deleted after
+    # the caller's pre-read; creating it here would silently resurrect the
+    # just-deleted note, so reject with db_checksum None (nothing to rebase
+    # against, issue #1445).
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared()
+    entity = _entity()
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository()
+    note_content_lookup_repository = _NoteContentLookupRepository()
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_update(
+            cast(AsyncSession, session),
+            request=AcceptedNoteUpdateMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="api",
+                base_checksum="old-checksum",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+            ),
+        )
+
+    rejection = exc_info.value.rejection
+    assert rejection.kind is AcceptedNoteMutationRejectKind.conflict
+    assert isinstance(rejection.detail, AcceptedNoteBaseChecksumConflict)
+    assert rejection.detail.db_checksum is None
+    assert rejection.detail.as_json_dict() == {
+        "message": "Note changed since your last sync",
+        "db_checksum": None,
+    }
+    # No entity was resurrected and nothing persisted.
+    assert preparer.calls == []
+    assert pending_entity_repository.calls == []
+    assert note_content_accept_repository.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_creates_missing_entity_without_base_checksum() -> None:
+    # Without a precondition the PUT keeps its upsert contract: a missing
+    # addressed entity is created (201) exactly as before.
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared()
+    entity = _entity()
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository()
+    note_content_lookup_repository = _NoteContentLookupRepository()
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    change = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+            preparer_factory=preparer_factory,
+            pending_entity_repository=pending_entity_repository,
+            note_content_accept_repository=note_content_accept_repository,
+            search_repository=search_repository,
+        ),
+    )
+
+    assert change.status_code == 201
+    assert len(pending_entity_repository.calls) == 1
+    assert note_content_accept_repository.calls[0][1].db_version == 1
+
+
+@pytest.mark.asyncio
 async def test_run_accepted_note_update_rejects_rename_onto_unindexed_storage() -> None:
     # A PUT that renames the entity onto a path occupied by an on-disk but unindexed
     # file must reject with 409, mirroring the create/move storage guard, rather than
@@ -690,9 +894,7 @@ async def test_run_accepted_note_update_rejects_non_markdown_existing_entity() -
             ),
         )
 
-    assert (
-        exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.unsupported_media_type
-    )
+    assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.unsupported_media_type
     assert exc_info.value.rejection.kind.http_status_code == 415
     # Rejected before any note_content load or persistence.
     assert note_content_lookup_repository.calls == []

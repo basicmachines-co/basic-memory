@@ -81,18 +81,39 @@ class AcceptedNoteMutationRejectKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptedNoteBaseChecksumConflict:
+    """Structured 409 detail for a failed base-checksum precondition.
+
+    Browser saves and the collaboration relay parse exactly this wire shape —
+    {"message": ..., "db_checksum": ...} — to decide whether to rebase against
+    the current accepted content (checksum present) or treat the note as gone
+    (checksum null). Keep the message text and key names stable (issue #1445).
+    """
+
+    db_checksum: str | None
+    message: str = "Note changed since your last sync"
+
+    def as_json_dict(self) -> dict[str, str | None]:
+        """Serialize to the wire shape route adapters place in the HTTP body."""
+        return {"message": self.message, "db_checksum": self.db_checksum}
+
+
+type AcceptedNoteMutationRejectionDetail = str | AcceptedNoteBaseChecksumConflict
+
+
+@dataclass(frozen=True, slots=True)
 class AcceptedNoteMutationRejection:
     """Typed rejection from accepted-note mutation orchestration."""
 
     kind: AcceptedNoteMutationRejectKind
-    detail: str
+    detail: AcceptedNoteMutationRejectionDetail
 
 
 class AcceptedNoteMutationRejected(Exception):
     """Exception wrapper for a typed accepted-note mutation rejection."""
 
     def __init__(self, rejection: AcceptedNoteMutationRejection) -> None:
-        super().__init__(rejection.detail)
+        super().__init__(str(rejection.detail))
         self.rejection = rejection
 
 
@@ -124,6 +145,8 @@ class AcceptedNoteUpdateMutation:
     data: EntitySchema
     actor: AcceptedNoteMutationActor
     source: RuntimeNoteChangeSource
+    # db_checksum the caller last synced; None means no precondition (issue #1445).
+    base_checksum: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,6 +349,16 @@ def concurrent_write_rejection() -> AcceptedNoteMutationRejection:
     return AcceptedNoteMutationRejection(
         kind=AcceptedNoteMutationRejectKind.conflict,
         detail="The note was modified concurrently. Reload the latest content and retry.",
+    )
+
+
+def reject_stale_base_checksum(current_db_checksum: str | None) -> NoReturn:
+    """Reject a PUT whose base-checksum precondition no longer matches DB state."""
+    raise AcceptedNoteMutationRejected(
+        AcceptedNoteMutationRejection(
+            kind=AcceptedNoteMutationRejectKind.conflict,
+            detail=AcceptedNoteBaseChecksumConflict(db_checksum=current_db_checksum),
+        )
     )
 
 
@@ -544,6 +577,15 @@ async def _run_accepted_note_update(
 
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     if entity is None:
+        # Trigger: the caller sent a base_checksum but the addressed entity is gone.
+        # Why: a base_checksum means the caller synced this note and expects to
+        #   replace it; the entity vanishing after that pre-read means it was
+        #   deleted, and creating it here would silently resurrect the just-deleted
+        #   note behind the user's back (issue #1445).
+        # Outcome: structured 409 with db_checksum None — the note is gone, so
+        #   there is nothing to rebase against.
+        if request.base_checksum is not None:
+            reject_stale_base_checksum(current_db_checksum=None)
         prepared_write = await prepare_create_or_reject(
             preparer,
             request.data,
@@ -580,9 +622,7 @@ async def _run_accepted_note_update(
                     destination_file_path=request.data.file_path,
                 )
             except EntityAlreadyExistsError as error:
-                reject_accepted_note_mutation(
-                    AcceptedNoteMutationRejectKind.conflict, str(error)
-                )
+                reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
         current_note_content = await load_required_accepted_note_content(
             session,
             project_id=project.id,
@@ -590,6 +630,19 @@ async def _run_accepted_note_update(
             dependencies=dependencies,
             missing_kind=AcceptedNoteMutationRejectKind.conflict,
         )
+        # Optimistic-concurrency precondition: the caller sent the db_checksum it
+        # last synced; if the accepted row has advanced to a different write,
+        # reject with the current checksum so the client rebases instead of
+        # clobbering the newer write (issue #1445). Cloud main checked this under
+        # SELECT ... FOR UPDATE; core needs no row lock because accept_write's
+        # compare-and-set on db_version already guarantees a write planned against
+        # this read cannot land stale — a write slipping in between this check and
+        # the CAS trips the CAS and surfaces the concurrent-write 409 instead.
+        if (
+            request.base_checksum is not None
+            and current_note_content.db_checksum != request.base_checksum
+        ):
+            reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
         try:
             prepared_write = await prepare_accepted_note_replace(
                 preparer,

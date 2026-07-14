@@ -16,7 +16,7 @@ import os
 import pathlib
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, Path, status
+from fastapi import APIRouter, Header, HTTPException, Response, Path, status
 from loguru import logger
 
 import logfire
@@ -49,6 +49,7 @@ from basic_memory.deps import (
     SessionMakerDep,
 )
 from basic_memory.runtime.note_content import (
+    NOTE_CONTENT_BASE_CHECKSUM_HEADER,
     runtime_note_content_payload_as_dict,
     runtime_note_content_payload_as_json_bytes,
 )
@@ -642,6 +643,15 @@ async def update_entity_by_id(
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
+    base_checksum: Annotated[
+        str | None,
+        Header(
+            alias=NOTE_CONTENT_BASE_CHECKSUM_HEADER,
+            description="Optional optimistic-concurrency precondition: the "
+            "db_checksum the caller last synced. A stale value rejects the write "
+            "with a structured 409 instead of overwriting the newer accepted note.",
+        ),
+    ] = None,
 ) -> EntityResponseV2:
     """Update an entity by external ID.
 
@@ -650,6 +660,8 @@ async def update_entity_by_id(
     Args:
         entity_id: External ID (UUID string)
         data: Updated entity data
+        base_checksum: Optional db_checksum precondition from the
+            x-bm-cloud-note-base-checksum header (issue #1445)
 
     Returns:
         Updated entity with file content
@@ -669,6 +681,7 @@ async def update_entity_by_id(
                 data=data,
                 user_profile_id=None,
                 source="api",
+                base_checksum=base_checksum,
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error

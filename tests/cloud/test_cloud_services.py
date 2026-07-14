@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from basic_memory.indexing.accepted_note_mutation_runner import (
+    AcceptedNoteBaseChecksumConflict,
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
@@ -601,6 +602,7 @@ async def test_note_content_mutation_service_delegates_remaining_methods_to_core
             data=update_data,
             user_profile_id=user_profile_id,
             source="api",
+            base_checksum="synced-checksum",
             actor_kind="mcp_client",
             actor_name="Claude Code",
         )
@@ -645,6 +647,7 @@ async def test_note_content_mutation_service_delegates_remaining_methods_to_core
     assert update_request.actor.user_profile_id == user_profile_id
     assert update_request.actor.kind == "mcp_client"
     assert update_request.actor.name == "Claude Code"
+    assert update_request.base_checksum == "synced-checksum"
 
     edit_request = calls[1][2]
     assert isinstance(edit_request, AcceptedNoteEditMutation)
@@ -695,6 +698,51 @@ async def test_note_content_mutation_service_maps_core_rejections(monkeypatch) -
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "A note with this external_id already exists."
+
+
+@pytest.mark.asyncio
+async def test_note_content_mutation_service_serializes_structured_rejection_detail(
+    monkeypatch,
+) -> None:
+    """The rejection-to-error mapping is the wire boundary: a typed base-checksum
+    conflict becomes the JSON dict routes place verbatim in the 409 body."""
+    tenant_session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker())
+
+    async def rejecting_runner(
+        _repository_session: AsyncSession,
+        *,
+        request: AcceptedNoteUpdateMutation,
+        dependencies: AcceptedNoteMutationDependencies,
+    ):
+        raise AcceptedNoteMutationRejected(
+            AcceptedNoteMutationRejection(
+                kind=AcceptedNoteMutationRejectKind.conflict,
+                detail=AcceptedNoteBaseChecksumConflict(db_checksum="current-checksum"),
+            )
+        )
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_update", rejecting_runner)
+
+    service = NoteContentMutationService(
+        session_maker=tenant_session_maker,
+        mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
+    )
+
+    with pytest.raises(NoteContentMutationServiceError) as exc_info:
+        await service.update_note(
+            project_external_id="project-123",
+            entity_external_id="entity-123",
+            data=EntitySchema(title="Updated", directory="notes", content="# Updated"),
+            user_profile_id=None,
+            source="api",
+            base_checksum="stale-checksum",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "message": "Note changed since your last sync",
+        "db_checksum": "current-checksum",
+    }
 
 
 def test_rejection_kinds_own_route_status_behavior() -> None:

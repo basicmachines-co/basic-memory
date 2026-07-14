@@ -32,6 +32,14 @@ NOTE_CONTENT_EXTERNAL_CHANGE_SYNC_ERROR = (
     "Refresh to review the latest content, then retry your write if you want it to win."
 )
 
+# Optional optimistic-concurrency precondition on note PUTs. Browser saves and
+# the collaboration relay send the db_checksum they last synced; the accepted
+# note update runner rejects the write with a structured 409 when the accepted
+# row has advanced, so those clients rebase instead of clobbering the newer
+# write (cloud issue #1445). The "cloud" segment is part of the wire contract
+# existing clients already send; core keeps the name verbatim.
+NOTE_CONTENT_BASE_CHECKSUM_HEADER = "x-bm-cloud-note-base-checksum"
+
 
 class RuntimeNoteMaterializationStatus(StrEnum):
     """Normal outcomes for materialized note file writes."""

@@ -17,6 +17,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
+from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
@@ -693,6 +694,121 @@ async def test_update_entity_by_id_does_not_duplicate(
     )
     assert response.status_code == 202
 
+    entities = await _find_all_entities(entity_repository, session_maker)
+    assert len(entities) == 1
+    assert entities[0].external_id == created_entity.external_id
+
+
+@pytest.mark.asyncio
+async def test_update_entity_stale_base_checksum_returns_structured_409(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    """A PUT with a stale base-checksum precondition rejects instead of clobbering."""
+    create_data = {
+        "title": "Preconditioned",
+        "directory": "test",
+        "content": "Original content",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+    current_checksum = note_content.db_checksum
+
+    update_data = {
+        "title": "Preconditioned",
+        "directory": "test",
+        "content": "Stale overwrite",
+    }
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=update_data,
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale-checksum"},
+    )
+    assert response.status_code == 409
+    # Exact wire shape cloud web/relay clients parse to rebase (issue #1445).
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": current_checksum,
+    }
+
+    # The stale write did not land.
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+    assert note_content.db_version == 1
+    assert "Original content" in note_content.markdown_content
+
+    # Retrying with the current accepted checksum satisfies the precondition.
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json={
+            "title": "Preconditioned",
+            "directory": "test",
+            "content": "Rebased content",
+        },
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: current_checksum},
+    )
+    assert response.status_code == 202
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+    assert note_content.db_version == 2
+    assert "Rebased content" in note_content.markdown_content
+
+
+@pytest.mark.asyncio
+async def test_update_entity_with_base_checksum_after_delete_returns_409_gone(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+):
+    """PUT with a base checksum must not silently resurrect a just-deleted note."""
+    create_data = {
+        "title": "Deleted Note",
+        "directory": "test",
+        "content": "To be deleted",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+    synced_checksum = note_content.db_checksum
+
+    response = await client.delete(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    )
+    assert response.status_code == 202
+
+    put_data = {
+        "title": "Deleted Note",
+        "directory": "test",
+        "content": "Resurrected?",
+    }
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=put_data,
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: synced_checksum},
+    )
+    assert response.status_code == 409
+    # db_checksum null tells the caller the note is gone: nothing to rebase against.
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": None,
+    }
+    entities = await _find_all_entities(entity_repository, session_maker)
+    assert entities == []
+
+    # Without the header the PUT keeps its upsert contract and re-creates the note.
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=put_data,
+    )
+    assert response.status_code == 202
     entities = await _find_all_entities(entity_repository, session_maker)
     assert len(entities) == 1
     assert entities[0].external_id == created_entity.external_id
