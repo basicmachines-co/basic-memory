@@ -1,6 +1,6 @@
 """Tests for project-index move/delete maintenance."""
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -23,12 +23,14 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMoveRun,
     ProjectIndexMoveTarget,
     RepositoryProjectIndexMaintenanceStore,
+    RepositoryProjectIndexMovedEntitySearchRefresher,
     StoreProjectIndexMaintenanceRunner,
     build_project_index_delete_batch_plan,
     build_project_index_move_batch_plan,
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
+from basic_memory.models import Entity
 
 
 def _stub_move_store(
@@ -170,6 +172,67 @@ class RecordingMoveContentUpdater:
         del session
         self.seen_files.append(moved_file)
         return self.updates.get(moved_file.entity_id)
+
+
+@dataclass(slots=True)
+class StaticMovedEntityRepository:
+    """Return only the moved entities that still have a database row."""
+
+    entities: list[Entity]
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[int],
+    ) -> Sequence[Entity]:
+        del session
+        return [entity for entity in self.entities if entity.id in ids]
+
+
+@dataclass(slots=True)
+class RecordingMovedEntityIndexer:
+    """Record which moved entities were search-refreshed."""
+
+    indexed_entity_ids: list[int] = field(default_factory=list)
+
+    async def index_entity(self, entity: Entity) -> object:
+        self.indexed_entity_ids.append(entity.id)
+        return entity
+
+
+@pytest.mark.asyncio
+async def test_moved_entity_search_refresher_skips_entities_deleted_mid_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A moved entity deleted between move commit and refresh must not abort the run."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(results=[])
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    surviving_entity = cast(Entity, SimpleNamespace(id=10))
+    entity_indexer = RecordingMovedEntityIndexer()
+    refresher = RepositoryProjectIndexMovedEntitySearchRefresher(
+        session_maker=session_maker,
+        entity_repository=StaticMovedEntityRepository(entities=[surviving_entity]),
+        entity_indexer=entity_indexer,
+    )
+
+    # Entity 5 was deleted concurrently; only entity 10 can still be refreshed.
+    await refresher.refresh_moved_entities([10, 5, 10])
+
+    assert entity_indexer.indexed_entity_ids == [10]
 
 
 def test_project_index_move_batch_plan_builds_batches_and_progress_metadata() -> None:

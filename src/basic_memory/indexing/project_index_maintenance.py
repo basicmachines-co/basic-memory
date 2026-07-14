@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from loguru import logger
 from sqlalchemy import bindparam, case, column, delete, select, table, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -685,14 +686,24 @@ class RepositoryProjectIndexMovedEntitySearchRefresher:
         missing_entity_ids = [
             entity_id for entity_id in unique_entity_ids if entity_id not in entities_by_id
         ]
+        # Trigger: a moved entity id has no row by the time the refresh reloads it.
+        # Why: move batches commit before this refresh runs, so a concurrent delete
+        #      (file removed, note deleted via API) can legitimately retire the row
+        #      in between; failing here would abort the coordinator run before delete
+        #      batches and file indexing, stalling the whole scan over a benign race.
+        # Outcome: skip the vanished ids (their search rows were removed with the
+        #          entity) and refresh the survivors.
         if missing_entity_ids:
-            raise RuntimeError(
-                "Moved entities disappeared before search refresh: "
-                f"{', '.join(str(entity_id) for entity_id in missing_entity_ids)}"
+            logger.warning(
+                "Skipping search refresh for moved entities deleted mid-run",
+                entity_ids=missing_entity_ids,
             )
 
         for entity_id in unique_entity_ids:
-            await self.entity_indexer.index_entity(entities_by_id[entity_id])
+            entity = entities_by_id.get(entity_id)
+            if entity is None:
+                continue
+            await self.entity_indexer.index_entity(entity)
 
 
 def build_project_index_move_batch_plan(
