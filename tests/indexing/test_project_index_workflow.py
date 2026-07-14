@@ -3,21 +3,23 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-import pytest
-
 from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
 from basic_memory.indexing.project_index_coordinator import ProjectIndexRequest
 from basic_memory.indexing.project_index_progress import ProjectIndexCounters
 from basic_memory.indexing.project_index_workflow import (
     ProjectIndexBatchJobActivity,
     ProjectIndexBatchJobActivityUpdate,
-    ProjectIndexStaleWorkflowPlan,
+    ProjectIndexStaleWorkflowFail,
+    ProjectIndexStaleWorkflowKeepRunning,
+    ProjectIndexWorkflowAlreadyRecorded,
     ProjectIndexWorkflowCompletionUpdate,
     ProjectIndexWorkflowFailureUpdate,
     ProjectIndexWorkflowProgressUpdate,
-    ProjectIndexWorkflowRecordPlan,
+    ProjectIndexWorkflowRecordComplete,
+    ProjectIndexWorkflowRecordProgress,
     ProjectIndexWorkflowStart,
-    ProjectIndexWorkflowStartPlan,
+    ProjectIndexWorkflowStartComplete,
+    ProjectIndexWorkflowStartRunning,
     build_project_index_batch_activity_update,
     build_project_index_workflow_completion_update,
     build_project_index_workflow_progress_update,
@@ -228,9 +230,7 @@ def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() ->
         transport_event_data={"queue_job_id": "123"},
     )
 
-    assert plan.status == "running"
-    assert plan.is_complete is False
-    assert plan.completion_update is None
+    assert isinstance(plan, ProjectIndexWorkflowStartRunning)
     assert plan.workflow_start.progress == "Indexed 0/4 files, 0 succeeded"
     assert plan.workflow_start.metadata["phase"] == "indexing"
     assert plan.workflow_start.metadata["transport"] == {
@@ -238,8 +238,6 @@ def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() ->
         "entrypoint": "index_project",
         "queue_job_id": "123",
     }
-    with pytest.raises(RuntimeError, match="does not include a completion update"):
-        plan.require_completion_update()
 
 
 def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
@@ -270,7 +268,7 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
         transport_event_data={"queue_job_id": None},
     )
 
-    assert plan == ProjectIndexWorkflowStartPlan.complete(
+    assert plan == ProjectIndexWorkflowStartComplete(
         workflow_start=ProjectIndexWorkflowStart(
             counters=ProjectIndexCounters(
                 total=0,
@@ -396,8 +394,8 @@ def test_project_index_workflow_start_plan_completes_empty_projects() -> None:
             },
         ),
     )
-    assert plan.is_complete is True
-    assert plan.require_completion_update().metadata["phase"] == "completed"
+    assert isinstance(plan, ProjectIndexWorkflowStartComplete)
+    assert plan.completion_update.metadata["phase"] == "completed"
 
 
 def test_project_index_workflow_progress_update_builds_metadata_and_event_data() -> None:
@@ -582,11 +580,9 @@ def test_project_index_file_result_record_plan_builds_progress_update() -> None:
         ),
     )
 
-    assert plan.status == "progress"
-    assert plan.is_complete is False
-    assert plan.should_emit_progress_event is True
-    assert plan.completion_update is None
-    progress_update = plan.require_progress_update()
+    assert isinstance(plan, ProjectIndexWorkflowRecordProgress)
+    progress_update = plan.progress_update
+    assert progress_update.should_emit_event is True
     assert progress_update.counters == ProjectIndexCounters(
         total=2,
         processed=1,
@@ -626,10 +622,9 @@ def test_project_index_file_result_record_plan_builds_completion_update() -> Non
         ),
     )
 
-    assert plan.status == "complete"
-    assert plan.is_complete is True
-    progress_update = plan.require_progress_update()
-    completion_update = plan.require_completion_update()
+    assert isinstance(plan, ProjectIndexWorkflowRecordComplete)
+    progress_update = plan.progress_update
+    completion_update = plan.completion_update
     assert progress_update.metadata["phase"] == "indexing"
     assert completion_update.counters == ProjectIndexCounters(
         total=1,
@@ -685,10 +680,34 @@ def test_project_index_batch_result_record_plan_ignores_recorded_batches() -> No
         ],
     )
 
-    assert plan == ProjectIndexWorkflowRecordPlan.already_recorded()
-    assert plan.should_emit_progress_event is False
-    with pytest.raises(RuntimeError, match="does not include a progress update"):
-        plan.require_progress_update()
+    assert plan == ProjectIndexWorkflowAlreadyRecorded()
+
+
+def test_project_index_batch_result_record_plan_builds_progress_update() -> None:
+    workflow_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    plan = plan_project_index_batch_result_record(
+        metadata=project_index_record_metadata(total=3, recorded_batches=[]),
+        workflow_id=workflow_id,
+        batch_index=0,
+        batch_count=2,
+        results=[
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed: notes/a.md",
+            )
+        ],
+    )
+
+    assert isinstance(plan, ProjectIndexWorkflowRecordProgress)
+    assert plan.progress_update.counters == ProjectIndexCounters(
+        total=3,
+        processed=1,
+        succeeded=1,
+        missing=0,
+        failed=0,
+    )
+    assert plan.progress_update.metadata["recorded_batches"] == [0]
 
 
 def test_project_index_batch_result_record_plan_builds_completion_update() -> None:
@@ -712,10 +731,9 @@ def test_project_index_batch_result_record_plan_builds_completion_update() -> No
         ],
     )
 
-    assert plan.status == "complete"
-    assert plan.is_complete is True
-    progress_update = plan.require_progress_update()
-    completion_update = plan.require_completion_update()
+    assert isinstance(plan, ProjectIndexWorkflowRecordComplete)
+    progress_update = plan.progress_update
+    completion_update = plan.completion_update
     assert progress_update.metadata["recorded_batches"] == [0, 1]
     assert completion_update.metadata["phase"] == "completed"
     assert completion_update.metadata["recorded_batches"] == [0, 1]
@@ -752,10 +770,8 @@ def test_project_index_stale_workflow_plan_keeps_active_batches_running() -> Non
         stale_before="2026-06-19T10:25:30+00:00",
     )
 
-    assert plan.status == "keep_running"
-    assert plan.should_fail is False
-    assert plan.failure_update is None
-    assert plan.require_activity_update() == ProjectIndexBatchJobActivityUpdate(
+    assert isinstance(plan, ProjectIndexStaleWorkflowKeepRunning)
+    assert plan.activity_update == ProjectIndexBatchJobActivityUpdate(
         activity=active_batch_jobs,
         metadata={
             "phase": "indexing",
@@ -788,8 +804,6 @@ def test_project_index_stale_workflow_plan_keeps_active_batches_running() -> Non
             },
         },
     )
-    with pytest.raises(RuntimeError, match="does not include a failure update"):
-        plan.require_failure_update()
 
 
 def test_project_index_stale_workflow_plan_builds_failure_update() -> None:
@@ -818,7 +832,7 @@ def test_project_index_stale_workflow_plan_builds_failure_update() -> None:
         "last_heartbeat_at": "2026-06-19T10:20:30+00:00",
         "stale_before": "2026-06-19T10:25:30+00:00",
     }
-    assert plan == ProjectIndexStaleWorkflowPlan.fail(
+    assert plan == ProjectIndexStaleWorkflowFail(
         ProjectIndexWorkflowFailureUpdate(
             counters=ProjectIndexCounters(
                 total=100,
@@ -866,9 +880,6 @@ def test_project_index_stale_workflow_plan_builds_failure_update() -> None:
             },
         )
     )
-    assert plan.should_fail is True
-    with pytest.raises(RuntimeError, match="does not include an activity update"):
-        plan.require_activity_update()
 
 
 def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_data() -> None:
