@@ -58,7 +58,7 @@ from basic_memory.indexing.relation_resolution import (
     ResolvedRelationTarget,
     UnresolvedRelation,
 )
-from basic_memory.models import Entity, Project
+from basic_memory.models import Entity, Project, Relation
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.runtime.jobs import (
@@ -2457,12 +2457,13 @@ class RuntimeFactoryRelationRepository:
     async def update(
         self,
         session: AsyncSession,
-        entity_id: int,
-        entity_data: dict[str, object],
-    ) -> object | None:
+        relation_id: int,
+        resolved_target_fields: dict[str, int | str],
+        /,
+    ) -> Relation | None:
         return None
 
-    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+    async def delete(self, session: AsyncSession, relation_id: int, /) -> bool:
         return False
 
 

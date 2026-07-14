@@ -21,7 +21,7 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_relations,
 )
 from basic_memory.indexing.models import IndexFileJobStatus
-from basic_memory.models import Entity
+from basic_memory.models import Entity, Relation
 
 
 class StubRelationResolutionRuntime:
@@ -86,7 +86,7 @@ class StubRelationRepository:
         self._unresolved_per_call = unresolved_per_call
         self._fail_update_ids = fail_update_ids or set()
         self.calls = 0
-        self.updates: list[tuple[int, dict[str, object]]] = []
+        self.updates: list[tuple[int, dict[str, int | str]]] = []
         self.deletes: list[int] = []
 
     async def find_unresolved_relations(
@@ -113,18 +113,19 @@ class StubRelationRepository:
     async def update(
         self,
         session: AsyncSession,
-        entity_id: int,
-        entity_data: dict[str, object],
-    ) -> object | None:
+        relation_id: int,
+        resolved_target_fields: dict[str, int | str],
+        /,
+    ) -> Relation | None:
         assert isinstance(session, FakeSession)
-        if entity_id in self._fail_update_ids:
+        if relation_id in self._fail_update_ids:
             raise IntegrityError("update relation", {}, Exception("duplicate relation"))
-        self.updates.append((entity_id, entity_data))
-        return object()
+        self.updates.append((relation_id, resolved_target_fields))
+        return None
 
-    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+    async def delete(self, session: AsyncSession, relation_id: int, /) -> bool:
         assert isinstance(session, FakeSession)
-        self.deletes.append(entity_id)
+        self.deletes.append(relation_id)
         return True
 
 

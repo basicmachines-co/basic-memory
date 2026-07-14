@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.models import IndexFileJobStatus
-from basic_memory.models import Entity
+from basic_memory.models import Entity, Relation
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
@@ -63,16 +63,21 @@ class RelationResolutionRelationRepository(Protocol):
     ) -> Sequence[UnresolvedRelation]:
         """Return unresolved relations for one source entity."""
 
+    # Positional-only parameters: the concrete implementation is the generic
+    # model repository, whose parameters are named for entities. `/` lets this
+    # contract name the relation id honestly without renaming the shared
+    # repository method.
     async def update(
         self,
         session: AsyncSession,
-        entity_id: int,
-        entity_data: dict[str, object],
-    ) -> object | None:
-        """Apply resolved target fields to one relation."""
+        relation_id: int,
+        resolved_target_fields: dict[str, int | str],
+        /,
+    ) -> Relation | None:
+        """Apply resolved target fields (to_id, to_name) to one relation row."""
 
-    async def delete(self, session: AsyncSession, entity_id: int) -> bool:
-        """Delete one redundant unresolved relation."""
+    async def delete(self, session: AsyncSession, relation_id: int, /) -> bool:
+        """Delete one redundant unresolved relation row."""
 
 
 class RelationResolutionEntityRepository(Protocol):
