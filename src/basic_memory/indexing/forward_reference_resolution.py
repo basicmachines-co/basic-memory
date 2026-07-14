@@ -11,26 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.link_resolution import LinkText, resolve_project_link_texts
-from basic_memory.models import Entity, Relation
-
-type ForwardReferenceEntityId = int
-type ForwardReferenceRelationId = int
-
-
-class UnresolvedForwardReference(Protocol):
-    """Minimal unresolved relation shape needed for exact target planning."""
-
-    @property
-    def id(self) -> ForwardReferenceRelationId:
-        """Return the unresolved relation primary key."""
-
-    @property
-    def from_id(self) -> ForwardReferenceEntityId:
-        """Return the source entity id for the unresolved relation."""
-
-    @property
-    def to_name(self) -> LinkText | None:
-        """Return the unresolved target link text."""
+from basic_memory.indexing.relation_resolution import (
+    EntityId,
+    RelationResolutionEntityIndexer,
+    RelationResolutionEntityRepository,
+    UnresolvedRelation,
+)
+from basic_memory.models import Relation
 
 
 class ForwardReferenceRelationSource(Protocol):
@@ -38,7 +25,7 @@ class ForwardReferenceRelationSource(Protocol):
 
     async def list_unresolved_forward_references(
         self,
-    ) -> tuple[UnresolvedForwardReference, ...]:
+    ) -> tuple[UnresolvedRelation, ...]:
         """Return unresolved relation rows for one project."""
 
 
@@ -47,36 +34,18 @@ class ForwardReferenceEntityRefreshRuntime(Protocol):
 
     async def refresh_forward_reference_entity(
         self,
-        entity_id: ForwardReferenceEntityId,
+        entity_id: EntityId,
     ) -> bool:
         """Refresh one entity and return whether the entity still exists."""
-
-
-class ForwardReferenceEntityRepository(Protocol):
-    """Repository capability required to load forward-reference target entities."""
-
-    async def find_by_id(
-        self,
-        session: AsyncSession,
-        entity_id: ForwardReferenceEntityId,
-    ) -> Entity | None:
-        """Return one entity by id."""
-
-
-class ForwardReferenceEntityIndexer(Protocol):
-    """Search capability required to refresh one forward-reference target entity."""
-
-    async def index_entity(self, entity: Entity) -> object:
-        """Refresh one entity in the search index."""
 
 
 @dataclass(frozen=True, slots=True)
 class ForwardReferenceUpdate:
     """One unresolved relation that can be filled with an exact target entity."""
 
-    relation_id: ForwardReferenceRelationId
-    source_entity_id: ForwardReferenceEntityId
-    target_entity_id: ForwardReferenceEntityId
+    relation_id: int
+    source_entity_id: EntityId
+    target_entity_id: EntityId
     link_text: LinkText
 
 
@@ -87,7 +56,7 @@ class ForwardReferenceResolutionPlan:
     unresolved_before: int
     link_texts: tuple[LinkText, ...]
     updates: tuple[ForwardReferenceUpdate, ...]
-    entity_ids_to_refresh: frozenset[ForwardReferenceEntityId]
+    entity_ids_to_refresh: frozenset[EntityId]
 
     @property
     def resolved_count(self) -> int:
@@ -111,7 +80,7 @@ class ForwardReferenceResolutionRuntime(Protocol):
     async def resolve_forward_reference_link_texts(
         self,
         link_texts: Sequence[LinkText],
-    ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
+    ) -> Mapping[LinkText, EntityId | None]:
         """Resolve link texts to exact target entity ids."""
 
     async def apply_forward_reference_updates(
@@ -130,7 +99,7 @@ class RepositoryForwardReferenceRelationSource:
 
     async def list_unresolved_forward_references(
         self,
-    ) -> tuple[UnresolvedForwardReference, ...]:
+    ) -> tuple[UnresolvedRelation, ...]:
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(
                 select(Relation).where(
@@ -151,7 +120,7 @@ class RepositoryForwardReferenceResolutionRuntime:
     async def resolve_forward_reference_link_texts(
         self,
         link_texts: Sequence[LinkText],
-    ) -> Mapping[LinkText, ForwardReferenceEntityId | None]:
+    ) -> Mapping[LinkText, EntityId | None]:
         return await resolve_project_link_texts(
             link_texts,
             session_maker=self.session_maker,
@@ -184,12 +153,12 @@ class RepositoryForwardReferenceEntityRefreshRuntime:
     """Refresh forward-reference target entity search rows with explicit sessions."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    entity_repository: ForwardReferenceEntityRepository
-    entity_indexer: ForwardReferenceEntityIndexer
+    entity_repository: RelationResolutionEntityRepository
+    entity_indexer: RelationResolutionEntityIndexer
 
     async def refresh_forward_reference_entity(
         self,
-        entity_id: ForwardReferenceEntityId,
+        entity_id: EntityId,
     ) -> bool:
         async with db.scoped_session(self.session_maker) as session:
             entity = await self.entity_repository.find_by_id(session, entity_id)
@@ -203,7 +172,7 @@ class RepositoryForwardReferenceEntityRefreshRuntime:
 class ForwardReferenceEntityRefreshFailure:
     """One target entity whose search refresh raised."""
 
-    entity_id: ForwardReferenceEntityId
+    entity_id: EntityId
     error: Exception
 
 
@@ -211,12 +180,12 @@ class ForwardReferenceEntityRefreshFailure:
 class ForwardReferenceEntityRefreshRun:
     """Search refresh results for target entities touched by forward refs."""
 
-    successful_entity_ids: frozenset[ForwardReferenceEntityId]
-    missing_entity_ids: frozenset[ForwardReferenceEntityId]
+    successful_entity_ids: frozenset[EntityId]
+    missing_entity_ids: frozenset[EntityId]
     failures: tuple[ForwardReferenceEntityRefreshFailure, ...]
 
     @property
-    def failed_entity_ids(self) -> frozenset[ForwardReferenceEntityId]:
+    def failed_entity_ids(self) -> frozenset[EntityId]:
         """Return entity ids whose refresh raised."""
         return frozenset(failure.entity_id for failure in self.failures)
 
@@ -249,13 +218,13 @@ class ForwardReferenceResolutionRun:
         return self.plan.remaining_count
 
     @property
-    def entity_ids_to_refresh(self) -> frozenset[ForwardReferenceEntityId]:
+    def entity_ids_to_refresh(self) -> frozenset[EntityId]:
         """Return exact target entity ids whose search rows should be refreshed."""
         return self.plan.entity_ids_to_refresh
 
 
 def collect_forward_reference_link_texts(
-    unresolved_relations: Sequence[UnresolvedForwardReference],
+    unresolved_relations: Sequence[UnresolvedRelation],
 ) -> tuple[LinkText, ...]:
     """Collect unique unresolved link texts in first-seen order."""
     link_texts: dict[LinkText, None] = {}
@@ -266,12 +235,12 @@ def collect_forward_reference_link_texts(
 
 
 def plan_forward_reference_resolution(
-    unresolved_relations: Sequence[UnresolvedForwardReference],
-    resolved_targets: Mapping[LinkText, ForwardReferenceEntityId | None],
+    unresolved_relations: Sequence[UnresolvedRelation],
+    resolved_targets: Mapping[LinkText, EntityId | None],
 ) -> ForwardReferenceResolutionPlan:
     """Plan exact target updates for a batch of unresolved relation rows."""
     updates: list[ForwardReferenceUpdate] = []
-    entity_ids_to_refresh: set[ForwardReferenceEntityId] = set()
+    entity_ids_to_refresh: set[EntityId] = set()
 
     for relation in unresolved_relations:
         link_text = relation.to_name
@@ -302,7 +271,7 @@ def plan_forward_reference_resolution(
 
 async def run_forward_reference_resolution(
     runtime: ForwardReferenceResolutionRuntime,
-    unresolved_relations: Sequence[UnresolvedForwardReference],
+    unresolved_relations: Sequence[UnresolvedRelation],
 ) -> ForwardReferenceResolutionRun:
     """Resolve link texts, apply exact relation updates, and return refresh targets."""
     link_texts = collect_forward_reference_link_texts(unresolved_relations)
@@ -323,11 +292,11 @@ async def run_forward_reference_resolution(
 
 async def run_forward_reference_entity_refresh(
     runtime: ForwardReferenceEntityRefreshRuntime,
-    entity_ids: Iterable[ForwardReferenceEntityId],
+    entity_ids: Iterable[EntityId],
 ) -> ForwardReferenceEntityRefreshRun:
     """Refresh forward-reference target search rows and report per-entity failures."""
-    successful_entity_ids: set[ForwardReferenceEntityId] = set()
-    missing_entity_ids: set[ForwardReferenceEntityId] = set()
+    successful_entity_ids: set[EntityId] = set()
+    missing_entity_ids: set[EntityId] = set()
     failures: list[ForwardReferenceEntityRefreshFailure] = []
 
     for entity_id in entity_ids:

@@ -25,11 +25,13 @@ from basic_memory.indexing.forward_reference_resolution import (
 from basic_memory.models import Entity
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: UnresolvedRelation declares plain (writable) attribute members.
+@dataclass(slots=True)
 class StubUnresolvedRelation:
     id: int
     from_id: int
-    to_name: str | None
+    to_name: str
+    relation_type: str = "related_to"
 
 
 class RecordingForwardReferenceRuntime:
@@ -126,7 +128,7 @@ def test_collect_forward_reference_link_texts_dedupes_in_first_seen_order() -> N
         StubUnresolvedRelation(id=1, from_id=10, to_name="Target"),
         StubUnresolvedRelation(id=2, from_id=11, to_name="Other"),
         StubUnresolvedRelation(id=3, from_id=12, to_name="Target"),
-        StubUnresolvedRelation(id=4, from_id=13, to_name=None),
+        StubUnresolvedRelation(id=4, from_id=13, to_name=""),
         StubUnresolvedRelation(id=5, from_id=14, to_name=""),
     ]
 
@@ -138,7 +140,7 @@ def test_plan_forward_reference_resolution_filters_only_exact_safe_updates() -> 
         StubUnresolvedRelation(id=1, from_id=10, to_name="Target"),
         StubUnresolvedRelation(id=2, from_id=11, to_name="Missing"),
         StubUnresolvedRelation(id=3, from_id=12, to_name="Self"),
-        StubUnresolvedRelation(id=4, from_id=13, to_name=None),
+        StubUnresolvedRelation(id=4, from_id=13, to_name=""),
         StubUnresolvedRelation(id=5, from_id=14, to_name="Target"),
     ]
 
@@ -459,7 +461,7 @@ async def test_run_forward_reference_resolution_skips_resolution_without_link_te
 
     result = await run_forward_reference_resolution(
         runtime,
-        (StubUnresolvedRelation(id=1, from_id=10, to_name=None),),
+        (StubUnresolvedRelation(id=1, from_id=10, to_name=""),),
     )
 
     assert result.resolved_link_text_count == 0

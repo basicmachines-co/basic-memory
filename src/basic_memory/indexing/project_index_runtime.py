@@ -14,8 +14,6 @@ from typing import TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.forward_reference_resolution import (
-    ForwardReferenceEntityIndexer,
-    ForwardReferenceEntityRepository,
     ForwardReferenceEntityRefreshFailure,
     ForwardReferenceEntityRefreshRun,
     ForwardReferenceEntityRefreshRuntime,
@@ -27,6 +25,10 @@ from basic_memory.indexing.forward_reference_resolution import (
     RepositoryForwardReferenceResolutionRuntime,
     run_forward_reference_entity_refresh,
     run_forward_reference_resolution,
+)
+from basic_memory.indexing.relation_resolution import (
+    RelationResolutionEntityIndexer,
+    RelationResolutionEntityRepository,
 )
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.project_index_maintenance import (
@@ -209,8 +211,8 @@ def build_default_project_index_runtime(
     project_id: ProjectId,
     session_maker: async_sessionmaker[AsyncSession],
     vector_sync: VectorSyncExecutor,
-    entity_repository: ForwardReferenceEntityRepository,
-    entity_indexer: ForwardReferenceEntityIndexer,
+    entity_repository: RelationResolutionEntityRepository,
+    entity_indexer: RelationResolutionEntityIndexer,
 ) -> ProjectIndexRuntime:
     """Compose the default repository-backed project-index runtime."""
     vector_entity_source = RepositoryVectorSyncEntitySource(

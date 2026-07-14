@@ -32,11 +32,13 @@ from basic_memory.indexing.forward_reference_resolution import (
 )
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: UnresolvedRelation declares plain (writable) attribute members.
+@dataclass(slots=True)
 class StubUnresolvedRelation:
     id: int
     from_id: int
-    to_name: str | None
+    to_name: str
+    relation_type: str = "related_to"
 
 
 @dataclass(slots=True)
@@ -168,7 +170,7 @@ class NoopEntityRepository:
 
 @dataclass(slots=True)
 class NoopEntityIndexer:
-    async def index_entity(self, entity) -> object:
+    async def index_entity(self, entity) -> None:
         msg = "index_entity should not be called by the construction test"
         raise AssertionError(msg)
 
