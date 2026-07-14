@@ -199,7 +199,8 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     note_path = project_root / "notes" / "a.md"
     note_path.parent.mkdir()
     note_path.write_text("# A\n", encoding="utf-8")
-    project = SimpleNamespace(path=str(project_root))
+    # No permalink/name identity: the prefix falls back to the root directory name.
+    project = SimpleNamespace(path=str(project_root), permalink=None, name=None)
 
     request = LocalWatchEventIndexRequest.from_project_changes(
         project=project,
