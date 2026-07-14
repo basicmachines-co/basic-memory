@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteAcceptanceRequest,
     DirectoryDeleteAcceptedResult,
+    DirectoryDeleteFileFailure,
     DirectoryDeleteRejected,
     DirectoryDeleteRejectKind,
     DirectoryFileDeleteEnqueueError,
@@ -25,6 +26,7 @@ from basic_memory.runtime.cleanup import (
     RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,
 )
+from basic_memory.schemas.response import DirectoryDeleteError, DirectoryDeleteResult
 
 
 class FakeDirectoryFileDeleteEnqueuer:
@@ -177,8 +179,12 @@ def test_directory_delete_result_serializes_skipped_files_as_failures() -> None:
     # folded into successful_deletes (the file would otherwise reappear silently).
     result = DirectoryDeleteAcceptedResult.pending(
         deleted_files=("notes/a.md", "notes/b.md"),
-        skipped_files=("notes/b.md",),
-        skip_reasons=("file changed before delete: notes/b.md",),
+        failed_files=(
+            DirectoryDeleteFileFailure(
+                file_path="notes/b.md",
+                reason="file changed before delete: notes/b.md",
+            ),
+        ),
     )
 
     assert result.to_response_payload() == {
@@ -186,9 +192,34 @@ def test_directory_delete_result_serializes_skipped_files_as_failures() -> None:
         "successful_deletes": 1,
         "failed_deletes": 1,
         "deleted_files": ["notes/a.md", "notes/b.md"],
-        "errors": ["file changed before delete: notes/b.md"],
+        "errors": [{"path": "notes/b.md", "error": "file changed before delete: notes/b.md"}],
         "file_delete_status": "pending",
     }
+
+
+def test_directory_delete_payload_with_failures_validates_as_client_result() -> None:
+    """The MCP/CLI client validates the payload as DirectoryDeleteResult, whose
+    errors field requires {path, error} objects — plain strings raised a Pydantic
+    validation error on every partial failure."""
+    result = DirectoryDeleteAcceptedResult.pending(
+        deleted_files=("notes/a.md", "notes/b.md"),
+        failed_files=(
+            DirectoryDeleteFileFailure(
+                file_path="notes/b.md",
+                reason="file changed before delete: notes/b.md",
+            ),
+        ),
+    )
+
+    validated = DirectoryDeleteResult.model_validate(result.to_response_payload())
+
+    assert validated.failed_deletes == 1
+    assert validated.errors == [
+        DirectoryDeleteError(
+            path="notes/b.md",
+            error="file changed before delete: notes/b.md",
+        )
+    ]
 
 
 def test_directory_delete_result_serializes_failed_enqueue_error() -> None:
@@ -318,11 +349,18 @@ async def test_run_directory_delete_reports_skipped_guarded_cleanup() -> None:
         runtime=DirectoryDeleteRuntime(store=store, file_delete_enqueuer=SkippingEnqueuer()),
     )
 
-    assert result.skipped_files == ("notes/a.md",)
+    assert result.failed_files == (
+        DirectoryDeleteFileFailure(
+            file_path="notes/a.md",
+            reason="no accepted file checksum for notes/a.md",
+        ),
+    )
     payload = result.to_response_payload()
     assert payload["successful_deletes"] == 0
     assert payload["failed_deletes"] == 1
-    assert payload["errors"] == ["no accepted file checksum for notes/a.md"]
+    assert payload["errors"] == [
+        {"path": "notes/a.md", "error": "no accepted file checksum for notes/a.md"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -366,13 +404,19 @@ async def test_run_directory_delete_continues_past_enqueue_failure() -> None:
     # Every file was attempted despite the middle failure.
     assert enqueuer.attempted == ["notes/a.md", "notes/b.md", "notes/c.md"]
     # The failing file is reported as a failed delete, not raised out of the batch.
-    assert result.skipped_files == ("notes/b.md",)
-    assert result.skip_reasons == ("queue unavailable for notes/b.md",)
+    assert result.failed_files == (
+        DirectoryDeleteFileFailure(
+            file_path="notes/b.md",
+            reason="queue unavailable for notes/b.md",
+        ),
+    )
     payload = result.to_response_payload()
     assert payload["file_delete_status"] == "pending"
     assert payload["successful_deletes"] == 2
     assert payload["failed_deletes"] == 1
-    assert payload["errors"] == ["queue unavailable for notes/b.md"]
+    assert payload["errors"] == [
+        {"path": "notes/b.md", "error": "queue unavailable for notes/b.md"}
+    ]
 
 
 @pytest.mark.asyncio

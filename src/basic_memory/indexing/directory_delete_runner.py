@@ -245,6 +245,14 @@ def directory_delete_like_prefix(directory: RuntimeFilePath) -> RuntimeFilePath:
 
 
 @dataclass(frozen=True, slots=True)
+class DirectoryDeleteFileFailure:
+    """One accepted file left on disk after cleanup, with its caller-visible reason."""
+
+    file_path: RuntimeFilePath
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class DirectoryDeleteAcceptedResult:
     """Existing directory-delete response shape before route serialization."""
 
@@ -252,10 +260,9 @@ class DirectoryDeleteAcceptedResult:
     file_delete_status: DirectoryDeleteFileStatus
     error: str | None = None
     # Files whose guarded cleanup was skipped (checksum changed / no accepted
-    # checksum) and therefore remain on disk despite the DB row being deleted.
-    # "missing" results count as successful (the file is already gone).
-    skipped_files: tuple[RuntimeFilePath, ...] = ()
-    skip_reasons: tuple[str, ...] = ()
+    # checksum) or whose cleanup enqueue failed; they remain on disk despite the
+    # DB row being deleted. "missing" results count as successful (already gone).
+    failed_files: tuple[DirectoryDeleteFileFailure, ...] = ()
     # Surviving source entities whose relations pointed into the deleted directory;
     # the caller reindexes these to clear now-stale relation rows from search.
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
@@ -270,16 +277,14 @@ class DirectoryDeleteAcceptedResult:
         cls,
         *,
         deleted_files: Sequence[RuntimeFilePath],
-        skipped_files: Sequence[RuntimeFilePath] = (),
-        skip_reasons: Sequence[str] = (),
+        failed_files: Sequence[DirectoryDeleteFileFailure] = (),
         relation_cleanup_entity_ids: frozenset[int] = frozenset(),
     ) -> "DirectoryDeleteAcceptedResult":
         """Return the response after DB rows were deleted and cleanup was queued."""
         return cls(
             deleted_files=tuple(deleted_files),
             file_delete_status="pending",
-            skipped_files=tuple(skipped_files),
-            skip_reasons=tuple(skip_reasons),
+            failed_files=tuple(failed_files),
             relation_cleanup_entity_ids=relation_cleanup_entity_ids,
         )
 
@@ -300,17 +305,23 @@ class DirectoryDeleteAcceptedResult:
     def to_response_payload(self) -> dict[str, object]:
         """Serialize to the current Basic Memory directory-delete response contract.
 
-        A guarded cleanup that left files on disk (skipped_files) is reported as
+        A guarded cleanup that left files on disk (failed_files) is reported as
         failed_deletes with reasons, not folded into successful_deletes — otherwise
         callers see a clean success while stale files remain and later reappear.
         """
-        skipped = len(self.skipped_files)
+        failed = len(self.failed_files)
         payload: dict[str, object] = {
             "total_files": len(self.deleted_files),
-            "successful_deletes": len(self.deleted_files) - skipped,
-            "failed_deletes": skipped,
+            "successful_deletes": len(self.deleted_files) - failed,
+            "failed_deletes": failed,
             "deleted_files": list(self.deleted_files),
-            "errors": list(self.skip_reasons),
+            # The MCP/CLI client validates errors as DirectoryDeleteError objects
+            # ({path, error}); plain strings fail Pydantic validation client-side
+            # on every partial failure, so serialize structured entries.
+            "errors": [
+                {"path": failure.file_path, "error": failure.reason}
+                for failure in self.failed_files
+            ],
             "file_delete_status": self.file_delete_status,
         }
         if self.error is not None:
@@ -456,16 +467,16 @@ async def finish_directory_delete_acceptance(
     # disk while its DB row is gone; surface both as failed deletes instead of reporting
     # a clean success that later reappears when sync re-indexes the stranded file.
     skipped = [r for r in outcome.results if r.status == RuntimeDeleteStatus.skipped]
-    skipped_files = tuple(r.file_path for r in skipped) + tuple(
-        failure.file_path for failure in outcome.failures
-    )
-    skip_reasons = tuple(r.reason for r in skipped) + tuple(
-        failure.reason for failure in outcome.failures
+    failed_files = tuple(
+        DirectoryDeleteFileFailure(file_path=result.file_path, reason=result.reason)
+        for result in skipped
+    ) + tuple(
+        DirectoryDeleteFileFailure(file_path=failure.file_path, reason=failure.reason)
+        for failure in outcome.failures
     )
     return DirectoryDeleteAcceptedResult.pending(
         deleted_files=accepted.deleted_files,
-        skipped_files=skipped_files,
-        skip_reasons=skip_reasons,
+        failed_files=failed_files,
         relation_cleanup_entity_ids=accepted.relation_cleanup_entity_ids,
     )
 
