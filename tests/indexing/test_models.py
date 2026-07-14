@@ -81,13 +81,13 @@ def test_file_index_result_is_a_frozen_success_value():
         setattr(result, "checksum", "checksum-2")
 
 
-def test_file_index_result_from_fields_builds_result_from_entity_fields():
+def test_file_index_result_from_fields_validates_required_entity_text():
     result = FileIndexResult.from_fields(
         file_path="notes/a.md",
         entity_id=42,
-        external_id="note-42",
-        title="A Note",
-        permalink="notes/a-note",
+        external_id=" note-42 ",
+        title=" A Note ",
+        permalink=" notes/a-note ",
         checksum="checksum-1",
         operation=FileIndexOperation.created,
     )
@@ -101,6 +101,53 @@ def test_file_index_result_from_fields_builds_result_from_entity_fields():
         checksum="checksum-1",
         operation=FileIndexOperation.created,
     )
+
+    with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md is missing title"):
+        FileIndexResult.from_fields(
+            file_path="notes/a.md",
+            entity_id=42,
+            external_id="note-42",
+            title="",
+            permalink="notes/a-note",
+            checksum="checksum-1",
+            operation=FileIndexOperation.created,
+        )
+
+
+def test_file_index_result_from_fields_validates_optional_permalink_text():
+    result = FileIndexResult.from_fields(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink=None,
+        checksum="checksum-1",
+        operation=FileIndexOperation.created,
+    )
+
+    assert result.permalink is None
+
+    with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md has invalid permalink"):
+        FileIndexResult.from_fields(
+            file_path="notes/a.md",
+            entity_id=42,
+            external_id="note-42",
+            title="A Note",
+            permalink=123,
+            checksum="checksum-1",
+            operation=FileIndexOperation.created,
+        )
+
+    with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md has blank permalink"):
+        FileIndexResult.from_fields(
+            file_path="notes/a.md",
+            entity_id=42,
+            external_id="note-42",
+            title="A Note",
+            permalink="  ",
+            checksum="checksum-1",
+            operation=FileIndexOperation.created,
+        )
 
 
 def test_index_file_job_result_carries_live_update_metadata():
@@ -644,6 +691,46 @@ def test_current_materialized_note_entity_from_fields_requires_indexed_permalink
             external_id="note-42",
             title="A Note",
             permalink=None,
+            checksum="checksum-1",
+            file_path="notes/a.md",
+        )
+
+
+def test_current_materialized_note_entity_from_fields_validates_identity_text():
+    entity = CurrentMaterializedNoteEntity.from_fields(
+        entity_id=42,
+        external_id=" note-42 ",
+        title=" A Note ",
+        permalink=" notes/a-note ",
+        checksum="checksum-1",
+        file_path="notes/a.md",
+    )
+
+    assert entity == CurrentMaterializedNoteEntity(
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+    )
+
+    no_checksum = CurrentMaterializedNoteEntity.from_fields(
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum=None,
+        file_path="notes/a.md",
+    )
+
+    assert no_checksum.checksum is None
+
+    with pytest.raises(RuntimeError, match="Current entity for notes/a.md is missing title"):
+        CurrentMaterializedNoteEntity.from_fields(
+            entity_id=42,
+            external_id="note-42",
+            title="  ",
+            permalink="notes/a-note",
             checksum="checksum-1",
             file_path="notes/a.md",
         )
