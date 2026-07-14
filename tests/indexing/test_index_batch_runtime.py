@@ -15,7 +15,6 @@ import basic_memory.indexing.note_content_batch_reconciliation as batch_reconcil
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.index_batch_runtime import (
-    DefaultIndexBatchRuntime,
     IndexBatchRuntime,
     build_default_index_batch_runtime,
     count_search_indexed_entities,
@@ -291,17 +290,13 @@ def test_build_default_index_batch_runtime_composes_repository_backed_stack() ->
         session_maker=session_maker,
     )
 
-    assert isinstance(runtime, DefaultIndexBatchRuntime)
+    assert isinstance(runtime, IndexBatchRuntime)
     assert isinstance(runtime.note_content_reconciler, NoteContentReconciler)
+    assert runtime.content_type_provider is content_type_provider
+    assert runtime.entity_repository is entity_repository
+    assert runtime.session_maker is session_maker
 
-    batch_runtime = runtime.batch_runtime
-    assert isinstance(batch_runtime, IndexBatchRuntime)
-    assert batch_runtime.content_type_provider is content_type_provider
-    assert batch_runtime.entity_repository is entity_repository
-    assert batch_runtime.session_maker is session_maker
-    assert batch_runtime.note_content_reconciler is runtime.note_content_reconciler
-
-    batch_indexer = batch_runtime.batch_indexer
+    batch_indexer = runtime.batch_indexer
     assert isinstance(batch_indexer, BatchIndexer)
     assert batch_indexer.app_config is app_config
     assert batch_indexer.entity_service is entity_service
@@ -355,7 +350,7 @@ async def test_build_default_index_batch_runtime_search_indexes_non_markdown_ent
 
     # batch_indexer is typed as the IndexInputBatchExecutor protocol (no writer
     # attribute); reach the concrete BatchIndexer to exercise its composed writer.
-    await cast(BatchIndexer, runtime.batch_runtime.batch_indexer).search_service.index_entity_data(
+    await cast(BatchIndexer, runtime.batch_indexer).search_service.index_entity_data(
         cast(Entity, _NonMarkdownEntity())
     )
 

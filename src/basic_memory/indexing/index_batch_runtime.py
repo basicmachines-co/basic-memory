@@ -111,30 +111,6 @@ def count_search_indexed_entities(indexed_entities: list[IndexedEntity]) -> int:
     return sum(1 for indexed in indexed_entities if indexed.markdown_content is not None)
 
 
-@dataclass(frozen=True, slots=True)
-class DefaultIndexBatchRuntime[FileInfoT: LoadedIndexFile]:
-    """Default batch-index runtime plus its concrete note-content reconciler."""
-
-    batch_runtime: IndexBatchRuntime[Entity, FileInfoT]
-    note_content_reconciler: NoteContentReconciler
-
-    async def index_loaded_files(
-        self,
-        files: Mapping[str, FileInfoT],
-        *,
-        max_concurrent: int = 8,
-        parse_max_concurrent: int | None = None,
-        metadata_update_max_concurrent: int | None = None,
-    ) -> IndexingBatchResult:
-        """Index loaded files through the composed runtime."""
-        return await self.batch_runtime.index_loaded_files(
-            files,
-            max_concurrent=max_concurrent,
-            parse_max_concurrent=parse_max_concurrent,
-            metadata_update_max_concurrent=metadata_update_max_concurrent,
-        )
-
-
 def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     *,
     project_id: ProjectId,
@@ -147,7 +123,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     content_type_provider: IndexContentTypeProvider,
     session_maker: async_sessionmaker[AsyncSession],
     file_reader: NoteContentReconcileFileReader | None = None,
-) -> DefaultIndexBatchRuntime[FileInfoT]:
+) -> IndexBatchRuntime[Entity, FileInfoT]:
     """Compose the default repository-backed batch index runtime.
 
     Hosted and local runtimes still own storage and session lifecycles. This
@@ -173,15 +149,12 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
         file_writer=StorageIndexFileWriter(storage=frontmatter_storage),
         session_maker=session_maker,
     )
-    return DefaultIndexBatchRuntime(
-        batch_runtime=IndexBatchRuntime(
-            batch_indexer=batch_indexer,
-            content_type_provider=content_type_provider,
-            entity_repository=entity_repository,
-            session_maker=session_maker,
-            note_content_reconciler=note_content_reconciler,
-            timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
-            file_reader=file_reader,
-        ),
+    return IndexBatchRuntime(
+        batch_indexer=batch_indexer,
+        content_type_provider=content_type_provider,
+        entity_repository=entity_repository,
+        session_maker=session_maker,
         note_content_reconciler=note_content_reconciler,
+        timestamp_provider=DefaultIndexedNoteContentTimestampProvider(),
+        file_reader=file_reader,
     )

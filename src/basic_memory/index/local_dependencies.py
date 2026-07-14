@@ -27,7 +27,7 @@ from basic_memory.indexing.file_indexer import (
     IndexMarkdownNoteContentReconciler,
 )
 from basic_memory.indexing.index_batch_runtime import (
-    DefaultIndexBatchRuntime,
+    IndexBatchRuntime,
     build_default_index_batch_runtime,
 )
 from basic_memory.indexing.index_file_runner import (
@@ -223,7 +223,7 @@ class DefaultLocalIndexProjectDependencyProvider:
 class LocalIndexFileBatchIndexer(IndexFileBatchIndexer[IndexInputFile]):
     """Adapt the default loaded-file batch runtime to the file-batch job contract."""
 
-    batch_runtime: DefaultIndexBatchRuntime[IndexInputFile]
+    batch_runtime: IndexBatchRuntime[Entity, IndexInputFile]
 
     async def index_files(
         self,
