@@ -58,11 +58,12 @@ async def recover_project_materializations(
     project: Project,
     session_maker: "async_sessionmaker[AsyncSession]",
 ) -> None:
-    """Re-drive note materializations a crash left stuck for one project.
+    """Re-drive note materializations a crash or write error left stuck for one project.
 
     A local note write returns before its markdown file is written; a crash
     between accepting the DB snapshot and writing the file leaves note_content
-    stuck in writing/pending and the source-of-truth file missing. Runs once at
+    stuck in writing/pending (a transient write error leaves it failed) and the
+    source-of-truth file missing. Runs once at
     startup, before the watch service serves, so the file is (re)written and then
     picked up by the initial project index. Non-fatal: a recovery failure must not
     block startup, so it is logged and startup continues.
@@ -217,7 +218,7 @@ async def initialize_file_indexing(
         active_projects = [p for p in active_projects if p.name not in skip]
         logger.info(f"Skipping projects that are not locally indexable: {skip}")
 
-    # Recover materializations a crash left stuck (writing/pending) before serving.
+    # Recover materializations left stuck (writing/pending/failed) before serving.
     # Runs synchronously here so the source-of-truth files are re-written before the
     # initial project index scans them; bounded by the count of stuck rows.
     for project in active_projects:

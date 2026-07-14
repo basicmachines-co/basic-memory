@@ -638,12 +638,19 @@ async def test_note_content_file_path_lookup_prefers_entity_with_current_path(
 
 
 @pytest.mark.asyncio
-async def test_find_stuck_materializations_returns_only_writing_and_pending(
+async def test_find_stuck_materializations_returns_unfinished_and_failed_rows(
     session_maker,
     test_project: Project,
     entity_repository: EntityRepository,
 ):
-    """The startup-recovery query returns only rows whose file write never finished."""
+    """The recovery query returns rows whose file write never finished or failed.
+
+    'failed' must be included: a transient write error (ENOSPC, permissions)
+    publishes it and nothing else retries; for a new note the file never exists,
+    so the next scan's delete reconciliation would destroy the accepted entity.
+    'external_change_detected' stays excluded — re-driving it would clobber a
+    deliberate external edit the conflict guard chose to protect.
+    """
     repository = NoteContentRepository(project_id=test_project.id)
 
     statuses = {
@@ -676,7 +683,7 @@ async def test_find_stuck_materializations_returns_only_writing_and_pending(
         stuck = await repository.find_stuck_materializations(session)
 
     stuck_ids = {row.entity_id for row in stuck}
-    assert stuck_ids == {entity_ids["writing"], entity_ids["pending"]}
+    assert stuck_ids == {entity_ids["writing"], entity_ids["pending"], entity_ids["failed"]}
 
 
 @pytest.mark.asyncio

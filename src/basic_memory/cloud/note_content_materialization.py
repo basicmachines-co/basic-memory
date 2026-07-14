@@ -132,12 +132,14 @@ async def drain_pending_materializations() -> None:
 # "synced". If the process dies anywhere between those points the row is stuck
 # forever: the crash may land before the file write (nothing on disk) or after it
 # but before publish (the correct accepted file is already on disk, row still
-# "writing"). On the next startup we re-drive every stuck row. The write path
-# short-circuits when the accepted content is already on disk, so the
-# crash-after-write case publishes to "synced" instead of tripping the
-# external-change guard. The db_version compare-and-set guard in the preflight and
-# publisher makes recovery unconditionally safe: an older recovery attempt can
-# never overwrite a newer accepted write or its file.
+# "writing"). A transient write error (ENOSPC, permissions) publishes "failed"
+# instead — equally terminal, since nothing else ever retries it. On the next
+# startup we re-drive every stuck row. The write path short-circuits when the
+# accepted content is already on disk, so the crash-after-write case publishes to
+# "synced" instead of tripping the external-change guard. The db_version
+# compare-and-set guard in the preflight and publisher makes recovery
+# unconditionally safe: an older recovery attempt can never overwrite a newer
+# accepted write or its file.
 
 # Synthetic provenance stamped on recovered writes so operators can tell a
 # crash-recovery materialization apart from a normal accept-path write in logs
@@ -175,7 +177,7 @@ async def recover_stuck_materializations(
     file_service: FileService,
     project_id: int,
 ) -> int:
-    """Re-drive every note materialization stuck in writing/pending for a project.
+    """Re-drive every note materialization stuck in writing/pending/failed for a project.
 
     Meant to run once per project at startup, before serving. Non-fatal per row:
     a single row that raises is logged and skipped so one poisoned note cannot

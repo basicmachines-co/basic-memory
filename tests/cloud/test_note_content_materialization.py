@@ -449,6 +449,46 @@ async def test_recover_stuck_materializations_writes_file_and_marks_synced(
 
 
 @pytest.mark.asyncio
+async def test_recover_stuck_materializations_re_drives_failed_row(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+    file_service: FileService,
+) -> None:
+    """A row a transient write error left 'failed' is recovered on the next sweep.
+
+    A failed publish (ENOSPC, permissions) is terminal without recovery: nothing
+    else retries it, the accepted file never lands on disk, and the next scan's
+    delete reconciliation destroys the entity — data loss of an acknowledged write.
+    """
+    await _seed_stuck_note_content(
+        session_maker,
+        project_id=test_project.id,
+        entity_id=sample_entity.id,
+        markdown_content="# Recovered after transient failure\n",
+        db_version=1,
+        db_checksum="db-checksum-1",
+        file_write_status="failed",
+    )
+
+    recovered = await recover_stuck_materializations(
+        session_maker=session_maker,
+        file_service=file_service,
+        project_id=test_project.id,
+    )
+
+    assert recovered == 1
+    written = file_service.base_path / sample_entity.file_path
+    assert written.read_text(encoding="utf-8") == "# Recovered after transient failure\n"
+
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        row = await repository.get_by_entity_id(session, sample_entity.id)
+    assert row is not None
+    assert row.file_write_status == "synced"
+
+
+@pytest.mark.asyncio
 async def test_recover_stuck_materializations_returns_zero_when_none_stuck(
     session_maker,
     test_project: Project,

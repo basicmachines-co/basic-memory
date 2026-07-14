@@ -335,11 +335,17 @@ class NoteContentRepository(Repository[NoteContent]):
         flips it to ``writing`` before the file is written and the publisher records
         ``synced``/``written``. A process crash between those points leaves the row
         stuck in ``writing``/``pending`` forever and the source-of-truth markdown
-        file never (re)materialized. Startup recovery re-drives exactly these rows;
-        the db_version compare-and-set guard in the publisher keeps the retry safe
-        (an older recovery attempt can never revert a newer accepted write).
+        file never (re)materialized. A transient write error (ENOSPC, permissions)
+        publishes ``failed`` instead — equally terminal without a retry, and for a
+        new note the file never exists, so the next scan's delete reconciliation
+        would destroy the entity and its accepted content. The recovery sweep
+        re-drives all three states; the db_version compare-and-set guard in the
+        preflight and publisher keeps the retry safe (an older recovery attempt can
+        never revert a newer accepted write).
         """
-        query = self.select().where(NoteContent.file_write_status.in_(("writing", "pending")))
+        query = self.select().where(
+            NoteContent.file_write_status.in_(("writing", "pending", "failed"))
+        )
         result = await session.execute(query)
         return list(result.scalars().all())
 
