@@ -17,12 +17,10 @@ from basic_memory.indexing.accepted_note_search import (
     build_accepted_note_search_row,
 )
 from basic_memory.models import Entity, NoteContent
-from basic_memory.repository import AcceptedNoteContentWrite, NoteContentRepository
-from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
+from basic_memory.repository import AcceptedNoteContentWrite
 from basic_memory.repository.entity_repository import (
     AcceptedPendingEntityWrite,
     EntityMetadata,
-    EntityRepository,
 )
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
@@ -308,55 +306,6 @@ class AcceptedPersistedNoteWrite:
     previous_file_delete: RuntimePendingNoteFileDelete | None = None
 
 
-def accepted_entity_repository_for_project(
-    project_id: ProjectId,
-) -> AcceptedPendingEntityRepository:
-    """Create the core repository adapter for pending accepted entities."""
-    return EntityRepository(project_id=project_id)
-
-
-def accepted_note_content_repository_for_project(
-    project_id: ProjectId,
-) -> AcceptedNoteContentRepository:
-    """Create the core repository adapter for accepted note_content rows."""
-    return NoteContentRepository(project_id=project_id)
-
-
-def accepted_note_search_repository_for_project(
-    project_id: ProjectId,
-) -> AcceptedNoteSearchRowRepository:
-    """Create the core repository adapter for accepted-note search rows."""
-    return AcceptedNoteSearchRepository(project_id=project_id)
-
-
-@dataclass(frozen=True, slots=True)
-class DefaultAcceptedNoteWriteRepositories:
-    """Default repository capability set for accepted-note write persistence."""
-
-    def pending_entity_repository(
-        self,
-        project_id: ProjectId,
-    ) -> AcceptedPendingEntityRepository:
-        return accepted_entity_repository_for_project(project_id)
-
-    def note_content_repository(
-        self,
-        project_id: ProjectId,
-    ) -> AcceptedNoteContentRepository:
-        return accepted_note_content_repository_for_project(project_id)
-
-    def search_repository(
-        self,
-        project_id: ProjectId,
-    ) -> AcceptedNoteSearchRowRepository:
-        return accepted_note_search_repository_for_project(project_id)
-
-
-def build_default_accepted_note_write_repositories() -> AcceptedNoteWriteRepositories:
-    """Compose the default repository adapters for accepted-note write persistence."""
-    return DefaultAcceptedNoteWriteRepositories()
-
-
 async def prepare_accepted_note_create(
     preparer: AcceptedNoteCreatePreparer,
     data: EntitySchema,
@@ -543,11 +492,10 @@ async def create_accepted_pending_entity(
     now: datetime,
     user_profile_value: str | None,
     external_id: str | None = None,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> Entity:
     """Insert a prepared accepted entity row without materializing a file."""
-    write_repositories = repositories or build_default_accepted_note_write_repositories()
-    repository = write_repositories.pending_entity_repository(project_id)
+    repository = repositories.pending_entity_repository(project_id)
     return await repository.create_pending_accepted_entity(
         session,
         accepted_pending_entity_write_from_prepared(
@@ -588,11 +536,10 @@ async def accept_note_content_write(
     db_checksum: RuntimeNoteContentChecksum,
     last_source: RuntimeNoteChangeSource | None,
     updated_at: datetime,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> NoteContent:
     """Accept markdown into note_content before object storage catches up."""
-    write_repositories = repositories or build_default_accepted_note_write_repositories()
-    repository = write_repositories.note_content_repository(entity.project_id)
+    repository = repositories.note_content_repository(entity.project_id)
     return await repository.accept_write(
         session,
         accepted_note_content_write_from_markdown(
@@ -631,11 +578,10 @@ async def refresh_accepted_note_search_index(
     *,
     entity: AcceptedNoteSearchEntitySource,
     search_content: str,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> None:
     """Refresh the hot accepted-note search row inside the caller's transaction."""
-    write_repositories = repositories or build_default_accepted_note_write_repositories()
-    repository = write_repositories.search_repository(entity.project_id)
+    repository = repositories.search_repository(entity.project_id)
     await repository.refresh_entity(
         session,
         accepted_note_search_row_from_entity(entity, search_content=search_content),
@@ -647,11 +593,10 @@ async def delete_accepted_note_search_index(
     *,
     project_id: ProjectId,
     entity_id: RuntimeEntityId,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> None:
     """Remove all search rows for an accepted-note entity inside the caller's transaction."""
-    write_repositories = repositories or build_default_accepted_note_write_repositories()
-    repository = write_repositories.search_repository(project_id)
+    repository = repositories.search_repository(project_id)
     await repository.delete_entity(session, entity_id)
 
 
@@ -660,11 +605,10 @@ async def delete_accepted_note_vectors(
     *,
     project_id: ProjectId,
     entity_id: RuntimeEntityId,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> None:
     """Remove semantic vectors for an accepted-note entity inside the caller's transaction."""
-    write_repositories = repositories or build_default_accepted_note_write_repositories()
-    repository = write_repositories.search_repository(project_id)
+    repository = repositories.search_repository(project_id)
     await repository.delete_entity_vectors(session, entity_id)
 
 
@@ -680,10 +624,9 @@ async def persist_accepted_note_write(
     current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
     existing_file_path: RuntimeFilePath | None = None,
     accepted_file_path: RuntimeFilePath | None = None,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Accept markdown into note_content and refresh search inside one transaction."""
-    write_repositories = repositories or build_default_accepted_note_write_repositories()
     content_write = plan_accepted_note_content_write(
         project_id=entity.project_id,
         entity_id=entity.id,
@@ -699,13 +642,13 @@ async def persist_accepted_note_write(
         db_checksum=db_checksum,
         last_source=last_source,
         updated_at=updated_at,
-        repositories=write_repositories,
+        repositories=repositories,
     )
     await refresh_accepted_note_search_index(
         session,
         entity=entity,
         search_content=search_content,
-        repositories=write_repositories,
+        repositories=repositories,
     )
     return AcceptedPersistedNoteWrite(
         note_content=note_content,
@@ -728,7 +671,7 @@ async def delete_accepted_note(
     project_id: ProjectId,
     entity: AcceptedNoteDeleteEntitySource | None,
     note_content: RuntimeDeletedNoteFileChecksumSource | None = None,
-    repositories: AcceptedNoteWriteRepositories | None = None,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> RuntimeAcceptedNoteChange[dict[str, object]]:
     """Plan an accepted note delete and remove the entity when it exists."""
     accepted = plan_accepted_note_delete_change(

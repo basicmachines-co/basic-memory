@@ -13,14 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
 from basic_memory.indexing.accepted_note_write_runner import (
-    DefaultAcceptedNoteWriteRepositories,
     AcceptedNoteWriteRepositories,
     accept_note_content_write,
     accepted_note_content_write_from_markdown,
     accepted_note_search_row_from_entity,
     accepted_pending_entity_write_from_prepared,
     apply_accepted_prepared_entity_fields,
-    build_default_accepted_note_write_repositories,
     create_accepted_pending_entity,
     delete_accepted_note,
     delete_accepted_note_entity,
@@ -33,10 +31,8 @@ from basic_memory.indexing.accepted_note_write_runner import (
     delete_accepted_note_search_index,
 )
 from basic_memory.models import Entity, NoteContent
-from basic_memory.repository import AcceptedNoteContentWrite, NoteContentRepository
-from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
+from basic_memory.repository import AcceptedNoteContentWrite
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
-from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 
 
@@ -367,15 +363,6 @@ def _note_content() -> NoteContent:
         file_write_status="pending",
         last_source="api",
     )
-
-
-def test_build_default_accepted_note_write_repositories_wires_core_repositories() -> None:
-    repositories = build_default_accepted_note_write_repositories()
-
-    assert isinstance(repositories, DefaultAcceptedNoteWriteRepositories)
-    assert isinstance(repositories.pending_entity_repository(7), EntityRepository)
-    assert isinstance(repositories.note_content_repository(7), NoteContentRepository)
-    assert isinstance(repositories.search_repository(7), AcceptedNoteSearchRepository)
 
 
 @pytest.mark.asyncio
@@ -810,10 +797,12 @@ async def test_delete_accepted_note_entity_deletes_via_session() -> None:
 async def test_delete_accepted_note_plans_missing_response_without_deleting() -> None:
     session = _DeleteSession()
 
+    # The fail-fast provider proves a missing entity touches no repository.
     accepted = await delete_accepted_note(
         cast(AsyncSession, session),
         project_id=7,
         entity=None,
+        repositories=_repository_provider(),
     )
 
     assert session.deleted == []

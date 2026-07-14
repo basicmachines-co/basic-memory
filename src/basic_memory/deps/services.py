@@ -59,7 +59,6 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationMovePolicy,
     AcceptedNoteMutationPreparer,
-    build_default_accepted_note_repositories,
 )
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.directory_delete_runner import (
@@ -74,11 +73,13 @@ from basic_memory.file_utils import FileError
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
-from basic_memory.repository import ObservationRepository, RelationRepository
+from basic_memory.repository import NoteContentRepository, ObservationRepository, RelationRepository
+from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.runtime.cleanup import RuntimeFileDeleteResult, RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.storage import (
+    ProjectId,
     RuntimeFileChecksum,
     RuntimeFilePath,
     runtime_content_type_is_markdown,
@@ -706,6 +707,28 @@ IndexFileExecutorV2ExternalDep = Annotated[
 # --- Note Content Writes ---
 
 
+@dataclass(frozen=True, slots=True)
+class LocalAcceptedNoteRepositories:
+    """Project-scoped core repositories for accepted-note mutations.
+
+    One concrete bundle satisfies both the lookup and write repository
+    capabilities the accepted-note mutation runner consumes; cloud composes its
+    own tenant-scoped equivalent behind the same protocols.
+    """
+
+    def entity_repository(self, project_id: ProjectId) -> EntityRepository:
+        return EntityRepository(project_id=project_id)
+
+    def pending_entity_repository(self, project_id: ProjectId) -> EntityRepository:
+        return EntityRepository(project_id=project_id)
+
+    def note_content_repository(self, project_id: ProjectId) -> NoteContentRepository:
+        return NoteContentRepository(project_id=project_id)
+
+    def search_repository(self, project_id: ProjectId) -> AcceptedNoteSearchRepository:
+        return AcceptedNoteSearchRepository(project_id=project_id)
+
+
 async def get_note_content_mutation_service(
     project_repository: ProjectRepositoryDep,
     entity_repository: EntityRepositoryV2ExternalDep,
@@ -715,7 +738,7 @@ async def get_note_content_mutation_service(
     app_config: AppConfigDep,
 ) -> NoteContentMutationService:
     """Create the local accepted-note mutation facade for API routes."""
-    accepted_note_repositories = build_default_accepted_note_repositories()
+    accepted_note_repositories = LocalAcceptedNoteRepositories()
     return NoteContentMutationService(
         session_maker=session_maker,
         mutation_dependencies=AcceptedNoteMutationDependencies(
