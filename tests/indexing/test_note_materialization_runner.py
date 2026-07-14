@@ -564,6 +564,63 @@ async def test_repository_note_materialization_publisher_updates_current_written
 
 
 @pytest.mark.asyncio
+async def test_repository_note_materialization_publisher_records_stale_written_file() -> None:
+    """A newer accepted version at publish time records the written file as pending
+    without touching the entity row; the newer version's own materialization owns
+    the final state."""
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    entity = materialization_entity()
+    # The accepted note advanced past the requested db_version between the file
+    # write and this publish.
+    note_content = materialization_note_content(db_version=5, db_checksum="newer-db-checksum")
+    session = FakeRepositorySession(entity=entity, note_content=note_content)
+    session_lock = FakeSessionLock()
+    repository = RecordingNoteContentRepository()
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        result = await RepositoryNoteMaterializationPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            session_lock=session_lock,
+            note_content_store=lambda project_id: repository,
+        ).publish_written_file_state(request, prepared, written)
+
+    assert result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.stale,
+        reason="file written but newer accepted note remains pending: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+    assert repository.calls == [
+        (
+            cast(AsyncSession, session),
+            42,
+            {
+                "expected_db_version": 5,
+                "file_version": 4,
+                "file_checksum": "new-file-sum",
+                "file_write_status": "pending",
+                "file_updated_at": written.file_updated_at,
+                "last_materialization_error": None,
+                "last_materialization_attempt_at": prepared.attempted_at,
+            },
+        )
+    ]
+    # The entity metadata update belongs to the newer version's publish.
+    assert session.flush_count == 0
+
+
+@pytest.mark.asyncio
 async def test_repository_note_materialization_status_publisher_records_conflict() -> None:
     request = materialization_request()
     attempted_at = datetime(2026, 6, 18, 15, 0, tzinfo=UTC)
