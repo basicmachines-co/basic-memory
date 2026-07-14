@@ -225,6 +225,13 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     assert none_identity_request.project_root == project_root.resolve()
     assert none_identity_request.project_prefix == "configured-project-root"
 
+    # A project without a usable path has no watch root at all.
+    with pytest.raises(ValueError, match="requires path"):
+        LocalWatchEventIndexRequest.from_project_changes(
+            project=SimpleNamespace(path=""),
+            changes=(),
+        )
+
 
 def test_local_watch_request_uses_project_permalink_for_duplicate_leaf_roots(
     tmp_path: Path,
