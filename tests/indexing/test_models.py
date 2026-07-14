@@ -831,6 +831,8 @@ def test_plan_indexed_file_live_update_metadata_omits_mismatched_metadata():
         live_update_source=None,
         operation=None,
     )
+
+
 def test_plan_indexed_file_live_update_metadata_etag_mismatch_is_not_superseded():
     indexed_file = FileIndexResult(
         file_path="notes/a.md",
