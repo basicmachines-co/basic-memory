@@ -90,20 +90,6 @@ class ProjectDeleteRepository(Protocol):
     async def delete(self, session: AsyncSession, entity_id: int) -> bool: ...
 
 
-class ProjectDeleteRepositories(Protocol):
-    """Repository provider for project delete cleanup."""
-
-    def project_repository(self) -> ProjectDeleteRepository: ...
-
-
-@dataclass(frozen=True, slots=True)
-class DefaultProjectDeleteRepositories:
-    """Default repository provider for local project delete cleanup."""
-
-    def project_repository(self) -> ProjectDeleteRepository:
-        return ProjectRepository()
-
-
 async def load_project_file_snapshots(
     session: AsyncSession,
     *,
@@ -205,9 +191,7 @@ class RepositoryProjectHardDeleter:
     """Repository-backed hard deleter for one inactive project."""
 
     session_maker: async_sessionmaker[AsyncSession]
-    repositories: ProjectDeleteRepositories = field(
-        default_factory=DefaultProjectDeleteRepositories
-    )
+    project_repository: ProjectDeleteRepository = field(default_factory=ProjectRepository)
 
     async def hard_delete_project(
         self,
@@ -230,10 +214,7 @@ class RepositoryProjectHardDeleter:
                 )
                 return ProjectHardDeleteOutcome.reactivated
 
-            deleted = await self.repositories.project_repository().delete(
-                session,
-                request.project_id,
-            )
+            deleted = await self.project_repository.delete(session, request.project_id)
             return ProjectHardDeleteOutcome.deleted if deleted else ProjectHardDeleteOutcome.missing
 
 
