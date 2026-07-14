@@ -131,7 +131,7 @@ class FakeFileIndexer:
         self,
         indexed_file: FileIndexResult | None = None,
         *,
-        error: FileOperationError | None = None,
+        error: Exception | None = None,
     ) -> None:
         self.indexed_file = indexed_file
         self.error = error
@@ -408,3 +408,42 @@ async def test_run_index_file_treats_delete_after_metadata_check_as_missing() ->
         status=IndexFileJobStatus.missing,
         reason="file deleted before indexing: notes/a.md",
     )
+
+
+class SequencedMetadataSource:
+    """Metadata source whose answers change between calls (file deleted mid-job)."""
+
+    def __init__(self, responses: list[IndexFileObjectMetadata | None]) -> None:
+        self.responses = list(responses)
+        self.paths: list[str] = []
+
+    async def load_current_file_metadata(self, file_path: str) -> IndexFileObjectMetadata | None:
+        self.paths.append(file_path)
+        return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_run_index_file_treats_raw_file_not_found_as_missing() -> None:
+    """The local markdown indexer re-raises the raw FileNotFoundError for missing
+    files; that shape must also become a missing result, not a job failure."""
+    metadata_source = SequencedMetadataSource(
+        [
+            # File still present at the pre-index metadata check...
+            IndexFileObjectMetadata(checksum="etag-1"),
+            # ...but gone when the failed read triggers the re-check.
+            None,
+        ]
+    )
+
+    result = await run_index_file(
+        current_file_request(),
+        metadata_source=metadata_source,
+        materialized_note_source=FakeMaterializedNoteSource(None),
+        file_indexer=FakeFileIndexer(error=FileNotFoundError("notes/a.md")),
+    )
+
+    assert result == IndexFileJobResult(
+        status=IndexFileJobStatus.missing,
+        reason="file deleted before indexing: notes/a.md",
+    )
+    assert metadata_source.paths == ["notes/a.md", "notes/a.md"]

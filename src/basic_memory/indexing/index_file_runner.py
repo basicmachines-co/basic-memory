@@ -191,7 +191,12 @@ async def run_index_file(
             request.file_path,
             source=source,
         )
-    except FileOperationError:
+    except (FileOperationError, FileNotFoundError):
+        # Trigger: the file disappeared between the metadata check and the read.
+        # Why: the local markdown indexer deliberately unwraps its read failure and
+        #   re-raises the raw FileNotFoundError, which a FileOperationError-only
+        #   handler misses — turning an ordinary delete race into a job failure.
+        # Outcome: both error shapes fall through to the same missing-file check.
         current_metadata = await metadata_source.load_current_file_metadata(request.file_path)
         if current_metadata is None:
             return IndexFileJobResult(
