@@ -23,6 +23,41 @@ class BatchSummary:
     write_seconds_total: float = 0.0
 
 
+def test_vector_sync_progress_checkpoint_state_shape_is_stable() -> None:
+    """The dumped checkpoint document must stay byte-identical across releases."""
+    progress = VectorSyncProgress(
+        entity_ids=[11, 22],
+        next_index=2,
+        entities_synced=2,
+        entities_failed=1,
+        failed_entity_ids=[22],
+        embedding_jobs_total=40,
+        embed_seconds_total=12.346,
+        write_seconds_total=1.234,
+        elapsed_seconds=15.679,
+    )
+
+    state = progress.to_checkpoint_state()
+
+    expected = {
+        "entity_ids": [11, 22],
+        "next_index": 2,
+        "entities_synced": 2,
+        "entities_failed": 1,
+        "failed_entity_ids": [22],
+        "embedding_jobs_total": 40,
+        "embed_seconds_total": 12.346,
+        "write_seconds_total": 1.234,
+        "elapsed_seconds": 15.679,
+        "entities_total": 2,
+    }
+    assert state == expected
+    assert list(state) == list(expected)
+    # Old checkpoints carry the computed entities_total field; restoring must
+    # ignore it and rebuild the identical progress value.
+    assert VectorSyncProgress.from_checkpoint_state(expected) == progress
+
+
 def test_vector_sync_progress_checkpoint_round_trip() -> None:
     progress = VectorSyncProgress(
         entity_ids=[11, 22, 22],
@@ -153,6 +188,56 @@ def test_apply_vector_sync_batch_result_updates_progress_and_reports_new_failure
     assert progress.elapsed_seconds == 8.5
     assert progress.failed_entity_ids == [22, 33]
     assert new_failed_entity_ids == [33]
+
+
+def test_indexing_result_checkpoint_state_shape_is_stable() -> None:
+    """The dumped checkpoint document must stay byte-identical across releases."""
+    result = IndexingResult(
+        files_processed=3,
+        files_unchanged=4,
+        entities_created=5,
+        entities_deleted=1,
+        relations_resolved=7,
+        semantic_vectors_synced=9,
+        errors=[("a.md", "bad frontmatter")],
+        total_duration_seconds=12.346,
+        semantic_vector_sync_seconds=4.568,
+        peak_rss_mib=512.988,
+        batch_count=2,
+    )
+
+    state = result.to_checkpoint_state()
+
+    expected = {
+        "files_processed": 3,
+        "files_unchanged": 4,
+        "entities_created": 5,
+        "entities_updated": 0,
+        "entities_deleted": 1,
+        "files_moved": 0,
+        "forward_refs_resolved": 0,
+        "relations_resolved": 7,
+        "relations_unresolved": 0,
+        "search_indexed": 0,
+        "semantic_vector_entities_total": 0,
+        "semantic_vectors_synced": 9,
+        "semantic_vectors_failed": 0,
+        "errors": [["a.md", "bad frontmatter"]],
+        "total_duration_seconds": 12.346,
+        "change_detection_seconds": 0.0,
+        "s3_download_seconds": 0.0,
+        "file_processing_seconds": 0.0,
+        "relation_resolution_seconds": 0.0,
+        "search_indexing_seconds": 0.0,
+        "semantic_vector_sync_seconds": 4.568,
+        "semantic_vector_embed_seconds": 0.0,
+        "semantic_vector_write_seconds": 0.0,
+        "peak_rss_mib": 512.988,
+        "batch_count": 2,
+    }
+    assert state == expected
+    assert list(state) == list(expected)
+    assert IndexingResult.from_checkpoint_state(expected) == result
 
 
 def test_indexing_result_checkpoint_round_trip() -> None:
