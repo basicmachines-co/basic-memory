@@ -329,7 +329,10 @@ async def _reindex(
     )
     from basic_memory.repository import EntityRepository, ProjectRepository
     from basic_memory.repository.search_repository import create_search_repository
-    from basic_memory.services.initialization import reconcile_projects_with_config
+    from basic_memory.services.initialization import (
+        reconcile_projects_with_config,
+        recover_project_materializations,
+    )
     from basic_memory.services.search_service import SearchService
     from basic_memory.services.file_service import FileService
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -365,6 +368,16 @@ async def _reindex(
             console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
 
             if search:
+                # Trigger: the project-index scan below reconciles deletes against
+                # the filesystem, and a crash can leave an accepted note stuck
+                # mid-materialization with its markdown file never written.
+                # Why: scanning first would treat the missing file as a delete and
+                # destroy the entity plus its accepted content — data loss of an
+                # acknowledged write.
+                # Outcome: run the same per-project recovery sweep as startup so
+                # stuck materializations are re-driven to disk before the scan.
+                await recover_project_materializations(proj, session_maker)
+
                 search_mode_label = "full project index" if full else "project index"
                 console.print(
                     f"  Rebuilding full-text search index ([cyan]{search_mode_label}[/cyan])..."

@@ -323,6 +323,59 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
 
 
 @pytest.mark.asyncio
+async def test_reindex_recovers_stuck_materializations_before_scan(monkeypatch, session_maker):
+    """The scan reconciles deletes against the filesystem, so a note whose accepted
+    file write a crash left stuck ('writing'/'pending'/'failed') would be destroyed
+    as a missing file. Recovery must re-drive stuck rows before each project scan."""
+    app_config = _stub_app_config()
+    projects = [
+        SimpleNamespace(id=1, name="foo", path="/tmp/foo"),
+        SimpleNamespace(id=2, name="bar", path="/tmp/bar"),
+    ]
+    call_order: list[str] = []
+
+    class StubProjectRepository:
+        async def get_active_projects(self, session):
+            return projects
+
+    async def record_recover(project, session_maker_arg):
+        assert session_maker_arg is session_maker
+        call_order.append(f"recover:{project.name}")
+
+    async def record_project_index(project, *, runtime_factory, force_full, embeddings):
+        call_order.append(f"index:{project.name}")
+        return SimpleNamespace(
+            total_files=0, enqueued_files=0, enqueued_batches=0, deleted_files=0
+        )
+
+    # _reindex imports its database/index dependencies at call time (#886),
+    # so stubs target the source modules instead of db_cmd attributes.
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.reconcile_projects_with_config", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.recover_project_materializations",
+        record_recover,
+    )
+    monkeypatch.setattr(
+        "basic_memory.db.get_or_create_db",
+        AsyncMock(return_value=(None, session_maker)),
+    )
+    monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.run_local_project_index_for_project",
+        record_project_index,
+    )
+    monkeypatch.setattr(db_cmd.console, "print", lambda *args, **kwargs: None)
+
+    await db_cmd._reindex(app_config, search=True, embeddings=False, full=False, project=None)
+
+    # Recovery runs before the delete-reconciling scan, per project.
+    assert call_order == ["recover:foo", "index:foo", "recover:bar", "index:bar"]
+
+
+@pytest.mark.asyncio
 async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
     """A full reindex (search + embeddings) must embed once: the FTS rebuild runs
     with embeddings=False so only the explicit vector phase calls the provider."""
