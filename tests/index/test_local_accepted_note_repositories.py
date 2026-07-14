@@ -1,6 +1,6 @@
 """Tests for the local accepted-note repository bundle."""
 
-from basic_memory.deps.services import LocalAcceptedNoteRepositories
+from basic_memory.index.local_notes import LocalAcceptedNoteRepositories
 from basic_memory.indexing.accepted_note_mutation_runner import AcceptedNoteMutationRepositories
 from basic_memory.indexing.accepted_note_write_runner import AcceptedNoteWriteRepositories
 from basic_memory.repository import NoteContentRepository

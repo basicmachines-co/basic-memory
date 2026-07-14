@@ -79,6 +79,7 @@ from basic_memory.runtime.jobs import (
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import RuntimeFilePath
+from basic_memory.schemas.project_index import ProjectIndexRunResponse
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
 
@@ -702,6 +703,89 @@ class LocalProjectIndexRunner:
             runtime_factory=self.runtime_factory,
             force_full=force_full,
         )
+
+
+# --- Project-Index Route Commands ---
+
+
+class ProjectIndexRunner(Protocol):
+    """Run project-wide indexing in the current process."""
+
+    async def index_project(
+        self,
+        project_id: int,
+        *,
+        force_full: bool = False,
+    ) -> ProjectIndexCoordinatorResult: ...
+
+
+class ProjectIndexObserver(Protocol):
+    """Observe project files visible to the active runtime."""
+
+    async def observe_project(self, project_id: int) -> LocalProjectIndexObservation: ...
+
+
+class ProjectIndexScheduler(Protocol):
+    """Schedule background project indexing."""
+
+    def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexRouteRequest:
+    """Route-level project-index command input."""
+
+    project_id: int
+    project_name: str
+    force_full: bool
+    run_in_background: bool
+
+
+type ProjectIndexRouteResult = ProjectIndexRunResponse | dict[str, str]
+
+
+class ProjectIndexCommand(Protocol):
+    """Handle a project-index route request."""
+
+    async def index_project(
+        self,
+        request: ProjectIndexRouteRequest,
+    ) -> ProjectIndexRouteResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalProjectIndexCommand:
+    project_index_runner: ProjectIndexRunner
+    project_index_scheduler: ProjectIndexScheduler
+
+    async def index_project(
+        self,
+        request: ProjectIndexRouteRequest,
+    ) -> ProjectIndexRouteResult:
+        if request.run_in_background:
+            self.project_index_scheduler.schedule_project_index(
+                project_id=request.project_id,
+                force_full=request.force_full,
+            )
+            logger.info(
+                f"Filesystem indexing initiated for project: {request.project_name} "
+                f"(force_full={request.force_full})"
+            )
+
+            return {
+                "status": "index_started",
+                "message": (f"Filesystem indexing initiated for project '{request.project_name}'"),
+            }
+
+        result = await self.project_index_runner.index_project(
+            request.project_id,
+            force_full=request.force_full,
+        )
+        logger.info(
+            f"Filesystem indexing completed for project: {request.project_name} "
+            f"(force_full={request.force_full})"
+        )
+        return ProjectIndexRunResponse.from_result(result)
 
 
 async def run_local_project_index(

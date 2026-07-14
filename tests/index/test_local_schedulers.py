@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 
 from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
-from basic_memory.deps.services import (
+from basic_memory.index.local_schedulers import (
     LocalEntityVectorSyncScheduler,
     LocalProjectIndexScheduler,
     LocalRelationResolutionScheduler,
@@ -57,7 +57,7 @@ async def test_entity_vector_scheduler_maps_to_search_service():
 
 
 def _clear_project_index_scheduler_state() -> None:
-    from basic_memory.deps.services import _dirty_project_index, _pending_project_index
+    from basic_memory.index.local_schedulers import _dirty_project_index, _pending_project_index
 
     _pending_project_index.clear()
     _dirty_project_index.clear()
@@ -105,7 +105,7 @@ async def test_project_index_scheduler_coalesces_requests_during_in_flight_run()
     """While a run is in flight, new requests must not start a second concurrent
     run over the same rows; they coalesce to exactly one trailing rerun that
     keeps the strongest force_full seen."""
-    from basic_memory.deps.services import _dirty_project_index, _pending_project_index
+    from basic_memory.index.local_schedulers import _dirty_project_index, _pending_project_index
 
     _clear_project_index_scheduler_state()
     runner = GatedProjectIndexRunner()
@@ -154,7 +154,7 @@ class FailingThenGatedProjectIndexRunner:
 async def test_project_index_scheduler_reruns_coalesced_request_after_failed_run():
     """A request coalesced behind a run that raises must still get its rerun —
     a failed run is exactly when the coalesced request most needs its retry."""
-    from basic_memory.deps.services import _dirty_project_index, _pending_project_index
+    from basic_memory.index.local_schedulers import _dirty_project_index, _pending_project_index
 
     _clear_project_index_scheduler_state()
     runner = FailingThenGatedProjectIndexRunner()
@@ -196,7 +196,7 @@ async def test_project_index_scheduler_single_flight_is_per_project():
 @pytest.mark.asyncio
 async def test_project_index_scheduler_is_noop_in_test_mode():
     """Test mode must suppress the run without leaking a pending marker."""
-    from basic_memory.deps.services import _pending_project_index
+    from basic_memory.index.local_schedulers import _pending_project_index
 
     _clear_project_index_scheduler_state()
     runner = StubProjectIndexRunner()
@@ -239,7 +239,7 @@ class StubRelationResolutionRuntime:
 @pytest.mark.asyncio
 async def test_relation_resolution_scheduler_runs_project_resolution():
     """A single write schedules one debounced project resolution pass."""
-    from basic_memory.deps.services import _pending_relation_resolution
+    from basic_memory.index.local_schedulers import _pending_relation_resolution
 
     _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()
@@ -260,7 +260,7 @@ async def test_relation_resolution_scheduler_runs_project_resolution():
 @pytest.mark.asyncio
 async def test_relation_resolution_scheduler_coalesces_a_burst():
     """A burst of writes collapses to a single project resolution pass."""
-    from basic_memory.deps.services import _pending_relation_resolution
+    from basic_memory.index.local_schedulers import _pending_relation_resolution
 
     _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()
@@ -282,7 +282,7 @@ async def test_relation_resolution_scheduler_coalesces_a_burst():
 async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
     """A write that commits while a pass is scanning must trigger a follow-up pass,
     not be dropped by coalescing (the scan already read the unresolved rows)."""
-    from basic_memory.deps.services import (
+    from basic_memory.index.local_schedulers import (
         _dirty_relation_resolution,
         _pending_relation_resolution,
     )
@@ -343,7 +343,7 @@ async def test_drain_background_tasks_awaits_scheduled_work():
 async def test_drain_background_tasks_covers_follow_up_tasks():
     """A drained task can schedule a follow-up (the relation-resolution dirty
     re-run); the drain must wait for that wave too, not just the first snapshot."""
-    from basic_memory.deps.services import (
+    from basic_memory.index.local_schedulers import (
         _dirty_relation_resolution,
         _pending_relation_resolution,
     )
@@ -384,7 +384,7 @@ async def test_drain_background_tasks_covers_follow_up_tasks():
 @pytest.mark.asyncio
 async def test_relation_resolution_scheduler_is_noop_in_test_mode():
     """Test mode should suppress the background resolution pass entirely."""
-    from basic_memory.deps.services import _pending_relation_resolution
+    from basic_memory.index.local_schedulers import _pending_relation_resolution
 
     _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()

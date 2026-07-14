@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from basic_memory.deps.services import _log_task_failure
+from basic_memory.index.local_schedulers import _log_task_failure
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,7 @@ async def test_log_task_failure_ignores_cancelled_task():
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    with patch("basic_memory.deps.services.logger.exception") as mock_exc:
+    with patch("basic_memory.index.local_schedulers.logger.exception") as mock_exc:
         _log_task_failure(task)
         mock_exc.assert_not_called()
 
@@ -32,7 +32,7 @@ async def test_log_task_failure_logs_real_exception():
     with pytest.raises(ValueError):
         await task
 
-    with patch("basic_memory.deps.services.logger.exception") as mock_exc:
+    with patch("basic_memory.index.local_schedulers.logger.exception") as mock_exc:
         _log_task_failure(task)
         mock_exc.assert_called_once()
         assert "sync failed" in str(mock_exc.call_args)

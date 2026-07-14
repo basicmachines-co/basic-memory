@@ -24,10 +24,10 @@ from basic_memory.deps import (
     ProjectIndexCommandDep,
     ProjectIndexObserverDep,
     ProjectExternalIdPathDep,
-    ProjectIndexRouteRequest,
     SessionDep,
     SessionMakerDep,
 )
+from basic_memory.index.local_project import ProjectIndexRouteRequest
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository

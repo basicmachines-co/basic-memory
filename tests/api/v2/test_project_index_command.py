@@ -6,7 +6,7 @@ import pytest
 
 from basic_memory.api.v2.routers.project_router import index_project
 from basic_memory.config import ProjectConfig
-from basic_memory.deps.services import ProjectIndexRouteRequest
+from basic_memory.index.local_project import ProjectIndexRouteRequest
 
 
 class RecordingProjectIndexCommand:
