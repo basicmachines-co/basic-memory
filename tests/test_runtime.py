@@ -148,9 +148,9 @@ class FakeStorageEventSource:
 @dataclass(frozen=True, slots=True)
 class FakeDeletedNoteEntity:
     id: int
-    external_id: str
-    title: str
-    permalink: str | None
+    external_id: object | None
+    title: object | None
+    permalink: object | None
     content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
@@ -768,13 +768,13 @@ class TestRuntimeContracts:
         with pytest.raises(FrozenInstanceError):
             setattr(result, "processed", 0)
 
-    def test_runtime_deleted_note_reference_carries_live_update_identity(self):
+    def test_runtime_deleted_note_reference_validates_live_update_identity(self):
         reference = RuntimeDeletedNoteReference.from_entity(
             FakeDeletedNoteEntity(
                 id=1,
-                external_id="note-1",
-                title="Deleted note",
-                permalink="deleted-note",
+                external_id=" note-1 ",
+                title=" Deleted note ",
+                permalink=" deleted-note ",
             ),
             file_path="notes/deleted.md",
         )
@@ -784,6 +784,17 @@ class TestRuntimeContracts:
             title="Deleted note",
             permalink="deleted-note",
         )
+
+        with pytest.raises(RuntimeError, match="missing title"):
+            RuntimeDeletedNoteReference.from_entity(
+                FakeDeletedNoteEntity(
+                    id=1,
+                    external_id="note-1",
+                    title="",
+                    permalink="deleted-note",
+                ),
+                file_path="notes/deleted.md",
+            )
 
         # A markdown entity indexed without a permalink still needs a stable
         # live-update identity, so the file path stands in for it.
@@ -802,9 +813,9 @@ class TestRuntimeContracts:
     def test_runtime_external_file_delete_plan_distinguishes_adapter_work(self):
         entity = FakeDeletedNoteEntity(
             id=7,
-            external_id="note-7",
-            title="Deleted note",
-            permalink="deleted-note",
+            external_id=" note-7 ",
+            title=" Deleted note ",
+            permalink=" deleted-note ",
         )
 
         missing_plan = RuntimeExternalFileDeletePlan.missing_entity(file_path="notes/deleted.md")

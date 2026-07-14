@@ -15,18 +15,18 @@ from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 
 @dataclass(frozen=True, slots=True)
 class _DeletedEntity:
-    external_id: str
-    title: str
-    permalink: str | None
+    external_id: object | None
+    title: object | None
+    permalink: object | None
     content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
 
 
 @dataclass(frozen=True, slots=True)
 class _DeletedFileEntity:
     id: int
-    external_id: str
-    title: str
-    permalink: str | None
+    external_id: object | None
+    title: object | None
+    permalink: object | None
     file_path: str
     checksum: str | None
     content_type: str = RUNTIME_MARKDOWN_CONTENT_TYPE
@@ -40,9 +40,9 @@ class _DeletedNoteContent:
 def test_runtime_deleted_note_response_builds_pending_file_delete_payload() -> None:
     response = RuntimeDeletedNoteResponse.pending_file_delete(
         entity=_DeletedEntity(
-            external_id="note-1",
-            title="Deleted Note",
-            permalink="notes/deleted-note",
+            external_id=" note-1 ",
+            title=" Deleted Note ",
+            permalink=" notes/deleted-note ",
         ),
         file_path="notes/deleted.md",
     )
@@ -88,6 +88,38 @@ def test_runtime_deleted_note_permalink_requires_a_usable_fallback_path() -> Non
         runtime_deleted_note_permalink(None, file_path=" ")
 
 
+@pytest.mark.parametrize(
+    ("entity", "message"),
+    [
+        (
+            _DeletedEntity(
+                external_id=None,
+                title="Deleted Note",
+                permalink="notes/deleted-note",
+            ),
+            "missing external_id",
+        ),
+        (
+            _DeletedEntity(
+                external_id="note-1",
+                title=" ",
+                permalink="notes/deleted-note",
+            ),
+            "missing title",
+        ),
+    ],
+)
+def test_runtime_deleted_note_response_rejects_missing_identity_fields(
+    entity: _DeletedEntity,
+    message: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=message):
+        RuntimeDeletedNoteResponse.pending_file_delete(
+            entity=entity,
+            file_path="notes/deleted.md",
+        )
+
+
 def test_plan_accepted_note_delete_change_builds_missing_payload() -> None:
     accepted = plan_accepted_note_delete_change(
         project_id=7,
@@ -105,9 +137,9 @@ def test_plan_accepted_note_delete_change_builds_payload_and_file_cleanup() -> N
         project_id=7,
         entity=_DeletedFileEntity(
             id=42,
-            external_id="note-1",
-            title="Deleted Note",
-            permalink="notes/deleted-note",
+            external_id=" note-1 ",
+            title=" Deleted Note ",
+            permalink=" notes/deleted-note ",
             file_path="notes/deleted.md",
             checksum="entity-checksum",
         ),

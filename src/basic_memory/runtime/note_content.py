@@ -135,16 +135,22 @@ class RuntimeAcceptedNoteWriteEntitySource(RuntimeAcceptedNoteEntitySource, Prot
 
 
 class RuntimeDeletedNoteEntitySource(RuntimeContentTypeSource, Protocol):
-    """Minimal deleted-note entity shape needed before row cleanup."""
+    """Minimal deleted-note entity shape needed before row cleanup.
+
+    The wide identity types are deliberate: downstream runtimes feed loosely
+    typed entity projections through this seam, so the delete live-update
+    identity is validated where the reference is built rather than trusted
+    from the declared shape.
+    """
 
     @property
-    def external_id(self) -> NoteExternalId: ...
+    def external_id(self) -> object | None: ...
 
     @property
-    def title(self) -> str: ...
+    def title(self) -> object | None: ...
 
     @property
-    def permalink(self) -> str | None: ...
+    def permalink(self) -> object | None: ...
 
 
 class RuntimeDeletedNoteEntityDeleteSource(RuntimeDeletedNoteEntitySource, Protocol):
@@ -345,8 +351,16 @@ class RuntimeDeletedNoteReference:
         file_path: RuntimeFilePath,
     ) -> Self:
         return cls(
-            external_id=entity.external_id,
-            title=entity.title,
+            external_id=required_runtime_deleted_note_text(
+                entity.external_id,
+                field_name="external_id",
+                file_path=file_path,
+            ),
+            title=required_runtime_deleted_note_text(
+                entity.title,
+                field_name="title",
+                file_path=file_path,
+            ),
             permalink=runtime_deleted_note_permalink(
                 entity.permalink,
                 file_path=file_path,
@@ -423,16 +437,28 @@ def select_deleted_note_file_checksum(
     return entity.checksum
 
 
+def required_runtime_deleted_note_text(
+    value: object,
+    *,
+    field_name: str,
+    file_path: RuntimeFilePath,
+) -> str:
+    """Return required deleted-note text for downstream live-update contracts."""
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"Deleted entity for {file_path} is missing {field_name}")
+    return value.strip()
+
+
 def runtime_deleted_note_permalink(
-    value: str | None,
+    value: object,
     *,
     file_path: RuntimeFilePath,
 ) -> str:
     """Return deleted-note permalink text, falling back to the file path."""
-    if value is not None and value.strip():
+    if isinstance(value, str) and value.strip():
         return value.strip()
 
-    fallback = file_path.strip()
+    fallback = str(file_path).strip()
     if not fallback:
         raise RuntimeError(f"Deleted entity for {file_path} is missing permalink")
     return fallback
