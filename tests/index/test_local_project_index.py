@@ -21,13 +21,14 @@ from basic_memory.index.local_project import (
     LocalProjectIndexObservedFileSource,
     LocalProjectIndexRuntime,
     LocalProjectIndexRuntimeFactory,
+    LocalProjectIndexScan,
     RepositoryLocalProjectIndexedFileStatSource,
     local_project_index_file_paths,
     run_local_project_index,
     run_local_project_index_for_project,
 )
 from basic_memory.indexing.change_detector import ChangeDetector
-from basic_memory.indexing.change_planning import ChangeReport
+from basic_memory.indexing.change_planning import ChangeReport, plan_file_changes
 from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
 from basic_memory.indexing.file_batch_runner import IndexFileBatchReadResult
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
@@ -2379,6 +2380,63 @@ async def test_local_project_index_observed_source_reuses_checksum_when_stat_mat
     assert by_path["notes/resized.md"].checksum == sha256(resized_content).hexdigest()
     assert by_path["notes/new.md"].checksum == sha256(new_content).hexdigest()
     assert set(hashed_paths) == {"notes/remtimed.md", "notes/resized.md", "notes/new.md"}
+
+
+async def test_local_project_index_observed_source_carries_indexed_files_under_unreadable_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Indexed rows under a directory the walk cannot read must not plan as deletes."""
+    keep = tmp_path / "keep.md"
+    keep_content = b"# Keep\n"
+    keep.write_bytes(keep_content)
+
+    indexed_stats = {
+        "keep.md": IndexedFileStat(mtime=None, size=None, checksum=None),
+        "locked/a.md": IndexedFileStat(mtime=1.0, size=10, checksum="indexed-a"),
+        "locked/deep/b.md": IndexedFileStat(mtime=1.0, size=11, checksum="indexed-b"),
+        # Indexed elsewhere and genuinely gone from storage — must not be carried.
+        "other/gone.md": IndexedFileStat(mtime=1.0, size=12, checksum="indexed-gone"),
+    }
+
+    def unreadable_scan(*args, **kwargs) -> LocalProjectIndexScan:
+        return LocalProjectIndexScan(
+            file_paths=("keep.md",),
+            unreadable_directories=("locked",),
+        )
+
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.scan_local_project_index_files",
+        unreadable_scan,
+    )
+
+    observed = await LocalProjectIndexObservedFileSource(
+        FileService(tmp_path),
+        ignore_patterns=set(),
+        indexed_stat_source=_StaticIndexedFileStatSource(indexed_stats),
+    ).list_observed_index_files()
+
+    assert [target.path for target in observed] == ["keep.md", "locked/a.md", "locked/deep/b.md"]
+    carried = {target.path: target for target in observed[1:]}
+    assert carried["locked/a.md"].checksum is None
+    assert carried["locked/deep/b.md"].checksum is None
+
+    keep_checksum = sha256(keep_content).hexdigest()
+    report = plan_file_changes(
+        storage_checksum_by_path={target.path: target.checksum for target in observed},
+        db_checksum_by_path={
+            "keep.md": keep_checksum,
+            "locked/a.md": "indexed-a",
+            "locked/deep/b.md": "indexed-b",
+        },
+        all_db_paths=("keep.md", "locked/a.md", "locked/deep/b.md", "other/gone.md"),
+        move_candidates=(),
+    )
+
+    # The unreadable subtree re-enters change detection as modified, never deleted;
+    # only the path that is genuinely gone from storage is planned as a delete.
+    assert report.deleted_files == ["other/gone.md"]
+    assert sorted(report.modified_files) == ["locked/a.md", "locked/deep/b.md"]
 
 
 async def test_local_project_index_observed_source_hashes_without_stat_source(

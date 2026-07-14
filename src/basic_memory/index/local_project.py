@@ -142,17 +142,71 @@ class RepositoryLocalProjectIndexedFileStatSource(LocalProjectIndexedFileStatSou
         }
 
 
+@dataclass(frozen=True, slots=True)
+class LocalProjectIndexScan:
+    """Walk result for one local project scan.
+
+    ``unreadable_directories`` names project-relative directories whose listing
+    failed mid-walk; their contents are absent from ``file_paths`` even though
+    the files may still exist, so callers must never treat that absence as a
+    delete signal.
+    """
+
+    file_paths: tuple[str, ...]
+    unreadable_directories: tuple[str, ...]
+
+
+def record_local_project_scan_walk_error(
+    error: OSError,
+    *,
+    project_root: Path,
+    unreadable_directories: list[str],
+) -> None:
+    """Classify one os.walk error raised during a local project scan."""
+    # Trigger: the walk error carries no directory attribution.
+    # Why: without a directory we cannot carry its indexed rows through the
+    # snapshot, so finishing the scan could still plan a mass delete for an
+    # unknown subtree.
+    # Outcome: fail the whole scan (RuntimeError bypasses the walk loop's
+    # partial-snapshot OSError handling); the next scan retries.
+    if error.filename is None:
+        raise RuntimeError("Local project scan failed without a directory attribution") from error
+    # Trigger: the project root itself is unreadable (missing/unmounted).
+    # Why: an empty snapshot would make the coordinator treat every indexed
+    # entity as deleted.
+    # Outcome: re-raise so the scan aborts instead of returning empty.
+    if Path(error.filename) == project_root:
+        raise error
+    unreadable_directory = Path(error.filename).relative_to(project_root).as_posix()
+    logger.warning(
+        "Recording unreadable directory during project scan",
+        path=unreadable_directory,
+        error=str(error),
+    )
+    unreadable_directories.append(unreadable_directory)
+
+
 def local_project_index_file_paths(
     project_root: Path,
     *,
     ignore_patterns: LocalProjectIndexIgnorePatterns | None = None,
 ) -> tuple[str, ...]:
     """Return sorted project-relative files eligible for local project indexing."""
+    return scan_local_project_index_files(project_root, ignore_patterns=ignore_patterns).file_paths
+
+
+def scan_local_project_index_files(
+    project_root: Path,
+    *,
+    ignore_patterns: LocalProjectIndexIgnorePatterns | None = None,
+) -> LocalProjectIndexScan:
+    """Walk one local project and report eligible files plus unreadable subtrees."""
     project_root = project_root.expanduser().resolve()
     active_ignore_patterns = (
         ignore_patterns if ignore_patterns is not None else load_gitignore_patterns(project_root)
     )
     file_paths: list[str] = []
+    unreadable_directories: list[str] = []
 
     # os.walk lets us prune ignored/hidden directories *before* descending —
     # rglob("*") would stat every file inside node_modules/.venv/.git first — and
@@ -160,12 +214,11 @@ def local_project_index_file_paths(
     # are skipped explicitly so the batch reader never reads outside the project
     # boundary. This restores the pre-refactor scanner's no-follow + dir-pruning.
     def _scan_error(error: OSError) -> None:
-        # Abort only if the project root itself is unreadable (missing/unmounted):
-        # returning an empty snapshot would make the coordinator treat every indexed
-        # entity as deleted. A failure deeper in the tree just prunes that subtree.
-        if error.filename is not None and Path(error.filename) == project_root:
-            raise error
-        logger.warning("Skipping unreadable directory during project scan", path=error.filename)
+        record_local_project_scan_walk_error(
+            error,
+            project_root=project_root,
+            unreadable_directories=unreadable_directories,
+        )
 
     walker = os.walk(project_root, followlinks=False, onerror=_scan_error)
     while True:
@@ -204,7 +257,10 @@ def local_project_index_file_paths(
                 continue
             file_paths.append(relative_path)
 
-    return tuple(sorted(file_paths))
+    return LocalProjectIndexScan(
+        file_paths=tuple(sorted(file_paths)),
+        unreadable_directories=tuple(unreadable_directories),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,11 +272,12 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
     indexed_stat_source: LocalProjectIndexedFileStatSource | None = None
 
     async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
-        file_paths = await asyncio.to_thread(
-            local_project_index_file_paths,
+        scan = await asyncio.to_thread(
+            scan_local_project_index_files,
             self.file_service.base_path,
             ignore_patterns=self.ignore_patterns,
         )
+        file_paths = scan.file_paths
         # Trigger: a stat source is wired (local runtime); it is absent in
         # cloud/tests that observe without a database.
         # Why: hashing every file on every startup is O(project bytes) and
@@ -266,6 +323,35 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
                     checksum=checksum,
                     size=metadata.size,
                 )
+            )
+
+        # Trigger: the walk could not list a directory below the project root,
+        # so every file under it is missing from the scan snapshot.
+        # Why: delete reconciliation plans all_db_paths - storage_paths; letting
+        # an unreadable subtree fall out of the snapshot would destroy the
+        # entity/search rows for every indexed file it contains (same hazard as
+        # a single unobservable file, carried above). Only the DB-backed stat
+        # source can enumerate the affected rows; the bare observed source
+        # (no indexed_stat_source) has nothing to carry.
+        # Outcome: indexed paths under the unreadable directory re-enter the
+        # snapshot with an unknown checksum, classifying as modified — the
+        # batch planner re-checks them next pass instead of deleting them.
+        for unreadable_directory in scan.unreadable_directories:
+            directory_prefix = f"{unreadable_directory}/"
+            carried_paths = sorted(
+                indexed_path
+                for indexed_path in indexed_stats
+                if indexed_path.startswith(directory_prefix)
+            )
+            if not carried_paths:
+                continue
+            logger.warning(
+                "Carrying indexed files under unreadable directory through change detection",
+                directory=unreadable_directory,
+                file_count=len(carried_paths),
+            )
+            observed_files.extend(
+                RuntimeObservedIndexFile(path=carried_path) for carried_path in carried_paths
             )
         return tuple(observed_files)
 

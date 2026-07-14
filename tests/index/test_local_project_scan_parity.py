@@ -1,5 +1,6 @@
 """Local project scan parity with the legacy sync oracle."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,10 @@ import pytest
 import basic_memory.index.local_project as local_project
 from basic_memory.index.local_project import (
     LocalProjectIndexObservedFileSource,
+    LocalProjectIndexScan,
     local_project_index_file_paths,
+    record_local_project_scan_walk_error,
+    scan_local_project_index_files,
 )
 from basic_memory.services import FileService
 
@@ -83,6 +87,69 @@ def test_local_project_index_file_paths_prunes_ignored_directories(
     assert not any(".hidden" in path for path in visited)
 
 
+def test_scan_local_project_index_files_records_unreadable_subdirectory(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """An unreadable subdirectory is reported, not silently pruned from the scan."""
+    project_root = tmp_path.resolve()
+    (project_root / "keep.md").write_text("# keep\n", encoding="utf-8")
+    locked_dir = project_root / "locked"
+    locked_dir.mkdir()
+    (locked_dir / "note.md").write_text("# locked\n", encoding="utf-8")
+
+    real_walk = os.walk
+
+    def walk_with_locked_scandir_error(top, *, followlinks, onerror):
+        # Emulate exactly what os.walk does when scandir(locked) fails: report
+        # the directory through onerror and never yield its listing.
+        for dirpath, dirnames, filenames in real_walk(
+            top, followlinks=followlinks, onerror=onerror
+        ):
+            if Path(dirpath) == locked_dir:
+                onerror(PermissionError(13, "Permission denied", str(locked_dir)))
+                continue
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(local_project.os, "walk", walk_with_locked_scandir_error)
+
+    scan = scan_local_project_index_files(project_root, ignore_patterns=set())
+
+    assert scan.file_paths == ("keep.md",)
+    assert scan.unreadable_directories == ("locked",)
+
+
+def test_record_local_project_scan_walk_error_classifies_root_none_and_subtree(
+    tmp_path: Path,
+) -> None:
+    """Root failures abort, unattributed failures fail the scan, subtrees are recorded."""
+    project_root = tmp_path.resolve()
+    unreadable_directories: list[str] = []
+
+    root_error = PermissionError(13, "Permission denied", str(project_root))
+    with pytest.raises(PermissionError):
+        record_local_project_scan_walk_error(
+            root_error,
+            project_root=project_root,
+            unreadable_directories=unreadable_directories,
+        )
+
+    with pytest.raises(RuntimeError, match="without a directory attribution"):
+        record_local_project_scan_walk_error(
+            PermissionError(13, "Permission denied"),
+            project_root=project_root,
+            unreadable_directories=unreadable_directories,
+        )
+    assert unreadable_directories == []
+
+    record_local_project_scan_walk_error(
+        PermissionError(13, "Permission denied", str(project_root / "locked" / "deep")),
+        project_root=project_root,
+        unreadable_directories=unreadable_directories,
+    )
+    assert unreadable_directories == ["locked/deep"]
+
+
 def test_local_project_index_file_paths_aborts_when_root_unreadable(tmp_path: Path) -> None:
     """A missing/unmounted project root must raise, not return an empty snapshot —
     the coordinator would otherwise classify every indexed entity as deleted."""
@@ -117,15 +184,18 @@ async def test_local_project_index_observed_file_source_skips_files_missing_afte
     keep_path.write_text("# Keep\n", encoding="utf-8")
     warnings: list[tuple[str, dict[str, object]]] = []
 
-    def discovered_paths(*args, **kwargs) -> tuple[str, ...]:
-        return ("missing.md", "keep.md")
+    def discovered_scan(*args, **kwargs) -> LocalProjectIndexScan:
+        return LocalProjectIndexScan(
+            file_paths=("missing.md", "keep.md"),
+            unreadable_directories=(),
+        )
 
     def record_warning(message: str, **kwargs: object) -> None:
         warnings.append((message, kwargs))
 
     monkeypatch.setattr(
-        "basic_memory.index.local_project.local_project_index_file_paths",
-        discovered_paths,
+        "basic_memory.index.local_project.scan_local_project_index_files",
+        discovered_scan,
     )
     monkeypatch.setattr(local_project.logger, "warning", record_warning)
 
