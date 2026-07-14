@@ -471,6 +471,166 @@ async def delete_project_index_entities(
 
 
 @dataclass(frozen=True, slots=True)
+class _MoveReplacementScreen:
+    """Move-batch rows that survive destination verification."""
+
+    target_rows: list[RowMapping]
+    replacement_rows: list[RowMapping]
+    dropped_move_paths: tuple[str, ...]
+
+
+def _screen_replaced_move_targets(
+    *,
+    target_rows: list[RowMapping],
+    replacement_rows: list[RowMapping],
+    target_paths_by_old_path: dict[str, str],
+) -> _MoveReplacementScreen:
+    """Drop planned moves whose destination row indexes different content.
+
+    The move was planned by matching the destination file's checksum to the
+    source entity's indexed checksum, so that checksum is the only content a
+    replacement row may legitimately index. A mismatch means the destination
+    holds a concurrently created entity (e.g. an accepted-but-unmaterialized
+    note); deleting it would destroy that entity, so the move is dropped for
+    the next scan to reconcile.
+    """
+    old_path_by_new_path = {
+        target_paths_by_old_path[str(row["file_path"])]: str(row["file_path"])
+        for row in target_rows
+    }
+    expected_checksum_by_new_path = {
+        target_paths_by_old_path[str(row["file_path"])]: row["checksum"] for row in target_rows
+    }
+    verified_replacement_rows: list[RowMapping] = []
+    dropped_new_paths: set[str] = set()
+    for replacement_row in replacement_rows:
+        replacement_path = str(replacement_row["file_path"])
+        expected_checksum = expected_checksum_by_new_path.get(replacement_path)
+        if expected_checksum is not None and replacement_row["checksum"] == expected_checksum:
+            verified_replacement_rows.append(replacement_row)
+            continue
+        dropped_new_paths.add(replacement_path)
+        logger.warning(
+            "Dropping planned move: destination holds a concurrently created entity",
+            old_path=old_path_by_new_path.get(replacement_path),
+            new_path=replacement_path,
+        )
+
+    if not dropped_new_paths:
+        return _MoveReplacementScreen(
+            target_rows=target_rows,
+            replacement_rows=verified_replacement_rows,
+            dropped_move_paths=(),
+        )
+    return _MoveReplacementScreen(
+        target_rows=[
+            row
+            for row in target_rows
+            if target_paths_by_old_path[str(row["file_path"])] not in dropped_new_paths
+        ],
+        replacement_rows=verified_replacement_rows,
+        dropped_move_paths=tuple(
+            sorted(old_path_by_new_path[new_path] for new_path in dropped_new_paths)
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _MoveContentPlan:
+    """Planned frontmatter rewrites for one move batch, keyed by entity id."""
+
+    updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate]
+    moved_files_by_entity_id: dict[int, ProjectIndexMovedFile]
+
+    @classmethod
+    def empty(cls) -> "_MoveContentPlan":
+        return cls(updates_by_entity_id={}, moved_files_by_entity_id={})
+
+
+@dataclass(frozen=True, slots=True)
+class _MoveBatchUpdateValues:
+    """Parallel per-table CASE assignments for one move batch."""
+
+    entity_values: dict[str, object]
+    note_content_values: dict[str, object]
+    search_index_values: dict[str, object]
+    permalinks_by_entity_id: dict[int, str]
+
+
+def _build_move_batch_update_values(
+    *,
+    target_paths_by_old_path: dict[str, str],
+    target_paths_by_entity_id: dict[int, str],
+    content_updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate],
+) -> _MoveBatchUpdateValues:
+    """Assemble the parallel CASE assignments for entity/note_content/search_index.
+
+    Every table repoints file_path in one statement; when content repair was
+    planned, the checksum/permalink/markdown columns join those same statements
+    so the batch transaction stamps rows that agree with the post-commit file
+    writes.
+    """
+    entity_values: dict[str, object] = {
+        "file_path": case(target_paths_by_old_path, value=Entity.file_path)
+    }
+    note_content_values: dict[str, object] = {
+        "file_path": case(target_paths_by_entity_id, value=NoteContent.entity_id)
+    }
+    search_index_values: dict[str, object] = {
+        "file_path": case(
+            target_paths_by_entity_id,
+            value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
+        )
+    }
+    permalinks_by_entity_id: dict[int, str] = {}
+    if content_updates_by_entity_id:
+        checksums_by_entity_id = {
+            entity_id: content_update.checksum
+            for entity_id, content_update in content_updates_by_entity_id.items()
+        }
+        markdown_by_entity_id = {
+            entity_id: content_update.markdown_content
+            for entity_id, content_update in content_updates_by_entity_id.items()
+        }
+        permalinks_by_entity_id = {
+            entity_id: content_update.permalink
+            for entity_id, content_update in content_updates_by_entity_id.items()
+        }
+        entity_values["checksum"] = case(
+            checksums_by_entity_id,
+            value=Entity.id,
+            else_=Entity.checksum,
+        )
+        entity_values["permalink"] = case(
+            permalinks_by_entity_id,
+            value=Entity.id,
+            else_=Entity.permalink,
+        )
+        note_content_values["db_checksum"] = case(
+            checksums_by_entity_id,
+            value=NoteContent.entity_id,
+            else_=NoteContent.db_checksum,
+        )
+        note_content_values["file_checksum"] = case(
+            checksums_by_entity_id,
+            value=NoteContent.entity_id,
+            else_=NoteContent.file_checksum,
+        )
+        note_content_values["markdown_content"] = case(
+            markdown_by_entity_id,
+            value=NoteContent.entity_id,
+            else_=NoteContent.markdown_content,
+        )
+
+    return _MoveBatchUpdateValues(
+        entity_values=entity_values,
+        note_content_values=note_content_values,
+        search_index_values=search_index_values,
+        permalinks_by_entity_id=permalinks_by_entity_id,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class RepositoryProjectIndexMaintenanceStore:
     """Apply project-index move/delete maintenance with explicit sessions."""
 
@@ -499,101 +659,51 @@ class RepositoryProjectIndexMaintenanceStore:
         target_paths_by_old_path = {
             move_target.old_path: move_target.new_path for move_target in move_batch.targets
         }
-        old_paths = tuple(target_paths_by_old_path)
 
         async with db.scoped_session(self.session_maker) as session:
+            # --- Load the indexed rows the batch may rewrite ---
             existing_paths_result = await session.execute(
                 select(Entity.id, Entity.file_path, Entity.permalink, Entity.checksum).where(
                     Entity.project_id == self.project_id,
-                    Entity.file_path.in_(old_paths),
+                    Entity.file_path.in_(tuple(target_paths_by_old_path)),
                 )
             )
             target_rows = list(existing_paths_result.mappings().all())
-            replaced_entity_ids: frozenset[int] = frozenset()
-            relation_cleanup_entity_ids: frozenset[int] = frozenset()
+            replacement_rows = await self._load_move_replacement_rows(
+                session,
+                target_rows=target_rows,
+                target_paths_by_old_path=target_paths_by_old_path,
+            )
+
+            # --- Screen destinations recreated concurrently ---
+            # See verify_replaced_move_targets above: only scan runtimes verify,
+            # and only when a row already occupies a destination path.
             dropped_move_paths: tuple[str, ...] = ()
-            content_updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate] = {}
-            replacement_rows: list[RowMapping] = []
-
-            if target_rows:
-                new_paths = tuple(
-                    sorted({target_paths_by_old_path[str(row["file_path"])] for row in target_rows})
-                )
-                replacement_result = await session.execute(
-                    select(Entity.id, Entity.file_path, Entity.checksum).where(
-                        Entity.project_id == self.project_id,
-                        Entity.file_path.in_(new_paths),
-                        Entity.id.not_in(tuple(int(row["id"]) for row in target_rows)),
-                    )
-                )
-                replacement_rows = list(replacement_result.mappings().all())
-
             if self.verify_replaced_move_targets and replacement_rows:
-                old_path_by_new_path = {
-                    target_paths_by_old_path[str(row["file_path"])]: str(row["file_path"])
-                    for row in target_rows
-                }
-                # The move was planned by matching the destination file's checksum
-                # to the source entity's indexed checksum, so that checksum is the
-                # only content a replacement row may legitimately index.
-                expected_checksum_by_new_path = {
-                    target_paths_by_old_path[str(row["file_path"])]: row["checksum"]
-                    for row in target_rows
-                }
-                verified_replacement_rows: list[RowMapping] = []
-                dropped_new_paths: set[str] = set()
-                for replacement_row in replacement_rows:
-                    replacement_path = str(replacement_row["file_path"])
-                    expected_checksum = expected_checksum_by_new_path.get(replacement_path)
-                    if (
-                        expected_checksum is not None
-                        and replacement_row["checksum"] == expected_checksum
-                    ):
-                        verified_replacement_rows.append(replacement_row)
-                        continue
-                    dropped_new_paths.add(replacement_path)
-                    logger.warning(
-                        "Dropping planned move: destination holds a concurrently created entity",
-                        old_path=old_path_by_new_path.get(replacement_path),
-                        new_path=replacement_path,
-                    )
-                replacement_rows = verified_replacement_rows
-                if dropped_new_paths:
-                    dropped_move_paths = tuple(
-                        sorted(old_path_by_new_path[new_path] for new_path in dropped_new_paths)
-                    )
-                    target_rows = [
-                        row
-                        for row in target_rows
-                        if target_paths_by_old_path[str(row["file_path"])] not in dropped_new_paths
-                    ]
+                replacement_screen = _screen_replaced_move_targets(
+                    target_rows=target_rows,
+                    replacement_rows=replacement_rows,
+                    target_paths_by_old_path=target_paths_by_old_path,
+                )
+                target_rows = replacement_screen.target_rows
+                replacement_rows = replacement_screen.replacement_rows
+                dropped_move_paths = replacement_screen.dropped_move_paths
 
+            # --- Plan provider-specific content repair inside the transaction ---
             updated_old_paths = frozenset(str(row["file_path"]) for row in target_rows)
             target_paths_by_entity_id = {
                 int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
                 for row in target_rows
             }
-            planned_moved_files_by_entity_id: dict[int, ProjectIndexMovedFile] = {}
-            if self.move_content_updater is not None:
-                for row in target_rows:
-                    entity_id = int(row["id"])
-                    old_path = str(row["file_path"])
-                    moved_file = ProjectIndexMovedFile(
-                        entity_id=entity_id,
-                        old_path=old_path,
-                        new_path=target_paths_by_old_path[old_path],
-                        old_permalink=(
-                            str(row["permalink"]) if row["permalink"] is not None else None
-                        ),
-                    )
-                    content_update = await self.move_content_updater.plan_moved_file_content(
-                        session,
-                        moved_file,
-                    )
-                    if content_update is not None:
-                        content_updates_by_entity_id[entity_id] = content_update
-                        planned_moved_files_by_entity_id[entity_id] = moved_file
+            content_plan = await self._plan_move_content_updates(
+                session,
+                target_rows=target_rows,
+                target_paths_by_old_path=target_paths_by_old_path,
+            )
 
+            # --- Apply the batched replacement deletes and path/content updates ---
+            replaced_entity_ids: frozenset[int] = frozenset()
+            relation_cleanup_entity_ids: frozenset[int] = frozenset()
             if updated_old_paths:
                 replaced_entity_ids = frozenset(int(row["id"]) for row in replacement_rows)
                 relation_cleanup_entity_ids = await delete_project_index_entities(
@@ -601,130 +711,21 @@ class RepositoryProjectIndexMaintenanceStore:
                     project_id=self.project_id,
                     entity_ids=tuple(replaced_entity_ids),
                 )
-
-                entity_update_values = {
-                    "file_path": case(
-                        target_paths_by_old_path,
-                        value=Entity.file_path,
-                    )
-                }
-                note_content_update_values = {
-                    "file_path": case(
-                        target_paths_by_entity_id,
-                        value=NoteContent.entity_id,
-                    )
-                }
-                search_index_update_values = {
-                    "file_path": case(
-                        target_paths_by_entity_id,
-                        value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
-                    )
-                }
-                if content_updates_by_entity_id:
-                    checksums_by_entity_id = {
-                        entity_id: content_update.checksum
-                        for entity_id, content_update in content_updates_by_entity_id.items()
-                    }
-                    markdown_by_entity_id = {
-                        entity_id: content_update.markdown_content
-                        for entity_id, content_update in content_updates_by_entity_id.items()
-                    }
-                    permalinks_by_entity_id = {
-                        entity_id: content_update.permalink
-                        for entity_id, content_update in content_updates_by_entity_id.items()
-                    }
-                    entity_update_values["checksum"] = case(
-                        checksums_by_entity_id,
-                        value=Entity.id,
-                        else_=Entity.checksum,
-                    )
-                    entity_update_values["permalink"] = case(
-                        permalinks_by_entity_id,
-                        value=Entity.id,
-                        else_=Entity.permalink,
-                    )
-                    note_content_update_values["db_checksum"] = case(
-                        checksums_by_entity_id,
-                        value=NoteContent.entity_id,
-                        else_=NoteContent.db_checksum,
-                    )
-                    note_content_update_values["file_checksum"] = case(
-                        checksums_by_entity_id,
-                        value=NoteContent.entity_id,
-                        else_=NoteContent.file_checksum,
-                    )
-                    note_content_update_values["markdown_content"] = case(
-                        markdown_by_entity_id,
-                        value=NoteContent.entity_id,
-                        else_=NoteContent.markdown_content,
-                    )
-
-                await session.execute(
-                    update(Entity)
-                    .where(
-                        Entity.project_id == self.project_id,
-                        Entity.file_path.in_(updated_old_paths),
-                    )
-                    .values(**entity_update_values)
+                await self._execute_move_batch_updates(
+                    session,
+                    updated_old_paths=updated_old_paths,
+                    target_paths_by_entity_id=target_paths_by_entity_id,
+                    update_values=_build_move_batch_update_values(
+                        target_paths_by_old_path=target_paths_by_old_path,
+                        target_paths_by_entity_id=target_paths_by_entity_id,
+                        content_updates_by_entity_id=content_plan.updates_by_entity_id,
+                    ),
                 )
-                await session.execute(
-                    update(NoteContent)
-                    .where(
-                        NoteContent.project_id == self.project_id,
-                        NoteContent.entity_id.in_(tuple(target_paths_by_entity_id)),
-                    )
-                    .values(**note_content_update_values)
-                )
-                await session.execute(
-                    update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
-                    .where(
-                        PROJECT_INDEX_SEARCH_INDEX_TABLE.c.project_id == self.project_id,
-                        PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id.in_(
-                            tuple(target_paths_by_entity_id)
-                        ),
-                    )
-                    .values(**search_index_update_values)
-                )
-                if content_updates_by_entity_id:
-                    await session.execute(
-                        update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
-                        .where(
-                            PROJECT_INDEX_SEARCH_INDEX_TABLE.c.project_id == self.project_id,
-                            PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id.in_(
-                                tuple(content_updates_by_entity_id)
-                            ),
-                            PROJECT_INDEX_SEARCH_INDEX_TABLE.c.type == "entity",
-                        )
-                        .values(
-                            permalink=case(
-                                permalinks_by_entity_id,
-                                value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
-                            )
-                        )
-                    )
 
-        # Trigger: the batch committed with entity/note_content rows stamped from
-        # the planned markdown, and the files still hold their pre-move metadata.
-        # Why: writing files inside the transaction is not atomic with it — a
-        #      rollback would revert the database while the on-disk frontmatter
-        #      rewrites persisted, leaving files ahead of their indexed state.
-        # Outcome: writes happen only after a successful commit; a failed write
-        #          leaves the file with a checksum that no longer matches its
-        #          rows, which the next scan reconciles as a modified file.
-        if self.move_content_updater is not None:
-            for entity_id, content_update in content_updates_by_entity_id.items():
-                try:
-                    await self.move_content_updater.write_moved_file_content(
-                        planned_moved_files_by_entity_id[entity_id],
-                        content_update,
-                    )
-                except Exception as write_error:
-                    logger.error(
-                        "Failed to write moved file content after move batch commit",
-                        path=planned_moved_files_by_entity_id[entity_id].new_path,
-                        error=str(write_error),
-                    )
+        # --- Write planned file content after the commit ---
+        await self._write_moved_file_contents(content_plan)
 
+        # --- Report per-path outcomes ---
         missing_paths = tuple(
             move_target.old_path
             for move_target in move_batch.targets
@@ -739,6 +740,154 @@ class RepositoryProjectIndexMaintenanceStore:
             missing_paths=missing_paths,
             dropped_move_paths=dropped_move_paths,
         )
+
+    async def _load_move_replacement_rows(
+        self,
+        session: AsyncSession,
+        *,
+        target_rows: list[RowMapping],
+        target_paths_by_old_path: dict[str, str],
+    ) -> list[RowMapping]:
+        """Load entities already occupying the batch's move destinations.
+
+        Rows can appear there when the watcher legitimately moves onto an
+        existing indexed file, or when a racing event index created the moved
+        file at its new path first; survivors are deleted so the source entity
+        can take over the path.
+        """
+        if not target_rows:
+            return []
+        new_paths = tuple(
+            sorted({target_paths_by_old_path[str(row["file_path"])] for row in target_rows})
+        )
+        replacement_result = await session.execute(
+            select(Entity.id, Entity.file_path, Entity.checksum).where(
+                Entity.project_id == self.project_id,
+                Entity.file_path.in_(new_paths),
+                Entity.id.not_in(tuple(int(row["id"]) for row in target_rows)),
+            )
+        )
+        return list(replacement_result.mappings().all())
+
+    async def _plan_move_content_updates(
+        self,
+        session: AsyncSession,
+        *,
+        target_rows: list[RowMapping],
+        target_paths_by_old_path: dict[str, str],
+    ) -> _MoveContentPlan:
+        """Plan provider-specific frontmatter rewrites inside the batch transaction.
+
+        Planning must not mutate storage: the batch can still roll back, and an
+        already-rewritten file would survive that rollback (see
+        ProjectIndexMoveContentUpdater). Runtimes without a content updater skip
+        content repair entirely.
+        """
+        if self.move_content_updater is None:
+            return _MoveContentPlan.empty()
+
+        updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate] = {}
+        moved_files_by_entity_id: dict[int, ProjectIndexMovedFile] = {}
+        for row in target_rows:
+            entity_id = int(row["id"])
+            old_path = str(row["file_path"])
+            moved_file = ProjectIndexMovedFile(
+                entity_id=entity_id,
+                old_path=old_path,
+                new_path=target_paths_by_old_path[old_path],
+                old_permalink=(str(row["permalink"]) if row["permalink"] is not None else None),
+            )
+            content_update = await self.move_content_updater.plan_moved_file_content(
+                session,
+                moved_file,
+            )
+            if content_update is not None:
+                updates_by_entity_id[entity_id] = content_update
+                moved_files_by_entity_id[entity_id] = moved_file
+        return _MoveContentPlan(
+            updates_by_entity_id=updates_by_entity_id,
+            moved_files_by_entity_id=moved_files_by_entity_id,
+        )
+
+    async def _execute_move_batch_updates(
+        self,
+        session: AsyncSession,
+        *,
+        updated_old_paths: frozenset[str],
+        target_paths_by_entity_id: dict[int, str],
+        update_values: _MoveBatchUpdateValues,
+    ) -> None:
+        """Run the batched UPDATE statements for one screened set of moves."""
+        await session.execute(
+            update(Entity)
+            .where(
+                Entity.project_id == self.project_id,
+                Entity.file_path.in_(updated_old_paths),
+            )
+            .values(**update_values.entity_values)
+        )
+        await session.execute(
+            update(NoteContent)
+            .where(
+                NoteContent.project_id == self.project_id,
+                NoteContent.entity_id.in_(tuple(target_paths_by_entity_id)),
+            )
+            .values(**update_values.note_content_values)
+        )
+        await session.execute(
+            update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
+            .where(
+                PROJECT_INDEX_SEARCH_INDEX_TABLE.c.project_id == self.project_id,
+                PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id.in_(tuple(target_paths_by_entity_id)),
+            )
+            .values(**update_values.search_index_values)
+        )
+        # Entity search rows carry a permalink column that only changes when
+        # content repair rewrote the note's permalink frontmatter.
+        if update_values.permalinks_by_entity_id:
+            await session.execute(
+                update(PROJECT_INDEX_SEARCH_INDEX_TABLE)
+                .where(
+                    PROJECT_INDEX_SEARCH_INDEX_TABLE.c.project_id == self.project_id,
+                    PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id.in_(
+                        tuple(update_values.permalinks_by_entity_id)
+                    ),
+                    PROJECT_INDEX_SEARCH_INDEX_TABLE.c.type == "entity",
+                )
+                .values(
+                    permalink=case(
+                        update_values.permalinks_by_entity_id,
+                        value=PROJECT_INDEX_SEARCH_INDEX_TABLE.c.entity_id,
+                    )
+                )
+            )
+
+    async def _write_moved_file_contents(self, content_plan: _MoveContentPlan) -> None:
+        """Write planned frontmatter rewrites once the batch has committed.
+
+        Trigger: the batch committed with entity/note_content rows stamped from
+        the planned markdown, and the files still hold their pre-move metadata.
+        Why: writing files inside the transaction is not atomic with it — a
+        rollback would revert the database while the on-disk frontmatter
+        rewrites persisted, leaving files ahead of their indexed state.
+        Outcome: writes happen only after a successful commit; a failed write
+        leaves the file with a checksum that no longer matches its rows, which
+        the next scan reconciles as a modified file.
+        """
+        if self.move_content_updater is None:
+            return
+        for entity_id, content_update in content_plan.updates_by_entity_id.items():
+            try:
+                await self.move_content_updater.write_moved_file_content(
+                    content_plan.moved_files_by_entity_id[entity_id],
+                    content_update,
+                )
+            except Exception as write_error:
+                logger.error(
+                    "Failed to write moved file content after move batch commit",
+                    path=content_plan.moved_files_by_entity_id[entity_id].new_path,
+                    error=str(write_error),
+                )
 
     async def apply_project_index_delete_batch(
         self,

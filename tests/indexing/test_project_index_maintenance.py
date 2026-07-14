@@ -562,6 +562,53 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
 
 
 @pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_move_batch_handles_empty_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch with no targets returns before touching the database, and a batch
+    whose paths match no indexed rows reports them missing without deleting or
+    updating anything."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(results=[FakeProjectIndexResult()])
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    empty_result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(completed_batches=1, targets=())
+    )
+    assert empty_result == ProjectIndexMoveBatchResult(updated_files=0)
+    assert session.statements == []
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/gone.md", "archive/gone.md"),),
+        )
+    )
+    assert result == ProjectIndexMoveBatchResult(
+        updated_files=0,
+        missing_paths=("notes/gone.md",),
+    )
+    # Only the target-row select ran: no replacement lookup, deletes, or updates.
+    assert len(session.statements) == 1
+
+
+@pytest.mark.asyncio
 async def test_repository_project_index_maintenance_store_deletes_replaced_move_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
