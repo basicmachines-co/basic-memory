@@ -9,7 +9,8 @@ from basic_memory.indexing.project_delete_acceptance import (
 from basic_memory.runtime.jobs import RuntimeProjectDeleteJobRequest
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: ProjectDeleteAcceptedProjectSource declares plain (writable) attribute members.
+@dataclass(slots=True)
 class ProjectSource:
     id: int
     external_id: str

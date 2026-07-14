@@ -30,7 +30,8 @@ from basic_memory.indexing.project_index_workflow import (
 )
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: ProjectIndexRequestSource declares plain (writable) attribute members.
+@dataclass(slots=True)
 class ProjectIndexSource:
     project_id: int
     project_external_id: str

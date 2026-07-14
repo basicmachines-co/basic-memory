@@ -2426,7 +2426,8 @@ class RuntimeFactorySearchIndex:
         return RuntimeFactoryVectorBatchResult(entities_synced=len(entity_ids))
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: EmbeddingIndexBatchSummary declares plain (writable) attribute members.
+@dataclass(slots=True)
 class RuntimeFactoryVectorBatchResult:
     entities_synced: int
     entities_skipped: int = 0

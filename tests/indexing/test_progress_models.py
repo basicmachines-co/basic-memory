@@ -10,7 +10,8 @@ from basic_memory.indexing.progress import (
 )
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: VectorSyncBatchSummary declares plain (writable) attribute members.
+@dataclass(slots=True)
 class BatchSummary:
     """Small fake proving progress updates only need a narrow batch protocol."""
 

@@ -30,7 +30,8 @@ from basic_memory.runtime.jobs import (
 from basic_memory.runtime.projects import ProjectRuntimeReference
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: ProjectIndexRequestSource declares plain (writable) attribute members.
+@dataclass(slots=True)
 class ProjectIndexSource:
     project_id: int
     project_external_id: str
@@ -110,7 +111,8 @@ class StaticProjectIndexBatchEnqueuer:
         return self.result
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: EmbeddingIndexBatchSummary declares plain (writable) attribute members.
+@dataclass(slots=True)
 class RecordingEmbeddingBatchSummary:
     entities_synced: int
     entities_skipped: int = 0

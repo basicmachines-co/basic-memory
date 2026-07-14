@@ -62,7 +62,8 @@ class RecordingFrontmatterStorage:
         raise AssertionError("construction test should not write frontmatter")
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: IndexedNoteContentEntity declares plain (writable) attribute members.
+@dataclass(slots=True)
 class FakeEntity:
     id: int
 

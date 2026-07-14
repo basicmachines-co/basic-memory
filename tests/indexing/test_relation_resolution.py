@@ -79,7 +79,8 @@ class FakeSession:
         pass
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: UnresolvedRelation declares plain (writable) attribute members.
+@dataclass(slots=True)
 class FakeRelation:
     id: int
     from_id: int
@@ -87,7 +88,8 @@ class FakeRelation:
     relation_type: str = "related_to"
 
 
-@dataclass(frozen=True, slots=True)
+# Not frozen: ResolvedRelationTarget declares plain (writable) attribute members.
+@dataclass(slots=True)
 class FakeResolvedEntity:
     id: int
     title: str
