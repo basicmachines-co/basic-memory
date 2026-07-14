@@ -218,16 +218,21 @@ class RuntimeNoteContentStateSource(Protocol):
 
 
 class RuntimePendingNoteMaterializationSource(Protocol):
-    """Minimal note_content row shape needed to queue materialization work."""
+    """Minimal note_content row shape needed to queue materialization work.
+
+    Input-typed on purpose: downstream runtimes replay these values from
+    persisted job payloads where a driver may deliver a string, so planning
+    coerces instead of trusting the declared shape.
+    """
 
     @property
-    def db_version(self) -> RuntimeNoteContentVersion: ...
+    def db_version(self) -> RuntimeNoteContentVersionInput: ...
 
     @property
-    def db_checksum(self) -> RuntimeNoteContentChecksum: ...
+    def db_checksum(self) -> object: ...
 
     @property
-    def last_source(self) -> RuntimeNoteChangeSource | None: ...
+    def last_source(self) -> object | None: ...
 
 
 class RuntimeAcceptedNoteWriteContentSource(
@@ -722,12 +727,12 @@ def plan_pending_note_materialization(
     return RuntimePendingNoteMaterialization(
         project_id=project_id,
         entity_id=entity_id,
-        db_version=note_content.db_version,
-        db_checksum=note_content.db_checksum,
+        db_version=int(note_content.db_version),
+        db_checksum=str(note_content.db_checksum),
         actor_user_profile_id=actor_user_profile_id,
         actor_kind=actor_kind,
         actor_name=actor_name,
-        source=source or None,
+        source=str(source) if source else None,
         cleanup_after_write=cleanup_after_write,
     )
 

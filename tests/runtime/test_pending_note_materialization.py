@@ -55,6 +55,23 @@ def test_plan_pending_note_materialization_uses_fallback_source_when_missing() -
     )
 
 
+def test_plan_pending_note_materialization_coerces_replayed_payload_values() -> None:
+    materialization = plan_pending_note_materialization(
+        project_id=7,
+        entity_id=42,
+        note_content=_NoteContentState(
+            db_version="4",
+            db_checksum="db-checksum",
+            last_source=None,
+        ),
+        fallback_source="api",
+    )
+
+    assert materialization.db_version == 4
+    assert materialization.db_checksum == "db-checksum"
+    assert materialization.source == "api"
+
+
 def test_plan_pending_note_materialization_prefers_note_source() -> None:
     materialization = plan_pending_note_materialization(
         project_id=7,
