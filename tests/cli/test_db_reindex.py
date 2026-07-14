@@ -344,9 +344,7 @@ async def test_reindex_recovers_stuck_materializations_before_scan(monkeypatch, 
 
     async def record_project_index(project, *, runtime_factory, force_full, embeddings):
         call_order.append(f"index:{project.name}")
-        return SimpleNamespace(
-            total_files=0, enqueued_files=0, enqueued_batches=0, deleted_files=0
-        )
+        return SimpleNamespace(total_files=0, enqueued_files=0, enqueued_batches=0, deleted_files=0)
 
     # _reindex imports its database/index dependencies at call time (#886),
     # so stubs target the source modules instead of db_cmd attributes.

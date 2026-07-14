@@ -87,9 +87,7 @@ async def recover_project_materializations(
                 recovered=recovered,
             )
     except Exception as e:  # pragma: no cover - defensive startup guard
-        logger.error(
-            f"Error recovering stuck materializations for project {project.name}: {e}"
-        )
+        logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:

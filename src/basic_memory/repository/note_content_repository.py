@@ -22,6 +22,7 @@ class NoteContentVersionConflict(Exception):
     than silently clobbering the winner (last-write-wins).
     """
 
+
 NOTE_CONTENT_MUTABLE_FIELDS = frozenset(
     {
         "markdown_content",
@@ -326,9 +327,7 @@ class NoteContentRepository(Repository[NoteContent]):
             raise ValueError(f"Can't find NoteContent for entity {entity_id} after update")
         return updated
 
-    async def find_stuck_materializations(
-        self, session: AsyncSession
-    ) -> Sequence[NoteContent]:
+    async def find_stuck_materializations(self, session: AsyncSession) -> Sequence[NoteContent]:
         """Return accepted notes whose file write never completed.
 
         ``accept_write`` marks a row ``pending`` and the materialization preflight
