@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.note_content_read_repair_runner import (
+    ENTITY_METADATA_PAYLOAD_EXCLUDE,
     NoteContentReadRepairFile,
     NoteContentReadRepairPreflight,
     NoteContentReadRepairReconcilerProvider,
@@ -22,6 +23,7 @@ from basic_memory.indexing.note_content_read_repair_runner import (
     prepare_note_content_read_repair,
     run_note_content_read_repair,
 )
+from basic_memory.schemas.v2.entity import EntityResponseV2
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteResponse,
     RuntimeNoteContentReadRepairStatus,
@@ -293,7 +295,14 @@ def test_note_content_response_payload_from_read_view_returns_entity_payload_for
     assert payload_dict["note_type"] == "file"
     assert payload_dict["content_type"] == "image/png"
     assert payload_dict["file_path"] == "images/diagram.png"
-    assert "db_version" not in payload_dict
+    # The payload is the full EntityResponseV2 dump minus exactly the excluded
+    # note_content bookkeeping fields.
+    assert set(payload_dict) == set(EntityResponseV2.model_fields) - ENTITY_METADATA_PAYLOAD_EXCLUDE
+
+
+def test_entity_metadata_payload_exclusions_name_real_response_fields() -> None:
+    """Every excluded name must be a real EntityResponseV2 field, or exclusion drifts."""
+    assert ENTITY_METADATA_PAYLOAD_EXCLUDE <= EntityResponseV2.model_fields.keys()
 
 
 def test_note_content_resource_from_read_view_returns_accepted_markdown_resource() -> None:

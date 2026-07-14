@@ -354,6 +354,35 @@ async def load_note_content_read_view_with_default_repositories(
     )
 
 
+# EntityResponseV2 also carries the accepted note_content bookkeeping columns
+# (versions, checksums, write status). Metadata-only note-content reads omit them
+# so route payloads do not leak DB-internal write state; a test pins every name
+# here to a real EntityResponseV2 field so the set cannot drift silently.
+ENTITY_METADATA_PAYLOAD_EXCLUDE: frozenset[str] = frozenset(
+    {
+        "db_version",
+        "db_checksum",
+        "file_version",
+        "file_checksum",
+        "file_write_status",
+        "last_source",
+        "file_updated_at",
+        "last_materialization_error",
+        "sync_error",
+    }
+)
+
+
+def entity_metadata_response_payload[EntityT: NoteContentReadResponseEntitySource](
+    entity: EntityT,
+) -> RuntimeNoteContentResponsePayload:
+    """Serialize the metadata-only payload for a non-accepted note-content read."""
+    return EntityResponseV2.model_validate(entity).model_dump(
+        mode="json",
+        exclude=set(ENTITY_METADATA_PAYLOAD_EXCLUDE),
+    )
+
+
 def note_content_response_payload_from_read_view[
     EntityT: NoteContentReadResponseEntitySource,
     NoteContentT: RuntimeNoteContentStateSource,
@@ -366,20 +395,7 @@ def note_content_response_payload_from_read_view[
 
     read_plan = plan_runtime_note_content_read(view.entity, view.note_content)
     if read_plan.action is RuntimeNoteContentReadAction.entity_metadata:
-        return EntityResponseV2.model_validate(read_plan.require_entity_metadata()).model_dump(
-            mode="json",
-            exclude={
-                "db_version",
-                "db_checksum",
-                "file_version",
-                "file_checksum",
-                "file_write_status",
-                "last_source",
-                "file_updated_at",
-                "last_materialization_error",
-                "sync_error",
-            },
-        )
+        return entity_metadata_response_payload(read_plan.require_entity_metadata())
 
     if read_plan.action is not RuntimeNoteContentReadAction.accepted_note:
         return None
