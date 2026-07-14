@@ -29,8 +29,7 @@ dependencies = [
     "alembic>=1.14.1",
     "pillow>=11.1.0",
     "pybars3>=0.9.7",
-    # Keep FastMCP pinned until each minor upgrade passes the MCP transport matrix.
-    "fastmcp==3.3.1",
+    "fastmcp>=3.3.1,<4",
     "pyjwt>=2.10.1",
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
@@ -48,7 +47,9 @@ dependencies = [
     "fastembed>=0.7.4",
     "sqlite-vec>=0.1.6",
     "openai>=1.100.2",
-    "litellm>=1.60.0,<2.0.0",
+    # LiteLLM 1.92 added a Rust bridge whose PyO3 version rejects Python 3.14.
+    # Keep the last universal wheel while Basic Memory supports Python 3.14.
+    "litellm>=1.60.0,<1.92.0",
     "logfire>=4.19.0",
     "psutil>=5.9.0",
     # uvloop's C event loop has no self._ready.popleft() codepath, so the
@@ -141,6 +142,10 @@ reportMissingImports = "error"
 reportMissingTypeStubs = false
 reportUnusedImport = "none"
 pythonVersion = "3.12"
+
+[tool.ty.terminal]
+# Keep advisory diagnostics visible without treating them as type errors.
+error-on-warning = false
 
 
 

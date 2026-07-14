@@ -27,6 +27,7 @@ Basic Memory provides the MCP server — tools like `write_note`, `search_notes`
 | **memory-research** | Web research synthesized into Basic Memory entities. Researches a subject, checks for existing knowledge, presents findings, and creates entity notes. | When asked to research a company, person, technology, or topic. |
 | **memory-literary-analysis** | Analyze a complete literary work into a structured knowledge graph — characters, themes, chapters, locations, symbols, and literary devices. | Full-text literary analysis, book club companions, teaching resources, or research projects. |
 | **memory-continue** | Resume prior work by rebuilding context from the knowledge graph — `build_context` via `memory://` URLs, recent activity, and search, then read the key notes. | Starting a session, or when the user says "continue with...", "back to...", or "where were we?" |
+| **memory-onboarding** | Guided onboarding for people new to Basic Memory — interview, blueprint, approval gate, then build a full system: schemas, templates, instruction notes, a startup router, indexes, and real seed notes, plus assistant setup so the rules load every session. | When a user is new to Basic Memory, doesn't know what to use it for, wants structure in an empty or messy project, or wants their assistant to follow consistent rules across sessions. |
 
 ## Basic Memory Cloud
 

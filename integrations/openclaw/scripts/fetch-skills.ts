@@ -1,15 +1,18 @@
 /**
  * Copy all memory-* skills from the top-level basic-memory skills source.
  *
- * Auto-discovers skill directories in ../../../skills, copies each SKILL.md
- * into this package's skills/<dir>/SKILL.md, and generates skills/manifest.json.
+ * Auto-discovers skill directories in ../../../skills, copies each skill's
+ * SKILL.md plus any bundled resources (references/, evals/, assets/, ...)
+ * into this package's skills/<dir>/, and generates skills/manifest.json.
  */
 
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -80,8 +83,25 @@ function main() {
     const meta = parseFrontmatter(content)
 
     const outDir = resolve(SKILLS_DIR, dir)
+    // Clear any previously generated copy so files deleted or renamed in
+    // the source skill don't survive as stale artifacts in the package.
+    rmSync(outDir, { recursive: true, force: true })
     mkdirSync(outDir, { recursive: true })
     writeFileSync(resolve(outDir, "SKILL.md"), content)
+
+    // Copy bundled resources (references/, evals/, assets/, ...) so
+    // multi-file skills stay self-contained in the generated package.
+    for (const entry of readdirSync(resolve(SOURCE_SKILLS_DIR, dir), {
+      withFileTypes: true,
+    })) {
+      if (entry.name === "SKILL.md") continue
+      cpSync(
+        resolve(SOURCE_SKILLS_DIR, dir, entry.name),
+        resolve(outDir, entry.name),
+        { recursive: true },
+      )
+    }
+
     manifest.push({ dir, name: meta.name, description: meta.description })
     console.log(`  ✓ ${dir}`)
   }

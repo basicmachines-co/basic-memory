@@ -1,0 +1,29 @@
+{
+  "skill_name": "memory-onboarding",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "no-idea-newbie",
+      "prompt": "I just connected Basic Memory to my assistant but honestly I have no idea what to actually use it for. People talk about 'second brains' but I don't know where to start. Can you help me get set up with something useful?",
+      "persona": "Sam, marketing coordinator. When offered suggestions, is drawn to: tasks (loses track of follow-ups) and subscriptions (pays for services they forgot about). Light volume — maybe 5-10 notes a week. Real examples when asked: task 'send the Q3 sponsorship deck to Rivera Media by Friday'; subscriptions: Netflix $15.49/mo, Adobe CC $59.99/mo renews annually in March, a gym membership $40/mo they keep meaning to cancel. Uses a chat assistant that supports projects with custom instructions. Never tried a note system before.",
+      "expected_output": "Interview → blueprint scaled small (2 domains) → built KB with Task + Subscription schemas, Task Board and Subscriptions Index, instruction notes + startup router, seed notes using Sam's real examples, assistant stub for project instructions, cheat-sheet.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "eval_name": "freelance-photographer",
+      "prompt": "I want to use Basic Memory to run my freelance photography business — keeping track of my clients, upcoming shoots, what I've invoiced, and all my camera gear. Set me up with a good structure that my AI assistant can work with consistently.",
+      "persona": "Priya, wedding/portrait photographer. ~3 shoots a month. Clients: couples and a few corporate accounts. Wants per-client history. Invoices tracked simply: date, client, amount, paid/unpaid (accounting itself stays in her accounting software). Gear: 2 bodies (Canon R5 serial 0482xx, R6), 6 lenses, lighting kit — wants serials and purchase dates for insurance. Real examples: upcoming shoot 'Chen-Okafor wedding Sept 12 at Maple Grove Estate, second shooter booked'; unpaid invoice 'Hartley corporate headshots $850 sent July 2'. Uses a desktop AI app with per-project custom instructions.",
+      "expected_output": "Blueprint with Clients/People, Shoots (project-like), Invoices (finance playbook adapted: no secrets, amounts from user only), Gear (assets playbook: serials, insurance index), schemas + router + instruction notes, seeds from her real examples, stub for project instructions, bidirectional client↔shoot links.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "eval_name": "messy-restructure",
+      "prompt": "My Basic Memory project is a mess — like 30 random notes dumped in the root folder, no organization, half of them are ideas for my blog and the rest are random todos. I want an actual system: task tracking, and proper research organization for my blog posts. And I want my assistant to actually follow the same rules every session instead of doing something different each time.",
+      "persona": "Jordan, writes a woodworking blog. Existing project 'main' has ~30 root-level notes with inconsistent naming (some lowercase, some dated, e.g. 'bandsaw jig idea', '2026-05-02 misc', 'todo dump', 'japanese joinery links'). Wants: tasks, and blog research (topic → sources → draft outline). Blog posts monthly. Real examples: active research topic 'hand-cut dovetails vs router jigs' with 4 saved links; task 'edit the shop-tour video by end of July'. Uses a CLI assistant that auto-loads a context file from the home directory.",
+      "expected_output": "Restructure path: assess existing notes, propose old→new mapping BEFORE moving, build tasks + research structure (topic hubs), schemas + router with known-failure-modes seeded from their actual mess (casing, duplicates), stub written for an agent context file, verification test described.",
+      "files": []
+    }
+  ]
+}
