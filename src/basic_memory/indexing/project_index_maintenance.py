@@ -99,7 +99,12 @@ class ProjectIndexMovedFile:
 
 @dataclass(frozen=True, slots=True)
 class ProjectIndexMovedFileContentUpdate:
-    """Storage result after rewriting a moved file's markdown metadata."""
+    """Planned markdown metadata rewrite for a moved file.
+
+    ``checksum`` is computed from ``markdown_content`` — the exact bytes the
+    post-commit write persists — so the database rows stamped during the batch
+    transaction agree with the file once the write lands.
+    """
 
     permalink: str
     checksum: str
@@ -107,13 +112,25 @@ class ProjectIndexMovedFileContentUpdate:
 
 
 class ProjectIndexMoveContentUpdater(Protocol):
-    """Capability that applies provider-specific moved-file content repair."""
+    """Capability that plans and persists provider-specific moved-file content repair.
 
-    async def update_moved_file_content(
+    Planning runs inside the move batch's database transaction and must not
+    mutate storage: the batch can still roll back (e.g. an intra-batch
+    permalink collision), and an already-rewritten file would survive that
+    rollback. The write runs only after the batch commits.
+    """
+
+    async def plan_moved_file_content(
         self,
         session: AsyncSession,
         moved_file: ProjectIndexMovedFile,
     ) -> ProjectIndexMovedFileContentUpdate | None: ...
+
+    async def write_moved_file_content(
+        self,
+        moved_file: ProjectIndexMovedFile,
+        content_update: ProjectIndexMovedFileContentUpdate,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,15 +560,12 @@ class RepositoryProjectIndexMaintenanceStore:
                 replacement_rows = verified_replacement_rows
                 if dropped_new_paths:
                     dropped_move_paths = tuple(
-                        sorted(
-                            old_path_by_new_path[new_path] for new_path in dropped_new_paths
-                        )
+                        sorted(old_path_by_new_path[new_path] for new_path in dropped_new_paths)
                     )
                     target_rows = [
                         row
                         for row in target_rows
-                        if target_paths_by_old_path[str(row["file_path"])]
-                        not in dropped_new_paths
+                        if target_paths_by_old_path[str(row["file_path"])] not in dropped_new_paths
                     ]
 
             updated_old_paths = frozenset(str(row["file_path"]) for row in target_rows)
@@ -559,23 +573,26 @@ class RepositoryProjectIndexMaintenanceStore:
                 int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
                 for row in target_rows
             }
+            planned_moved_files_by_entity_id: dict[int, ProjectIndexMovedFile] = {}
             if self.move_content_updater is not None:
                 for row in target_rows:
                     entity_id = int(row["id"])
                     old_path = str(row["file_path"])
-                    content_update = await self.move_content_updater.update_moved_file_content(
-                        session,
-                        ProjectIndexMovedFile(
-                            entity_id=entity_id,
-                            old_path=old_path,
-                            new_path=target_paths_by_old_path[old_path],
-                            old_permalink=(
-                                str(row["permalink"]) if row["permalink"] is not None else None
-                            ),
+                    moved_file = ProjectIndexMovedFile(
+                        entity_id=entity_id,
+                        old_path=old_path,
+                        new_path=target_paths_by_old_path[old_path],
+                        old_permalink=(
+                            str(row["permalink"]) if row["permalink"] is not None else None
                         ),
+                    )
+                    content_update = await self.move_content_updater.plan_moved_file_content(
+                        session,
+                        moved_file,
                     )
                     if content_update is not None:
                         content_updates_by_entity_id[entity_id] = content_update
+                        planned_moved_files_by_entity_id[entity_id] = moved_file
 
             if updated_old_paths:
                 replaced_entity_ids = frozenset(int(row["id"]) for row in replacement_rows)
@@ -686,6 +703,28 @@ class RepositoryProjectIndexMaintenanceStore:
                         )
                     )
 
+        # Trigger: the batch committed with entity/note_content rows stamped from
+        # the planned markdown, and the files still hold their pre-move metadata.
+        # Why: writing files inside the transaction is not atomic with it — a
+        #      rollback would revert the database while the on-disk frontmatter
+        #      rewrites persisted, leaving files ahead of their indexed state.
+        # Outcome: writes happen only after a successful commit; a failed write
+        #          leaves the file with a checksum that no longer matches its
+        #          rows, which the next scan reconciles as a modified file.
+        if self.move_content_updater is not None:
+            for entity_id, content_update in content_updates_by_entity_id.items():
+                try:
+                    await self.move_content_updater.write_moved_file_content(
+                        planned_moved_files_by_entity_id[entity_id],
+                        content_update,
+                    )
+                except Exception as write_error:
+                    logger.error(
+                        "Failed to write moved file content after move batch commit",
+                        path=planned_moved_files_by_entity_id[entity_id].new_path,
+                        error=str(write_error),
+                    )
+
         missing_paths = tuple(
             move_target.old_path
             for move_target in move_batch.targets
@@ -716,9 +755,7 @@ class RepositoryProjectIndexMaintenanceStore:
         # Outcome: only positively re-confirmed absences are deleted; skipped
         #          paths are reported and the next scan picks the file up as
         #          modified.
-        confirmed_paths = await self.delete_path_verifier.confirm_deleted_paths(
-            delete_batch.paths
-        )
+        confirmed_paths = await self.delete_path_verifier.confirm_deleted_paths(delete_batch.paths)
         skipped_paths = tuple(
             deleted_path
             for deleted_path in delete_batch.paths

@@ -1527,9 +1527,7 @@ async def test_local_project_index_move_spares_concurrently_created_destination_
     assert third.deleted_files == 1
 
     async with db.scoped_session(session_maker) as session:
-        reconciled_source = await entity_repository.get_by_file_path(
-            session, "notes/move-race.md"
-        )
+        reconciled_source = await entity_repository.get_by_file_path(session, "notes/move-race.md")
         surviving_destination = await entity_repository.get_by_file_path(
             session, "archive/move-race.md"
         )

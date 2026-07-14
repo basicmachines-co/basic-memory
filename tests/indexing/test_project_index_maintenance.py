@@ -157,14 +157,21 @@ class FakeProjectIndexSession:
 
 @dataclass(slots=True)
 class RecordingMoveContentUpdater:
-    """Record moved-file repair requests and return configured content updates."""
+    """Record moved-file plan/write requests and return configured content updates."""
 
     updates: dict[int, project_index_maintenance_module.ProjectIndexMovedFileContentUpdate]
     seen_files: list[project_index_maintenance_module.ProjectIndexMovedFile] = field(
         default_factory=list
     )
+    written: list[
+        tuple[
+            project_index_maintenance_module.ProjectIndexMovedFile,
+            project_index_maintenance_module.ProjectIndexMovedFileContentUpdate,
+        ]
+    ] = field(default_factory=list)
+    events: list[str] | None = None
 
-    async def update_moved_file_content(
+    async def plan_moved_file_content(
         self,
         session: AsyncSession,
         moved_file: project_index_maintenance_module.ProjectIndexMovedFile,
@@ -172,6 +179,19 @@ class RecordingMoveContentUpdater:
         del session
         self.seen_files.append(moved_file)
         return self.updates.get(moved_file.entity_id)
+
+    fail_writes: bool = False
+
+    async def write_moved_file_content(
+        self,
+        moved_file: project_index_maintenance_module.ProjectIndexMovedFile,
+        content_update: project_index_maintenance_module.ProjectIndexMovedFileContentUpdate,
+    ) -> None:
+        if self.fail_writes:
+            raise RuntimeError("simulated write failure")
+        if self.events is not None:
+            self.events.append("write")
+        self.written.append((moved_file, content_update))
 
 
 @dataclass(slots=True)
@@ -795,6 +815,7 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
             old_permalink="main/notes/a",
         )
     ]
+    assert content_updater.written == [(content_updater.seen_files[0], content_updater.updates[10])]
     assert len(session.statements) == 6
     assert "checksum" in str(session.statements[2])
     assert "permalink" in str(session.statements[2])
@@ -905,6 +926,190 @@ async def test_repository_project_index_maintenance_store_skips_whole_batch_when
         skipped_paths=("notes/a.md", "notes/b.md"),
     )
     assert session.statements == []
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_writes_moved_content_after_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Moved-file frontmatter rewrites must land only after the batch commits."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md", "permalink": "main/notes/a"},
+                ]
+            )
+        ]
+    )
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+        events.append("commit")
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    content_updater = RecordingMoveContentUpdater(
+        updates={
+            10: project_index_maintenance_module.ProjectIndexMovedFileContentUpdate(
+                permalink="main/archive/a",
+                checksum="updated-checksum",
+                markdown_content="---\npermalink: main/archive/a\n---\n\n# A\n",
+            )
+        },
+        events=events,
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        move_content_updater=content_updater,
+    )
+
+    await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    )
+
+    assert events == ["commit", "write"]
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_logs_failed_post_commit_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-commit file-write failure is logged; the committed batch still succeeds."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md", "permalink": "main/notes/a"},
+                ]
+            )
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    content_updater = RecordingMoveContentUpdater(
+        updates={
+            10: project_index_maintenance_module.ProjectIndexMovedFileContentUpdate(
+                permalink="main/archive/a",
+                checksum="updated-checksum",
+                markdown_content="---\npermalink: main/archive/a\n---\n\n# A\n",
+            )
+        },
+        fail_writes=True,
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        move_content_updater=content_updater,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    )
+
+    # The next scan reconciles the stale file as modified (checksum mismatch).
+    assert result.updated_files == 1
+    assert content_updater.written == []
+
+
+@dataclass(slots=True)
+class FailingUpdateProjectIndexSession(FakeProjectIndexSession):
+    """Fail the batch on its first UPDATE, simulating an intra-batch rollback."""
+
+    async def execute(
+        self,
+        statement: object,
+        params: object | None = None,
+    ) -> FakeProjectIndexResult:
+        if "UPDATE entity" in str(statement):
+            raise RuntimeError("simulated intra-batch failure")
+        return await super().execute(statement, params)
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_failed_move_batch_writes_no_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A move batch that rolls back must leave every file untouched."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FailingUpdateProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {"id": 10, "file_path": "notes/a.md", "permalink": "main/notes/a"},
+                ]
+            )
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    content_updater = RecordingMoveContentUpdater(
+        updates={
+            10: project_index_maintenance_module.ProjectIndexMovedFileContentUpdate(
+                permalink="main/archive/a",
+                checksum="updated-checksum",
+                markdown_content="---\npermalink: main/archive/a\n---\n\n# A\n",
+            )
+        }
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        move_content_updater=content_updater,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated intra-batch failure"):
+        await store.apply_project_index_move_batch(
+            ProjectIndexMoveBatch(
+                completed_batches=1,
+                targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+            )
+        )
+
+    # The plan ran, but no file was rewritten for the rolled-back batch.
+    assert len(content_updater.seen_files) == 1
+    assert content_updater.written == []
 
 
 @pytest.mark.asyncio

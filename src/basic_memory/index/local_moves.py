@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+import yaml
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.file_utils import (
+    ParseError,
+    compute_checksum,
+    has_frontmatter,
+    parse_frontmatter,
+    remove_frontmatter,
+)
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMaintenanceRunner,
@@ -63,6 +72,33 @@ class LocalMoveEntityService(Protocol):
     ) -> str: ...
 
 
+def merged_frontmatter_markdown(content: str, updates: Mapping[str, object]) -> str:
+    """Return markdown with frontmatter updates applied, without touching storage.
+
+    Mirrors FileService.update_frontmatter_with_result's merge — including its
+    tolerance for malformed YAML, which keeps the full content and prepends a
+    fresh frontmatter block — so planned bytes match what a direct frontmatter
+    rewrite would have produced.
+    """
+    current_frontmatter: dict[str, object] = {}
+    body = content
+    if has_frontmatter(content):
+        try:
+            current_frontmatter = dict(parse_frontmatter(content))
+            body = remove_frontmatter(content)
+        except ParseError as error:
+            logger.warning(
+                "Treating file with malformed frontmatter as plain markdown",
+                error=str(error),
+            )
+            current_frontmatter = {}
+            body = content
+
+    merged_frontmatter = {**current_frontmatter, **updates}
+    yaml_block = yaml.dump(merged_frontmatter, sort_keys=False, allow_unicode=True)
+    return f"---\n{yaml_block}---\n\n{body.strip()}"
+
+
 @dataclass(frozen=True, slots=True)
 class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
     """Apply local markdown permalink policy for moved files."""
@@ -70,7 +106,7 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
     entity_service: LocalMoveEntityService
     file_service: FileService
 
-    async def update_moved_file_content(
+    async def plan_moved_file_content(
         self,
         session: AsyncSession,
         moved_file: ProjectIndexMovedFile,
@@ -91,15 +127,29 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
         if permalink == moved_file.old_permalink:
             return None
 
-        update = await self.file_service.update_frontmatter_with_result(
-            moved_file.new_path,
+        current_bytes = await self.file_service.read_file_bytes(moved_file.new_path)
+        planned_content = merged_frontmatter_markdown(
+            current_bytes.decode("utf-8"),
             {"permalink": permalink},
         )
+        # Invariant: the move batch stamps entity/note_content rows from this
+        # planned content while write_moved_file_content persists exactly these
+        # bytes after commit, so database and file checksums agree. Divergence
+        # (a failed write, an on-save formatter, platform newline translation)
+        # shows up on the next scan as a checksum-mismatch modified file and is
+        # re-indexed from disk.
         return ProjectIndexMovedFileContentUpdate(
             permalink=permalink,
-            checksum=update.checksum,
-            markdown_content=update.content,
+            checksum=await compute_checksum(planned_content),
+            markdown_content=planned_content,
         )
+
+    async def write_moved_file_content(
+        self,
+        moved_file: ProjectIndexMovedFile,
+        content_update: ProjectIndexMovedFileContentUpdate,
+    ) -> None:
+        await self.file_service.write_file(moved_file.new_path, content_update.markdown_content)
 
 
 @dataclass(frozen=True, slots=True)
