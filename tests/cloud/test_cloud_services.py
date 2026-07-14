@@ -769,12 +769,13 @@ async def test_directory_delete_service_uses_injected_runtime_and_session_maker(
         ),
     )
 
-    status_code, payload = await service.delete_directory(
+    result = await service.delete_directory(
         project_external_id="project-123",
         directory="/notes/",
     )
 
-    assert status_code == 200
+    assert result.http_status_code == 200
+    payload = result.to_response_payload()
     assert payload["file_delete_status"] == "pending"
     assert payload["deleted_files"] == ["notes/example.md"]
     assert enqueuer.requests == [
@@ -826,12 +827,12 @@ async def test_directory_delete_service_refreshes_surviving_relation_sources(
         ),
     )
 
-    status_code, _ = await service.delete_directory(
+    result = await service.delete_directory(
         project_external_id="project-123",
         directory="/notes/",
     )
 
-    assert status_code == 200
+    assert result.http_status_code == 200
     # Ids arrive sorted so reindex order is deterministic.
     assert refresher.refreshed == [[42, 99]]
 

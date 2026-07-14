@@ -1349,6 +1349,8 @@ async def test_delete_directory_v2_success(client: AsyncClient, v2_project_url):
     assert result.successful_deletes == 3
     assert result.failed_deletes == 0
     assert len(result.deleted_files) == 3
+    # Runtime cleanup fields ride alongside the client schema in the raw payload.
+    assert response.json()["file_delete_status"] == "pending"
 
     # Verify entity is no longer accessible
     get_response = await client.get(
@@ -1366,10 +1368,16 @@ async def test_delete_directory_v2_empty_directory(client: AsyncClient, v2_proje
     response = await client.post(f"{v2_project_url}/knowledge/delete-directory", json=delete_data)
     assert response.status_code == 200
 
-    result = DirectoryDeleteResult.model_validate(response.json())
-    assert result.total_files == 0
-    assert result.successful_deletes == 0
-    assert result.failed_deletes == 0
+    # Exact snapshot of the route JSON: the typed result must keep serializing
+    # the existing directory-delete response contract byte-for-byte.
+    assert response.json() == {
+        "total_files": 0,
+        "successful_deletes": 0,
+        "failed_deletes": 0,
+        "deleted_files": [],
+        "errors": [],
+        "file_delete_status": "complete",
+    }
 
 
 @pytest.mark.asyncio

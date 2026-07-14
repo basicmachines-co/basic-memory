@@ -149,6 +149,7 @@ def directory_snapshot(
 def test_directory_delete_result_serializes_empty_complete_shape() -> None:
     result = DirectoryDeleteAcceptedResult.complete()
 
+    assert result.http_status_code == 200
     assert result.to_response_payload() == {
         "total_files": 0,
         "successful_deletes": 0,
@@ -228,6 +229,8 @@ def test_directory_delete_result_serializes_failed_enqueue_error() -> None:
         error="queue unavailable",
     )
 
+    # Files remain on disk with their DB rows gone: the route must report 500.
+    assert result.http_status_code == 500
     assert result.to_response_payload() == {
         "total_files": 1,
         "successful_deletes": 1,

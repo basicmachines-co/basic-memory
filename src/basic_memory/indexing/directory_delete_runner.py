@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Literal, NotRequired, Protocol, TypedDict
 
 from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -265,6 +265,29 @@ class DirectoryDeleteFileFailure:
     reason: str
 
 
+class DirectoryDeleteErrorPayload(TypedDict):
+    """One failed file delete in the existing route error contract."""
+
+    path: RuntimeFilePath
+    error: str
+
+
+class DirectoryDeleteResponsePayload(TypedDict):
+    """Existing directory-delete route response contract.
+
+    Extends the client-facing DirectoryDeleteResult schema with the runtime
+    ``file_delete_status``/``error`` fields that queued cleanups report.
+    """
+
+    total_files: int
+    successful_deletes: int
+    failed_deletes: int
+    deleted_files: list[RuntimeFilePath]
+    errors: list[DirectoryDeleteErrorPayload]
+    file_delete_status: DirectoryDeleteFileStatus
+    error: NotRequired[str]
+
+
 @dataclass(frozen=True, slots=True)
 class DirectoryDeleteAcceptedResult:
     """Existing directory-delete response shape before route serialization."""
@@ -315,7 +338,16 @@ class DirectoryDeleteAcceptedResult:
             error=error,
         )
 
-    def to_response_payload(self) -> dict[str, object]:
+    @property
+    def http_status_code(self) -> int:
+        """Return the route status for this result.
+
+        A failed cleanup enqueue leaves files on disk with their DB rows gone,
+        so the route reports a server error instead of a clean success.
+        """
+        return 500 if self.file_delete_status == "failed" else 200
+
+    def to_response_payload(self) -> DirectoryDeleteResponsePayload:
         """Serialize to the current Basic Memory directory-delete response contract.
 
         A guarded cleanup that left files on disk (failed_files) is reported as
@@ -323,7 +355,7 @@ class DirectoryDeleteAcceptedResult:
         callers see a clean success while stale files remain and later reappear.
         """
         failed = len(self.failed_files)
-        payload: dict[str, object] = {
+        payload: DirectoryDeleteResponsePayload = {
             "total_files": len(self.deleted_files),
             "successful_deletes": len(self.deleted_files) - failed,
             "failed_deletes": failed,

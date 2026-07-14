@@ -997,18 +997,19 @@ async def delete_directory(
         logger.info(f"API v2 request: delete_directory directory='{data.directory}'")
 
         try:
-            status_code, payload = await directory_delete_service.delete_directory(
+            result = await directory_delete_service.delete_directory(
                 project_external_id=project_external_id,
                 directory=data.directory,
             )
+            payload = result.to_response_payload()
             logger.info(
                 f"API v2 response: delete_directory "
-                f"total={payload.get('total_files')}, "
-                f"success={payload.get('successful_deletes')}, "
-                f"failed={payload.get('failed_deletes')}, "
-                f"file_delete_status={payload.get('file_delete_status')}"
+                f"total={payload['total_files']}, "
+                f"success={payload['successful_deletes']}, "
+                f"failed={payload['failed_deletes']}, "
+                f"file_delete_status={payload['file_delete_status']}"
             )
-            return runtime_json_response(status_code=status_code, payload=payload)
+            return runtime_json_response(status_code=result.http_status_code, payload=payload)
 
         except DirectoryDeleteServiceError as error:
             logger.error(f"Error deleting directory: {error.detail}")

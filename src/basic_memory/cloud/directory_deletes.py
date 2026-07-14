@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteAcceptanceRequest,
+    DirectoryDeleteAcceptedResult,
     DirectoryDeleteRejected,
     DirectoryDeleteRejection,
     DirectoryDeleteRuntime,
@@ -65,8 +66,12 @@ class DirectoryDeleteService:
         *,
         project_external_id: str,
         directory: str,
-    ) -> tuple[int, dict[str, object]]:
-        """Delete directory entities immediately and queue file cleanup in the background."""
+    ) -> DirectoryDeleteAcceptedResult:
+        """Delete directory entities immediately and queue file cleanup in the background.
+
+        The typed result carries the route status (``http_status_code``) and the
+        existing response contract (``to_response_payload``).
+        """
         request = DirectoryDeleteAcceptanceRequest(
             project_external_id=project_external_id,
             directory=directory,
@@ -102,8 +107,7 @@ class DirectoryDeleteService:
                 sorted(accepted.relation_cleanup_entity_ids)
             )
 
-        status_code = 500 if result.file_delete_status == "failed" else 200
-        return status_code, result.to_response_payload()
+        return result
 
     @staticmethod
     def normalize_directory_path(directory: str) -> str:
