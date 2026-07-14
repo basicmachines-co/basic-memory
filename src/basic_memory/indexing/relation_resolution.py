@@ -233,10 +233,16 @@ class ResolveRelationsJobRequest:
 
 @dataclass(frozen=True, slots=True)
 class ProjectIndexRelationResolutionContext:
-    """Project-index completion facts needed to queue relation resolution."""
+    """Project-index completion facts needed to queue relation resolution.
 
-    project_id: int
-    project_path: str
+    The wide identity types are deliberate: downstream runtimes rebuild this
+    context from legacy workflow metadata, where project_id may arrive as a
+    string and either field may be missing. Planning coerces or skips instead
+    of pushing malformed identity into a queue request.
+    """
+
+    project_id: int | str | None
+    project_path: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,10 +256,12 @@ class IndexFileRelationResolutionContext:
 
 def plan_project_index_completion_relation_resolution(
     context: ProjectIndexRelationResolutionContext,
-) -> ResolveRelationsJobRequest:
+) -> ResolveRelationsJobRequest | None:
     """Plan the final relation-resolution job for a completed project index."""
+    if context.project_id is None or context.project_path is None:
+        return None
     return ResolveRelationsJobRequest(
-        project_id=context.project_id,
+        project_id=int(context.project_id),
         project_path=context.project_path,
     )
 
@@ -263,13 +271,17 @@ async def resolve_project_index_completion_relations(
     runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
-) -> ResolveRelationsResult:
+) -> ResolveRelationsResult | None:
     """Run the final relation-resolution pass for a completed project index.
 
     The context names the project so queue-based runtimes can plan an enqueue
     from the same completion facts; the inline path resolves directly against
-    the already project-scoped runtime.
+    the already project-scoped runtime. A context without complete project
+    identity plans no request, so the resolution pass is skipped.
     """
+    request = plan_project_index_completion_relation_resolution(context)
+    if request is None:
+        return None
     return await resolve_project_relations(runtime, max_passes=max_passes)
 
 
