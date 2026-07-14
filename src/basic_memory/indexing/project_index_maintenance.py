@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from loguru import logger
-from sqlalchemy import bindparam, case, column, delete, select, table, text, update
+from sqlalchemy import RowMapping, bindparam, case, column, delete, select, table, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -169,6 +169,7 @@ class ProjectIndexMoveBatchResult:
     replaced_entity_ids: frozenset[int] = frozenset()
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
     missing_paths: tuple[str, ...] = ()
+    dropped_move_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +197,15 @@ class ProjectIndexMoveRun:
         """Return every move source path that the runtime could not update."""
         return tuple(
             missing_path for record in self.records for missing_path in record.result.missing_paths
+        )
+
+    @property
+    def dropped_move_paths(self) -> tuple[str, ...]:
+        """Return every move source path dropped because its destination changed."""
+        return tuple(
+            dropped_path
+            for record in self.records
+            for dropped_path in record.result.dropped_move_paths
         )
 
 
@@ -451,6 +461,16 @@ class RepositoryProjectIndexMaintenanceStore:
     project_id: ProjectId
     move_content_updater: ProjectIndexMoveContentUpdater | None = None
     delete_path_verifier: ProjectIndexDeletePathVerifier = TrustPlannedProjectIndexDeleteVerifier()
+    # Trigger: an entity occupies a move destination at apply time.
+    # Why: scan change planning only pairs moves with paths that had no DB row
+    #      at snapshot time, so a row found there was created concurrently and
+    #      may carry accepted-but-unmaterialized content; the watcher flow, by
+    #      contrast, legitimately moves onto an existing indexed file and must
+    #      keep replacing it unconditionally.
+    # Outcome: scan runtimes set this True so a replacement is only deleted
+    #          when its checksum proves it indexes the moved bytes; mismatches
+    #          drop the move for the next scan to reconcile.
+    verify_replaced_move_targets: bool = False
 
     async def apply_project_index_move_batch(
         self,
@@ -466,20 +486,79 @@ class RepositoryProjectIndexMaintenanceStore:
 
         async with db.scoped_session(self.session_maker) as session:
             existing_paths_result = await session.execute(
-                select(Entity.id, Entity.file_path, Entity.permalink).where(
+                select(Entity.id, Entity.file_path, Entity.permalink, Entity.checksum).where(
                     Entity.project_id == self.project_id,
                     Entity.file_path.in_(old_paths),
                 )
             )
-            target_rows = existing_paths_result.mappings().all()
+            target_rows = list(existing_paths_result.mappings().all())
+            replaced_entity_ids: frozenset[int] = frozenset()
+            relation_cleanup_entity_ids: frozenset[int] = frozenset()
+            dropped_move_paths: tuple[str, ...] = ()
+            content_updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate] = {}
+            replacement_rows: list[RowMapping] = []
+
+            if target_rows:
+                new_paths = tuple(
+                    sorted({target_paths_by_old_path[str(row["file_path"])] for row in target_rows})
+                )
+                replacement_result = await session.execute(
+                    select(Entity.id, Entity.file_path, Entity.checksum).where(
+                        Entity.project_id == self.project_id,
+                        Entity.file_path.in_(new_paths),
+                        Entity.id.not_in(tuple(int(row["id"]) for row in target_rows)),
+                    )
+                )
+                replacement_rows = list(replacement_result.mappings().all())
+
+            if self.verify_replaced_move_targets and replacement_rows:
+                old_path_by_new_path = {
+                    target_paths_by_old_path[str(row["file_path"])]: str(row["file_path"])
+                    for row in target_rows
+                }
+                # The move was planned by matching the destination file's checksum
+                # to the source entity's indexed checksum, so that checksum is the
+                # only content a replacement row may legitimately index.
+                expected_checksum_by_new_path = {
+                    target_paths_by_old_path[str(row["file_path"])]: row["checksum"]
+                    for row in target_rows
+                }
+                verified_replacement_rows: list[RowMapping] = []
+                dropped_new_paths: set[str] = set()
+                for replacement_row in replacement_rows:
+                    replacement_path = str(replacement_row["file_path"])
+                    expected_checksum = expected_checksum_by_new_path.get(replacement_path)
+                    if (
+                        expected_checksum is not None
+                        and replacement_row["checksum"] == expected_checksum
+                    ):
+                        verified_replacement_rows.append(replacement_row)
+                        continue
+                    dropped_new_paths.add(replacement_path)
+                    logger.warning(
+                        "Dropping planned move: destination holds a concurrently created entity",
+                        old_path=old_path_by_new_path.get(replacement_path),
+                        new_path=replacement_path,
+                    )
+                replacement_rows = verified_replacement_rows
+                if dropped_new_paths:
+                    dropped_move_paths = tuple(
+                        sorted(
+                            old_path_by_new_path[new_path] for new_path in dropped_new_paths
+                        )
+                    )
+                    target_rows = [
+                        row
+                        for row in target_rows
+                        if target_paths_by_old_path[str(row["file_path"])]
+                        not in dropped_new_paths
+                    ]
+
             updated_old_paths = frozenset(str(row["file_path"]) for row in target_rows)
             target_paths_by_entity_id = {
                 int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
                 for row in target_rows
             }
-            replaced_entity_ids: frozenset[int] = frozenset()
-            relation_cleanup_entity_ids: frozenset[int] = frozenset()
-            content_updates_by_entity_id: dict[int, ProjectIndexMovedFileContentUpdate] = {}
             if self.move_content_updater is not None:
                 for row in target_rows:
                     entity_id = int(row["id"])
@@ -499,15 +578,6 @@ class RepositoryProjectIndexMaintenanceStore:
                         content_updates_by_entity_id[entity_id] = content_update
 
             if updated_old_paths:
-                new_paths = tuple(sorted(set(target_paths_by_entity_id.values())))
-                replacement_result = await session.execute(
-                    select(Entity.id, Entity.file_path).where(
-                        Entity.project_id == self.project_id,
-                        Entity.file_path.in_(new_paths),
-                        Entity.id.not_in(tuple(target_paths_by_entity_id)),
-                    )
-                )
-                replacement_rows = replacement_result.mappings().all()
                 replaced_entity_ids = frozenset(int(row["id"]) for row in replacement_rows)
                 relation_cleanup_entity_ids = await delete_project_index_entities(
                     session,
@@ -620,6 +690,7 @@ class RepositoryProjectIndexMaintenanceStore:
             move_target.old_path
             for move_target in move_batch.targets
             if move_target.old_path not in updated_old_paths
+            and move_target.old_path not in dropped_move_paths
         )
         return ProjectIndexMoveBatchResult(
             updated_files=len(updated_old_paths),
@@ -627,6 +698,7 @@ class RepositoryProjectIndexMaintenanceStore:
             replaced_entity_ids=replaced_entity_ids,
             relation_cleanup_entity_ids=relation_cleanup_entity_ids,
             missing_paths=missing_paths,
+            dropped_move_paths=dropped_move_paths,
         )
 
     async def apply_project_index_delete_batch(

@@ -606,6 +606,134 @@ async def test_repository_project_index_maintenance_store_deletes_replaced_move_
 
 
 @pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_drops_move_onto_concurrent_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A verified move must not delete a concurrently created destination entity."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {
+                        "id": 10,
+                        "file_path": "notes/a.md",
+                        "permalink": None,
+                        "checksum": "moved-checksum",
+                    },
+                ]
+            ),
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    # Created after the scan snapshot with different content —
+                    # e.g. an accepted write_note that is not yet materialized.
+                    {"id": 20, "file_path": "archive/a.md", "checksum": "accepted-checksum"},
+                ]
+            ),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        verify_replaced_move_targets=True,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    )
+
+    assert result == ProjectIndexMoveBatchResult(
+        updated_files=0,
+        dropped_move_paths=("notes/a.md",),
+    )
+    # Only the two SELECTs ran: nothing was deleted or repointed.
+    assert len(session.statements) == 2
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
+    assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_replaces_destination_with_moved_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A verified move still dedupes a destination row that indexes the moved bytes."""
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    {
+                        "id": 10,
+                        "file_path": "notes/a.md",
+                        "permalink": None,
+                        "checksum": "moved-checksum",
+                    },
+                ]
+            ),
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    # A racing event index already created a row for the moved
+                    # file at its new path: same bytes, safe to dedupe.
+                    {"id": 20, "file_path": "archive/a.md", "checksum": "moved-checksum"},
+                ]
+            ),
+            FakeProjectIndexResult(scalar_values=[99]),
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+        verify_replaced_move_targets=True,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    )
+
+    assert result == ProjectIndexMoveBatchResult(
+        updated_files=1,
+        moved_entity_ids=frozenset({10}),
+        replaced_entity_ids=frozenset({20}),
+        relation_cleanup_entity_ids=frozenset({99}),
+    )
+    assert any("DELETE FROM entity" in str(statement) for statement in session.statements)
+
+
+@pytest.mark.asyncio
 async def test_repository_project_index_maintenance_store_applies_move_content_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

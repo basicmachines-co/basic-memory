@@ -44,7 +44,10 @@ from basic_memory.indexing.models import (
     IndexedEntity,
     IndexingBatchResult,
 )
-from basic_memory.indexing.project_index_coordinator import ProjectIndexObservedFileSource
+from basic_memory.indexing.project_index_coordinator import (
+    ProjectIndexChangeDetector,
+    ProjectIndexObservedFileSource,
+)
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
@@ -56,6 +59,7 @@ from basic_memory.indexing.relation_resolution import (
     UnresolvedRelation,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
@@ -1405,6 +1409,134 @@ async def test_local_project_index_treats_rename_over_existing_path_as_modify_an
     assert len(results) == 1
     assert results[0].entity_id == target_entity_id
     assert results[0].file_path == "note.md"
+
+
+@dataclass(slots=True)
+class ConcurrentDestinationWriteChangeDetector:
+    """After planning, simulate an accepted write_note landing at a move destination."""
+
+    detector: ProjectIndexChangeDetector
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: EntityRepository
+    destination_file: Path
+    destination_relative: str
+    accepted_content: bytes
+    permalink: str
+
+    async def detect_all_changes(
+        self,
+        storage_files: Mapping[str, RuntimeObservedIndexFile],
+    ) -> ChangeReport:
+        report = await self.detector.detect_all_changes(storage_files)
+        self.destination_file.write_bytes(self.accepted_content)
+        entity = Entity(
+            permalink=self.permalink,
+            title="Accepted",
+            note_type="note",
+            file_path=self.destination_relative,
+            checksum=sha256(self.accepted_content).hexdigest(),
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        async with db.scoped_session(self.session_maker) as session:
+            await self.entity_repository.add(session, entity)
+        return report
+
+
+async def test_local_project_index_move_spares_concurrently_created_destination_entity(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """A planned move must not destroy an entity created at its destination mid-run."""
+    del config_manager
+
+    source_path = project_config.home / "notes" / "move-race.md"
+    destination_path = project_config.home / "archive" / "move-race.md"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    moved_content = b"# Move Race\n\nOriginal content that moves.\n"
+    source_path.write_bytes(moved_content)
+
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert first.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        source_before = await entity_repository.get_by_file_path(session, "notes/move-race.md")
+    assert source_before is not None
+
+    source_path.rename(destination_path)
+
+    accepted_content = b"# Accepted\n\nConcurrently accepted note content.\n"
+    runtime_factory = LocalProjectIndexRuntimeFactory(batch_size=10)
+    runtime = await runtime_factory.runtime_for_project(test_project)
+    racing_runtime = LocalProjectIndexRuntime(
+        observed_file_source=runtime.observed_file_source,
+        change_detector=ConcurrentDestinationWriteChangeDetector(
+            detector=runtime.change_detector,
+            session_maker=session_maker,
+            entity_repository=entity_repository,
+            destination_file=destination_path,
+            destination_relative="archive/move-race.md",
+            accepted_content=accepted_content,
+            permalink=f"{test_project.permalink}/archive/move-race-accepted",
+        ),
+        maintenance_runner=runtime.maintenance_runner,
+        moved_entity_search_refresher=runtime.moved_entity_search_refresher,
+        batch_enqueuer=runtime.batch_enqueuer,
+        completion_relation_runtime=runtime.completion_relation_runtime,
+        batch_size=runtime.batch_size,
+    )
+
+    second = await run_local_project_index(
+        RuntimeProjectIndexJobRequest(
+            project=ProjectRuntimeReference.from_project(test_project),
+        ),
+        runtime=racing_runtime,
+    )
+
+    # The planned move was dropped: nothing moved and nothing was deleted.
+    assert second.moved_files == 0
+    assert second.deleted_files == 0
+
+    async with db.scoped_session(session_maker) as session:
+        destination_entity = await entity_repository.get_by_file_path(
+            session, "archive/move-race.md"
+        )
+        stale_source = await entity_repository.get_by_file_path(session, "notes/move-race.md")
+
+    assert destination_entity is not None
+    assert destination_entity.checksum == sha256(accepted_content).hexdigest()
+    assert destination_path.read_bytes() == accepted_content
+    # The stale source row is left for the next scan to reconcile as deleted.
+    assert stale_source is not None
+
+    third = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert third.deleted_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        reconciled_source = await entity_repository.get_by_file_path(
+            session, "notes/move-race.md"
+        )
+        surviving_destination = await entity_repository.get_by_file_path(
+            session, "archive/move-race.md"
+        )
+
+    assert reconciled_source is None
+    assert surviving_destination is not None
+    assert surviving_destination.id == destination_entity.id
 
 
 async def test_local_project_index_move_repairs_observation_search_permalinks(

@@ -590,6 +590,10 @@ class LocalProjectIndexRuntimeFactory:
             delete_path_verifier=LocalProjectIndexDeletePathVerifier(
                 file_service=dependencies.file_service,
             ),
+            # Scan-planned moves guarantee the destination had no DB row at
+            # snapshot time, so a replacement row found at apply time is a
+            # concurrent creation that must be checksum-verified before deletion.
+            verify_replaced_move_targets=True,
         )
         return LocalProjectIndexRuntime(
             observed_file_source=LocalProjectIndexObservedFileSource(
