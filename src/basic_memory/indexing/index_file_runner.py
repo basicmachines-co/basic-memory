@@ -39,25 +39,6 @@ class IndexFileObjectMetadata:
     metadata: RuntimeNoteObjectMetadataMap = field(default_factory=dict)
 
 
-class IndexFileCurrentMetadata(Protocol):
-    """Storage metadata shape needed to build index-file object metadata."""
-
-    @property
-    def checksum(self) -> RuntimeFileChecksum: ...
-
-    @property
-    def metadata(self) -> RuntimeNoteObjectMetadataMap: ...
-
-
-class IndexFileCurrentMetadataSource(Protocol):
-    """Capability that loads current storage metadata for one file path."""
-
-    async def load_current_file_metadata(
-        self,
-        file_path: RuntimeFilePath,
-    ) -> IndexFileCurrentMetadata | None: ...
-
-
 class IndexFileRunnerChecker(Protocol):
     """Capability that decides whether an observed object needs indexing."""
 
@@ -71,25 +52,6 @@ class IndexFileMetadataSource(Protocol):
         self,
         file_path: RuntimeFilePath,
     ) -> IndexFileObjectMetadata | None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class StorageIndexFileMetadataSource:
-    """Adapt a storage metadata loader to the index-file runner protocol."""
-
-    metadata_source: IndexFileCurrentMetadataSource
-
-    async def load_current_file_metadata(
-        self,
-        file_path: RuntimeFilePath,
-    ) -> IndexFileObjectMetadata | None:
-        current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
-        if current_metadata is None:
-            return None
-        return IndexFileObjectMetadata(
-            checksum=current_metadata.checksum,
-            metadata=current_metadata.metadata,
-        )
 
 
 class IndexFileMaterializedNoteSource(Protocol):
