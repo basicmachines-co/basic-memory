@@ -33,8 +33,8 @@ from basic_memory.index.storage_events import (
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
+    RuntimeJobCounts,
     RuntimeStorageEventOperation,
-    RuntimeStorageEventProcessingResult,
 )
 
 
@@ -454,7 +454,7 @@ def test_local_watch_path_visibility_uses_project_relative_hidden_parts(tmp_path
 def test_local_watch_status_update_plans_success() -> None:
     update = plan_local_watch_event_index_status_update(
         project_prefix="configured-project-root",
-        result=RuntimeStorageEventProcessingResult.empty().with_processed(2).with_skipped(1),
+        result=RuntimeJobCounts(processed=2, skipped=1),
     )
 
     assert update.path == "configured-project-root"
@@ -469,10 +469,7 @@ def test_local_watch_status_update_plans_success() -> None:
 def test_local_watch_status_update_plans_failure_details() -> None:
     update = plan_local_watch_event_index_status_update(
         project_prefix="configured-project-root",
-        result=RuntimeStorageEventProcessingResult.empty()
-        .with_processed(1)
-        .with_failed(2)
-        .with_skipped(3),
+        result=RuntimeJobCounts(processed=1, failed=2, skipped=3),
     )
 
     assert update.path == "configured-project-root"

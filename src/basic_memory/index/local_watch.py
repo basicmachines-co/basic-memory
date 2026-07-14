@@ -23,7 +23,7 @@ from basic_memory.index.storage_events import (
 )
 from basic_memory.runtime.storage import (
     ProjectPath,
-    RuntimeStorageEventProcessingResult,
+    RuntimeJobCounts,
     StorageBucketName,
     StorageEventPayload,
     group_storage_events_by_bucket,
@@ -238,25 +238,25 @@ class LocalWatchEventIndexStatusUpdate:
 def plan_local_watch_event_index_status_update(
     *,
     project_prefix: ProjectPath,
-    result: RuntimeStorageEventProcessingResult,
+    result: RuntimeJobCounts,
 ) -> LocalWatchEventIndexStatusUpdate:
     """Plan the local watch-status update for an event-index result."""
-    if result.counts.failed:
+    if result.failed:
         return LocalWatchEventIndexStatusUpdate(
             path=project_prefix,
             status="error",
-            indexed_files_increment=result.counts.processed,
-            error_count_increment=result.counts.failed,
+            indexed_files_increment=result.processed,
+            error_count_increment=result.failed,
             error=(
-                f"event-index processed={result.counts.processed} "
-                f"failed={result.counts.failed} skipped={result.counts.skipped}"
+                f"event-index processed={result.processed} "
+                f"failed={result.failed} skipped={result.skipped}"
             ),
         )
 
     return LocalWatchEventIndexStatusUpdate(
         path=project_prefix,
         status="success",
-        indexed_files_increment=result.counts.processed,
+        indexed_files_increment=result.processed,
         error_count_increment=0,
     )
 
@@ -292,11 +292,11 @@ async def run_local_watch_event_indexing(
     request: LocalWatchEventIndexRequest,
     *,
     runtime: StorageEventIndexRuntime,
-) -> RuntimeStorageEventProcessingResult:
+) -> RuntimeJobCounts:
     """Normalize local file changes and process them through storage-event indexing."""
     event_source = LocalWatchStorageEventSource(request)
     events = event_source.events()
-    result = RuntimeStorageEventProcessingResult.empty()
+    result = RuntimeJobCounts()
     if isinstance(runtime, LocalWatchStorageEventIndexRuntime):
         move_processor = runtime.move_processor
         if move_processor is not None:

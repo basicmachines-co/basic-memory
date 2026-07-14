@@ -92,7 +92,6 @@ from basic_memory.runtime.storage import (
     RuntimeJobCounts,
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
-    RuntimeStorageEventProcessingResult,
     RuntimeStorageEventProjectBatch,
     RuntimeStorageEventRoutingPlan,
     RuntimeStorageEventSkipReason,
@@ -755,28 +754,19 @@ class TestRuntimeContracts:
         assert parse_runtime_workflow_id("not-a-workflow-id") is None
 
     def test_runtime_job_counts_are_immutable_accumulators(self):
-        result = RuntimeJobCounts().with_processed(2).with_failed().add(RuntimeJobCounts(skipped=3))
-
-        assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 3}
-
-    def test_runtime_storage_event_processing_result_wraps_counts_for_internal_handoffs(self):
         result = (
-            RuntimeStorageEventProcessingResult.empty()
+            RuntimeJobCounts()
             .with_processed(2)
             .with_failed()
-            .add(RuntimeStorageEventProcessingResult.from_counts(skipped=3))
+            .with_skipped(2)
+            .add(RuntimeJobCounts(skipped=1))
         )
 
-        assert result.counts == RuntimeJobCounts(processed=2, failed=1, skipped=3)
+        assert result == RuntimeJobCounts(processed=2, failed=1, skipped=3)
         assert result.as_dict() == {"processed": 2, "failed": 1, "skipped": 3}
-        assert result.add_counts(RuntimeJobCounts(processed=4)).as_dict() == {
-            "processed": 6,
-            "failed": 1,
-            "skipped": 3,
-        }
 
         with pytest.raises(FrozenInstanceError):
-            setattr(result, "counts", RuntimeJobCounts())
+            setattr(result, "processed", 0)
 
     def test_runtime_deleted_note_reference_carries_live_update_identity(self):
         reference = RuntimeDeletedNoteReference.from_entity(

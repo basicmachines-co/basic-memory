@@ -341,9 +341,9 @@ class WatchService:
         duration_ms = int((time.time() - start_time) * 1000)
         logger.info(
             "Event-index file change processing completed, "
-            f"processed_files={result.counts.processed}, "
-            f"failed_files={result.counts.failed}, "
-            f"skipped_files={result.counts.skipped}, "
+            f"processed_files={result.processed}, "
+            f"failed_files={result.failed}, "
+            f"skipped_files={result.skipped}, "
             f"total_indexed_files={self.state.indexed_files}, "
             f"duration_ms={duration_ms}"
         )

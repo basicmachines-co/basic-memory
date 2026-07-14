@@ -17,8 +17,8 @@ from basic_memory.index.storage_events import (
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
+    RuntimeJobCounts,
     RuntimeStorageEventOperation,
-    RuntimeStorageEventProcessingResult,
     StorageBucketName,
     StorageEventPayload,
     StorageObjectIdentity,
@@ -149,13 +149,13 @@ class RecordingBucketContextProcessor(StorageEventBucketContextProcessor[BucketR
         bucket_name: StorageBucketName,
         context: BucketRuntimeContext,
         events: tuple[StorageEventPayload, ...],
-    ) -> RuntimeStorageEventProcessingResult:
+    ) -> RuntimeJobCounts:
         self.calls.append(
             (bucket_name, context.runtime_name, tuple(event.object_key for event in events))
         )
         if bucket_name == self.fail_bucket:
             raise RuntimeError("bucket context failed")
-        return RuntimeStorageEventProcessingResult.from_counts(processed=len(events))
+        return RuntimeJobCounts(processed=len(events))
 
     async def bucket_failed(
         self,

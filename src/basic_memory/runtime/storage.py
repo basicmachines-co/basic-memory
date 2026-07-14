@@ -283,51 +283,6 @@ def plan_runtime_storage_event_operations(
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeStorageEventProcessingResult:
-    """Internal storage-event processing result for adapter handoffs."""
-
-    counts: RuntimeJobCounts
-
-    @classmethod
-    def empty(cls) -> Self:
-        return cls(counts=RuntimeJobCounts())
-
-    @classmethod
-    def from_counts(
-        cls,
-        *,
-        processed: int = 0,
-        failed: int = 0,
-        skipped: int = 0,
-    ) -> Self:
-        return cls(
-            counts=RuntimeJobCounts(
-                processed=processed,
-                failed=failed,
-                skipped=skipped,
-            )
-        )
-
-    def add(self, other: RuntimeStorageEventProcessingResult) -> Self:
-        return type(self)(counts=self.counts.add(other.counts))
-
-    def add_counts(self, counts: RuntimeJobCounts) -> Self:
-        return type(self)(counts=self.counts.add(counts))
-
-    def with_processed(self, count: int = 1) -> Self:
-        return type(self)(counts=self.counts.with_processed(count))
-
-    def with_failed(self, count: int = 1) -> Self:
-        return type(self)(counts=self.counts.with_failed(count))
-
-    def with_skipped(self, count: int = 1) -> Self:
-        return type(self)(counts=self.counts.with_skipped(count))
-
-    def as_dict(self) -> dict[str, int]:
-        return self.counts.as_dict()
-
-
-@dataclass(frozen=True, slots=True)
 class RuntimeStorageFileIndexRequest:
     """Typed request for indexing one observed runtime storage object."""
 

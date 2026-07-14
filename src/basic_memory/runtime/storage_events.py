@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from basic_memory.runtime.storage import (
+    RuntimeJobCounts,
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
-    RuntimeStorageEventProcessingResult,
     StorageBucketName,
     StorageEtag,
     StorageEventName,
@@ -87,9 +87,9 @@ class RuntimeStorageEventSource:
 async def run_runtime_storage_event_operations(
     events: Iterable[StorageEventPayload],
     processor: RuntimeStorageEventOperationProcessor,
-) -> RuntimeStorageEventProcessingResult:
+) -> RuntimeJobCounts:
     """Execute normalized storage event operations and count per-event outcomes."""
-    result = RuntimeStorageEventProcessingResult.empty()
+    result = RuntimeJobCounts()
 
     for operation in plan_runtime_storage_event_operations(events):
         try:

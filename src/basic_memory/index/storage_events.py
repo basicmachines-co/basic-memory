@@ -9,7 +9,7 @@ from typing import Generic, Protocol, TypeVar
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
     ProjectPath,
-    RuntimeStorageEventProcessingResult,
+    RuntimeJobCounts,
     StorageBucketName,
     StorageEventPayload,
     StorageEventSource,
@@ -79,7 +79,7 @@ class StorageEventBucketContextProcessor(Protocol[BucketContextT]):
         bucket_name: StorageBucketName,
         context: BucketContextT,
         events: tuple[StorageEventPayload, ...],
-    ) -> RuntimeStorageEventProcessingResult:
+    ) -> RuntimeJobCounts:
         """Process one bucket's storage events and return aggregate counts."""
 
     async def bucket_failed(
@@ -110,9 +110,9 @@ class StorageEventBucketIndexRuntime(Generic[BucketContextT]):
 async def run_storage_event_bucket_indexing(
     source: StorageEventSource,
     runtime: StorageEventBucketIndexRuntime[BucketContextT],
-) -> RuntimeStorageEventProcessingResult:
+) -> RuntimeJobCounts:
     """Resolve bucket contexts and aggregate provider-neutral bucket results."""
-    result = RuntimeStorageEventProcessingResult.empty()
+    result = RuntimeJobCounts()
 
     for bucket_name, events in source.events_by_bucket().items():
         if not events:
@@ -144,10 +144,10 @@ async def run_storage_event_bucket_indexing(
 async def run_storage_event_indexing(
     events: Iterable[StorageEventPayload],
     runtime: StorageEventIndexRuntime,
-) -> RuntimeStorageEventProcessingResult:
+) -> RuntimeJobCounts:
     """Route normalized storage events by project and execute project-scoped operations."""
     routing_plan = plan_runtime_storage_events_by_project(events)
-    result = RuntimeStorageEventProcessingResult.empty().add_counts(routing_plan.skipped_counts)
+    result = routing_plan.skipped_counts
 
     for project_batch in routing_plan.project_batches:
         project = await runtime.project_resolver.resolve_project(project_batch.project_path)
