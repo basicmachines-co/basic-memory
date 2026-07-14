@@ -2,6 +2,9 @@
 
 from dataclasses import dataclass, field
 
+import pytest
+from pydantic import ValidationError
+
 from basic_memory.indexing.progress import (
     IndexingResult,
     VectorSyncProgress,
@@ -327,3 +330,41 @@ def test_indexing_result_recovers_empty_result_from_missing_or_invalid_state() -
 
     assert missing == IndexingResult()
     assert invalid == IndexingResult()
+
+
+def test_runtime_construction_rejects_unknown_fields() -> None:
+    """A mistyped keyword must raise, as the replaced dataclasses did."""
+    with pytest.raises(ValidationError):
+        IndexingResult.model_validate({"files_processsed": 3})
+    with pytest.raises(ValidationError):
+        VectorSyncProgress.model_validate({"next_indx": 1})
+
+
+def test_runtime_construction_rejects_malformed_error_entries() -> None:
+    """Silently dropping a malformed error entry would flip success to True."""
+    with pytest.raises(ValidationError):
+        IndexingResult.model_validate({"errors": [{"path": "a.md"}]})
+
+
+def test_checkpoint_restore_tolerates_retired_fields_and_legacy_error_shapes() -> None:
+    """Old checkpoint documents keep restoring after fields are retired."""
+    restored = IndexingResult.from_checkpoint_state(
+        {
+            "files_processed": 2,
+            "errors": [{"path": "a.md", "error": "boom"}],
+            "retired_field": "ignored",
+        }
+    )
+    assert restored.files_processed == 2
+    assert restored.errors == [("a.md", "boom")]
+
+    progress = VectorSyncProgress.from_checkpoint_state(
+        {"entity_ids": [1, 2], "next_index": 1, "retired_field": True}
+    )
+    assert progress.entity_ids == [1, 2]
+    assert progress.next_index == 1
+
+
+def test_checkpoint_restore_falls_back_on_garbage_state() -> None:
+    """A checkpoint that cannot validate restores to a fresh state."""
+    assert IndexingResult.from_checkpoint_state({"errors": [{"path": "a.md"}]}) == IndexingResult()

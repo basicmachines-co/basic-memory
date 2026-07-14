@@ -30,9 +30,24 @@ class VectorSyncBatchSummary(Protocol):
 
 
 class CheckpointModel(BaseModel):
-    """Shared base model for durable checkpoint JSON."""
+    """Shared base model for durable checkpoint JSON.
+
+    Subclasses that parse a slice of a larger metadata document rely on
+    ``extra="ignore"``. Runtime value models (IndexingResult,
+    VectorSyncProgress) override to ``extra="forbid"`` so a mistyped keyword
+    raises exactly as the dataclasses they replaced did; their legacy-document
+    tolerance lives in ``from_checkpoint_state``.
+    """
 
     model_config = ConfigDict(extra="ignore")
+
+    @classmethod
+    def _known_checkpoint_fields(cls, state: object) -> object:
+        """Drop retired keys from a persisted checkpoint before validation."""
+        if isinstance(state, Mapping):
+            state_payload = cast(Mapping[str, object], state)
+            return {k: v for k, v in state_payload.items() if k in cls.model_fields}
+        return state
 
 
 class VectorSyncProgress(CheckpointModel):
@@ -41,6 +56,8 @@ class VectorSyncProgress(CheckpointModel):
     This model is also the persisted checkpoint document: field names and the
     dumped JSON shape must stay stable so older checkpoints keep restoring.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     entity_ids: list[int] = Field(default_factory=list)
     next_index: int = 0
@@ -111,7 +128,7 @@ class VectorSyncProgress(CheckpointModel):
             return cls()
 
         try:
-            return cls.model_validate(state)
+            return cls.model_validate(cls._known_checkpoint_fields(state))
         except ValidationError:
             return cls()
 
@@ -177,6 +194,8 @@ class IndexingResult(CheckpointModel):
     older checkpoints keep restoring.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     files_processed: int = 0
     files_unchanged: int = 0
     entities_created: int = 0
@@ -221,6 +240,14 @@ class IndexingResult(CheckpointModel):
                 error = item_payload.get("error")
                 if path is not None and error is not None:
                     normalized.append((str(path), str(error)))
+                    continue
+            # Trigger: an error entry is neither a (path, error) pair nor the
+            #   legacy mapping shape.
+            # Why: silently dropping it flips total_errors/success and hides
+            #   the malformed producer; checkpoint restore already tolerates a
+            #   raise here via its ValidationError fallback.
+            # Outcome: runtime construction fails fast on garbage entries.
+            raise ValueError(f"indexing error entries must be (path, error) pairs, got {item!r}")
         return normalized
 
     @property
@@ -271,7 +298,28 @@ class IndexingResult(CheckpointModel):
         if state is None:
             return cls()
 
+        known = cls._known_checkpoint_fields(state)
+        # Trigger: a persisted checkpoint carries error entries in a shape we
+        #   no longer recognize.
+        # Why: restore is best-effort over historical documents — one garbage
+        #   entry must not discard the whole checkpoint, while runtime
+        #   construction (the validator below) stays fail-fast.
+        # Outcome: unrecognizable entries are dropped from the restored state.
+        if isinstance(known, dict):
+            known_payload = cast(dict[str, object], known)
+            raw_errors = known_payload.get("errors")
+            if isinstance(raw_errors, list):
+                known_payload["errors"] = [
+                    item
+                    for item in cast(list[object], raw_errors)
+                    if (isinstance(item, list | tuple) and len(item) == 2)
+                    or (
+                        isinstance(item, Mapping)
+                        and cast(Mapping[str, object], item).get("path") is not None
+                        and cast(Mapping[str, object], item).get("error") is not None
+                    )
+                ]
         try:
-            return cls.model_validate(state)
+            return cls.model_validate(known)
         except ValidationError:
             return cls()
