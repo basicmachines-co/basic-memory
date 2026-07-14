@@ -215,15 +215,6 @@ class RecordingNoteContentRepository:
 
 
 @dataclass(frozen=True, slots=True)
-class RecordingNoteContentRepositories:
-    repository: RecordingNoteContentRepository
-
-    def note_content_repository(self, project_id: int) -> RecordingNoteContentRepository:
-        _ = project_id
-        return self.repository
-
-
-@dataclass(frozen=True, slots=True)
 class FakeFileMetadata:
     modified_at: datetime
 
@@ -541,7 +532,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
         result = await RepositoryNoteMaterializationPublisher(
             session_maker=cast(async_sessionmaker[AsyncSession], object()),
             session_lock=session_lock,
-            repositories=RecordingNoteContentRepositories(repository),
+            note_content_store=lambda project_id: repository,
         ).publish_written_file_state(request, prepared, written)
 
     assert result == RuntimeNoteMaterializationResult(
@@ -595,7 +586,7 @@ async def test_repository_note_materialization_status_publisher_records_conflict
         await RepositoryNoteMaterializationStatusPublisher(
             session_maker=cast(async_sessionmaker[AsyncSession], object()),
             session_lock=session_lock,
-            repositories=RecordingNoteContentRepositories(repository),
+            note_content_store=lambda project_id: repository,
         ).publish_note_materialization_status(
             request,
             NoteMaterializationStatusPublication(
