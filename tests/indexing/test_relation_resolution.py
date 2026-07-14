@@ -201,41 +201,16 @@ def test_resolve_relations_job_request_matches_project_queue_identity() -> None:
         setattr(request, "project_path", "other")
 
 
-def test_project_index_completion_relation_resolution_plan_requires_project_identity() -> None:
+def test_project_index_completion_relation_resolution_plan_builds_queue_request() -> None:
     assert plan_project_index_completion_relation_resolution(
         ProjectIndexRelationResolutionContext(
-            project_id="7",
+            project_id=7,
             project_path="main",
         )
     ) == ResolveRelationsJobRequest(
         project_id=7,
         project_path="main",
     )
-    assert (
-        plan_project_index_completion_relation_resolution(
-            ProjectIndexRelationResolutionContext(
-                project_id=None,
-                project_path="main",
-            )
-        )
-        is None
-    )
-    assert (
-        plan_project_index_completion_relation_resolution(
-            ProjectIndexRelationResolutionContext(
-                project_id="7",
-                project_path=None,
-            )
-        )
-        is None
-    )
-    with pytest.raises(ValueError):
-        plan_project_index_completion_relation_resolution(
-            ProjectIndexRelationResolutionContext(
-                project_id="not-an-int",
-                project_path="main",
-            )
-        )
 
 
 @pytest.mark.asyncio
@@ -258,20 +233,6 @@ async def test_project_index_completion_relation_resolution_runs_shared_pass() -
     )
     assert runtime.counter_calls == 2
     assert runtime.resolve_calls == 2
-
-    skipped_runtime = StubRelationResolutionRuntime([2, 0], [{10}])
-    assert (
-        await resolve_project_index_completion_relations(
-            ProjectIndexRelationResolutionContext(
-                project_id=None,
-                project_path="main",
-            ),
-            skipped_runtime,
-        )
-        is None
-    )
-    assert skipped_runtime.counter_calls == 0
-    assert skipped_runtime.resolve_calls == 0
 
 
 def test_index_file_relation_resolution_plan_requires_incremental_processed_file() -> None:

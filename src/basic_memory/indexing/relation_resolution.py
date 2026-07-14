@@ -230,8 +230,8 @@ class ResolveRelationsJobRequest:
 class ProjectIndexRelationResolutionContext:
     """Project-index completion facts needed to queue relation resolution."""
 
-    project_id: int | str | None
-    project_path: str | None
+    project_id: int
+    project_path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,12 +245,10 @@ class IndexFileRelationResolutionContext:
 
 def plan_project_index_completion_relation_resolution(
     context: ProjectIndexRelationResolutionContext,
-) -> ResolveRelationsJobRequest | None:
+) -> ResolveRelationsJobRequest:
     """Plan the final relation-resolution job for a completed project index."""
-    if context.project_id is None or context.project_path is None:
-        return None
     return ResolveRelationsJobRequest(
-        project_id=int(context.project_id),
+        project_id=context.project_id,
         project_path=context.project_path,
     )
 
@@ -260,11 +258,13 @@ async def resolve_project_index_completion_relations(
     runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
-) -> ResolveRelationsResult | None:
-    """Run the final relation-resolution pass for a completed project index."""
-    request = plan_project_index_completion_relation_resolution(context)
-    if request is None:
-        return None
+) -> ResolveRelationsResult:
+    """Run the final relation-resolution pass for a completed project index.
+
+    The context names the project so queue-based runtimes can plan an enqueue
+    from the same completion facts; the inline path resolves directly against
+    the already project-scoped runtime.
+    """
     return await resolve_project_relations(runtime, max_passes=max_passes)
 
 
