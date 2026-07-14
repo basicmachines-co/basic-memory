@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 
 from loguru import logger
 from watchfiles.main import FileChange
@@ -33,39 +33,43 @@ LocalWatchProjectT = TypeVar("LocalWatchProjectT", bound="LocalWatchProjectSourc
 
 
 class LocalWatchProjectSource(Protocol):
-    """Minimal project shape needed to build local watcher storage events."""
+    """Minimal project shape needed to build local watcher storage events.
 
-    @property
-    def path(self) -> str: ...
-
-
-class LocalWatchProjectIdentitySource(LocalWatchProjectSource, Protocol):
-    """Stable project identity for local watcher storage prefixes.
-
-    Project ORM rows always carry a permalink and name; test doubles may leave
-    both None, which falls back to the project root directory name.
+    Object-typed on purpose: downstream runtimes compose leaner project
+    projections (Path-typed paths, no identity attributes) against this seam,
+    so the helpers coerce and fall back instead of trusting the declared shape.
     """
 
     @property
-    def permalink(self) -> str | None: ...
+    def path(self) -> object: ...
+
+
+@runtime_checkable
+class LocalWatchProjectIdentitySource(Protocol):
+    """Optional stable project identity for local watcher storage prefixes."""
 
     @property
-    def name(self) -> str | None: ...
+    def permalink(self) -> object | None: ...
+
+    @property
+    def name(self) -> object | None: ...
 
 
 def local_project_root(project: LocalWatchProjectSource) -> Path:
     """Return the resolved filesystem root for a local watcher project."""
-    project_path = project.path.strip()
+    project_path = str(project.path).strip() if project.path else ""
     if not project_path:
         raise ValueError("local watcher project requires path")
     return Path(project_path).expanduser().resolve()
 
 
-def local_project_prefix(project: LocalWatchProjectIdentitySource) -> ProjectPath:
+def local_project_prefix(project: LocalWatchProjectSource) -> ProjectPath:
     """Return the storage-event prefix for a local watcher project."""
-    for project_identity in (project.permalink, project.name):
-        if project_identity and project_identity.strip():
-            return project_identity.strip()
+    if isinstance(project, LocalWatchProjectIdentitySource):
+        for project_identity in (project.permalink, project.name):
+            project_prefix = str(project_identity).strip() if project_identity else ""
+            if project_prefix:
+                return project_prefix
 
     return local_project_root(project).name
 
@@ -201,7 +205,7 @@ class LocalWatchEventIndexRequest:
     def from_project_changes(
         cls,
         *,
-        project: LocalWatchProjectIdentitySource,
+        project: LocalWatchProjectSource,
         changes: Iterable[FileChange],
         event_time: str | None = None,
         bucket_name: StorageBucketName = LOCAL_FILESYSTEM_BUCKET_NAME,

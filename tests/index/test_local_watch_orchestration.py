@@ -199,8 +199,9 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     note_path = project_root / "notes" / "a.md"
     note_path.parent.mkdir()
     note_path.write_text("# A\n", encoding="utf-8")
-    # No permalink/name identity: the prefix falls back to the root directory name.
-    project = SimpleNamespace(path=str(project_root), permalink=None, name=None)
+    # No permalink/name attributes at all: a structural caller without the
+    # optional identity shape falls back to the root directory name.
+    project = SimpleNamespace(path=str(project_root))
 
     request = LocalWatchEventIndexRequest.from_project_changes(
         project=project,
@@ -213,6 +214,16 @@ def test_local_watch_request_builds_storage_prefix_from_project(tmp_path: Path) 
     assert request.project_root == project_root.resolve()
     assert request.project_prefix == "configured-project-root"
     assert [event.object_key for event in source.events()] == ["configured-project-root/notes/a.md"]
+
+    # None-valued identity attributes also fall back to the directory name,
+    # and a Path-typed project path is coerced rather than crashing.
+    none_identity_request = LocalWatchEventIndexRequest.from_project_changes(
+        project=SimpleNamespace(path=project_root, permalink=None, name=None),
+        changes=((Change.added, str(note_path)),),
+    )
+
+    assert none_identity_request.project_root == project_root.resolve()
+    assert none_identity_request.project_prefix == "configured-project-root"
 
 
 def test_local_watch_request_uses_project_permalink_for_duplicate_leaf_roots(
