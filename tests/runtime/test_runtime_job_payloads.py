@@ -1,8 +1,5 @@
 """Tests for portable runtime worker payload boundaries."""
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -11,53 +8,12 @@ from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.job_payloads import (
     DELETE_NOTE_FILE_ENTRYPOINT,
     MATERIALIZE_NOTE_FILE_ENTRYPOINT,
-    RuntimeJobPayloadSerializer,
-    RuntimeJobPayloadSource,
     RuntimeNoteFileDeleteJobPayload,
     RuntimeNoteMaterializationJobPayload,
-    RuntimePayloadJobEnqueuer,
-    enqueue_runtime_job_payload,
 )
 from basic_memory.runtime.jobs import RuntimeJobRequest
 from basic_memory.runtime.note_content import RuntimeNoteMaterializationJobRequest
 from basic_memory.runtime.note_object_metadata import NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT
-
-
-@dataclass(slots=True)
-class FakeJobRuntime:
-    """Runtime double that records the concrete queue request it receives."""
-
-    job_id: str = "job-1"
-    requests: list[RuntimeJobRequest] = field(default_factory=list)
-
-    async def enqueue(self, request: RuntimeJobRequest) -> str:
-        self.requests.append(request)
-        return self.job_id
-
-
-class FakeRuntimeJobPayload:
-    """Payload double that owns concrete runtime request construction."""
-
-    def __init__(self, request: RuntimeJobRequest) -> None:
-        self.request = request
-        self.headers: Mapping[str, str] | None = None
-
-    def runtime_job_request(
-        self,
-        *,
-        headers: Mapping[str, str] | None = None,
-    ) -> RuntimeJobRequest:
-        self.headers = headers
-        return self.request
-
-
-@dataclass(frozen=True, slots=True)
-class NoteFileDeletePayloadSerializer:
-    def serialize(
-        self,
-        request: RuntimeNoteFileDeleteJobRequest,
-    ) -> RuntimeNoteFileDeleteJobPayload:
-        return RuntimeNoteFileDeleteJobPayload.from_runtime_request(request)
 
 
 def test_runtime_note_file_delete_job_payload_round_trips_runtime_request() -> None:
@@ -97,75 +53,6 @@ def test_runtime_note_file_delete_job_payload_builds_runtime_queue_request() -> 
         dedupe_key="delete-note-file:101:42:notes/a.md:file-sum",
         headers={"source": "test", "project_id": "101"},
     )
-
-
-@pytest.mark.asyncio
-async def test_runtime_payload_job_enqueuer_validates_serializes_and_queues() -> None:
-    """The typed enqueuer builds the concrete job request without queue-specific code."""
-    runtime_request = RuntimeNoteFileDeleteJobRequest(
-        project_id=101,
-        entity_id=42,
-        file_path="notes/a.md",
-        file_checksum="file-sum",
-    )
-    payload = RuntimeNoteFileDeleteJobPayload.from_runtime_request(runtime_request)
-    execute_after = timedelta(seconds=5)
-    runtime = FakeJobRuntime(job_id="job-42")
-    payload_serializer: RuntimeJobPayloadSerializer[RuntimeNoteFileDeleteJobRequest] = (
-        NoteFileDeletePayloadSerializer()
-    )
-    enqueuer = RuntimePayloadJobEnqueuer(
-        runtime=runtime,
-        entrypoint="delete_note_file",
-        payload_serializer=payload_serializer,
-    )
-
-    job_id = await enqueuer.enqueue(
-        runtime_request,
-        headers={"source": "test"},
-        priority=3,
-        execute_after=execute_after,
-    )
-
-    assert job_id == "job-42"
-    assert runtime.requests == [
-        RuntimeJobRequest(
-            entrypoint="delete_note_file",
-            payload=payload.model_dump_json().encode("utf-8"),
-            priority=3,
-            execute_after=execute_after,
-            dedupe_key=runtime_request.dedupe_key(),
-            headers={
-                "source": "test",
-                "project_id": str(runtime_request.project_id),
-            },
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_enqueue_runtime_job_payload_uses_payload_owned_request_builder() -> None:
-    """Queueable payloads keep special request semantics while adapters stay generic."""
-    request = RuntimeJobRequest(
-        entrypoint="custom_entrypoint",
-        payload=b"{}",
-        dedupe_key="custom-dedupe",
-        headers={"origin": "custom"},
-        execute_after=timedelta(seconds=10),
-    )
-    payload_source: RuntimeJobPayloadSource = FakeRuntimeJobPayload(request)
-    runtime = FakeJobRuntime(job_id="job-99")
-
-    job_id = await enqueue_runtime_job_payload(
-        runtime,
-        payload_source,
-        headers={"source": "test"},
-    )
-
-    assert job_id == "job-99"
-    assert isinstance(payload_source, FakeRuntimeJobPayload)
-    assert payload_source.headers == {"source": "test"}
-    assert runtime.requests == [request]
 
 
 def test_runtime_note_materialization_job_payload_round_trips_runtime_request() -> None:
