@@ -19,50 +19,29 @@ from basic_memory.indexing.relation_resolution import (
     plan_project_index_completion_relation_resolution,
     resolve_project_index_completion_relations,
     resolve_project_relations,
-    resolve_relations_until_stable,
 )
 from basic_memory.indexing.models import IndexFileJobStatus
 from basic_memory.models import Entity
-
-
-class StubUnresolvedRelationCounter:
-    """Returns scripted unresolved relation counts, in call order."""
-
-    def __init__(self, counts: list[int]) -> None:
-        self._counts = counts
-        self.calls = 0
-
-    async def count_unresolved_relations(self) -> int:
-        index = min(self.calls, len(self._counts) - 1)
-        self.calls += 1
-        return self._counts[index]
-
-
-class StubRelationResolutionPass:
-    """Returns scripted affected entity sets, in pass order."""
-
-    def __init__(self, affected_per_pass: list[set[int]]) -> None:
-        self._affected_per_pass = affected_per_pass
-        self.calls = 0
-
-    async def resolve_relations(self) -> set[int]:
-        index = min(self.calls, len(self._affected_per_pass) - 1)
-        self.calls += 1
-        return self._affected_per_pass[index]
 
 
 class StubRelationResolutionRuntime:
     """Relation-resolution runtime with scripted counters and pass results."""
 
     def __init__(self, counts: list[int], affected_per_pass: list[set[int]]) -> None:
-        self.counter = StubUnresolvedRelationCounter(counts)
-        self.resolver = StubRelationResolutionPass(affected_per_pass)
+        self._counts = counts
+        self._affected_per_pass = affected_per_pass
+        self.counter_calls = 0
+        self.resolve_calls = 0
 
     async def count_unresolved_relations(self) -> int:
-        return await self.counter.count_unresolved_relations()
+        index = min(self.counter_calls, len(self._counts) - 1)
+        self.counter_calls += 1
+        return self._counts[index]
 
     async def resolve_relations(self) -> set[int]:
-        return await self.resolver.resolve_relations()
+        index = min(self.resolve_calls, len(self._affected_per_pass) - 1)
+        self.resolve_calls += 1
+        return self._affected_per_pass[index]
 
 
 class FakeSession:
@@ -277,8 +256,8 @@ async def test_project_index_completion_relation_resolution_runs_shared_pass() -
         passes=2,
         affected_entities=1,
     )
-    assert runtime.counter.calls == 2
-    assert runtime.resolver.calls == 2
+    assert runtime.counter_calls == 2
+    assert runtime.resolve_calls == 2
 
     skipped_runtime = StubRelationResolutionRuntime([2, 0], [{10}])
     assert (
@@ -291,8 +270,8 @@ async def test_project_index_completion_relation_resolution_runs_shared_pass() -
         )
         is None
     )
-    assert skipped_runtime.counter.calls == 0
-    assert skipped_runtime.resolver.calls == 0
+    assert skipped_runtime.counter_calls == 0
+    assert skipped_runtime.resolve_calls == 0
 
 
 def test_index_file_relation_resolution_plan_requires_incremental_processed_file() -> None:
@@ -320,13 +299,9 @@ def test_index_file_relation_resolution_plan_requires_incremental_processed_file
 
 @pytest.mark.asyncio
 async def test_resolves_until_a_stable_pass_changes_nothing() -> None:
-    counter = StubUnresolvedRelationCounter([3, 1])
-    resolver = StubRelationResolutionPass([{10, 11}, set()])
+    runtime = StubRelationResolutionRuntime([3, 1], [{10, 11}, set()])
 
-    result = await resolve_relations_until_stable(
-        resolver=resolver,
-        unresolved_counter=counter,
-    )
+    result = await resolve_project_relations(runtime)
 
     assert result == ResolveRelationsResult(
         unresolved_before=3,
@@ -335,40 +310,31 @@ async def test_resolves_until_a_stable_pass_changes_nothing() -> None:
         affected_entities=2,
     )
     assert result.resolved == 2
-    assert resolver.calls == 2
-    assert counter.calls == 2
+    assert runtime.resolve_calls == 2
+    assert runtime.counter_calls == 2
 
 
 @pytest.mark.asyncio
 async def test_stops_immediately_when_no_relations_resolve() -> None:
-    counter = StubUnresolvedRelationCounter([1, 1])
-    resolver = StubRelationResolutionPass([set()])
+    runtime = StubRelationResolutionRuntime([1, 1], [set()])
 
-    result = await resolve_relations_until_stable(
-        resolver=resolver,
-        unresolved_counter=counter,
-    )
+    result = await resolve_project_relations(runtime)
 
     assert result.passes == 1
     assert result.resolved == 0
     assert result.remaining == 1
-    assert resolver.calls == 1
+    assert runtime.resolve_calls == 1
 
 
 @pytest.mark.asyncio
 async def test_resolution_loop_is_bounded_by_max_passes() -> None:
-    counter = StubUnresolvedRelationCounter([2, 0])
-    resolver = StubRelationResolutionPass([{1}])
+    runtime = StubRelationResolutionRuntime([2, 0], [{1}])
 
-    result = await resolve_relations_until_stable(
-        resolver=resolver,
-        unresolved_counter=counter,
-        max_passes=3,
-    )
+    result = await resolve_project_relations(runtime, max_passes=3)
 
     assert result.passes == 3
     assert result.remaining == 0
-    assert resolver.calls == 3
+    assert runtime.resolve_calls == 3
 
 
 @pytest.mark.asyncio
