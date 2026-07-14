@@ -15,6 +15,7 @@ from basic_memory.indexing.change_planning import (
     FileMoveCandidate,
     plan_change_detection_snapshot,
     plan_file_changes,
+    plan_move_target_checksums,
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.change_detector import (
@@ -49,7 +50,10 @@ def test_plan_change_detection_snapshot_maps_typed_runtime_state() -> None:
         move_candidates=(FileMoveCandidate(path="old/moved.md", checksum="moved-checksum"),),
     )
 
-    assert snapshot.new_file_checksum_by_path == {
+    assert plan_move_target_checksums(
+        storage_checksum_by_path=snapshot.storage_checksum_by_path,
+        db_checksum_by_path=snapshot.db_checksum_by_path,
+    ) == {
         "new/moved.md": "moved-checksum",
         "new.md": "new-file-checksum",
     }
@@ -83,15 +87,14 @@ def test_plan_file_changes_keeps_unobservable_files_out_of_deletes() -> None:
     )
 
 
-def test_new_file_checksum_by_path_excludes_unknown_checksums() -> None:
+def test_plan_move_target_checksums_excludes_unknown_checksums() -> None:
     """Unknown checksums carry no content evidence, so they cannot claim a move."""
-    snapshot = ChangeDetectionSnapshot(
+    move_target_checksums = plan_move_target_checksums(
         storage_checksum_by_path={"new.md": "new-checksum", "unreadable.md": None},
         db_checksum_by_path={},
-        all_db_paths=(),
     )
 
-    assert snapshot.new_file_checksum_by_path == {"new.md": "new-checksum"}
+    assert move_target_checksums == {"new.md": "new-checksum"}
 
 
 def test_plan_file_changes_detects_new_modified_unchanged_and_deleted_files() -> None:

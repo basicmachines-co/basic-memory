@@ -69,25 +69,32 @@ class ChangeDetectionSnapshot:
         """Return observed storage paths in adapter-provided order."""
         return tuple(self.storage_checksum_by_path)
 
-    @property
-    def new_file_checksum_by_path(self) -> dict[FileIndexPath, FileIndexChecksum]:
-        """Return storage objects that do not have an indexed row at the same path.
-
-        Paths with an unknown (None) checksum are excluded: without content
-        evidence they cannot prove a move, so they stay plain new files.
-        """
-        return {
-            path: checksum
-            for path, checksum in self.storage_checksum_by_path.items()
-            if path not in self.db_checksum_by_path and checksum is not None
-        }
-
 
 def storage_checksums_from_sources(
     storage_files: Mapping[FileIndexPath, StorageChecksumSource],
 ) -> dict[FileIndexPath, FileIndexChecksum | None]:
     """Extract checksums from storage-object metadata without keeping vendor objects."""
     return {path: file_info.checksum for path, file_info in storage_files.items()}
+
+
+def plan_move_target_checksums(
+    *,
+    storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
+    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
+) -> dict[FileIndexPath, FileIndexChecksum]:
+    """Return storage objects eligible to prove a move, keyed by destination path.
+
+    Move destinations must be paths with no indexed row at all. A modified (or
+    null-checksum) path already has an entity; matching it to a deleted file's
+    checksum would redirect that entity onto the existing path and silently
+    drop the in-place edit. Unknown (None) storage checksums carry no content
+    evidence, so they cannot claim a move candidate either.
+    """
+    return {
+        path: checksum
+        for path, checksum in storage_checksum_by_path.items()
+        if path not in db_checksum_by_path and checksum is not None
+    }
 
 
 def plan_change_detection_snapshot(snapshot: ChangeDetectionSnapshot) -> ChangeReport:
@@ -126,19 +133,11 @@ def plan_file_changes(
             continue
         unchanged_files.append(path)
 
-    # Move destinations must be paths with no indexed row at all. A modified (or
-    # null-checksum) path already has an entity; matching it to a deleted file's
-    # checksum would redirect that entity onto the existing path and silently
-    # drop the in-place edit. Unknown (None) storage checksums carry no content
-    # evidence, so they cannot claim a move candidate either.
-    move_target_checksum_by_path: dict[FileIndexPath, FileIndexChecksum] = {}
-    for path in new_files:
-        storage_checksum = storage_checksum_by_path[path]
-        if path in db_checksum_by_path or storage_checksum is None:
-            continue
-        move_target_checksum_by_path[path] = storage_checksum
     moved_files = plan_moved_files(
-        new_file_checksum_by_path=move_target_checksum_by_path,
+        new_file_checksum_by_path=plan_move_target_checksums(
+            storage_checksum_by_path=storage_checksum_by_path,
+            db_checksum_by_path=db_checksum_by_path,
+        ),
         storage_paths=storage_paths,
         move_candidates=move_candidates,
     )

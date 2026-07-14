@@ -18,6 +18,7 @@ from basic_memory.indexing.change_planning import (
     FileMoveCandidate,
     StorageChecksumSource,
     plan_change_detection_snapshot,
+    plan_move_target_checksums,
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRepository
@@ -148,18 +149,15 @@ async def detect_project_file_changes(
         with logfire.span("change_detector.detect_deletes"):
             all_db_paths = await store.load_all_indexed_paths()
 
-        candidate_snapshot = ChangeDetectionSnapshot(
+        move_target_checksums = plan_move_target_checksums(
             storage_checksum_by_path=storage_checksum_by_path,
             db_checksum_by_path=db_checksums,
-            all_db_paths=all_db_paths,
         )
         with logfire.span(
             "change_detector.detect_moves",
-            candidate_count=len(candidate_snapshot.new_file_checksum_by_path),
+            candidate_count=len(move_target_checksums),
         ):
-            move_candidates = await store.load_move_candidates(
-                candidate_snapshot.new_file_checksum_by_path
-            )
+            move_candidates = await store.load_move_candidates(move_target_checksums)
 
         snapshot = ChangeDetectionSnapshot(
             storage_checksum_by_path=storage_checksum_by_path,
