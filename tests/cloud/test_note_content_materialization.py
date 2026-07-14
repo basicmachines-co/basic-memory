@@ -575,7 +575,10 @@ async def test_recover_stuck_materializations_publishes_already_written_file(
     # is already on disk while the row still reads 'writing' (file_checksum None).
     target = file_service.base_path / sample_entity.file_path
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(markdown_content, encoding="utf-8")
+    # write_bytes: the crash-written file must be byte-identical to the accepted
+    # content; text mode would translate \n to \r\n on Windows and read as an
+    # external edit instead of an already-written file
+    target.write_bytes(markdown_content.encode("utf-8"))
 
     recovered = await recover_stuck_materializations(
         session_maker=session_maker,

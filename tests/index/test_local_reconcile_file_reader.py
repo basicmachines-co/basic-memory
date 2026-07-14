@@ -21,7 +21,9 @@ from basic_memory.services.file_service import FileService
 async def test_reader_returns_current_bytes_and_mtime(file_service: FileService) -> None:
     """The reader returns the current file bytes and modification time."""
     path = "note.md"
-    (Path(file_service.base_path) / path).write_text("# Fresh\n", encoding="utf-8")
+    # write_bytes: text mode would translate \n to \r\n on Windows, breaking the
+    # byte-level assertion below
+    (Path(file_service.base_path) / path).write_bytes(b"# Fresh\n")
 
     reader = FileServiceNoteContentReconcileFileReader(file_service=file_service)
     result = await reader.get_file(path)
