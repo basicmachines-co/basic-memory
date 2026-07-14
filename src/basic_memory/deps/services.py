@@ -8,6 +8,7 @@ This module provides service-layer dependencies:
 """
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Coroutine, Protocol
@@ -16,6 +17,7 @@ from fastapi import Depends
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.deps.config import AppConfigDep
 from basic_memory.deps.db import SessionMakerDep
@@ -413,9 +415,37 @@ class LocalDirectoryFileDeleteEnqueuer:
             raise DirectoryFileDeleteEnqueueError(str(exc)) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class LocalDirectoryDeleteRelationCleanupRefresher:
+    """Reindex surviving relation sources after an accepted directory delete.
+
+    Their search_index relation rows went stale when the deleted targets'
+    rows cascaded away; reindexing each surviving source drops the danglers.
+    """
+
+    session_maker: async_sessionmaker[AsyncSession]
+    entity_repository: EntityRepository
+    search_service: SearchService
+
+    async def refresh_relation_sources(self, entity_ids: Sequence[int]) -> None:
+        unique_entity_ids = sorted(set(entity_ids))
+        if not unique_entity_ids:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            entities = await self.entity_repository.find_by_ids(session, unique_entity_ids)
+
+        # A source deleted between acceptance and this refresh has no search rows
+        # left to repair, so missing ids are skipped rather than treated as fatal.
+        for entity in entities:
+            await self.search_service.index_entity(entity)
+
+
 async def get_directory_delete_service(
     session_maker: SessionMakerDep,
     file_service: FileServiceV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
 ) -> DirectoryDeleteService:
     """Create the route-level directory-delete service for the local runtime."""
     return DirectoryDeleteService(
@@ -423,6 +453,11 @@ async def get_directory_delete_service(
         runtime=DirectoryDeleteRuntime(
             store=RepositoryDirectoryDeleteAcceptanceStore(),
             file_delete_enqueuer=LocalDirectoryFileDeleteEnqueuer(file_service=file_service),
+            relation_cleanup_refresher=LocalDirectoryDeleteRelationCleanupRefresher(
+                session_maker=session_maker,
+                entity_repository=entity_repository,
+                search_service=search_service,
+            ),
         ),
     )
 

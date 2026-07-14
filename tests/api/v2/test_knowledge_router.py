@@ -1268,6 +1268,68 @@ async def test_delete_directory_v2_validation_error(client: AsyncClient, v2_proj
 
 
 @pytest.mark.asyncio
+async def test_delete_directory_v2_refreshes_surviving_relation_sources(
+    client: AsyncClient,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+    search_service: SearchService,
+):
+    """A surviving note that linked into the deleted directory must have its stale
+    search relation rows refreshed, not left dangling until an unrelated reindex."""
+    from basic_memory.schemas.search import SearchItemType
+
+    # Target inside the directory that will be deleted.
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Cleanup Target",
+            "directory": "v2-relcleanup",
+            "content": "# Cleanup Target",
+        },
+    )
+    assert response.status_code == 202
+
+    # Keeper outside the directory linking into it (resolved at write time).
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Cleanup Keeper",
+            "directory": "v2-relkeep",
+            "content": "# Cleanup Keeper\n\n- relates_to [[Cleanup Target]]",
+        },
+    )
+    assert response.status_code == 202
+
+    async with db.scoped_session(session_maker) as session:
+        keeper = await entity_repository.get_by_file_path(session, "v2-relkeep/Cleanup Keeper.md")
+        assert keeper is not None
+        assert len(keeper.outgoing_relations) == 1
+        relation_permalink = keeper.outgoing_relations[0].permalink
+        assert relation_permalink is not None
+        stale_rows_before = await search_service.repository.search(
+            permalink=relation_permalink,
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+    assert stale_rows_before != []
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/delete-directory",
+        json={"directory": "v2-relcleanup"},
+    )
+    assert response.status_code == 200
+
+    async with db.scoped_session(session_maker) as session:
+        stale_rows_after = await search_service.repository.search(
+            permalink=relation_permalink,
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+    assert stale_rows_after == []
+
+
+@pytest.mark.asyncio
 async def test_delete_directory_v2_nested_structure(client: AsyncClient, v2_project_url):
     """Test delete_directory V2 handles nested directory structure."""
     # Create notes in nested structure

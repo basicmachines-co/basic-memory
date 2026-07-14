@@ -739,6 +739,55 @@ async def test_directory_delete_service_uses_injected_runtime_and_session_maker(
     ]
 
 
+@pytest.mark.asyncio
+async def test_directory_delete_service_refreshes_surviving_relation_sources(
+    session_maker,
+) -> None:
+    """Surviving sources that linked into the deleted directory must be reindexed;
+    dropping the ids leaves their stale relation rows in the search index."""
+
+    class RecordingRelationCleanupRefresher:
+        def __init__(self) -> None:
+            self.refreshed: list[list[int]] = []
+
+        async def refresh_relation_sources(self, entity_ids) -> None:
+            self.refreshed.append(list(entity_ids))
+
+    class StoreWithSurvivingSources(FakeDirectoryDeleteStore):
+        async def delete_directory_entities(
+            self,
+            session: AsyncSession,
+            *,
+            project_id: int,
+            entity_ids,
+        ) -> frozenset[int]:
+            await super().delete_directory_entities(
+                session,
+                project_id=project_id,
+                entity_ids=entity_ids,
+            )
+            return frozenset({99, 42})
+
+    refresher = RecordingRelationCleanupRefresher()
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=StoreWithSurvivingSources(),
+            file_delete_enqueuer=FakeDirectoryFileDeleteEnqueuer(),
+            relation_cleanup_refresher=refresher,
+        ),
+    )
+
+    status_code, _ = await service.delete_directory(
+        project_external_id="project-123",
+        directory="/notes/",
+    )
+
+    assert status_code == 200
+    # Ids arrive sorted so reindex order is deterministic.
+    assert refresher.refreshed == [[42, 99]]
+
+
 def test_directory_delete_service_rejects_project_traversal() -> None:
     try:
         DirectoryDeleteService.normalize_directory_path("notes/../other")

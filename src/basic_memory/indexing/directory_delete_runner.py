@@ -119,12 +119,25 @@ class DirectoryDeleteAcceptanceStore(Protocol):
         """
 
 
+class DirectoryDeleteRelationCleanupRefresher(Protocol):
+    """Capability that reindexes surviving relation sources after an accepted delete.
+
+    Sources deleted between acceptance and the refresh are skipped, not fatal —
+    their search rows disappeared with them.
+    """
+
+    async def refresh_relation_sources(self, entity_ids: Sequence[int]) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class DirectoryDeleteRuntime:
     """Dependencies required by directory-delete acceptance orchestration."""
 
     store: DirectoryDeleteAcceptanceStore
     file_delete_enqueuer: DirectoryFileDeleteEnqueuer
+    # None means this runtime has no inline reindex path; the surviving source ids
+    # are still surfaced on the accepted result for deferred (queued) consumers.
+    relation_cleanup_refresher: DirectoryDeleteRelationCleanupRefresher | None = None
 
 
 @dataclass(frozen=True, slots=True)

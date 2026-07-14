@@ -90,6 +90,18 @@ class DirectoryDeleteService:
             accepted=accepted,
             enqueuer=self.runtime.file_delete_enqueuer,
         )
+
+        # Trigger: notes outside the deleted directory linked into it.
+        # Why: the delete cascaded their relation rows away, but those sources own
+        #   matching search_index relation rows that now dangle; without a reindex
+        #   they linger until an unrelated rebuild.
+        # Outcome: reindex each surviving source inline when the runtime provides a
+        #   refresher (local); queued runtimes consume the ids from the result.
+        if accepted.relation_cleanup_entity_ids and self.runtime.relation_cleanup_refresher:
+            await self.runtime.relation_cleanup_refresher.refresh_relation_sources(
+                sorted(accepted.relation_cleanup_entity_ids)
+            )
+
         status_code = 500 if result.file_delete_status == "failed" else 200
         return status_code, result.to_response_payload()
 
