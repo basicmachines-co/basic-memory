@@ -37,8 +37,11 @@ VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
 # web_v2 = a note write originating from the web-v2 UI. Distinguishing it from
 # `api` lets clients tell a genuine web-UI edit apart from api/materialization
 # round-trips (e.g. the onboarding "close the loop" signal).
+# collaboration_relay = a relay service persisting a live collaboration
+# document with its service credential (issue #1445); the webhook-canonical
+# note.updated event echoes this source as the write's actor origin.
 VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
-    {"api", "mcp", "s3_webhook", "web_v2"}
+    {"api", "collaboration_relay", "mcp", "s3_webhook", "web_v2"}
 )
 _SAFE_ACTOR_NAME_CHARS = re.compile(r"[^A-Za-z0-9 ._()+/:-]+")
 _WHITESPACE = re.compile(r"\s+")

@@ -232,6 +232,10 @@ class IndexFileJobResult:
     actor_kind: str | None = None
     actor_name: str | None = None
     live_update_source: str | None = None
+    # True when the object carried our own bm-file-checksum metadata that no
+    # longer matches what this job indexed: a newer own-stack write landed
+    # mid-job, so this result describes superseded content (issue #1445).
+    content_superseded: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +354,9 @@ def index_file_job_result_from_indexed_file(
         live_update_source=(
             live_update_plan.live_update_source if live_update_plan is not None else None
         ),
+        content_superseded=(
+            live_update_plan.content_superseded if live_update_plan is not None else False
+        ),
     )
 
 
@@ -411,7 +418,12 @@ def plan_index_file_note_live_update(
         note_external_id=note_external_id,
         note_path=context.file_path,
         note_version_etag=normalized_etag,
-        content_checksum=result.entity_checksum,
+        # Superseded content (a newer own-stack write overwrote the object
+        # mid-job) publishes as a state-refresh only: a content_checksum here
+        # would invite the collaboration relay to reconcile open documents to
+        # the stale version. The newer write's own webhook job carries the
+        # current checksum.
+        content_checksum=None if result.content_superseded else result.entity_checksum,
         file_checksum=normalized_etag,
         file_size_bytes=context.object_size,
         title=title,
@@ -496,6 +508,7 @@ class IndexedFileLiveUpdatePlan:
     object_checksum: RuntimeFileChecksum
     indexed_checksum: RuntimeFileChecksum
     checksum_matches_indexed_file: bool
+    content_superseded: bool = False
     metadata_actor_user_profile_id: str | None = None
     metadata_actor_kind: str | None = None
     metadata_actor_name: str | None = None
@@ -599,11 +612,21 @@ def plan_indexed_file_live_update_metadata(
     )
     provenance = RuntimeNoteObjectProvenance.from_object_metadata(object_metadata)
     checksum_matches_indexed_file = selected_checksum.checksum == indexed_file.checksum
+    # Our own stack stamped the object with a content checksum and it no longer
+    # matches what this job indexed: a newer own-stack write landed mid-job (its
+    # webhook job is queued), so this job indexed superseded content. An etag
+    # mismatch proves nothing (etags never equal content sha256s), so external
+    # writes are unaffected.
+    content_superseded = (
+        not checksum_matches_indexed_file
+        and selected_checksum.source == RuntimeStorageObjectChecksumSource.note_file_checksum
+    )
     plan = IndexedFileLiveUpdatePlan(
         object_checksum_source=selected_checksum.source,
         object_checksum=selected_checksum.checksum,
         indexed_checksum=indexed_file.checksum,
         checksum_matches_indexed_file=checksum_matches_indexed_file,
+        content_superseded=content_superseded,
         metadata_actor_user_profile_id=provenance.actor_user_profile_id,
         metadata_actor_kind=provenance.actor_kind,
         metadata_actor_name=provenance.actor_name,

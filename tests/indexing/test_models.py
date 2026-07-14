@@ -819,6 +819,8 @@ def test_plan_indexed_file_live_update_metadata_omits_mismatched_metadata():
         object_checksum="checksum-2",
         indexed_checksum="checksum-1",
         checksum_matches_indexed_file=False,
+        # bm-file-checksum mismatch = a newer own-stack write landed mid-job
+        content_superseded=True,
         metadata_actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         metadata_actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
         metadata_actor_name="Claude Code",
@@ -829,3 +831,57 @@ def test_plan_indexed_file_live_update_metadata_omits_mismatched_metadata():
         live_update_source=None,
         operation=None,
     )
+def test_plan_indexed_file_live_update_metadata_etag_mismatch_is_not_superseded():
+    indexed_file = FileIndexResult(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        operation=FileIndexOperation.updated,
+    )
+
+    plan = plan_indexed_file_live_update_metadata(
+        indexed_file=indexed_file,
+        object_checksum="storage-native-etag",
+        object_metadata={
+            NOTE_OBJECT_SOURCE_METADATA: "mcp",
+        },
+    )
+
+    # An etag never equals a content sha256, so an etag-source mismatch proves
+    # nothing about supersession - external writes must not suppress checksums.
+    assert plan.object_checksum_source is RuntimeStorageObjectChecksumSource.storage_etag
+    assert plan.checksum_matches_indexed_file is False
+    assert plan.content_superseded is False
+
+
+def test_plan_index_file_note_live_update_superseded_content_omits_checksum():
+    context = IndexFileNoteLiveUpdateContext(
+        project_external_id="project-1",
+        project_name="Project One",
+        file_path="notes/a.md",
+        mode=RuntimeStorageFileIndexMode.observed_object,
+        object_etag='"etag-1"',
+        object_size=12,
+    )
+    result = IndexFileJobResult(
+        status=IndexFileJobStatus.processed,
+        reason="file indexed: notes/a.md",
+        entity_id=42,
+        note_external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        entity_checksum="checksum-1",
+        operation=FileIndexOperation.updated,
+        content_superseded=True,
+    )
+
+    plan = plan_index_file_note_live_update(context, result)
+
+    assert plan is not None
+    # Superseded content publishes a state refresh only: no content_checksum,
+    # so a collaboration relay never reconciles open docs to the stale version.
+    assert plan.content_checksum is None
+    assert plan.file_checksum == "etag-1"
