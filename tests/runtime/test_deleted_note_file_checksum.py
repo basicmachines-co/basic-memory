@@ -7,12 +7,12 @@ from basic_memory.runtime.note_content import select_deleted_note_file_checksum
 
 @dataclass(frozen=True, slots=True)
 class _NoteContentFileState:
-    file_checksum: object | None
+    file_checksum: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class _EntityFileState:
-    checksum: object | None
+    checksum: str | None
 
 
 def test_select_deleted_note_file_checksum_prefers_materialized_note_content() -> None:

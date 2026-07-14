@@ -23,7 +23,6 @@ from basic_memory.runtime.storage import (
     RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
-    RuntimeNoteContentVersionInput,
     runtime_content_type_is_markdown,
 )
 
@@ -139,13 +138,13 @@ class RuntimeDeletedNoteEntitySource(RuntimeContentTypeSource, Protocol):
     """Minimal deleted-note entity shape needed before row cleanup."""
 
     @property
-    def external_id(self) -> object | None: ...
+    def external_id(self) -> NoteExternalId: ...
 
     @property
-    def title(self) -> object | None: ...
+    def title(self) -> str: ...
 
     @property
-    def permalink(self) -> object | None: ...
+    def permalink(self) -> str | None: ...
 
 
 class RuntimeDeletedNoteEntityDeleteSource(RuntimeDeletedNoteEntitySource, Protocol):
@@ -159,7 +158,7 @@ class RuntimeDeletedNoteEntityChecksumSource(Protocol):
     """Minimal deleted-note entity shape needed to guard file cleanup."""
 
     @property
-    def checksum(self) -> object | None: ...
+    def checksum(self) -> RuntimeFileChecksum | None: ...
 
 
 class RuntimeDeletedNoteFileDeleteEntitySource(
@@ -177,7 +176,7 @@ class RuntimeDeletedNoteFileChecksumSource(Protocol):
     """Minimal note_content shape needed to guard file cleanup."""
 
     @property
-    def file_checksum(self) -> object | None: ...
+    def file_checksum(self) -> RuntimeFileChecksum | None: ...
 
 
 class RuntimeNoteContentStateSource(Protocol):
@@ -215,13 +214,13 @@ class RuntimePendingNoteMaterializationSource(Protocol):
     """Minimal note_content row shape needed to queue materialization work."""
 
     @property
-    def db_version(self) -> RuntimeNoteContentVersionInput: ...
+    def db_version(self) -> RuntimeNoteContentVersion: ...
 
     @property
-    def db_checksum(self) -> object: ...
+    def db_checksum(self) -> RuntimeNoteContentChecksum: ...
 
     @property
-    def last_source(self) -> object | None: ...
+    def last_source(self) -> RuntimeNoteChangeSource | None: ...
 
 
 class RuntimeAcceptedNoteWriteContentSource(
@@ -236,21 +235,21 @@ class RuntimeMaterializedNoteSource(Protocol):
     """Minimal note_content row shape needed to clean up a materialized file."""
 
     @property
-    def file_checksum(self) -> object | None: ...
+    def file_checksum(self) -> RuntimeFileChecksum | None: ...
 
 
 class RuntimeNoteContentDbVersionSource(Protocol):
     """Minimal note_content row shape needed to advance accepted DB versions."""
 
     @property
-    def db_version(self) -> RuntimeNoteContentVersionInput: ...
+    def db_version(self) -> RuntimeNoteContentVersion: ...
 
 
 class RuntimeNoteContentVersionSource(RuntimeNoteContentDbVersionSource, Protocol):
     """Minimal note_content row shape needed to compare accepted DB versions."""
 
     @property
-    def db_checksum(self) -> object: ...
+    def db_checksum(self) -> RuntimeNoteContentChecksum: ...
 
 
 class RuntimeAcceptedNoteContentWriteSource(
@@ -346,16 +345,8 @@ class RuntimeDeletedNoteReference:
         file_path: RuntimeFilePath,
     ) -> Self:
         return cls(
-            external_id=required_runtime_deleted_note_text(
-                entity.external_id,
-                field_name="external_id",
-                file_path=file_path,
-            ),
-            title=required_runtime_deleted_note_text(
-                entity.title,
-                field_name="title",
-                file_path=file_path,
-            ),
+            external_id=entity.external_id,
+            title=entity.title,
             permalink=runtime_deleted_note_permalink(
                 entity.permalink,
                 file_path=file_path,
@@ -428,34 +419,20 @@ def select_deleted_note_file_checksum(
 ) -> RuntimeFileChecksum | None:
     """Choose the best accepted file checksum to guard deleted-note cleanup."""
     if note_content is not None and note_content.file_checksum is not None:
-        return str(note_content.file_checksum)
-    if entity.checksum is not None:
-        return str(entity.checksum)
-    return None
-
-
-def required_runtime_deleted_note_text(
-    value: object,
-    *,
-    field_name: str,
-    file_path: RuntimeFilePath,
-) -> str:
-    """Return required deleted-note text for downstream live-update contracts."""
-    if not isinstance(value, str) or not value.strip():
-        raise RuntimeError(f"Deleted entity for {file_path} is missing {field_name}")
-    return value.strip()
+        return note_content.file_checksum
+    return entity.checksum
 
 
 def runtime_deleted_note_permalink(
-    value: object,
+    value: str | None,
     *,
     file_path: RuntimeFilePath,
 ) -> str:
     """Return deleted-note permalink text, falling back to the file path."""
-    if isinstance(value, str) and value.strip():
+    if value is not None and value.strip():
         return value.strip()
 
-    fallback = str(file_path).strip()
+    fallback = file_path.strip()
     if not fallback:
         raise RuntimeError(f"Deleted entity for {file_path} is missing permalink")
     return fallback
@@ -542,11 +519,7 @@ def plan_previous_materialized_note_file_delete(
     current_note_content: RuntimeMaterializedNoteSource | None,
 ) -> RuntimePendingNoteFileDelete | None:
     """Return old-file cleanup work when a moved note has materialized file state."""
-    file_checksum = (
-        str(current_note_content.file_checksum)
-        if current_note_content is not None and current_note_content.file_checksum is not None
-        else None
-    )
+    file_checksum = current_note_content.file_checksum if current_note_content is not None else None
     return plan_previous_note_file_delete(
         project_id=project_id,
         entity_id=entity_id,
@@ -562,7 +535,7 @@ def next_runtime_note_content_version(
     """Return the next accepted DB version for a note_content write."""
     if current_note_content is None:
         return 1
-    return int(current_note_content.db_version) + 1
+    return current_note_content.db_version + 1
 
 
 def accepted_note_file_path_conflicts(
@@ -717,12 +690,12 @@ def plan_pending_note_materialization(
     return RuntimePendingNoteMaterialization(
         project_id=project_id,
         entity_id=entity_id,
-        db_version=int(note_content.db_version),
-        db_checksum=str(note_content.db_checksum),
+        db_version=note_content.db_version,
+        db_checksum=note_content.db_checksum,
         actor_user_profile_id=actor_user_profile_id,
         actor_kind=actor_kind,
         actor_name=actor_name,
-        source=str(source) if source else None,
+        source=source or None,
         cleanup_after_write=cleanup_after_write,
     )
 
@@ -762,8 +735,8 @@ def note_content_matches_materialization_request(
 ) -> bool:
     """Return whether note_content still matches one queued materialization request."""
     return (
-        int(note_content.db_version) == request.db_version
-        and str(note_content.db_checksum) == request.db_checksum
+        note_content.db_version == request.db_version
+        and note_content.db_checksum == request.db_checksum
     )
 
 

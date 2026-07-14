@@ -10,8 +10,8 @@ from basic_memory.runtime.note_content import (
 
 @dataclass(frozen=True, slots=True)
 class _NoteContentVersion:
-    db_version: int | str
-    db_checksum: object
+    db_version: int
+    db_checksum: str
 
 
 def _request(
@@ -31,8 +31,8 @@ def _request(
     )
 
 
-def test_note_content_matches_materialization_request_with_coerced_runtime_values():
-    note_content = _NoteContentVersion(db_version="4", db_checksum=12345)
+def test_note_content_matches_materialization_request_accepts_matching_row():
+    note_content = _NoteContentVersion(db_version=4, db_checksum="12345")
 
     assert note_content_matches_materialization_request(note_content, _request())
 
