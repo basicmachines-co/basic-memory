@@ -1245,19 +1245,33 @@ class EntityService(BaseService[EntityModel]):
                     # Exact target resolution is useful for local sync, but expensive for cloud
                     # one-file jobs. Cloud can write unresolved rows and let a relation repair pass
                     # fill in to_id later.
-                    resolved_entities = []
+                    resolved_entities: list[Entity | Exception | None] = []
                     for rel in markdown.relations:
                         try:
-                            resolved_entities.append(
-                                await self.link_resolver.resolve_link(
+                            # Savepoint: a DB-level lookup failure would otherwise
+                            # poison the caller's write transaction — on Postgres
+                            # every later statement raises PendingRollbackError with
+                            # the root cause hidden. Scoping the lookup keeps the
+                            # relation writes below alive.
+                            async with active_session.begin_nested():
+                                resolved = await self.link_resolver.resolve_link(
                                     rel.target,
                                     strict=True,
                                     load_relations=False,
                                     session=active_session,
                                 )
-                            )
                         except Exception as exc:
-                            resolved_entities.append(exc)
+                            # The failure intentionally degrades to a forward
+                            # reference below, but losing the error silently hides
+                            # real defects — log it with the link context.
+                            logger.warning(
+                                f"Relation target resolution failed for '{rel.target}' "
+                                f"from entity {entity.file_path}; keeping forward reference",
+                                entity_id=entity_id,
+                                error=str(exc),
+                            )
+                            resolved = exc
+                        resolved_entities.append(resolved)
                 else:
                     resolved_entities = [None] * len(markdown.relations)
 
