@@ -964,10 +964,12 @@ class LocalProjectIndexScheduler:
         finally:
             rerun_force_full = _dirty_project_index.pop(project_id, None)
             _pending_project_index.discard(project_id)
-        # Re-arm outside the in-flight window (pending now cleared) so a request
-        # that raced the run gets its own pass. Bounded to one extra run per burst.
-        if rerun_force_full is not None:
-            self.schedule_project_index(project_id=project_id, force_full=rerun_force_full)
+            # Re-arm inside finally, outside the in-flight window (pending now
+            # cleared), so a request that raced the run gets its own pass even
+            # when this run raised — a failed run is exactly when the coalesced
+            # request most needs its retry. Bounded to one extra run per burst.
+            if rerun_force_full is not None:
+                self.schedule_project_index(project_id=project_id, force_full=rerun_force_full)
 
 
 @dataclass(frozen=True, slots=True)

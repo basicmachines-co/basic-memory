@@ -128,6 +128,50 @@ async def test_project_index_scheduler_coalesces_requests_during_in_flight_run()
     assert 13 not in _dirty_project_index
 
 
+class FailingThenGatedProjectIndexRunner:
+    """Runner whose first run blocks until released, then raises."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, bool]] = []
+        self.first_run_started = asyncio.Event()
+        self.release_first_run = asyncio.Event()
+
+    async def index_project(
+        self,
+        project_id: int,
+        *,
+        force_full: bool = False,
+    ) -> ProjectIndexCoordinatorResult:
+        self.calls.append((project_id, force_full))
+        if len(self.calls) == 1:
+            self.first_run_started.set()
+            await self.release_first_run.wait()
+            raise RuntimeError("scan blew up mid-run")
+        return cast(ProjectIndexCoordinatorResult, object())
+
+
+@pytest.mark.asyncio
+async def test_project_index_scheduler_reruns_coalesced_request_after_failed_run():
+    """A request coalesced behind a run that raises must still get its rerun —
+    a failed run is exactly when the coalesced request most needs its retry."""
+    from basic_memory.deps.services import _dirty_project_index, _pending_project_index
+
+    _clear_project_index_scheduler_state()
+    runner = FailingThenGatedProjectIndexRunner()
+    scheduler = LocalProjectIndexScheduler(project_index_runner=runner, test_mode=False)
+
+    scheduler.schedule_project_index(project_id=13)
+    await asyncio.wait_for(runner.first_run_started.wait(), timeout=1)
+    scheduler.schedule_project_index(project_id=13, force_full=True)
+
+    runner.release_first_run.set()
+    await drain_background_tasks()
+
+    assert runner.calls == [(13, False), (13, True)]
+    assert 13 not in _pending_project_index
+    assert 13 not in _dirty_project_index
+
+
 @pytest.mark.asyncio
 async def test_project_index_scheduler_single_flight_is_per_project():
     """One project's in-flight run must not block another project's run."""
