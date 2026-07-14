@@ -165,7 +165,7 @@ class NoteMaterializationContentSource(RuntimeNoteContentVersionSource, Protocol
     def markdown_content(self) -> str: ...
 
     @property
-    def file_checksum(self) -> object | None: ...
+    def file_checksum(self) -> RuntimeFileChecksum | None: ...
 
 
 class NoteMaterializationFileWriter(Protocol):
@@ -280,10 +280,8 @@ def plan_note_materialization_preflight(
         plan_prepared_note_write(
             request=request,
             file_path=entity.file_path,
-            markdown_content=str(note_content.markdown_content),
-            previous_file_checksum=(
-                str(note_content.file_checksum) if note_content.file_checksum is not None else None
-            ),
+            markdown_content=note_content.markdown_content,
+            previous_file_checksum=note_content.file_checksum,
             attempted_at=attempted_at,
         )
     )
@@ -455,7 +453,7 @@ class RepositoryNoteMaterializationPublisher:
             # concurrently, so guard every write on this db_version: if a newer
             # accepted write advanced the row between our read and our write, this
             # (now older) materialization must not revert the newer file_version.
-            expected_db_version = int(note_content.db_version)
+            expected_db_version = note_content.db_version
 
             if publish_plan.action is NoteMaterializationPublishAction.stale_file_path:
                 return publish_plan.result
