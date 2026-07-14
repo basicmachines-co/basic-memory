@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from basic_memory import db
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.cloud.note_content_materialization import drain_pending_materializations
 from basic_memory.db import scoped_session
+from basic_memory.deps.services import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app
@@ -133,6 +135,14 @@ async def lifespan(app: FastMCP):
             logger.debug("Shutting down Basic Memory MCP server")
 
             await watch_coordinator.stop()
+
+            # A local note write returns 202 before its markdown file is written;
+            # shutdown can land while that materialization (and the vector sync /
+            # relation resolution it schedules) is still queued in the in-process
+            # pool. Drain both queues before the engine closes so an accepted
+            # write is never lost — mirrors the API lifespan shutdown.
+            await drain_pending_materializations()
+            await drain_background_tasks()
 
             # Only shutdown DB if we created it (not if test fixture provided it)
             if engine_was_none:
