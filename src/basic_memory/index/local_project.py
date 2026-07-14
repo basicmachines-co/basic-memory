@@ -405,11 +405,17 @@ class LocalProjectIndexDeletePathVerifier(ProjectIndexDeletePathVerifier):
             # Trigger: the existence probe itself fails (permission/mount error).
             # Why: without a positive confirmation of absence, deleting would
             # turn a transient storage error into destroyed entity rows.
+            # Path.exists() would swallow a PermissionError into False, so the
+            # probe stats the file directly: only FileNotFoundError (or a gone
+            # parent directory) is a confirmed absence.
             # Outcome: leave the path out of the confirmed set; the next scan
             # reconciles it once the probe works again.
             try:
-                still_absent = not await self.file_service.exists(path)
-            except FileOperationError as exc:
+                (self.file_service.base_path / path).stat()
+                still_absent = False
+            except (FileNotFoundError, NotADirectoryError):
+                still_absent = True
+            except OSError as exc:
                 logger.warning(
                     "Skipping planned index delete: existence probe failed",
                     path=path,

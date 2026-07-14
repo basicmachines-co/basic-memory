@@ -675,21 +675,27 @@ async def test_local_project_index_delete_path_verifier_confirms_only_probed_abs
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """Only a positive absence probe confirms a planned delete; probe failures skip."""
+    """Only a positive absence probe confirms a planned delete; probe failures skip.
+
+    Path.exists() folds PermissionError into False, which would count an
+    unreadable file as confirmed-absent — the verifier stats directly so a
+    denied probe skips the delete instead.
+    """
     (tmp_path / "present.md").write_bytes(b"# Present\n")
 
     file_service = FileService(tmp_path)
-    original_exists = file_service.exists
 
-    async def flaky_exists(path):
-        if str(path).endswith("flaky.md"):
-            raise FileOperationError("mount error")
-        return await original_exists(path)
+    original_stat = Path.stat
 
-    monkeypatch.setattr(file_service, "exists", flaky_exists)
+    def denying_stat(self, **kwargs):
+        if self.name == "denied.md":
+            raise PermissionError(13, "Permission denied", str(self))
+        return original_stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denying_stat)
 
     verifier = LocalProjectIndexDeletePathVerifier(file_service=file_service)
-    confirmed = await verifier.confirm_deleted_paths(("present.md", "absent.md", "flaky.md"))
+    confirmed = await verifier.confirm_deleted_paths(("present.md", "absent.md", "denied.md"))
 
     assert confirmed == frozenset({"absent.md"})
 

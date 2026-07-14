@@ -764,6 +764,10 @@ async def _run_accepted_note_move(
         dependencies=dependencies,
     )
     existing_file_path = entity.file_path
+    # Same-path moves fail fast everywhere by decision (2026-07-14): cloud's
+    # pre-unification route returned a 200 no-op, local rejected — the unified
+    # runner keeps the rejection so a mistaken identity move surfaces instead
+    # of silently acking.
     if accepted_file_path == existing_file_path:
         reject_accepted_note_mutation(
             AcceptedNoteMutationRejectKind.bad_request,
