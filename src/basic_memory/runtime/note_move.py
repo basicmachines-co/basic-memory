@@ -21,7 +21,15 @@ def normalize_note_move_destination_path(destination_path: str) -> RuntimeFilePa
         raise ValueError(f"Invalid destination path: {destination_path}")
 
     # Reject absolute destinations under either OS convention, not just the host's.
-    if accepted_path.startswith("/") or PureWindowsPath(accepted_path).is_absolute():
+    # is_absolute() alone is not enough on Windows: a drive-relative path ("C:evil.md")
+    # and a rooted path ("\\evil.md") both report is_absolute() == False, yet joining
+    # either onto a base path on a Windows host discards or rewrites the base.
+    windows_path = PureWindowsPath(accepted_path)
+    if (
+        accepted_path.startswith(("/", "\\"))
+        or windows_path.drive
+        or windows_path.is_absolute()
+    ):
         raise ValueError(f"Invalid destination path: {destination_path}")
 
     # Reject traversal under either separator convention: PurePosixPath splits on

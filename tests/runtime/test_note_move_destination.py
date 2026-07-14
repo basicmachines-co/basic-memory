@@ -33,11 +33,20 @@ def test_normalize_note_move_destination_path_rejects_invalid_paths(
         "C:/evil.md",
         "C:\\evil.md",
         "\\\\host\\share\\evil.md",
+        # Windows drive-relative: is_absolute() is False, but on a Windows host
+        # joining it onto the project root discards the root entirely.
+        "C:evil.md",
+        "C:..\\evil.md",
+        # Windows rooted (drive-less): is_absolute() is False, but joining
+        # rewrites the base path's root on a Windows host.
+        "\\evil.md",
+        "\\archive\\evil.md",
     ],
 )
 def test_normalize_note_move_destination_path_rejects_escapes(destination_path: str) -> None:
     # These join onto the project root and escape it: ".." traversal (either
-    # separator) and Windows drive/UNC roots (absolute on Windows).
+    # separator), Windows drive/UNC roots (absolute on Windows), drive-relative
+    # destinations ("C:evil.md"), and rooted destinations ("\\evil.md").
     with pytest.raises(ValueError, match="Invalid destination path:"):
         normalize_note_move_destination_path(destination_path)
 
