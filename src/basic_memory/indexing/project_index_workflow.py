@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Self
+from typing import Literal, Self
 
 from basic_memory.indexing.models import (
     IndexFileJobResult,
     apply_project_index_batch_job_results,
     project_index_file_outcome_from_job_result,
 )
+from basic_memory.indexing.progress import CheckpointModel
 from basic_memory.indexing.project_index_coordinator import ProjectIndexRequest
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexCounters,
@@ -22,6 +23,7 @@ from basic_memory.indexing.project_index_progress import (
     project_index_recorded_batches_from_metadata,
     should_emit_project_index_progress_event,
 )
+from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.workflows import WorkflowId
 
 
@@ -177,6 +179,108 @@ class ProjectIndexBatchJobActivityUpdate:
     metadata: dict[str, object]
 
 
+# --- Checkpoint metadata write models ---
+# The workflow metadata document is validated with Pydantic on read (see
+# project_index_progress). These models are the matching typed write side:
+# field names and order define the persisted JSON shape, so builders dump
+# them instead of mutating dict[str, object] by string key.
+
+
+class ProjectIndexDiscoveryMetadata(CheckpointModel):
+    """Fan-out discovery facts recorded when a project-index workflow starts."""
+
+    total_files: int
+    batch_count: int
+    batch_size: int
+    discovered_at: str
+
+
+class ProjectIndexWorkflowStartMetadata(CheckpointModel):
+    """Initial checkpoint metadata document for a project-index workflow."""
+
+    phase: Literal["indexing"] = "indexing"
+    progress: str
+    payload: dict[str, object]
+    discovery: ProjectIndexDiscoveryMetadata
+    counters: dict[str, int]
+    transport: dict[str, object]
+
+
+class ProjectIndexWorkflowProgressMetadata(CheckpointModel):
+    """Checkpoint metadata fields rewritten by one running progress update."""
+
+    phase: Literal["indexing"] = "indexing"
+    progress: str
+    counters: dict[str, int]
+    # None means "leave any previously recorded batches untouched"; the field
+    # is dropped from the dump so per-file workflows never write the key.
+    recorded_batches: list[int] | None = None
+
+
+class ProjectIndexWorkflowCompletionMetadata(CheckpointModel):
+    """Checkpoint metadata fields rewritten by terminal workflow success."""
+
+    phase: Literal["completed"] = "completed"
+    progress: str
+    counters: dict[str, int]
+    result: dict[str, int]
+
+
+class ProjectIndexStaleDiagnostics(CheckpointModel):
+    """Diagnostics recorded when project-index batch fan-out stalls."""
+
+    reason: Literal["stale_project_index_batches"] = "stale_project_index_batches"
+    missing_batches: list[int]
+    recorded_batches: list[int]
+    # Despite the historical key name, this is the "legacy rows lack a
+    # batch_count" flag from ProjectIndexMissingBatches and persists as JSON
+    # true/false.
+    legacy_missing_batch_count: bool
+    last_heartbeat_at: str
+    stale_before: str
+
+
+class ProjectIndexWorkflowFailureMetadata(CheckpointModel):
+    """Checkpoint metadata fields rewritten by terminal workflow failure."""
+
+    phase: Literal["failed"] = "failed"
+    progress: str
+    counters: dict[str, int]
+    diagnostics: ProjectIndexStaleDiagnostics
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexWorkflowAttemptEvent:
+    """Attempt event payload for one project-index workflow start.
+
+    Queue transport identity is opaque to core: the owning runtime's transport
+    fields are spliced between the discovery counts and the project identity
+    to keep persisted event shapes stable.
+    """
+
+    progress: str
+    total_files: int
+    batch_count: int
+    batch_size: int
+    transport_event_data: Mapping[str, object]
+    project: ProjectRuntimeReference
+
+    def to_event_data(self) -> dict[str, object]:
+        """Serialize to the persisted attempt event shape."""
+        return {
+            "phase": "indexing",
+            "progress": self.progress,
+            "total_files": self.total_files,
+            "batch_count": self.batch_count,
+            "batch_size": self.batch_size,
+            **dict(self.transport_event_data),
+            "project_id": self.project.project_id,
+            "project_name": self.project.project_name,
+            "project_permalink": self.project.project_permalink,
+            "project_path": self.project.project_path,
+        }
+
+
 def build_project_index_batch_activity_update(
     *,
     metadata: Mapping[str, object],
@@ -208,41 +312,35 @@ def build_project_index_workflow_start(
 
     Queue transport identity is opaque to core: the runtime that owns the queue
     passes its durable ``transport`` metadata dict and any transport fields it
-    wants merged into the attempt event (inserted between the discovery counts
-    and the project identity to keep persisted event shapes stable).
+    wants merged into the attempt event (see ProjectIndexWorkflowAttemptEvent).
     """
     counters = initial_project_index_counters(total_files)
     progress = project_index_progress_text(counters)
-    payload = request.workflow_payload_metadata()
-    metadata: dict[str, object] = {
-        "phase": "indexing",
-        "progress": progress,
-        "payload": payload,
-        "discovery": {
-            "total_files": total_files,
-            "batch_count": batch_count,
-            "batch_size": batch_size,
-            "discovered_at": discovered_at,
-        },
-        "counters": counters.to_metadata(),
-        "transport": dict(transport_metadata),
-    }
+    start_metadata = ProjectIndexWorkflowStartMetadata(
+        progress=progress,
+        payload=request.workflow_payload_metadata(),
+        discovery=ProjectIndexDiscoveryMetadata(
+            total_files=total_files,
+            batch_count=batch_count,
+            batch_size=batch_size,
+            discovered_at=discovered_at,
+        ),
+        counters=counters.to_metadata(),
+        transport=dict(transport_metadata),
+    )
+    attempt_event = ProjectIndexWorkflowAttemptEvent(
+        progress=progress,
+        total_files=total_files,
+        batch_count=batch_count,
+        batch_size=batch_size,
+        transport_event_data=transport_event_data,
+        project=request.project,
+    )
     return ProjectIndexWorkflowStart(
         counters=counters,
         progress=progress,
-        metadata=metadata,
-        attempt_event_data={
-            "phase": "indexing",
-            "progress": progress,
-            "total_files": total_files,
-            "batch_count": batch_count,
-            "batch_size": batch_size,
-            **dict(transport_event_data),
-            "project_id": request.project.project_id,
-            "project_name": request.project.project_name,
-            "project_permalink": request.project.project_permalink,
-            "project_path": request.project.project_path,
-        },
+        metadata=start_metadata.model_dump(),
+        attempt_event_data=attempt_event.to_event_data(),
     )
 
 
@@ -287,12 +385,15 @@ def build_project_index_workflow_progress_update(
     """Build updated persisted metadata for a running project-index workflow."""
     progress = project_index_progress_text(counters)
     counters_metadata = counters.to_metadata()
+    progress_metadata = ProjectIndexWorkflowProgressMetadata(
+        progress=progress,
+        counters=counters_metadata,
+        recorded_batches=(
+            list(recorded_batch_indexes) if recorded_batch_indexes is not None else None
+        ),
+    )
     updated_metadata = dict(metadata)
-    updated_metadata["phase"] = "indexing"
-    updated_metadata["progress"] = progress
-    updated_metadata["counters"] = counters_metadata
-    if recorded_batch_indexes is not None:
-        updated_metadata["recorded_batches"] = list(recorded_batch_indexes)
+    updated_metadata.update(progress_metadata.model_dump(exclude_none=True))
 
     return ProjectIndexWorkflowProgressUpdate(
         counters=counters,
@@ -316,11 +417,13 @@ def build_project_index_workflow_completion_update(
 ) -> ProjectIndexWorkflowCompletionUpdate:
     """Build terminal success metadata for a project-index workflow."""
     counters_metadata = counters.to_metadata()
+    completion_metadata = ProjectIndexWorkflowCompletionMetadata(
+        progress=progress,
+        counters=counters_metadata,
+        result=counters_metadata,
+    )
     completed_metadata = dict(metadata)
-    completed_metadata["phase"] = "completed"
-    completed_metadata["progress"] = progress
-    completed_metadata["counters"] = counters_metadata
-    completed_metadata["result"] = counters_metadata
+    completed_metadata.update(completion_metadata.model_dump())
 
     return ProjectIndexWorkflowCompletionUpdate(
         counters=counters,
@@ -461,32 +564,30 @@ def build_project_index_workflow_stale_failure_update(
     counters: ProjectIndexCounters,
     missing_batch_indexes: Sequence[int],
     recorded_batch_indexes: Sequence[int],
-    legacy_missing_batch_count: int,
+    legacy_missing_batch_count: bool,
     last_heartbeat_at: str,
     stale_before: str,
 ) -> ProjectIndexWorkflowFailureUpdate:
     """Build terminal failure metadata for stale project-index batch fan-out."""
     missing_batches = list(missing_batch_indexes)
-    recorded_batches = list(recorded_batch_indexes)
     if legacy_missing_batch_count:
         error_message = "Project index stalled with legacy batch metadata"
     else:
         error_message = f"Project index stalled with {len(missing_batches)} unreported batch(es)"
     progress = f"Project index stalled after {counters.processed}/{counters.total} files"
-    diagnostics: dict[str, object] = {
-        "reason": "stale_project_index_batches",
-        "missing_batches": missing_batches,
-        "recorded_batches": recorded_batches,
-        "legacy_missing_batch_count": legacy_missing_batch_count,
-        "last_heartbeat_at": last_heartbeat_at,
-        "stale_before": stale_before,
-    }
-    counters_metadata = counters.to_metadata()
+    failure_metadata = ProjectIndexWorkflowFailureMetadata(
+        progress=progress,
+        counters=counters.to_metadata(),
+        diagnostics=ProjectIndexStaleDiagnostics(
+            missing_batches=missing_batches,
+            recorded_batches=list(recorded_batch_indexes),
+            legacy_missing_batch_count=legacy_missing_batch_count,
+            last_heartbeat_at=last_heartbeat_at,
+            stale_before=stale_before,
+        ),
+    )
     failed_metadata = dict(metadata)
-    failed_metadata["phase"] = "failed"
-    failed_metadata["progress"] = progress
-    failed_metadata["counters"] = counters_metadata
-    failed_metadata["diagnostics"] = diagnostics
+    failed_metadata.update(failure_metadata.model_dump())
 
     return ProjectIndexWorkflowFailureUpdate(
         counters=counters,
@@ -498,6 +599,6 @@ def build_project_index_workflow_stale_failure_update(
             "progress": progress,
             "payload": failed_metadata.get("payload") or {},
             "error": error_message,
-            "diagnostics": diagnostics,
+            "diagnostics": failed_metadata["diagnostics"],
         },
     )

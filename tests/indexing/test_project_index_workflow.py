@@ -1,5 +1,6 @@
 """Tests for portable project-index workflow metadata planning."""
 
+import json
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -200,6 +201,27 @@ def test_project_index_workflow_start_builds_existing_metadata_and_attempt_event
             "project_path": "project",
         },
     )
+    # Persisted document key order is part of the stable checkpoint shape.
+    assert list(start.metadata) == [
+        "phase",
+        "progress",
+        "payload",
+        "discovery",
+        "counters",
+        "transport",
+    ]
+    assert list(start.attempt_event_data) == [
+        "phase",
+        "progress",
+        "total_files",
+        "batch_count",
+        "batch_size",
+        "queue_job_id",
+        "project_id",
+        "project_name",
+        "project_permalink",
+        "project_path",
+    ]
 
 
 def test_project_index_workflow_start_plan_keeps_nonempty_workflows_running() -> None:
@@ -592,6 +614,8 @@ def test_project_index_file_result_record_plan_builds_progress_update() -> None:
     )
     assert progress_update.metadata["phase"] == "indexing"
     assert progress_update.metadata["progress"] == "Indexed 1/2 files, 1 succeeded"
+    # Per-file workflows never track batch structure; the key must stay absent.
+    assert "recorded_batches" not in progress_update.metadata
     assert progress_update.progress_event_data == {
         "phase": "indexing",
         "progress": "Indexed 1/2 files, 1 succeeded",
@@ -828,7 +852,7 @@ def test_project_index_stale_workflow_plan_builds_failure_update() -> None:
         "reason": "stale_project_index_batches",
         "missing_batches": [1],
         "recorded_batches": [0],
-        "legacy_missing_batch_count": 0,
+        "legacy_missing_batch_count": False,
         "last_heartbeat_at": "2026-06-19T10:20:30+00:00",
         "stale_before": "2026-06-19T10:25:30+00:00",
     }
@@ -911,7 +935,7 @@ def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_d
         counters=counters,
         missing_batch_indexes=(1,),
         recorded_batch_indexes=(0,),
-        legacy_missing_batch_count=0,
+        legacy_missing_batch_count=False,
         last_heartbeat_at="2026-06-19T10:20:30+00:00",
         stale_before="2026-06-19T10:25:30+00:00",
     )
@@ -920,7 +944,7 @@ def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_d
         "reason": "stale_project_index_batches",
         "missing_batches": [1],
         "recorded_batches": [0],
-        "legacy_missing_batch_count": 0,
+        "legacy_missing_batch_count": False,
         "last_heartbeat_at": "2026-06-19T10:20:30+00:00",
         "stale_before": "2026-06-19T10:25:30+00:00",
     }
@@ -958,3 +982,45 @@ def test_project_index_workflow_stale_failure_update_builds_metadata_and_event_d
             "diagnostics": diagnostics,
         },
     )
+
+
+def test_project_index_workflow_stale_failure_update_flags_legacy_batch_metadata() -> None:
+    counters = ProjectIndexCounters(
+        total=100,
+        processed=50,
+        succeeded=49,
+        missing=1,
+        failed=0,
+    )
+
+    update = build_project_index_workflow_stale_failure_update(
+        metadata={
+            "phase": "indexing",
+            "payload": {"project_id": 42},
+            "counters": {
+                "total": 100,
+                "processed": 50,
+                "succeeded": 49,
+                "missing": 1,
+                "failed": 0,
+            },
+        },
+        counters=counters,
+        missing_batch_indexes=(),
+        recorded_batch_indexes=(),
+        legacy_missing_batch_count=True,
+        last_heartbeat_at="2026-06-19T10:20:30+00:00",
+        stale_before="2026-06-19T10:25:30+00:00",
+    )
+
+    assert update.error_message == "Project index stalled with legacy batch metadata"
+    assert update.metadata["diagnostics"] == {
+        "reason": "stale_project_index_batches",
+        "missing_batches": [],
+        "recorded_batches": [],
+        "legacy_missing_batch_count": True,
+        "last_heartbeat_at": "2026-06-19T10:20:30+00:00",
+        "stale_before": "2026-06-19T10:25:30+00:00",
+    }
+    # The legacy marker persists as a raw JSON boolean, not a count.
+    assert '"legacy_missing_batch_count": true' in json.dumps(update.metadata["diagnostics"])
