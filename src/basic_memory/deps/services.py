@@ -918,16 +918,56 @@ class LocalEntityVectorSyncScheduler:
         )
 
 
+# Process-lifetime single-flight state: project ids with an index run already
+# scheduled or in flight. Every POST .../index and the startup scan previously
+# spawned an independent full coordinator run over the same rows; overlapping
+# runs are also the trigger for move/delete races, so at most one run per
+# project may be in flight.
+_pending_project_index: set[int] = set()
+# Projects whose index request arrived while a run was already in flight, with
+# the strongest force_full seen. The in-flight run scanned a snapshot that may
+# predate the new request, so exactly one trailing rerun starts when it
+# finishes — mirroring the relation-resolution dirty bit above.
+_dirty_project_index: dict[int, bool] = {}
+
+
 @dataclass(frozen=True, slots=True)
 class LocalProjectIndexScheduler:
+    """Run background project indexing with per-project single-flight coalescing."""
+
     project_index_runner: ProjectIndexRunner
     test_mode: bool
 
     def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None:
+        # Early-return in test mode BEFORE touching the pending set: the
+        # background coroutine (which clears the set) never runs under test mode,
+        # so adding here would leak the project id forever.
+        if self.test_mode:
+            return
+        # Coalesce: a run is already pending/in flight for this project. Mark it
+        # dirty (keeping the strongest force_full) so one follow-up run covers
+        # this request once the current run finishes, instead of racing it.
+        if project_id in _pending_project_index:
+            _dirty_project_index[project_id] = (
+                _dirty_project_index.get(project_id, False) or force_full
+            )
+            return
+        _pending_project_index.add(project_id)
         _schedule_background_coroutine(
-            self.project_index_runner.index_project(project_id, force_full=force_full),
+            self._run_project_index(project_id, force_full=force_full),
             test_mode=self.test_mode,
         )
+
+    async def _run_project_index(self, project_id: int, *, force_full: bool) -> None:
+        try:
+            await self.project_index_runner.index_project(project_id, force_full=force_full)
+        finally:
+            rerun_force_full = _dirty_project_index.pop(project_id, None)
+            _pending_project_index.discard(project_id)
+        # Re-arm outside the in-flight window (pending now cleared) so a request
+        # that raced the run gets its own pass. Bounded to one extra run per burst.
+        if rerun_force_full is not None:
+            self.schedule_project_index(project_id=project_id, force_full=rerun_force_full)
 
 
 @dataclass(frozen=True, slots=True)

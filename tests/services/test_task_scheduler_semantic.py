@@ -56,9 +56,17 @@ async def test_entity_vector_scheduler_maps_to_search_service():
     assert search_service.vector_synced == [7]
 
 
+def _clear_project_index_scheduler_state() -> None:
+    from basic_memory.deps.services import _dirty_project_index, _pending_project_index
+
+    _pending_project_index.clear()
+    _dirty_project_index.clear()
+
+
 @pytest.mark.asyncio
 async def test_project_index_scheduler_maps_to_project_index_runner():
     """Project index scheduling should call the event-index project runner."""
+    _clear_project_index_scheduler_state()
     project_index_runner = StubProjectIndexRunner()
 
     scheduler = LocalProjectIndexScheduler(
@@ -69,6 +77,92 @@ async def test_project_index_scheduler_maps_to_project_index_runner():
     await asyncio.sleep(0.05)
 
     assert project_index_runner.indexed == [(13, True)]
+
+
+class GatedProjectIndexRunner:
+    """Runner whose first run blocks until released, to hold a run in flight."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, bool]] = []
+        self.first_run_started = asyncio.Event()
+        self.release_first_run = asyncio.Event()
+
+    async def index_project(
+        self,
+        project_id: int,
+        *,
+        force_full: bool = False,
+    ) -> ProjectIndexCoordinatorResult:
+        self.calls.append((project_id, force_full))
+        if len(self.calls) == 1:
+            self.first_run_started.set()
+            await self.release_first_run.wait()
+        return cast(ProjectIndexCoordinatorResult, object())
+
+
+@pytest.mark.asyncio
+async def test_project_index_scheduler_coalesces_requests_during_in_flight_run():
+    """While a run is in flight, new requests must not start a second concurrent
+    run over the same rows; they coalesce to exactly one trailing rerun that
+    keeps the strongest force_full seen."""
+    from basic_memory.deps.services import _dirty_project_index, _pending_project_index
+
+    _clear_project_index_scheduler_state()
+    runner = GatedProjectIndexRunner()
+    scheduler = LocalProjectIndexScheduler(project_index_runner=runner, test_mode=False)
+
+    scheduler.schedule_project_index(project_id=13)
+    await asyncio.wait_for(runner.first_run_started.wait(), timeout=1)
+
+    # A burst of requests lands while the first run is still scanning.
+    scheduler.schedule_project_index(project_id=13)
+    scheduler.schedule_project_index(project_id=13, force_full=True)
+    scheduler.schedule_project_index(project_id=13)
+    assert runner.calls == [(13, False)]
+
+    runner.release_first_run.set()
+    await drain_background_tasks()
+
+    assert runner.calls == [(13, False), (13, True)]
+    assert 13 not in _pending_project_index
+    assert 13 not in _dirty_project_index
+
+
+@pytest.mark.asyncio
+async def test_project_index_scheduler_single_flight_is_per_project():
+    """One project's in-flight run must not block another project's run."""
+    _clear_project_index_scheduler_state()
+    runner = GatedProjectIndexRunner()
+    scheduler = LocalProjectIndexScheduler(project_index_runner=runner, test_mode=False)
+
+    scheduler.schedule_project_index(project_id=13)
+    await asyncio.wait_for(runner.first_run_started.wait(), timeout=1)
+
+    scheduler.schedule_project_index(project_id=14)
+    await asyncio.sleep(0.05)
+    # Project 14 ran while project 13 was still in flight.
+    assert runner.calls == [(13, False), (14, False)]
+
+    runner.release_first_run.set()
+    await drain_background_tasks()
+
+    assert runner.calls == [(13, False), (14, False)]
+
+
+@pytest.mark.asyncio
+async def test_project_index_scheduler_is_noop_in_test_mode():
+    """Test mode must suppress the run without leaking a pending marker."""
+    from basic_memory.deps.services import _pending_project_index
+
+    _clear_project_index_scheduler_state()
+    runner = StubProjectIndexRunner()
+
+    scheduler = LocalProjectIndexScheduler(project_index_runner=runner, test_mode=True)
+    scheduler.schedule_project_index(project_id=13)
+    await asyncio.sleep(0.02)
+
+    assert runner.indexed == []
+    assert 13 not in _pending_project_index
 
 
 @pytest.mark.asyncio
