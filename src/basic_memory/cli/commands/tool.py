@@ -381,17 +381,20 @@ def _plain_search_results(result: dict[str, Any], query: str = "") -> None:
             print(f"    {snippet}")
 
 
-def _plain_read_note(result: dict[str, Any]) -> None:
-    """Render read-note content faithfully: the note body, or the literal file.
+def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
+    """Render the note body for humans or the literal file for round-tripping.
 
     Plain mode adds NO decoration: no header line, no synthesized frontmatter
-    block, no placeholder for empty notes. Without --frontmatter the
-    API returns the note body; with it, the literal file (frontmatter block
-    included). Either is printed verbatim, trimmed only of the surrounding
-    newline artifacts the API keeps from frontmatter stripping, so the output
-    round-trips (e.g. ``read-note X --plain --frontmatter > note.md``).
+    block, no placeholder for empty notes. Without --frontmatter, trim the
+    surrounding newline artifacts left by the API's frontmatter removal. With
+    --frontmatter, write the literal file exactly so redirection round-trips
+    every boundary newline (e.g. ``read-note X --plain --frontmatter > note.md``).
     """
     content = result.get("content", "")
+    if include_frontmatter:
+        sys.stdout.write(content)
+        return
+
     body = content.strip("\n") if content else ""
     if body:
         print(body)
@@ -672,7 +675,7 @@ def read_note(
         if mode == "json" or isinstance(result, str):
             _print_json(result)
         elif mode == "plain":
-            _plain_read_note(result)
+            _plain_read_note(result, include_frontmatter=include_frontmatter)
         else:
             _display_read_note(result, include_frontmatter=include_frontmatter)
     except ValueError as e:

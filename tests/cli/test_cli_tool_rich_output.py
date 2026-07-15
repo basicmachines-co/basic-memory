@@ -28,13 +28,13 @@ READ_NOTE_RESULT = {
     "frontmatter": {"title": "Test Note", "tags": ["test"]},
 }
 
-# With --include-frontmatter the API returns the LITERAL FILE as content
+# With --frontmatter the API returns the LITERAL FILE as content
 # (frontmatter block included) alongside the parsed frontmatter dict.
 READ_NOTE_RESULT_WITH_FRONTMATTER = {
     "title": "Test Note",
     "permalink": "notes/test-note",
     "file_path": "notes/Test Note.md",
-    "content": "---\ntitle: Test Note\ntags:\n- test\n---\n\n# Test Note\n\nhello world",
+    "content": "---\ntitle: Test Note\ntags:\n- test\n---\n\n# Test Note\n\nhello world\n\n",
     "frontmatter": {"title": "Test Note", "tags": ["test"]},
 }
 
@@ -176,7 +176,7 @@ def _tty_runner_with_style(args, style, **kwargs):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -196,7 +196,7 @@ def test_search_notes_rich_output_default(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT_EMPTY,
 )
@@ -209,7 +209,7 @@ def test_search_notes_rich_empty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -224,7 +224,7 @@ def test_search_notes_json_flag_overrides_tty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -244,7 +244,7 @@ def test_search_notes_non_tty_gives_json(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
@@ -263,7 +263,7 @@ def test_read_note_rich_output_default(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
@@ -280,7 +280,7 @@ def test_read_note_json_flag_overrides_tty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value={"title": "", "permalink": "", "content": "", "frontmatter": {}},
 )
@@ -293,7 +293,7 @@ def test_read_note_rich_empty_content(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
@@ -312,7 +312,7 @@ def test_read_note_non_tty_gives_json(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
@@ -329,7 +329,7 @@ def test_build_context_rich_output_default(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_EMPTY,
 )
@@ -342,7 +342,7 @@ def test_build_context_rich_empty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
@@ -359,7 +359,7 @@ def test_build_context_json_flag_overrides_tty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
@@ -378,7 +378,7 @@ def test_build_context_non_tty_gives_json(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    "basic_memory.mcp.tools.recent_activity",
     new_callable=AsyncMock,
     return_value=RECENT_ACTIVITY_RESULT,
 )
@@ -396,7 +396,7 @@ def test_recent_activity_rich_output_default(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    "basic_memory.mcp.tools.recent_activity",
     new_callable=AsyncMock,
     return_value=[],
 )
@@ -409,7 +409,7 @@ def test_recent_activity_rich_empty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    "basic_memory.mcp.tools.recent_activity",
     new_callable=AsyncMock,
     return_value=RECENT_ACTIVITY_RESULT,
 )
@@ -424,7 +424,7 @@ def test_recent_activity_json_flag_overrides_tty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    "basic_memory.mcp.tools.recent_activity",
     new_callable=AsyncMock,
     return_value=RECENT_ACTIVITY_RESULT,
 )
@@ -444,12 +444,12 @@ def test_recent_activity_non_tty_gives_json(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
 )
 def test_read_note_rich_include_frontmatter(mock_mcp):
-    """read-note --include-frontmatter renders the panel once, not twice.
+    """read-note --frontmatter renders the panel once, not twice.
 
     Regression 1: the Rich renderer silently dropped frontmatter even with the
     flag. Regression 2: with the flag, content is the LITERAL FILE, so the
@@ -472,12 +472,12 @@ def test_read_note_rich_include_frontmatter(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
 def test_read_note_rich_no_frontmatter_without_flag(mock_mcp):
-    """read-note WITHOUT --include-frontmatter must not render the frontmatter panel.
+    """read-note without --frontmatter must not render the frontmatter panel.
 
     Regression (Bug 2): the JSON payload always contains a non-empty "frontmatter"
     key, so the previous `if frontmatter:` guard rendered it even without the flag.
@@ -499,7 +499,7 @@ def test_read_note_rich_no_frontmatter_without_flag(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
@@ -578,7 +578,7 @@ BUILD_CONTEXT_BRACKETED_OBS = {
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT_BRACKETED_TITLE,
 )
@@ -599,7 +599,7 @@ def test_search_notes_rich_title_with_brackets_survives(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_BRACKETED_OBS,
 )
@@ -654,7 +654,7 @@ SEARCH_RESULT_ZERO_TOTAL = {
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT_ZERO_TOTAL,
 )
@@ -683,7 +683,7 @@ def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -708,7 +708,7 @@ def test_search_notes_plain_output(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT_BRACKETED_TITLE,
 )
@@ -723,7 +723,7 @@ def test_search_notes_plain_brackets_survive(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT_ZERO_TOTAL,
 )
@@ -737,7 +737,7 @@ def test_search_notes_plain_zero_total_fallback(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT_EMPTY,
 )
@@ -750,7 +750,7 @@ def test_search_notes_plain_empty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
@@ -766,29 +766,24 @@ def test_read_note_plain_output(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
 )
 def test_read_note_plain_include_frontmatter(mock_mcp):
-    """read-note --plain --include-frontmatter shows the literal file, once.
+    """read-note --plain --frontmatter writes the literal file byte-for-byte.
 
     With the flag, content IS the file (frontmatter block included); plain mode
-    prints it verbatim and must not prepend a synthesized key/value block.
+    must not add decoration or alter leading/trailing newlines.
     """
     result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    # ONLY the literal file: no header line, output starts at the fence
-    assert "Test Note  [notes/test-note]" not in result.output
-    assert result.output.startswith("---\ntitle: Test Note\ntags:\n- test\n---")
-    assert "hello world" in result.output
-    # No duplicated frontmatter from a synthesized block or header
-    assert result.output.count("title: Test Note") == 1
+    assert result.output == READ_NOTE_RESULT_WITH_FRONTMATTER["content"]
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
 )
@@ -801,7 +796,7 @@ def test_read_note_include_frontmatter_alias(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value={"title": "", "permalink": "", "content": "", "frontmatter": {}},
 )
@@ -814,7 +809,7 @@ def test_read_note_plain_empty_content(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
@@ -836,7 +831,7 @@ def test_build_context_plain_output(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_BRACKETED_OBS,
 )
@@ -850,7 +845,7 @@ def test_build_context_plain_bracket_survives(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_build_context",
+    "basic_memory.mcp.tools.build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_EMPTY,
 )
@@ -863,7 +858,7 @@ def test_build_context_plain_empty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    "basic_memory.mcp.tools.recent_activity",
     new_callable=AsyncMock,
     return_value=RECENT_ACTIVITY_RESULT,
 )
@@ -880,7 +875,7 @@ def test_recent_activity_plain_output(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_recent_activity",
+    "basic_memory.mcp.tools.recent_activity",
     new_callable=AsyncMock,
     return_value=[],
 )
@@ -898,7 +893,7 @@ def test_recent_activity_plain_empty(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -916,7 +911,7 @@ def test_json_beats_plain(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -929,7 +924,7 @@ def test_json_and_plain_together_errors(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_read_note",
+    "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
@@ -942,7 +937,7 @@ def test_read_note_json_and_plain_together_errors(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -959,7 +954,7 @@ def test_plain_forces_plain_when_piped(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
@@ -975,7 +970,7 @@ def test_tty_config_rich_renders_rich(mock_mcp):
 
 
 @patch(
-    "basic_memory.cli.commands.tool.mcp_search",
+    "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
