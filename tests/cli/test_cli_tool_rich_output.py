@@ -848,6 +848,40 @@ def test_read_note_plain_include_frontmatter_not_found_is_empty(mock_mcp):
 @patch(
     "basic_memory.mcp.tools.read_note",
     new_callable=AsyncMock,
+    return_value=READ_NOTE_NOT_FOUND_RESULT,
+)
+def test_read_note_plain_not_found_renders_related_results(mock_mcp):
+    """A plain-mode miss stays distinct from an empty note and preserves suggestions."""
+    result = _tty_runner(["tool", "read-note", "missing-note", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Note not found." in result.output
+    assert "Related [draft] Note" in result.output
+    assert "notes/related-note" in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.read_note",
+    new_callable=AsyncMock,
+    return_value={
+        "title": None,
+        "permalink": None,
+        "file_path": None,
+        "content": None,
+        "frontmatter": None,
+    },
+)
+def test_read_note_plain_not_found_without_suggestions(mock_mcp):
+    """A plain-mode miss without suggestions still reports a clear empty fallback."""
+    result = _tty_runner(["tool", "read-note", "missing-note", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert result.output == "Note not found.\nNo note or related content found.\n"
+
+
+@patch(
+    "basic_memory.mcp.tools.read_note",
+    new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT_WITH_FRONTMATTER,
 )
 def test_read_note_include_frontmatter_alias(mock_mcp):

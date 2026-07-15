@@ -422,15 +422,38 @@ def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fals
     """Render the note body for humans or the literal file for round-tripping.
 
     Plain mode adds NO decoration: no header line, no synthesized frontmatter
-    block, no placeholder for empty notes. Without --frontmatter, trim the
-    surrounding newline artifacts left by the API's frontmatter removal. With
-    --frontmatter, write the literal file exactly so redirection round-trips
-    every boundary newline (e.g. ``read-note X --plain --frontmatter > note.md``).
+    block, no placeholder for empty notes. A missing note still reports the miss
+    and any related results so it cannot be confused with an empty note. Without
+    --frontmatter, trim the surrounding newline artifacts left by the API's
+    frontmatter removal. With --frontmatter, write the literal file exactly so
+    redirection round-trips every boundary newline (e.g.
+    ``read-note X --plain --frontmatter > note.md``).
     """
     raw_content = result.get("content")
     content = raw_content if isinstance(raw_content, str) else ""
     if include_frontmatter:
         sys.stdout.write(content)
+        return
+
+    # Trigger: the MCP fallback returns null note fields when no note resolves.
+    # Why: silence makes a miss indistinguishable from a real empty note in plain mode.
+    # Outcome: report the miss and preserve any related-note suggestions.
+    if raw_content is None and not result.get("title") and not result.get("permalink"):
+        print("Note not found.")
+        raw_related = result.get("related_results")
+        related_results = (
+            [item for item in raw_related if isinstance(item, dict)]
+            if isinstance(raw_related, list)
+            else []
+        )
+        if related_results:
+            print("Related results:")
+            for item in related_results:
+                title = str(item.get("title") or item.get("permalink") or "")
+                permalink = str(item.get("permalink") or "")
+                print(f"- {title}  {permalink}".rstrip())
+        else:
+            print("No note or related content found.")
         return
 
     body = content.strip("\n") if content else ""
