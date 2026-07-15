@@ -672,6 +672,28 @@ def _delete_routes_to_cloud(workspace_id: str | None) -> bool:
     return workspace_id is not None
 
 
+def _format_note_file_delete_result(
+    status: Literal["pending", "skipped", "complete", "failed"] | None,
+    *,
+    files_location: str,
+    cloud_routed: bool,
+) -> str:
+    """Describe note-file deletion without overstating backend completion."""
+    if status == "pending":
+        return f"Note-file deletion {files_location} was queued and is pending.\n"
+    if status == "complete" or (status is None and not cloud_routed):
+        # Local deletion is synchronous and older local responses omit the status.
+        return f"Note files {files_location} were deleted along with the project.\n"
+    if status == "failed":
+        return f"Note-file deletion {files_location} failed; note files may remain.\n"
+    if status == "skipped":
+        return f"Note-file deletion {files_location} was skipped; note files remain.\n"
+    return (
+        f"Note-file deletion {files_location} did not report a completion status; "
+        "note files may remain.\n"
+    )
+
+
 @mcp.tool(
     title="Delete Project",
     tags={"projects"},
@@ -776,12 +798,14 @@ async def delete_project(
             if hasattr(status_response.old_project, "path"):
                 result += f"• Path: {status_response.old_project.path}\n"
 
-        files_location = "in cloud storage" if _delete_routes_to_cloud(workspace_id) else "on disk"
+        cloud_routed = _delete_routes_to_cloud(workspace_id)
+        files_location = "in cloud storage" if cloud_routed else "on disk"
         if delete_notes:
-            if status_response.file_delete_status == "pending":
-                result += f"Note-file deletion {files_location} was queued and is pending.\n"
-            else:
-                result += f"Note files {files_location} were deleted along with the project.\n"
+            result += _format_note_file_delete_result(
+                status_response.file_delete_status,
+                files_location=files_location,
+                cloud_routed=cloud_routed,
+            )
         else:
             result += (
                 f"Note files remain {files_location} but the project is no longer "

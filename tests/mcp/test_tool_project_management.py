@@ -10,7 +10,11 @@ from sqlalchemy import select
 from basic_memory import db
 from basic_memory.mcp.tools import list_memory_projects, create_memory_project, delete_project
 from basic_memory.config import BasicMemoryConfig, ProjectEntry
-from basic_memory.mcp.tools.project_management import _merge_projects, _merge_workspace_projects
+from basic_memory.mcp.tools.project_management import (
+    _format_note_file_delete_result,
+    _merge_projects,
+    _merge_workspace_projects,
+)
 from basic_memory.models.project import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 
@@ -592,6 +596,30 @@ def test_delete_routes_to_cloud_honors_explicit_routing_flags(monkeypatch):
     monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
     # Explicit local wins even when a workspace selector was supplied.
     assert _delete_routes_to_cloud("some-workspace") is False
+
+
+@pytest.mark.parametrize(
+    ("status", "cloud_routed", "expected"),
+    [
+        ("pending", True, "queued and is pending"),
+        ("complete", True, "were deleted along with the project"),
+        ("failed", True, "failed; note files may remain"),
+        ("skipped", True, "was skipped; note files remain"),
+        (None, True, "did not report a completion status"),
+        (None, False, "were deleted along with the project"),
+    ],
+)
+def test_format_note_file_delete_result_reports_backend_status(status, cloud_routed, expected):
+    """Only explicit completion (or synchronous local deletion) reports success."""
+    result = _format_note_file_delete_result(
+        status,
+        files_location="in cloud storage" if cloud_routed else "on disk",
+        cloud_routed=cloud_routed,
+    )
+
+    assert expected in result
+    if status in {"failed", "skipped"} or (status is None and cloud_routed):
+        assert "were deleted" not in result
 
 
 @pytest.mark.asyncio
