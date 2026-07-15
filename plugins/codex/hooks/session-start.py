@@ -11,11 +11,13 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# --- Load the harness envelope module (vendored next to this hook) ---
 # SessionStart is read-only (no note writes), so the envelope is only used for
 # local event logging when captureEvents is enabled.
-_shared_dir = str(Path(__file__).resolve().parent.parent.parent / "shared")
-sys.path.insert(0, _shared_dir)
+# An installed plugin package is just plugins/codex/ — plugins/shared/ does not
+# ship — so scripts/sync_plugin_shared.py vendors the module into hooks/
+# (canonical source: plugins/shared/harness_envelope.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from harness_envelope import (
         SESSION_STARTED,

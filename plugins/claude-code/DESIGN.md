@@ -654,8 +654,11 @@ class HarnessEnvelope:
     payload_summary: dict     # safe, redacted payload excerpt
 ```
 
-The module lives at `plugins/shared/harness_envelope.py` — stdlib-only, no install
-step. Both plugins import it via `sys.path.insert`.
+The canonical module lives at `plugins/shared/harness_envelope.py` — stdlib-only,
+no install step. Because a marketplace install copies only the plugin's own
+directory, `scripts/sync_plugin_shared.py` vendors the module into each plugin's
+`hooks/` directory (the copies are committed and byte-compared in
+`just package-check`), and each hook imports it from its own directory.
 
 ### 14.3 V0 event types
 

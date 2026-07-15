@@ -6,6 +6,10 @@ repo_root := "../.."
 manifest-check:
     python3 {{repo_root}}/scripts/validate_codex_plugin.py .
 
+# Vendored plugins/shared modules must match their canonical source.
+vendor-check:
+    python3 {{repo_root}}/scripts/sync_plugin_shared.py --check
+
 # Validate against the local Codex plugin scaffold contract.
 scaffold-check:
     @validator="${CODEX_PLUGIN_VALIDATOR:-}"; \
@@ -16,4 +20,4 @@ scaffold-check:
     fi
 
 # Run every local package check for this plugin.
-check: manifest-check scaffold-check
+check: manifest-check vendor-check scaffold-check

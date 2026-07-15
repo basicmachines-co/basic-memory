@@ -11,12 +11,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# --- Load the harness envelope module (vendored next to this hook) ---
 # Trigger: this hook wants to stamp provenance and idempotency on the checkpoint.
 # Why: the envelope normalizes hook events so downstream consumers (recall,
 #      consolidation, memory routines) can trace where each note came from.
-_shared_dir = str(Path(__file__).resolve().parent.parent.parent / "shared")
-sys.path.insert(0, _shared_dir)
+# An installed plugin package is just plugins/codex/ — plugins/shared/ does not
+# ship — so scripts/sync_plugin_shared.py vendors the module into hooks/
+# (canonical source: plugins/shared/harness_envelope.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from harness_envelope import (
         COMPACTION_IMMINENT,

@@ -62,15 +62,17 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-# --- Load the shared envelope module (lives two directories up in plugins/shared/) ---
+# --- Load the harness envelope module (vendored next to this hook) ---
 # SessionStart is read-only (no note writes), so the envelope is only used for
 # local event logging when captureEvents is enabled.
+# An installed plugin package is just this plugin directory — plugins/shared/
+# does not ship — so scripts/sync_plugin_shared.py vendors the module into
+# hooks/ (canonical source: plugins/shared/harness_envelope.py).
 # Constraint: __file__ is '<stdin>' inside a bash heredoc, so the hook script's
 #             real directory is passed in via the BM_HOOK_DIR environment variable.
 _hook_dir = os.environ.get("BM_HOOK_DIR", "")
 if _hook_dir:
-    _shared_dir = os.path.join(_hook_dir, "..", "..", "shared")
-    sys.path.insert(0, os.path.normpath(_shared_dir))
+    sys.path.insert(0, _hook_dir)
 try:
     from harness_envelope import (
         SESSION_STARTED,
