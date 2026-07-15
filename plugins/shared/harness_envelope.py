@@ -66,11 +66,19 @@ DEFAULT_REDACT_KEY_PATTERNS = (
     re.compile(r"(?i)(?:^|[_.])(?:API[_.]KEY|ACCESS[_.]KEY|PRIVATE[_.]KEY)(?:[_.]|$)"),
 )
 
-# Paths that should never appear in payload summaries.
+
+# Paths that should never appear in payload summaries. Deny paths and payload
+# values are both compared with forward slashes — os.path.expanduser("~/.ssh/")
+# yields mixed separators on Windows (C:\Users\x/.ssh/) while native payload
+# values use backslashes, so an un-normalized startswith never matches there.
+def _normalize_path(path: str) -> str:
+    return path.replace("\\", "/")
+
+
 DEFAULT_REDACT_PATHS = (
-    os.path.expanduser("~/.ssh/"),
-    os.path.expanduser("~/.aws/"),
-    os.path.expanduser("~/.gnupg/"),
+    _normalize_path(os.path.expanduser("~/.ssh/")),
+    _normalize_path(os.path.expanduser("~/.aws/")),
+    _normalize_path(os.path.expanduser("~/.gnupg/")),
 )
 
 # Values that look like environment secrets: KEY=<long-value>
@@ -134,7 +142,7 @@ def _redact_str(value: str, deny_paths: list[str]) -> str:
     """Apply the string-level redaction rules: secret values, paths, truncation."""
     if SECRET_VALUE_RE.match(value):
         return "[REDACTED]"
-    if any(value.startswith(p) for p in deny_paths):
+    if any(_normalize_path(value).startswith(p) for p in deny_paths):
         return "[REDACTED_PATH]"
     if len(value) > MAX_PAYLOAD_VALUE_LEN:
         return value[:MAX_PAYLOAD_VALUE_LEN] + "…[truncated]"
@@ -189,7 +197,7 @@ def redact_payload(
 
     deny_paths = list(DEFAULT_REDACT_PATHS)
     if extra_redact_paths:
-        deny_paths.extend(extra_redact_paths)
+        deny_paths.extend(_normalize_path(path) for path in extra_redact_paths)
 
     return _redact_dict(payload, deny_key_patterns, deny_paths)
 

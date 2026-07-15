@@ -109,6 +109,16 @@ def test_redact_payload_applies_paths_and_truncation_at_depth() -> None:
     assert len(entry["preview"]) < 600
 
 
+def test_redact_payload_matches_deny_paths_across_separators() -> None:
+    # Windows payload values carry backslashes while deny paths are usually
+    # written with forward slashes; both sides normalize before comparison.
+    payload = {"path": "C:\\Users\\dev\\vault\\key.txt"}
+
+    redacted = he.redact_payload(payload, extra_redact_paths=["C:/Users/dev/vault/"])
+
+    assert redacted["path"] == "[REDACTED_PATH]"
+
+
 def test_redact_payload_extra_keys_apply_at_depth() -> None:
     payload = {"outer": {"internal_id": "abc"}}
 
