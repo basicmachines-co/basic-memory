@@ -709,7 +709,9 @@ New keys in `basicMemory` (both `.claude/settings.json` and `.codex/basic-memory
 
 ### 14.7 Privacy and redaction
 
-The envelope module applies layered redaction before any payload summary is stored:
+The envelope module applies layered redaction before any payload summary is
+stored, recursively over nested dicts and lists — a secret nested inside a list
+or sub-object is redacted exactly like a top-level one:
 
 1. **Key-pattern deny list** — keys matching `SECRET`, `TOKEN`, `KEY`, `PASSWORD`,
    `CREDENTIAL`, `AUTH` (case-insensitive) are replaced with `[REDACTED]`

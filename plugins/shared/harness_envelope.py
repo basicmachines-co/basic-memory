@@ -122,6 +122,44 @@ def idempotency_key(
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+def _redact_str(value: str, deny_paths: list[str]) -> str:
+    """Apply the string-level redaction rules: secret values, paths, truncation."""
+    if SECRET_VALUE_RE.match(value):
+        return "[REDACTED]"
+    if any(value.startswith(p) for p in deny_paths):
+        return "[REDACTED_PATH]"
+    if len(value) > MAX_PAYLOAD_VALUE_LEN:
+        return value[:MAX_PAYLOAD_VALUE_LEN] + "…[truncated]"
+    return value
+
+
+def _redact_value(value, deny_key_patterns: list, deny_paths: list[str]):
+    """Recursively redact a payload value of any JSON-compatible shape.
+
+    Payloads arrive from hook JSON, so nested dicts and lists are normal —
+    a secret one level down must be caught just like a top-level one.
+    """
+    if isinstance(value, str):
+        return _redact_str(value, deny_paths)
+    if isinstance(value, dict):
+        return _redact_dict(value, deny_key_patterns, deny_paths)
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(item, deny_key_patterns, deny_paths) for item in value]
+    return value
+
+
+def _redact_dict(payload: dict, deny_key_patterns: list, deny_paths: list[str]) -> dict:
+    result = {}
+    for key, value in payload.items():
+        # A denied key redacts the whole value, however deeply nested it is —
+        # partial redaction inside a secret-named subtree is not worth the risk.
+        if any(pat.search(str(key)) for pat in deny_key_patterns):
+            result[key] = "[REDACTED]"
+            continue
+        result[key] = _redact_value(value, deny_key_patterns, deny_paths)
+    return result
+
+
 def redact_payload(
     payload: dict,
     extra_redact_keys: list[str] | None = None,
@@ -129,8 +167,9 @@ def redact_payload(
 ) -> dict:
     """Strip secrets, large values, and denied paths from a payload summary.
 
-    Returns a new dict with sensitive content replaced by "[REDACTED]" markers.
-    This is the safety layer: nothing downstream sees unredacted payload values.
+    Returns a new dict with sensitive content replaced by "[REDACTED]" markers,
+    applied recursively over nested dicts and lists. This is the safety layer:
+    nothing downstream sees unredacted payload values at any depth.
     """
     deny_key_patterns = list(DEFAULT_REDACT_KEY_PATTERNS)
     if extra_redact_keys:
@@ -144,32 +183,7 @@ def redact_payload(
     if extra_redact_paths:
         deny_paths.extend(extra_redact_paths)
 
-    result = {}
-    for key, value in payload.items():
-        # Check key against deny patterns
-        if any(pat.search(key) for pat in deny_key_patterns):
-            result[key] = "[REDACTED]"
-            continue
-
-        if isinstance(value, str):
-            # Check for environment-secret-like values
-            if SECRET_VALUE_RE.match(value):
-                result[key] = "[REDACTED]"
-                continue
-
-            # Check for denied paths
-            if any(value.startswith(p) for p in deny_paths):
-                result[key] = "[REDACTED_PATH]"
-                continue
-
-            # Truncate overly long values
-            if len(value) > MAX_PAYLOAD_VALUE_LEN:
-                result[key] = value[:MAX_PAYLOAD_VALUE_LEN] + "…[truncated]"
-                continue
-
-        result[key] = value
-
-    return result
+    return _redact_dict(payload, deny_key_patterns, deny_paths)
 
 
 def create_envelope(
