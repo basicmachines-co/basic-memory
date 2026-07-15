@@ -163,6 +163,10 @@ def test_session_start_preserves_raw_cli_path_with_spaces(hook_harness: HookHarn
     assert "**Project:** global-project" in result.stdout
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows cannot execute the fixture's extensionless shebang script directly",
+)
 def test_session_start_discovers_basic_memory_from_path(hook_harness: HookHarness) -> None:
     hook_harness.write_settings(
         hook_harness.home,
