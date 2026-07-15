@@ -157,7 +157,8 @@ async def test_call_get_emits_transport_error_outcome(monkeypatch) -> None:
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport, base_url="https://example.test") as client:
-        with pytest.raises(httpx.ConnectError, match="boom"):
+        # Transport errors are wrapped in ToolError so callers never see blank messages (#1034)
+        with pytest.raises(ToolError, match="boom"):
             await utils_module.call_get(
                 client,
                 "/boom",

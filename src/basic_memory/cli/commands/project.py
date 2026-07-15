@@ -962,7 +962,8 @@ def remove_project(
                 console.print(f"[yellow]Note: Local files remain at {local_path_config}[/yellow]")
 
     except Exception as e:
-        console.print(f"[red]Error removing project: {str(e)}[/red]")
+        # str() of httpx transport errors is often empty (#1034) — never print a blank error.
+        console.print(f"[red]Error removing project: {str(e) or repr(e)}[/red]")
         raise typer.Exit(1)
 
 

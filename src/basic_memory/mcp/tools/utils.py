@@ -8,7 +8,15 @@ import typing
 from typing import Any, Optional
 
 import logfire
-from httpx import Response, URL, AsyncClient, HTTPStatusError, Headers
+from httpx import (
+    Response,
+    URL,
+    AsyncClient,
+    HTTPStatusError,
+    Headers,
+    TimeoutException,
+    TransportError,
+)
 from httpx._client import UseClientDefault, USE_CLIENT_DEFAULT
 from httpx._types import (
     RequestContent,
@@ -122,6 +130,35 @@ def get_error_message(
     # Fallback for any other status code
     else:  # pragma: no cover
         return f"HTTP error {status_code}: {method} request to '{path}' failed"
+
+
+def _transport_error_message(exc: TransportError, url: URL | str, method: str) -> str:
+    """Build an actionable message for transport failures that produced no response.
+
+    httpx transport errors often stringify to an empty string (e.g. ReadTimeout),
+    which is how blank errors like "Error removing project:" reached users (#1034),
+    so the message always names the exception type explicitly.
+    """
+    # Extract path from URL for cleaner error messages
+    if isinstance(url, str):
+        path = url.split("/")[-1]
+    else:
+        path = str(url).split("/")[-1] if url else "resource"
+
+    detail = str(exc).strip()
+    described = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+    if isinstance(exc, TimeoutException):
+        return (
+            f"Request timed out ({described}): the server did not respond to "
+            f"{method} '{path}' in time. Long-running operations (such as deleting a "
+            f"large project) may still be completing server-side — check the result "
+            f"(e.g. `bm project list` for project deletes) before retrying."
+        )
+    return (
+        f"Connection failed ({described}): the {method} request to '{path}' did not "
+        f"complete. Check that the server is reachable, then retry."
+    )
 
 
 def _extract_response_data(response: Response) -> Any:
@@ -274,6 +311,11 @@ async def call_get(
 
     except HTTPStatusError as e:
         raise ToolError(error_message) from e
+    except TransportError as e:
+        # No HTTP response arrived (timeout, connect failure) — wrap with actionable text (#1034)
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(_transport_error_message(e, url, "GET")) from e
     except Exception as e:
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))
@@ -379,6 +421,11 @@ async def call_put(
 
     except HTTPStatusError as e:
         raise ToolError(error_message) from e
+    except TransportError as e:
+        # No HTTP response arrived (timeout, connect failure) — wrap with actionable text (#1034)
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(_transport_error_message(e, url, "PUT")) from e
     except Exception as e:
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))
@@ -488,6 +535,11 @@ async def call_patch(
         error_message = _resolve_error_message(status_code, url, "PATCH", response_data)
 
         raise ToolError(error_message) from e
+    except TransportError as e:
+        # No HTTP response arrived (timeout, connect failure) — wrap with actionable text (#1034)
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(_transport_error_message(e, url, "PATCH")) from e
     except Exception as e:
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))
@@ -593,6 +645,11 @@ async def call_post(
 
     except HTTPStatusError as e:
         raise ToolError(error_message) from e
+    except TransportError as e:
+        # No HTTP response arrived (timeout, connect failure) — wrap with actionable text (#1034)
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(_transport_error_message(e, url, "POST")) from e
     except Exception as e:
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))
@@ -717,6 +774,11 @@ async def call_delete(
 
     except HTTPStatusError as e:
         raise ToolError(error_message) from e
+    except TransportError as e:
+        # No HTTP response arrived (timeout, connect failure) — wrap with actionable text (#1034)
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(_transport_error_message(e, url, "DELETE")) from e
     except Exception as e:
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))

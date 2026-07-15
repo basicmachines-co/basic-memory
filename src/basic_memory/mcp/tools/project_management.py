@@ -18,6 +18,7 @@ from basic_memory.config import (
 )
 from basic_memory.mcp.async_client import (
     _explicit_routing,
+    _force_cloud_mode,
     _force_local_mode,
     get_client,
     is_factory_mode,
@@ -654,6 +655,23 @@ async def create_memory_project(
         return result
 
 
+def _delete_routes_to_cloud(workspace_id: str | None) -> bool:
+    """Mirror get_client's non-project routing to describe where a delete landed.
+
+    Trigger: delete_project's result text must say whether the project's note
+        files live on local disk or in cloud storage.
+    Why: the previous text always claimed "Files remain on disk", which is
+        wrong for cloud-routed deletes (#1034).
+    Outcome: True when get_client(workspace=...) serves the request from a
+        cloud backend (factory mode, explicit --cloud, or a workspace selector).
+    """
+    if is_factory_mode():
+        return True
+    if _explicit_routing():
+        return _force_cloud_mode()
+    return workspace_id is not None
+
+
 @mcp.tool(
     title="Delete Project",
     tags={"projects"},
@@ -666,17 +684,22 @@ async def create_memory_project(
 )
 async def delete_project(
     project_name: str,
+    delete_notes: bool = False,
     workspace: str | None = None,
     context: Context | None = None,
 ) -> str:
     """Delete a Basic Memory project.
 
-    Removes a project from the configuration and database. This does NOT delete
-    the actual files on disk - only removes the project from Basic Memory's
-    configuration and database records.
+    Removes a project from Basic Memory's configuration and database records.
+    By default the project's note files are retained: local projects keep
+    their files on disk, cloud projects keep their files in cloud storage.
+    Pass delete_notes=True to also delete the note files themselves.
 
     Args:
         project_name: Name of the project to delete
+        delete_notes: Also delete the project's note files (from local disk
+            for local projects, from cloud storage for cloud projects).
+            Defaults to False, which only stops tracking the project.
         workspace: Optional cloud workspace selector to delete the project from.
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
@@ -685,15 +708,18 @@ async def delete_project(
             behavior (#954).
 
     Returns:
-        Confirmation message about project deletion
+        Confirmation message describing what was deleted and whether note
+        files were removed or retained.
 
     Example:
         delete_project("old-project")
+        delete_project("old-project", delete_notes=True)
         delete_project("team-project", workspace="team-paul")
 
     Warning:
-        This action cannot be undone. The project will need to be re-added
-        to access its content through Basic Memory again.
+        This action cannot be undone. With delete_notes=False the project must
+        be re-added to access its content through Basic Memory again; with
+        delete_notes=True the note files themselves are permanently deleted.
     """
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot delete projects, and workspace selectors
@@ -735,7 +761,9 @@ async def delete_project(
             )
 
         # Delete project using project external_id
-        status_response = await project_client.delete_project(target_project.external_id)
+        status_response = await project_client.delete_project(
+            target_project.external_id, delete_notes=delete_notes
+        )
         from basic_memory.mcp.project_context import invalidate_workspace_project_index
 
         await invalidate_workspace_project_index(context)
@@ -748,7 +776,14 @@ async def delete_project(
             if hasattr(status_response.old_project, "path"):
                 result += f"• Path: {status_response.old_project.path}\n"
 
-        result += "Files remain on disk but project is no longer tracked by Basic Memory.\n"
-        result += "Re-add the project to access its content again.\n"
+        files_location = "in cloud storage" if _delete_routes_to_cloud(workspace_id) else "on disk"
+        if delete_notes:
+            result += f"Note files {files_location} were deleted along with the project.\n"
+        else:
+            result += (
+                f"Note files remain {files_location} but the project is no longer "
+                "tracked by Basic Memory.\n"
+            )
+            result += "Re-add the project to access its content again.\n"
 
         return result

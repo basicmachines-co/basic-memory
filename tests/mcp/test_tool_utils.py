@@ -2,6 +2,7 @@
 
 from typing import Any, cast
 
+import httpx
 import pytest
 from httpx import HTTPStatusError, Request
 from mcp.server.fastmcp.exceptions import ToolError
@@ -9,6 +10,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from basic_memory.mcp.tools.utils import (
     call_delete,
     call_get,
+    call_patch,
     call_post,
     call_put,
     get_error_message,
@@ -193,6 +195,71 @@ async def test_call_post_adds_workspace_permalink_headers_at_request_time(mock_r
     assert request_headers["X-Existing"] == "value"
     assert request_headers[WORKSPACE_SLUG_HEADER] == "team-paul"
     assert request_headers[WORKSPACE_TYPE_HEADER] == "organization"
+
+
+_ALL_CALL_HELPERS = [
+    (call_get, "GET"),
+    (call_post, "POST"),
+    (call_put, "PUT"),
+    (call_patch, "PATCH"),
+    (call_delete, "DELETE"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_fn,method", _ALL_CALL_HELPERS)
+async def test_transport_timeout_wrapped_in_tool_error(call_fn, method):
+    """httpx timeouts stringify to '' — they must surface as actionable ToolErrors (#1034)."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("", request=request)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        with pytest.raises(ToolError) as exc:
+            await call_fn(client, "/v2/projects/project-uuid")
+
+    message = str(exc.value)
+    assert message  # never blank, even though str(ReadTimeout("")) is empty
+    assert "Request timed out" in message
+    assert "ReadTimeout" in message
+    assert f"{method} 'project-uuid'" in message
+    assert "may still be completing server-side" in message
+    assert "bm project list" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_fn,method", _ALL_CALL_HELPERS)
+async def test_transport_connect_error_wrapped_in_tool_error(call_fn, method):
+    """Non-timeout transport failures are wrapped with the exception type and detail."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        with pytest.raises(ToolError) as exc:
+            # httpx.URL object (not str) also exercises the URL-object path extraction
+            await call_fn(client, httpx.URL("http://test/v2/projects/project-uuid"))
+
+    message = str(exc.value)
+    assert "Connection failed" in message
+    assert "ConnectError: connection refused" in message
+    assert f"{method} request to 'project-uuid'" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_fn,method", _ALL_CALL_HELPERS)
+async def test_non_transport_error_reraised_unwrapped(call_fn, method):
+    """Errors that are neither HTTP-status nor transport failures pass through untouched."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise RuntimeError("unexpected failure")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        with pytest.raises(RuntimeError, match="unexpected failure"):
+            await call_fn(client, "/v2/projects/project-uuid")
 
 
 @pytest.mark.asyncio

@@ -134,6 +134,31 @@ async def test_create_and_delete_project_and_name_match_branch(
 
     delete_result = await delete_project("My Project")
     assert delete_result.startswith("✓")
+    # Local routing with delete_notes=False: files are retained on disk.
+    assert "Note files remain on disk" in delete_result
+    assert "Re-add the project" in delete_result
+    assert project_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_project_delete_notes_removes_local_files(app, tmp_path_factory):
+    """delete_notes=True flows through to the API and removes the project files (#1034)."""
+    project_root = tmp_path_factory.mktemp("delete-notes-project-home")
+    (project_root / "note.md").write_text("# Note\n\ncontent\n")
+
+    result = await create_memory_project(
+        project_name="Delete Notes Project",
+        project_path=str(project_root),
+        set_default=False,
+    )
+    assert isinstance(result, str)
+    assert result.startswith("✓")
+
+    delete_result = await delete_project("Delete Notes Project", delete_notes=True)
+    assert delete_result.startswith("✓")
+    assert "Note files on disk were deleted" in delete_result
+    assert "Re-add the project" not in delete_result
+    assert not project_root.exists()
 
 
 @pytest.mark.asyncio
@@ -353,8 +378,10 @@ async def test_create_memory_project_constrained_with_workspace_returns_disabled
 
 
 @pytest.mark.asyncio
-async def test_delete_project_resolves_workspace_slug(app):
-    """A friendly workspace slug resolves to the tenant id used for delete routing."""
+@pytest.mark.parametrize("delete_notes", [False, True])
+async def test_delete_project_resolves_workspace_slug(app, delete_notes):
+    """A friendly workspace slug resolves to the tenant id used for delete routing,
+    and delete_notes is passed through to the typed client (#1034)."""
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -414,12 +441,20 @@ async def test_delete_project_resolves_workspace_slug(app):
             new_callable=AsyncMock,
         ),
     ):
-        result = await delete_project("WS Project", workspace="team-paul")
+        result = await delete_project(
+            "WS Project", delete_notes=delete_notes, workspace="team-paul"
+        )
 
     mock_resolve_workspace.assert_awaited_once_with(workspace="team-paul", context=None)
     assert captured["workspace"] == "tenant-abc-123"
-    mock_delete_project.assert_awaited_once_with("project-uuid")
+    mock_delete_project.assert_awaited_once_with("project-uuid", delete_notes=delete_notes)
     assert result.startswith("✓")
+    # Cloud-routed delete: result text must not claim "files remain on disk" (#1034).
+    if delete_notes:
+        assert "Note files in cloud storage were deleted" in result
+    else:
+        assert "Note files remain in cloud storage" in result
+        assert "Re-add the project" in result
 
 
 @pytest.mark.asyncio
@@ -539,6 +574,21 @@ async def test_delete_project_default_workspace_is_none(app):
         await delete_project("Default WS Project")
 
     assert captured["workspace"] is None
+
+
+def test_delete_routes_to_cloud_honors_explicit_routing_flags(monkeypatch):
+    """Explicit --cloud/--local routing decides where the delete's files live (#1034)."""
+    from basic_memory.mcp.tools.project_management import _delete_routes_to_cloud
+
+    monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_CLOUD", "true")
+    assert _delete_routes_to_cloud(None) is True
+
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_CLOUD", "false")
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+    # Explicit local wins even when a workspace selector was supplied.
+    assert _delete_routes_to_cloud("some-workspace") is False
 
 
 @pytest.mark.asyncio
