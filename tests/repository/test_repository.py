@@ -1,13 +1,15 @@
 """Test repository implementation."""
 
 from datetime import datetime, UTC
+from unittest.mock import AsyncMock
+
 import pytest
 from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from basic_memory import db
 from basic_memory.models import Base
-from basic_memory.repository.repository import SELECT_BY_IDS_CHUNK_SIZE, Repository
+from basic_memory.repository.repository import Repository
 
 
 class ModelTest(Base):
@@ -134,21 +136,25 @@ async def test_find_by_ids(repository, session_maker):
 
 
 @pytest.mark.asyncio
-async def test_find_by_ids_exceeds_sqlite_bound_parameter_limit(repository, session_maker):
-    """Regression test for #1045: reindex --embeddings passes every entity id at once.
-
-    Id lists larger than SQLite's bound-parameter cap (999 on builds older than
-    3.32.0) must be queried in chunks instead of a single IN clause.
-    """
-    # More than two full chunks so the loop and the tail slice are both exercised.
-    total = SELECT_BY_IDS_CHUNK_SIZE * 2 + 100
-    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(total)]
+async def test_find_by_ids_chunks_large_requests(repository, session_maker, monkeypatch):
+    """Regression test for #1045: bulk id hydration must issue bounded queries."""
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(5)]
     async with db.scoped_session(session_maker) as session:
         await repository.add_all_no_return(session, instances)
 
-        ids_to_find = [f"test_{i}" for i in range(total)]
+        # Use a tiny deterministic chunk size so this test proves the query is
+        # split even on SQLite builds whose real parameter cap exceeds 1,100.
+        monkeypatch.setattr(
+            "basic_memory.repository.repository.SELECT_BY_IDS_CHUNK_SIZE",
+            2,
+        )
+        execute = AsyncMock(wraps=session.execute)
+        monkeypatch.setattr(session, "execute", execute)
+
+        ids_to_find = [instance.id for instance in instances]
         found = await repository.find_by_ids(session, ids_to_find)
-        assert len(found) == total
+
+        assert execute.await_count == 3
         assert sorted(e.id for e in found) == sorted(ids_to_find)
 
 
