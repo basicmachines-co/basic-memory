@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from basic_memory import db
 from basic_memory.models import Base
-from basic_memory.repository.repository import Repository
+from basic_memory.repository.repository import SELECT_BY_IDS_CHUNK_SIZE, Repository
 
 
 class ModelTest(Base):
@@ -131,6 +131,25 @@ async def test_find_by_ids(repository, session_maker):
         # Test with all non-existent IDs
         not_found = await repository.find_by_ids(session, ["fake1", "fake2"])
         assert len(not_found) == 0
+
+
+@pytest.mark.asyncio
+async def test_find_by_ids_exceeds_sqlite_bound_parameter_limit(repository, session_maker):
+    """Regression test for #1045: reindex --embeddings passes every entity id at once.
+
+    Id lists larger than SQLite's bound-parameter cap (999 on builds older than
+    3.32.0) must be queried in chunks instead of a single IN clause.
+    """
+    # More than two full chunks so the loop and the tail slice are both exercised.
+    total = SELECT_BY_IDS_CHUNK_SIZE * 2 + 100
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(total)]
+    async with db.scoped_session(session_maker) as session:
+        await repository.add_all_no_return(session, instances)
+
+        ids_to_find = [f"test_{i}" for i in range(total)]
+        found = await repository.find_by_ids(session, ids_to_find)
+        assert len(found) == total
+        assert sorted(e.id for e in found) == sorted(ids_to_find)
 
 
 @pytest.mark.asyncio

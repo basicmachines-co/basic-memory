@@ -23,6 +23,12 @@ from basic_memory.models import Base
 
 T = TypeVar("T", bound=Base)
 
+# SQLite caps the number of bound parameters per statement (999 on builds older
+# than 3.32.0), so id-list queries must stay below that floor. 500 leaves
+# headroom for additional binds (e.g. the project_id filter) while keeping the
+# number of round-trips low.
+SELECT_BY_IDS_CHUNK_SIZE = 500
+
 
 class Repository[T: Base]:
     """Base repository implementation with explicit caller-owned sessions."""
@@ -83,15 +89,25 @@ class Repository[T: Base]:
         return result.scalars().one_or_none()
 
     async def select_by_ids(self, session: AsyncSession, ids: List[int]) -> Sequence[T]:
-        """Select multiple entities by IDs using an existing session."""
-        query = (
-            select(self.Model).where(self.primary_key.in_(ids)).options(*self.get_load_options())
-        )
-        # Add project filter if applicable
-        query = self._add_project_filter(query)
+        """Select multiple entities by IDs using an existing session.
 
-        result = await session.execute(query)
-        return result.scalars().all()
+        Queries in chunks so callers can pass arbitrarily large id lists
+        without hitting SQLite's bound-parameter limit (issue #1045).
+        """
+        results: list[T] = []
+        for start in range(0, len(ids), SELECT_BY_IDS_CHUNK_SIZE):
+            chunk = ids[start : start + SELECT_BY_IDS_CHUNK_SIZE]
+            query = (
+                select(self.Model)
+                .where(self.primary_key.in_(chunk))
+                .options(*self.get_load_options())
+            )
+            # Add project filter if applicable
+            query = self._add_project_filter(query)
+
+            result = await session.execute(query)
+            results.extend(result.scalars().all())
+        return results
 
     async def add(self, session: AsyncSession, model: T) -> T:
         """
