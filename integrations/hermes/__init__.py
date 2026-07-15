@@ -901,13 +901,27 @@ class BasicMemoryProvider(MemoryProvider):
             logger.error("basic-memory: cannot determine server argv: %s", e)
             return
 
+        # Expose the actor to cleanup BEFORE start() blocks (up to 25s):
+        # _atexit_cleanup and the SIGTERM handler only reach actors through
+        # provider.shutdown() → self._actor, so a local-only actor would leak
+        # its freshly spawned `bm mcp` child if a signal lands mid-start.
+        # Callers can't observe the half-started actor: every tool/capture
+        # path gates on _initialized, which stays False until start() returns.
         actor = _BmMcpActor(argv)
+        self._actor = actor
         try:
             actor.start(timeout=25.0)
         except Exception as e:
             logger.error("basic-memory: MCP server failed to start: %s", e)
+            # A failed start can still have spawned the child (e.g. the ready
+            # timeout fired after `bm mcp` launched) — shut the actor down so
+            # the child is reaped instead of lingering until process exit.
+            try:
+                actor.shutdown(timeout=5.0)
+            except Exception as shutdown_error:
+                logger.debug("failed-start actor shutdown: %s", shutdown_error)
+            self._actor = None
             return
-        self._actor = actor
 
         tools = actor.list_tools()
         names = {t["name"] for t in tools}

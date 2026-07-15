@@ -113,6 +113,45 @@ def test_initialize_replaces_dead_actor_even_if_shutdown_raises(bm, monkeypatch,
     assert p._actor is TrackingActor.instances[1]
 
 
+def test_initialize_exposes_actor_to_cleanup_before_start(bm, monkeypatch, tmp_path):
+    """Regression (PR #1059 review): SIGTERM during actor.start() — which can
+    block up to 25s — must be able to reach the starting actor. Cleanup only
+    sees provider._actor, so it has to be assigned before start() blocks."""
+    p = _make_initializable_provider(bm, monkeypatch, tmp_path)
+    actor_visible_at_start: list[bool] = []
+
+    class ObservingActor(TrackingActor):
+        def start(self, timeout: float = 25.0) -> None:
+            actor_visible_at_start.append(p._actor is self)
+            super().start(timeout)
+
+    monkeypatch.setattr(bm, "_BmMcpActor", ObservingActor)
+    p.initialize(session_id="one", hermes_home=str(tmp_path))
+    assert actor_visible_at_start == [True], "actor must be reachable by cleanup during start()"
+    assert p._initialized is True
+    assert p._actor is TrackingActor.instances[0]
+
+
+def test_initialize_reaps_actor_when_start_fails(bm, monkeypatch, tmp_path):
+    """A failed start (e.g. the 25s ready timeout) can still have spawned the
+    `bm mcp` child — the actor must be shut down, not dropped on the floor."""
+    p = _make_initializable_provider(bm, monkeypatch, tmp_path)
+
+    class FailingActor(TrackingActor):
+        def start(self, timeout: float = 25.0) -> None:
+            self.started = True
+            self.alive = True  # child spawned before the ready wait timed out
+            raise TimeoutError("didn't initialize within 25s")
+
+    monkeypatch.setattr(bm, "_BmMcpActor", FailingActor)
+    p.initialize(session_id="one", hermes_home=str(tmp_path))
+
+    assert p._initialized is False
+    assert p._actor is None, "failed-start actor must not remain attached"
+    failed = TrackingActor.instances[0]
+    assert failed.shutdown_calls, "failed-start actor must be shut down to reap its child"
+
+
 # ---- SIGTERM cleanup chain ----
 
 
