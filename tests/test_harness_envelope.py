@@ -239,12 +239,12 @@ def test_event_log_rotation_keeps_newest_entries(
 # --- Installed Codex plugin layout ---
 
 
-def test_installed_codex_plugin_stamps_envelope_from_vendored_module(
-    tmp_path: Path,
-) -> None:
-    # Codex installs copy only plugins/codex/ — run the pre-compact hook from a
-    # bare copy (no plugins/shared sibling) and prove the vendored module loads
-    # and stamps the checkpoint.
+def _run_codex_pre_compact(tmp_path: Path, capture_events: object) -> tuple[Path, Path]:
+    """Run the codex pre-compact hook from a bare plugin copy.
+
+    The copy has no plugins/shared sibling, mirroring a marketplace install.
+    Returns (note_log, config_dir) for the caller's assertions.
+    """
     installed_plugin = tmp_path / "installed/codex"
     shutil.copytree(REPO_ROOT / "plugins/codex", installed_plugin)
     assert not (tmp_path / "installed/shared").exists()
@@ -256,7 +256,7 @@ def test_installed_codex_plugin_stamps_envelope_from_vendored_module(
             {
                 "basicMemory": {
                     "primaryProject": "codex-project",
-                    "captureEvents": True,
+                    "captureEvents": capture_events,
                     "eventRetention": 100,
                 }
             }
@@ -303,8 +303,18 @@ def test_installed_codex_plugin_stamps_envelope_from_vendored_module(
         env=env,
         text=True,
     )
-
     assert result.returncode == 0, result.stderr
+    return note_log, config_dir
+
+
+def test_installed_codex_plugin_stamps_envelope_from_vendored_module(
+    tmp_path: Path,
+) -> None:
+    # Codex installs copy only plugins/codex/ — run the pre-compact hook from a
+    # bare copy (no plugins/shared sibling) and prove the vendored module loads
+    # and stamps the checkpoint.
+    note_log, config_dir = _run_codex_pre_compact(tmp_path, capture_events=True)
+
     note = note_log.read_text(encoding="utf-8")
     assert "envelope_source: codex" in note
     assert "- [source] codex/codex-session-1" in note
@@ -313,3 +323,17 @@ def test_installed_codex_plugin_stamps_envelope_from_vendored_module(
     event = json.loads(event_logs[0].read_text(encoding="utf-8").splitlines()[0])
     assert event["source"] == "codex"
     assert event["project_hint"] == "codex-project"
+
+
+@pytest.mark.parametrize("capture_events", ["true", "false", 1])
+def test_codex_capture_events_gate_fails_closed_on_non_booleans(
+    tmp_path: Path, capture_events: object
+) -> None:
+    # captureEvents is a privacy gate: only JSON `true` may enable capture. A
+    # hand-edited string "false" (or "true", or a number) is truthy in Python
+    # and must NOT switch event logging on.
+    note_log, config_dir = _run_codex_pre_compact(tmp_path, capture_events=capture_events)
+
+    # The checkpoint itself still writes — only event capture stays off.
+    assert "envelope_source: codex" in note_log.read_text(encoding="utf-8")
+    assert not (config_dir / "events").exists()

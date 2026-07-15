@@ -416,6 +416,30 @@ def test_pre_compact_event_log_is_opt_in_and_lives_in_data_dir(
     assert event["idempotency_key"]
 
 
+@pytest.mark.parametrize("capture_events", ["true", "false", 1])
+def test_pre_compact_capture_events_gate_fails_closed_on_non_booleans(
+    hook_harness: HookHarness,
+    tmp_path: Path,
+    capture_events: object,
+) -> None:
+    # captureEvents is a privacy gate: only JSON `true` may enable capture. A
+    # hand-edited string "false" (or "true", or a number) is truthy in Python
+    # and must NOT switch event logging on.
+    hook_harness.write_settings(
+        hook_harness.home,
+        "settings.json",
+        {"primaryProject": "envelope-project", "captureEvents": capture_events},
+    )
+    payload = _pre_compact_payload(hook_harness, tmp_path, "Gate must fail closed")
+
+    result = hook_harness.run_hook("pre-compact.sh", payload)
+
+    assert result.returncode == 0, result.stderr
+    # The checkpoint itself still writes — only event capture stays off.
+    assert len(hook_harness.written_notes()) == 1
+    assert hook_harness.event_log_files() == []
+
+
 def test_pre_compact_event_retention_caps_local_event_log(
     hook_harness: HookHarness,
     tmp_path: Path,

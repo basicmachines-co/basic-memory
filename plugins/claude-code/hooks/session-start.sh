@@ -180,7 +180,9 @@ recall_prompt = cfg.get("recallPrompt") or default_prompt
 # Without this, setup writes them but they never reach Claude (dead config).
 placement_conventions = (cfg.get("placementConventions") or "").strip()
 capture_folder = (cfg.get("captureFolder") or "sessions").strip()
-capture_events = bool(cfg.get("captureEvents", False))
+# Strict boolean: captureEvents is a privacy gate, so it fails closed. A
+# hand-edited string like "false" (truthy in Python) must not enable capture.
+capture_events = cfg.get("captureEvents") is True
 # Approximate retention cap for the local event log; the envelope module
 # validates it (non-positive/junk values fall back to its default).
 event_retention = cfg.get("eventRetention")

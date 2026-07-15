@@ -159,7 +159,9 @@ def main() -> int:
     capture_folder = str(cfg.get("captureFolder") or "codex-sessions").strip()
     placement = str(cfg.get("placementConventions") or "").strip()
     focus = str(cfg.get("focus") or "").strip()
-    capture_events = bool(cfg.get("captureEvents", False))
+    # Strict boolean: captureEvents is a privacy gate, so it fails closed. A
+    # hand-edited string like "false" (truthy in Python) must not enable capture.
+    capture_events = cfg.get("captureEvents") is True
     # Approximate retention cap for the local event log; the envelope module
     # validates it (non-positive/junk values fall back to its default).
     event_retention = cfg.get("eventRetention")

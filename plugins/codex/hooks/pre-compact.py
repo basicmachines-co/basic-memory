@@ -152,7 +152,9 @@ def main() -> int:
     cfg = load_config(cwd)
     primary_project = str(cfg.get("primaryProject") or "").strip()
     capture_folder = str(cfg.get("captureFolder") or "codex-sessions").strip()
-    capture_events = bool(cfg.get("captureEvents", False))
+    # Strict boolean: captureEvents is a privacy gate, so it fails closed. A
+    # hand-edited string like "false" (truthy in Python) must not enable capture.
+    capture_events = cfg.get("captureEvents") is True
     redact_keys = cfg.get("redactKeys") or []
     redact_paths_cfg = cfg.get("redactPaths") or []
     # Approximate retention cap for the local event log; the envelope module
