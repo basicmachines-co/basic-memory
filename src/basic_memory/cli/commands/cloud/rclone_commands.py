@@ -126,7 +126,7 @@ class SyncProject:
     remote_name: str = "basic-memory-cloud"
 
 
-def get_bmignore_filter_path() -> Path:
+def get_bmignore_filter_path(*, force: bool = False) -> Path:
     """Get path to rclone filter file.
 
     Uses ~/.basic-memory/.bmignore converted to rclone format.
@@ -140,7 +140,7 @@ def get_bmignore_filter_path() -> Path:
         convert_bmignore_to_rclone_filters,
     )
 
-    return convert_bmignore_to_rclone_filters()
+    return convert_bmignore_to_rclone_filters(force=force)
 
 
 def get_bmignore_prune_filter_path() -> Path:
@@ -331,7 +331,9 @@ def project_sync(
 
     local_path = Path(project.local_sync_path).expanduser()
     remote_path = get_project_remote(project, bucket_name)
-    filter_path = filter_path or get_bmignore_filter_path()
+    # --delete-excluded makes this filter destructive. Rebuild it from the
+    # current .bmignore even when filesystem mtimes make the cache look newer.
+    filter_path = filter_path or get_bmignore_filter_path(force=True)
 
     cmd = _build_transfer_cmd(
         "sync",
