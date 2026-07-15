@@ -999,47 +999,61 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         logger.trace(f"Search {sql} params: {params}")
 
+        use_savepoint = session is not None or allow_relaxed
+
+        async def execute_rows(active_session: AsyncSession, query_params: dict):
+            # PostgreSQL leaves a transaction unusable after invalid tsquery syntax.
+            # Scope retryable or caller-owned attempts to a savepoint so a relaxed
+            # retry—and any caller continuing to use its session—starts healthy.
+            if use_savepoint:
+                async with active_session.begin_nested():
+                    result = await active_session.execute(text(sql), query_params)
+                    return result.fetchall()
+            result = await active_session.execute(text(sql), query_params)
+            return result.fetchall()
+
         async def run_search(active_session: AsyncSession):
-            result = await active_session.execute(text(sql), params)
-            rows = result.fetchall()
+            relaxed = self._relaxed_tsquery_text(search_text) if allow_relaxed else None
+            strict_syntax_error = False
+            try:
+                rows = await execute_rows(active_session, params)
+            except Exception as exc:
+                if not (self._is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
+                    raise
+                strict_syntax_error = True
+                rows = []
+
             # Trigger: multi-word natural-language query matched nothing
-            # under the default all-terms-AND tsquery semantics.
+            # under the default all-terms-AND tsquery semantics, or its punctuation
+            # produced invalid strict tsquery syntax.
             # Why: questions rarely have every word in one document;
-            # without relaxation the FTS half of hybrid search contributes
-            # zero candidates (parity with the SQLite path).
+            # without relaxation the FTS half of hybrid search contributes zero
+            # candidates. The relaxed renderer also tokenizes punctuation safely.
             # Outcome: one retry with OR-joined prefix lexemes; ts_rank
             # still ranks multi-term matches first.
-            relaxed = (
-                self._relaxed_tsquery_text(search_text) if allow_relaxed and not rows else None
-            )
-            if relaxed and params.get("text"):
-                params["text"] = relaxed
+            if relaxed and not rows and params.get("text"):
+                retry_reason = "invalid syntax" if strict_syntax_error else "0 results"
                 logger.debug(
-                    "Strict Postgres FTS returned 0 results; retrying relaxed FTS query "
+                    f"Strict Postgres FTS returned {retry_reason}; retrying relaxed FTS query "
                     f"strict='{search_text}' relaxed='{relaxed}'"
                 )
                 with logfire.span(
                     "search.relaxed_fts_retry",
                     backend="postgres",
+                    reason="syntax_error" if strict_syntax_error else "empty_result",
                     token_count=len(relaxed_query_words(search_text) or ()),
                     limit=limit,
                     offset=offset,
                 ):
-                    result = await active_session.execute(text(sql), params)
-                    rows = result.fetchall()
+                    rows = await execute_rows(
+                        active_session,
+                        {**params, "text": relaxed},
+                    )
             return rows
 
         try:
             if session is not None:
-                # Trigger: caller owns the session and keeps using it after this call.
-                # Why: a tsquery syntax error aborts the whole Postgres transaction, so
-                #   swallowing it and returning [] would poison the caller-owned
-                #   transaction and fail every later query on that session. Postgres
-                #   SAVEPOINT (begin_nested) scopes the failure to the FTS attempt.
-                # Outcome: on syntax error the savepoint rolls back and the caller's
-                #   outer transaction stays usable; the empty-result contract is kept.
-                async with session.begin_nested():
-                    rows = await run_search(session)
+                rows = await run_search(session)
             else:
                 async with db.scoped_session(self.session_maker) as owned_session:
                     rows = await run_search(owned_session)
@@ -1136,24 +1150,38 @@ class PostgresSearchRepository(SearchRepositoryBase):
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")
+
+        async def execute_count(active_session: AsyncSession, query_params: dict) -> int:
+            if allow_relaxed:
+                async with active_session.begin_nested():
+                    result = await active_session.execute(text(sql), query_params)
+                    return int(result.scalar_one())
+            result = await active_session.execute(text(sql), query_params)
+            return int(result.scalar_one())
+
         try:
             async with db.scoped_session(self.session_maker) as session:
-                result = await session.execute(text(sql), params)
-                total = int(result.scalar_one())
-                relaxed = (
-                    self._relaxed_tsquery_text(search_text)
-                    if allow_relaxed and total == 0
-                    else None
-                )
-                if relaxed and params.get("text"):
-                    params["text"] = relaxed
+                relaxed = self._relaxed_tsquery_text(search_text) if allow_relaxed else None
+                strict_syntax_error = False
+                try:
+                    total = await execute_count(session, params)
+                except Exception as exc:
+                    if not (self._is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
+                        raise
+                    strict_syntax_error = True
+                    total = 0
+
+                if relaxed and total == 0 and params.get("text"):
                     with logfire.span(
                         "search.count.relaxed_fts_retry",
                         backend="postgres",
+                        reason="syntax_error" if strict_syntax_error else "empty_result",
                         token_count=len(relaxed_query_words(search_text) or ()),
                     ):
-                        result = await session.execute(text(sql), params)
-                        total = int(result.scalar_one())
+                        total = await execute_count(
+                            session,
+                            {**params, "text": relaxed},
+                        )
                 return total
         except Exception as e:
             if self._is_tsquery_syntax_error(e):

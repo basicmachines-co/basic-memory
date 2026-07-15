@@ -1107,3 +1107,55 @@ async def test_postgres_multiword_query_relaxes_on_strict_miss(session_maker, te
     # The hybrid FTS branch opts in; OR-relaxation surfaces the partial match.
     results = await repo.search(search_text="Did Melanie go hiking at sunrise?", allow_relaxed=True)
     assert any(r.id == 77 for r in results)
+
+
+@pytest.mark.asyncio
+async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
+    session_maker,
+    test_project,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Punctuated strict queries retry safely with the relaxed token rendering."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=78,
+            title="Baz reference",
+            content_stems="a document containing baz",
+            content_snippet="A document containing baz.",
+            permalink="docs/baz-reference",
+            file_path="docs/baz-reference.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    syntax_errors: list[Exception] = []
+    real_is_syntax_error = repo._is_tsquery_syntax_error
+
+    def record_syntax_error(exc: Exception) -> bool:
+        is_syntax_error = real_is_syntax_error(exc)
+        if is_syntax_error:
+            syntax_errors.append(exc)
+        return is_syntax_error
+
+    monkeypatch.setattr(repo, "_is_tsquery_syntax_error", record_syntax_error)
+
+    query = "foo<bar baz qux"
+    async with db.scoped_session(session_maker) as caller_session:
+        results = await repo.search(
+            search_text=query,
+            allow_relaxed=True,
+            session=caller_session,
+        )
+        assert any(row.id == 78 for row in results)
+        assert (await caller_session.execute(text("SELECT 1"))).scalar_one() == 1
+
+    assert syntax_errors
+    search_syntax_error_count = len(syntax_errors)
+    assert await repo.count(search_text=query, allow_relaxed=True) == 1
+    assert len(syntax_errors) > search_syntax_error_count
