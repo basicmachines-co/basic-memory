@@ -12,6 +12,10 @@ from basic_memory import db
 from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
 from basic_memory.file_utils import parse_frontmatter
 from basic_memory.ignore_utils import get_bmignore_path
+from basic_memory.index.local_project import (
+    LocalProjectIndexRuntimeFactory,
+    run_local_project_index_for_project,
+)
 from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
@@ -1116,6 +1120,65 @@ async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url
     assert response.status_code == 202
     delete_response = DeleteEntitiesResponse.model_validate(response.json())
     assert delete_response.deleted is False
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_by_id_non_markdown_file_entity(
+    client: AsyncClient,
+    test_project: Project,
+    project_config,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+    search_repository,
+    config_manager,
+):
+    """Regression test for #1033: single-entity DELETE must handle file-type entities.
+
+    Non-markdown files are indexed as note_type="file" entities with no permalink and
+    no note_content row. The per-entity delete endpoint used to 500 on them because it
+    ran markdown-specific cleanup; it now shares the accepted-note delete path with
+    delete-directory, removing entity and search rows by entity id.
+    """
+    del config_manager
+
+    # Index a real non-markdown file through the local project indexer.
+    csv_path = project_config.home / "regression1033.csv"
+    csv_path.write_text("id,name\n1,alpha\n")
+
+    index_result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert index_result.enqueued_files == 1
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "regression1033.csv")
+    assert entity is not None
+    assert entity.note_type == "file"
+    assert entity.permalink is None
+    entity_id = entity.id
+    entity_external_id = entity.external_id
+
+    # The indexer writes a search row for file entities keyed by filename; assert it
+    # exists up front so the post-delete check is not vacuous.
+    rows_before = await search_repository.search(search_text="regression1033")
+    assert any(row.entity_id == entity_id for row in rows_before)
+
+    response = await client.delete(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
+
+    assert response.status_code == 202
+    delete_response = DeleteEntitiesResponse.model_validate(response.json())
+    assert delete_response.deleted is True
+
+    # Entity row is gone.
+    async with db.scoped_session(session_maker) as session:
+        assert await entity_repository.get_by_file_path(session, "regression1033.csv") is None
+        assert await entity_repository.get_by_external_id(session, entity_external_id) is None
+
+    # Search index rows for the entity are gone.
+    rows_after = await search_repository.search(search_text="regression1033")
+    assert not any(row.entity_id == entity_id for row in rows_after)
 
 
 @pytest.mark.asyncio
