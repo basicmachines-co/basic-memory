@@ -1,7 +1,9 @@
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,9 +49,11 @@ class HookHarness:
         env = os.environ.copy()
         env.update(
             {
+                "BM_BIN": shlex.join([sys.executable, str(self.bin_dir / "basic-memory")]),
                 "BM_TEST_COMMAND_LOG": str(self.command_log),
                 "HOME": str(self.home),
                 "PATH": f"{self.bin_dir}{os.pathsep}{env['PATH']}",
+                "USERPROFILE": str(self.home),
             }
         )
         return subprocess.run(

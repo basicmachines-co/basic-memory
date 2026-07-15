@@ -19,10 +19,13 @@ set -u
 
 input="$(cat 2>/dev/null || true)"
 
-# Resolve how to invoke the Basic Memory CLI — prefer a binary on PATH, fall back to
-# uvx / uv so checkpointing still works when BM was connected only as an ephemeral
-# `uvx basic-memory mcp` server (no persistent CLI). Silent no-op if none available.
-if command -v basic-memory >/dev/null 2>&1; then
+# Resolve how to invoke the Basic Memory CLI — prefer an explicit command when the
+# host configured one, then a binary on PATH. Fall back to uvx / uv so checkpointing
+# still works when BM was connected only as an ephemeral `uvx basic-memory mcp`
+# server (no persistent CLI). Silent no-op if none available.
+if [[ -n "${BM_BIN:-}" ]]; then
+    BM="$BM_BIN"
+elif command -v basic-memory >/dev/null 2>&1; then
     BM="basic-memory"
 elif command -v bm >/dev/null 2>&1; then
     BM="bm"

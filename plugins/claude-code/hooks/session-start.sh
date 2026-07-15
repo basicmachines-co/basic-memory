@@ -23,13 +23,16 @@ set -u
 input="$(cat 2>/dev/null || true)"
 
 # --- Resolve how to invoke the Basic Memory CLI ---
-# Prefer a binary on PATH (fast — no per-call env resolution). Fall back to uvx / uv
+# Prefer an explicit command when the host configured one, then a binary on PATH
+# (fast — no per-call env resolution). Fall back to uvx / uv
 # so the hook still works when Basic Memory was connected only as an ephemeral
 # `uvx basic-memory mcp` server (the MCP setup our README recommends) with no
 # persistent CLI installed — the uv cache is already warm from running the server.
 # Trigger: none of basic-memory / bm / uvx / uv on PATH → BM isn't usable here.
 # Outcome: silent no-op (the plugin must be invisible to non-BM users).
-if command -v basic-memory >/dev/null 2>&1; then
+if [[ -n "${BM_BIN:-}" ]]; then
+    BM="$BM_BIN"
+elif command -v basic-memory >/dev/null 2>&1; then
     BM="basic-memory"
 elif command -v bm >/dev/null 2>&1; then
     BM="bm"
