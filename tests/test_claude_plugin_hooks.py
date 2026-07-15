@@ -50,19 +50,24 @@ class HookHarness:
         payload: dict[str, str],
         *,
         basic_memory_command: str | None = None,
+        use_default_cli_discovery: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         assert BASH_EXECUTABLE is not None
         env = os.environ.copy()
         env.update(
             {
-                "BM_BIN": basic_memory_command
-                or shlex.join([sys.executable, str(self.bin_dir / "basic memory")]),
                 "BM_TEST_COMMAND_LOG": str(self.command_log),
                 "HOME": str(self.home),
                 "PATH": f"{self.bin_dir}{os.pathsep}{env['PATH']}",
                 "USERPROFILE": str(self.home),
             }
         )
+        if use_default_cli_discovery:
+            env.pop("BM_BIN", None)
+        else:
+            env["BM_BIN"] = basic_memory_command or shlex.join(
+                [sys.executable, str(self.bin_dir / "basic memory")]
+            )
         return subprocess.run(
             [BASH_EXECUTABLE, str(self.repo_root / "plugins/claude-code/hooks" / hook_name)],
             input=json.dumps(payload),
@@ -87,9 +92,7 @@ def hook_harness(tmp_path: Path) -> HookHarness:
     bin_dir.mkdir()
     command_log = tmp_path / "basic-memory-commands.jsonl"
 
-    fake_basic_memory = bin_dir / "basic memory"
-    fake_basic_memory.write_text(
-        """#!/usr/bin/env python3
+    fake_script = """#!/usr/bin/env python3
 import json
 import os
 import sys
@@ -99,10 +102,11 @@ with open(os.environ["BM_TEST_COMMAND_LOG"], "a", encoding="utf-8") as command_l
 
 if sys.argv[1:3] == ["tool", "search-notes"]:
     print(json.dumps({"results": []}))
-""",
-        encoding="utf-8",
-    )
-    fake_basic_memory.chmod(0o755)
+"""
+    for command_name in ("basic memory", "basic-memory"):
+        fake_basic_memory = bin_dir / command_name
+        fake_basic_memory.write_text(fake_script, encoding="utf-8")
+        fake_basic_memory.chmod(0o755)
 
     return HookHarness(
         repo_root=repo_root,
@@ -157,6 +161,26 @@ def test_session_start_preserves_raw_cli_path_with_spaces(hook_harness: HookHarn
 
     assert result.returncode == 0, result.stderr
     assert "**Project:** global-project" in result.stdout
+
+
+def test_session_start_discovers_basic_memory_from_path(hook_harness: HookHarness) -> None:
+    hook_harness.write_settings(
+        hook_harness.home,
+        "settings.json",
+        {"primaryProject": "global-project"},
+    )
+    cwd = hook_harness.home / "work/repo"
+    cwd.mkdir(parents=True)
+
+    result = hook_harness.run_hook(
+        "session-start.sh",
+        {"cwd": str(cwd)},
+        use_default_cli_discovery=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "**Project:** global-project" in result.stdout
+    assert hook_harness.logged_commands()
 
 
 def test_session_start_uses_user_settings_without_project_config(
