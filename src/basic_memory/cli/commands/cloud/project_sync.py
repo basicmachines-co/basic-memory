@@ -23,6 +23,8 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     project_bisync,
     project_check,
     project_diff,
+    project_prune,
+    project_prune_preview,
     project_sync,
     project_transfer,
 )
@@ -58,6 +60,14 @@ TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
     "teammate's files, so it is only supported on Personal workspaces.\n"
     "Use `bm cloud pull --name {name}` (fetch) / `bm cloud push --name {name}` "
     "(additive upload) instead."
+)
+
+TEAM_WORKSPACE_PRUNE_UNSUPPORTED = (
+    "The prune operation deletes files from the shared bucket based on your "
+    "local .bmignore, which could remove a teammate's files, so it is only "
+    "supported on Personal workspaces.\n"
+    "Team workspaces use the additive `bm cloud push --name {name}` / "
+    "`bm cloud pull --name {name}` transfers, which never delete."
 )
 
 
@@ -245,9 +255,10 @@ def sync_project_command(
 ) -> None:
     """One-way mirror: local -> cloud (make cloud identical to local).
 
-    Personal workspaces only. This deletes cloud files not present locally, so
-    on Team workspaces use `bm cloud push` (additive upload) / `bm cloud pull`
-    (fetch) instead.
+    Personal workspaces only. This deletes cloud files not present locally —
+    including files matching .bmignore, even if they synced before the pattern
+    was added — so on Team workspaces use `bm cloud push` (additive upload) /
+    `bm cloud pull` (fetch) instead. Preview deletions with --dry-run.
 
     Example:
       bm cloud sync --name research
@@ -287,6 +298,102 @@ def sync_project_command(
     except RcloneError as e:
         console.print(f"[red]Sync error: {e}[/red]")
         raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@cloud_app.command("prune")
+def prune_project_command(
+    name: str = typer.Option(..., "--name", "--project", help="Project name to prune"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview matching files without deleting"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Delete without confirmation prompt"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """Delete cloud files that match your local .bmignore patterns.
+
+    Targeted cleanup for files that synced before their pattern was added to
+    ~/.basic-memory/.bmignore (the sync filter hides ignored paths from normal
+    deletion, stranding them on the cloud — see #1032). Prune lists the
+    matching remote files and deletes them only after confirmation.
+
+    Personal workspaces only: prune deletes from the bucket based on this
+    machine's ignore file, so on Team workspaces only the additive
+    `bm cloud push` / `bm cloud pull` transfers are available.
+
+    Examples:
+      bm cloud prune --name research --dry-run
+      bm cloud prune --name research
+      bm cloud prune --name research --yes
+    """
+    config = ConfigManager().config
+    _require_cloud_credentials(config)
+    _require_personal_workspace(name, config, unsupported_message=TEAM_WORKSPACE_PRUNE_UNSUPPORTED)
+
+    try:
+        # Get tenant info for bucket name.
+        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
+        # because prune is gated to the (default-tenant) Personal workspace, so the
+        # default mount info is correct.
+        tenant_info = run_with_cleanup(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        with force_routing(cloud=True):
+            project_data = run_with_cleanup(_get_cloud_project(name))
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Prune inspects and deletes only remote files, so unlike sync/bisync it
+        # needs no local_sync_path — cleanup works from any machine that has the
+        # .bmignore patterns.
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=normalize_project_path(project_data.path),
+        )
+
+        console.print(f"[blue]Scanning {name} for cloud files matching .bmignore...[/blue]")
+        matches = project_prune_preview(sync_project, bucket_name)
+
+        if not matches:
+            console.print(f"[green]No cloud files in {name} match .bmignore[/green]")
+            return
+
+        console.print(f"[yellow]{len(matches)} cloud file(s) match .bmignore:[/yellow]")
+        for path in matches:
+            console.print(f"  [yellow]-[/yellow] {path}")
+
+        if dry_run:
+            console.print(
+                "\n[dim]Dry run: nothing deleted. Re-run without --dry-run to delete.[/dim]"
+            )
+            return
+
+        # Trigger: no --yes flag.
+        # Why: prune permanently deletes remote files; require an explicit
+        # go-ahead on the exact list shown above.
+        # Outcome: abort cleanly unless the user confirms.
+        if not yes and not typer.confirm(f"\nDelete these {len(matches)} file(s) from cloud?"):
+            console.print("[yellow]Prune cancelled - nothing deleted[/yellow]")
+            raise typer.Exit(0)
+
+        success = project_prune(sync_project, bucket_name, verbose=verbose)
+
+        if success:
+            console.print(f"[green]Pruned ignored files from {name}[/green]")
+        else:
+            console.print(f"[red]{name} prune failed[/red]")
+            raise typer.Exit(1)
+
+    except RcloneError as e:
+        console.print(f"[red]Prune error: {e}[/red]")
+        raise typer.Exit(1)
+    except typer.Exit:
+        # Already-handled exits (not found, cancelled, failed) propagate cleanly.
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)

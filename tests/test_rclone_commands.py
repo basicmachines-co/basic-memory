@@ -24,6 +24,8 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     project_copy_file,
     project_diff,
     project_ls,
+    project_prune,
+    project_prune_preview,
     project_sync,
     project_transfer,
     supports_create_empty_src_dirs,
@@ -909,6 +911,183 @@ def test_project_transfer_keep_cloud_on_push_preserves_cloud(tmp_path):
 
     cmd, _ = runner.calls[0]
     assert "--ignore-existing" in cmd
+
+
+# --- .bmignore deletion semantics (issue #1032) ---
+
+
+def test_project_sync_includes_delete_excluded(tmp_path):
+    """The one-way mirror removes newly-ignored files from cloud (#1032).
+
+    Without --delete-excluded, a file added to .bmignore after it synced is
+    invisible to rclone's deletion pass and stranded on the tenant.
+    """
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_sync(
+        project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--delete-excluded" in cmd
+
+
+def test_project_bisync_omits_delete_excluded(tmp_path):
+    """The two-way mirror must never delete based on the exclude filter."""
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_bisync(
+        project,
+        "my-bucket",
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 64, 2),
+        filter_path=filter_path,
+        state_path=tmp_path / "state",
+        is_initialized=lambda _name: True,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--delete-excluded" not in cmd
+
+
+@pytest.mark.parametrize("direction", ["push", "pull"])
+def test_project_copy_omits_delete_excluded(tmp_path, direction):
+    """push/pull are additive transfers: no filter-based deletion either."""
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_copy(
+        project,
+        "my-bucket",
+        direction,
+        overwrite=False,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--delete-excluded" not in cmd
+
+
+def test_project_prune_preview_lists_matching_files(tmp_path):
+    runner = _Runner(returncode=0, stdout="secret.env\nsecrets/leak.md\n\n")
+    filter_path = _write_filter_file(tmp_path)
+    # No local_sync_path: prune is purely remote and must not require one.
+    project = SyncProject(name="research", path="/research")
+
+    files = project_prune_preview(
+        project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+    )
+
+    assert files == ["secret.env", "secrets/leak.md"]
+    cmd, kwargs = runner.calls[0]
+    assert cmd[:2] == ["rclone", "lsf"]
+    assert cmd[2] == "basic-memory-cloud:my-bucket/research"
+    _assert_has_consistency_headers(cmd)
+    assert "--recursive" in cmd
+    assert "--files-only" in cmd
+    assert "--filter-from" in cmd
+    assert str(filter_path) in cmd
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+
+
+def test_project_prune_preview_raises_on_failure(tmp_path):
+    """A failed listing must not read as 'nothing to prune'."""
+    runner = _Runner(returncode=3, stderr="Failed to create file system: AccessDenied")
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research")
+
+    with pytest.raises(RcloneError) as exc_info:
+        project_prune_preview(
+            project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+        )
+
+    assert "AccessDenied" in str(exc_info.value)
+
+
+def test_project_prune_preview_reports_exit_code_when_no_stderr(tmp_path):
+    runner = _Runner(returncode=5, stderr="")
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research")
+
+    with pytest.raises(RcloneError) as exc_info:
+        project_prune_preview(
+            project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+        )
+
+    assert "exited with code 5" in str(exc_info.value)
+
+
+def test_project_prune_preview_checks_rclone_installed():
+    project = SyncProject(name="research", path="/research")
+    with pytest.raises(RcloneError) as exc_info:
+        project_prune_preview(project, "my-bucket", is_installed=lambda: False)
+    assert "rclone is not installed" in str(exc_info.value)
+
+
+def test_project_prune_deletes_with_filter(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research")
+
+    result = project_prune(
+        project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+    )
+
+    assert result is True
+    cmd, kwargs = runner.calls[0]
+    assert cmd[:2] == ["rclone", "delete"]
+    assert cmd[2] == "basic-memory-cloud:my-bucket/research"
+    _assert_has_consistency_headers(cmd)
+    assert "--filter-from" in cmd
+    assert str(filter_path) in cmd
+    assert "--verbose" not in cmd
+    assert kwargs["text"] is True
+
+
+def test_project_prune_with_verbose(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research")
+
+    project_prune(
+        project,
+        "my-bucket",
+        verbose=True,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--verbose" in cmd
+
+
+def test_project_prune_returns_false_on_failure(tmp_path):
+    runner = _Runner(returncode=1)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research")
+
+    result = project_prune(
+        project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+    )
+
+    assert result is False
+
+
+def test_project_prune_checks_rclone_installed():
+    project = SyncProject(name="research", path="/research")
+    with pytest.raises(RcloneError) as exc_info:
+        project_prune(project, "my-bucket", is_installed=lambda: False)
+    assert "rclone is not installed" in str(exc_info.value)
 
 
 def test_project_transfer_keep_both_returns_false_on_copy_failure(tmp_path):
