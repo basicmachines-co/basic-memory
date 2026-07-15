@@ -267,24 +267,36 @@ def sync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
-    _require_personal_workspace(name, config, unsupported_message=TEAM_WORKSPACE_SYNC_UNSUPPORTED)
+    target_workspace = _require_personal_workspace(
+        name,
+        config,
+        unsupported_message=TEAM_WORKSPACE_SYNC_UNSUPPORTED,
+    )
 
     try:
-        # Get tenant info for bucket name.
-        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
-        # because these mirror commands are gated to the (default-tenant) Personal
-        # workspace, so the default mount info is correct.
-        tenant_info = run_with_cleanup(get_mount_info())
+        remote_name = remote_name_for_workspace(
+            target_workspace.slug,
+            is_default=target_workspace.is_default,
+        )
+        tenant_info = run_with_cleanup(get_mount_info(workspace_id=target_workspace.tenant_id))
         bucket_name = tenant_info.bucket_name
 
-        # Get project info
+        # Resolve project metadata, bucket credentials, and rclone remote from
+        # the same Personal workspace. A same-named project may exist elsewhere.
         with force_routing(cloud=True):
-            project_data = run_with_cleanup(_get_cloud_project(name))
+            project_data = run_with_cleanup(
+                _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
+            )
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
 
-        sync_project, local_sync_path = _get_sync_project(name, config, project_data)
+        sync_project, local_sync_path = _get_sync_project(
+            name,
+            config,
+            project_data,
+            remote_name=remote_name,
+        )
 
         # Run sync
         console.print(f"[blue]Syncing {name} (local -> cloud)...[/blue]")
@@ -331,19 +343,27 @@ def prune_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
-    _require_personal_workspace(name, config, unsupported_message=TEAM_WORKSPACE_PRUNE_UNSUPPORTED)
+    target_workspace = _require_personal_workspace(
+        name,
+        config,
+        unsupported_message=TEAM_WORKSPACE_PRUNE_UNSUPPORTED,
+    )
 
     try:
-        # Get tenant info for bucket name.
-        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
-        # because prune is gated to the (default-tenant) Personal workspace, so the
-        # default mount info is correct.
-        tenant_info = run_with_cleanup(get_mount_info())
+        remote_name = remote_name_for_workspace(
+            target_workspace.slug,
+            is_default=target_workspace.is_default,
+        )
+        tenant_info = run_with_cleanup(get_mount_info(workspace_id=target_workspace.tenant_id))
         bucket_name = tenant_info.bucket_name
 
-        # Get project info
+        # Constraint: project names are not globally unique across workspaces.
+        # Keep lookup, credentials, remote, and deletion on the workspace that
+        # the Personal-workspace guard resolved.
         with force_routing(cloud=True):
-            project_data = run_with_cleanup(_get_cloud_project(name))
+            project_data = run_with_cleanup(
+                _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
+            )
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
@@ -354,6 +374,7 @@ def prune_project_command(
         sync_project = SyncProject(
             name=project_data.name,
             path=normalize_project_path(project_data.path),
+            remote_name=remote_name,
         )
 
         console.print(f"[blue]Scanning {name} for cloud files matching .bmignore...[/blue]")
