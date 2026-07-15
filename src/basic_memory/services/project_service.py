@@ -1188,11 +1188,7 @@ class ProjectService:
                 # Why: project info should degrade gracefully instead of crashing on stats queries.
                 # Outcome: report vector tables as unavailable and point the user to install the
                 # missing dependency before rebuilding embeddings.
-                if (
-                    is_postgres
-                    or uses_milvus
-                    or "no such module: vec0" not in str(exc).lower()
-                ):
+                if is_postgres or uses_milvus or "no such module: vec0" not in str(exc).lower():
                     raise
 
                 return EmbeddingStatus(

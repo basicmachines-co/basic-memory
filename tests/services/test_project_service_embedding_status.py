@@ -307,10 +307,7 @@ async def test_embedding_status_milvus_sqlite_uses_plain_marker_table(
         pytest.skip("This regression covers the SQLite marker-table branch.")
 
     await _execute(project_service, text("DELETE FROM search_vector_chunks"), {})
-    await _execute(
-        project_service,
-        text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
-    )
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
     await _execute(
         project_service,
         text(
@@ -366,10 +363,7 @@ async def test_embedding_status_milvus_sqlite_uses_plain_marker_table(
         ):
             status = await project_service.get_embedding_status(test_project.id)
 
-    await _execute(
-        project_service,
-        text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
-    )
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
 
     assert status.vector_tables_exist is True
     assert status.total_embeddings == 1
