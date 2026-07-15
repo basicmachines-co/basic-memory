@@ -1,0 +1,57 @@
+name: Publish Skills
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: publish-skills
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate skills
+        run: python scripts/validate_skills.py skills
+
+      - name: Package skills
+        run: python scripts/build_skills_dist.py
+
+      - name: Publish rolling skill archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: skills-latest
+        run: |
+          set -euo pipefail
+
+          asset="dist/skills/memory-onboarding.zip"
+          test -f "$asset"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$asset" --clobber
+            gh release edit "$RELEASE_TAG" \
+              --notes "Rolling skill archives built from ${GITHUB_SHA}." \
+              --latest=false
+          else
+            gh release create "$RELEASE_TAG" "$asset" \
+              --target "$GITHUB_SHA" \
+              --title "Latest Basic Memory skills" \
+              --notes "Rolling skill archives built from ${GITHUB_SHA}." \
+              --latest=false
+          fi
