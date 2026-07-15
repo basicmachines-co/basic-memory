@@ -4,4 +4,4 @@
 __version__ = "0.22.1"
 
 # API version for FastAPI - independent of package version
-__api_version__ = "v0"
+__api_version__ = "v2"

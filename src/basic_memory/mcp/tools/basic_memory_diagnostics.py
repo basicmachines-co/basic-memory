@@ -6,7 +6,7 @@ import sys
 from urllib.parse import urlparse, urlunparse
 
 import basic_memory
-from basic_memory.config import CONFIG_FILE_NAME, ConfigManager
+from basic_memory.config import CONFIG_FILE_NAME, resolve_data_dir
 from basic_memory.mcp.server import mcp
 
 # Fields in BasicMemoryConfig that contain secrets and must never be surfaced.
@@ -26,22 +26,23 @@ def _redact_url(url: str) -> str:
     """
     try:
         parsed = urlparse(url)
-    except Exception:  # pragma: no cover — urlparse is very permissive
+    except ValueError:
+        # A malformed authority can still contain credentials. Redact the
+        # userinfo conservatively rather than returning a secret unchanged.
+        scheme, separator, remainder = url.partition("://")
+        if separator and "@" in remainder:
+            _, _, authority = remainder.rpartition("@")
+            return f"{scheme}://***@{authority}"
         return url
 
-    if not parsed.hostname:
-        # Not a meaningful URL (e.g. a bare file path); leave it alone.
+    if "@" not in parsed.netloc:
+        # No URL userinfo is present, so there are no credentials to redact.
         return url
 
-    if parsed.username or parsed.password:
-        # Rebuild with credentials replaced by a placeholder.
-        netloc = f"***@{parsed.hostname}"
-        if parsed.port:
-            netloc = f"{netloc}:{parsed.port}"
-        redacted = parsed._replace(netloc=netloc)
-        return urlunparse(redacted)
-
-    return url
+    # Preserve the authority verbatim after the final @. In particular, using
+    # parsed.hostname here would discard the brackets required around IPv6 hosts.
+    _, _, authority = parsed.netloc.rpartition("@")
+    return urlunparse(parsed._replace(netloc=f"***@{authority}"))
 
 
 def _redact_config(raw: dict) -> dict:
@@ -71,7 +72,12 @@ def _redact_config(raw: dict) -> dict:
     "basic_memory_diagnostics",
     title="Basic Memory Diagnostics",
     tags={"diagnostics"},
-    annotations={"readOnlyHint": True, "openWorldHint": False},
+    annotations={
+        "title": "Basic Memory Diagnostics",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": False,
+    },
     # The report is a markdown string; suppress FastMCP's wrap_result so the
     # payload isn't duplicated into structuredContent.
     output_schema=None,
@@ -89,6 +95,7 @@ def basic_memory_diagnostics() -> str:
     """
     # --- Version information ---
     bm_version = basic_memory.__version__
+    api_version = basic_memory.__api_version__
 
     # --- System information ---
     python_version = sys.version
@@ -96,17 +103,22 @@ def basic_memory_diagnostics() -> str:
     machine = platform.machine()
 
     # --- Configuration ---
-    manager = ConfigManager()
-    config_file = manager.config_dir / CONFIG_FILE_NAME
+    # resolve_data_dir only computes the path. ConfigManager would create and
+    # chmod the directory, violating this tool's read-only contract.
+    config_file = resolve_data_dir() / CONFIG_FILE_NAME
     config_exists = config_file.exists()
 
     if config_exists:
         try:
             raw_config = json.loads(config_file.read_text(encoding="utf-8"))
-            safe_config = _redact_config(raw_config)
-            config_dump = json.dumps(safe_config, indent=2, default=str)
-        except Exception as exc:  # pragma: no cover
+        except (OSError, json.JSONDecodeError) as exc:
             config_dump = f"<error reading config: {exc}>"
+        else:
+            if isinstance(raw_config, dict):
+                safe_config = _redact_config(raw_config)
+                config_dump = json.dumps(safe_config, indent=2, default=str)
+            else:
+                config_dump = "<error reading config: expected a JSON object>"
     else:
         config_dump = "<config file not found>"
 
@@ -115,6 +127,7 @@ def basic_memory_diagnostics() -> str:
         "",
         "## Version",
         f"- basic-memory: {bm_version}",
+        f"- API: {api_version}",
         "",
         "## System",
         f"- Python: {python_version}",

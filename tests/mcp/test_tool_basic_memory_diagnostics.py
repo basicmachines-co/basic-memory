@@ -3,14 +3,21 @@
 import json
 import platform
 import sys
-from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 import basic_memory
+import pytest
 from basic_memory.mcp.tools.basic_memory_diagnostics import (
     _redact_config,
     _redact_url,
     basic_memory_diagnostics,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep every diagnostics test isolated from the developer's real config."""
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path))
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +56,8 @@ def test_diagnostics_returns_string():
 def test_diagnostics_includes_version():
     result = basic_memory_diagnostics()
     assert basic_memory.__version__ in result
+    assert basic_memory.__api_version__ == "v2"
+    assert f"API: {basic_memory.__api_version__}" in result
 
 
 def test_diagnostics_includes_python_version():
@@ -65,15 +74,10 @@ def test_diagnostics_includes_platform():
 
 def test_diagnostics_includes_config_path(tmp_path):
     """Config path section should appear in output."""
-    with patch("basic_memory.mcp.tools.basic_memory_diagnostics.ConfigManager") as MockMgr:
-        mock_mgr = MagicMock()
-        mock_mgr.config_dir = tmp_path
-        MockMgr.return_value = mock_mgr
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"default_project": "main", "projects": {}}))
 
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"default_project": "main", "projects": {}}))
-
-        result = basic_memory_diagnostics()
+    result = basic_memory_diagnostics()
 
     assert str(tmp_path) in result
     assert "Config path:" in result
@@ -85,15 +89,10 @@ def test_diagnostics_config_exists_with_valid_json(tmp_path):
         "default_project": "research",
         "projects": {"research": {"path": str(tmp_path / "research")}},
     }
-    with patch("basic_memory.mcp.tools.basic_memory_diagnostics.ConfigManager") as MockMgr:
-        mock_mgr = MagicMock()
-        mock_mgr.config_dir = tmp_path
-        MockMgr.return_value = mock_mgr
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
 
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps(config_data))
-
-        result = basic_memory_diagnostics()
+    result = basic_memory_diagnostics()
 
     assert "research" in result
     assert "```json" in result
@@ -106,15 +105,10 @@ def test_diagnostics_redacts_cloud_api_key(tmp_path):
         "cloud_api_key": "bmc_super_secret_token",
         "projects": {},
     }
-    with patch("basic_memory.mcp.tools.basic_memory_diagnostics.ConfigManager") as MockMgr:
-        mock_mgr = MagicMock()
-        mock_mgr.config_dir = tmp_path
-        MockMgr.return_value = mock_mgr
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
 
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps(config_data))
-
-        result = basic_memory_diagnostics()
+    result = basic_memory_diagnostics()
 
     assert "bmc_super_secret_token" not in result
     assert "cloud_api_key" not in result
@@ -122,19 +116,56 @@ def test_diagnostics_redacts_cloud_api_key(tmp_path):
 
 def test_diagnostics_config_missing(tmp_path):
     """When config file does not exist, output should say so."""
-    with patch("basic_memory.mcp.tools.basic_memory_diagnostics.ConfigManager") as MockMgr:
-        mock_mgr = MagicMock()
-        mock_mgr.config_dir = tmp_path
-        MockMgr.return_value = mock_mgr
+    config_file = tmp_path / "config.json"
+    assert not config_file.exists()
 
-        # Ensure no config.json is present
-        config_file = tmp_path / "config.json"
-        assert not config_file.exists()
-
-        result = basic_memory_diagnostics()
+    result = basic_memory_diagnostics()
 
     assert "Config exists: False" in result
     assert "<config file not found>" in result
+
+
+def test_diagnostics_does_not_create_config_directory(monkeypatch, tmp_path):
+    """Resolving diagnostics must remain read-only when no config exists."""
+    missing_config_dir = tmp_path / "does-not-exist"
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(missing_config_dir))
+
+    result = basic_memory_diagnostics()
+
+    assert "Config exists: False" in result
+    assert not missing_config_dir.exists()
+
+
+def test_diagnostics_reports_invalid_json(tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{not valid json", encoding="utf-8")
+
+    result = basic_memory_diagnostics()
+
+    assert "<error reading config:" in result
+
+
+def test_diagnostics_rejects_non_object_config(tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("[]", encoding="utf-8")
+
+    result = basic_memory_diagnostics()
+
+    assert "<error reading config: expected a JSON object>" in result
+
+
+def test_diagnostics_reports_config_read_error(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+
+    def fail_read_text(self, *args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    result = basic_memory_diagnostics()
+
+    assert "<error reading config: permission denied>" in result
 
 
 def test_diagnostics_output_sections():
@@ -170,6 +201,21 @@ def test_redact_url_strips_only_password_when_no_username():
 def test_redact_url_preserves_port():
     url = "postgresql://admin:pw@db.internal:5432/prod"
     assert _redact_url(url) == "postgresql://***@db.internal:5432/prod"
+
+
+def test_redact_url_preserves_ipv6_brackets():
+    url = "postgresql://admin:pw@[::1]:5432/prod"
+    assert _redact_url(url) == "postgresql://***@[::1]:5432/prod"
+
+
+def test_redact_url_scrubs_credentials_from_malformed_url():
+    url = "postgresql://admin:pw@[::1"
+    assert _redact_url(url) == "postgresql://***@[::1"
+
+
+def test_redact_url_leaves_malformed_url_without_credentials_unchanged():
+    url = "postgresql://[::1"
+    assert _redact_url(url) == url
 
 
 def test_redact_url_no_credentials_unchanged():
@@ -230,15 +276,10 @@ def test_diagnostics_redacts_database_url_password(tmp_path):
         "database_url": "postgresql://pguser:supersecret@db.internal:5432/basicmemory",
         "projects": {},
     }
-    with patch("basic_memory.mcp.tools.basic_memory_diagnostics.ConfigManager") as MockMgr:
-        mock_mgr = MagicMock()
-        mock_mgr.config_dir = tmp_path
-        MockMgr.return_value = mock_mgr
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
 
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps(config_data))
-
-        result = basic_memory_diagnostics()
+    result = basic_memory_diagnostics()
 
     assert "supersecret" not in result
     assert "pguser" not in result

@@ -13,6 +13,7 @@ from basic_memory.mcp.server import mcp
 
 
 EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
+    "basic_memory_diagnostics": [],
     "build_context": [
         "url",
         "project",
@@ -124,6 +125,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 # every tool must set annotations.title and explicit readOnlyHint, destructiveHint, and
 # openWorldHint values.
 EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
+    "basic_memory_diagnostics": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "cloud_info": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
@@ -176,6 +178,7 @@ EXPECTED_EDIT_NOTE_OPERATIONS = [
 
 
 TOOL_FUNCTIONS: dict[str, object] = {
+    "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
     "canvas": tools.canvas,
     "cloud_info": tools.cloud_info,
