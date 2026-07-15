@@ -396,6 +396,15 @@ class TestShareCreateCommand:
                 assert result.exit_code == 0
                 assert captured["json_data"]["expires_at"].startswith("2025-12-31")
 
+    def test_create_share_help_uses_a_future_expiration_date(self):
+        runner = CliRunner()
+
+        result = runner.invoke(app, ["cloud", "share", "create", "--help"])
+
+        assert result.exit_code == 0
+        assert "2099-12-31" in result.stdout
+        assert "2025-12-31" not in result.stdout
+
     def test_create_share_invalid_expires_at(self):
         runner = CliRunner()
 

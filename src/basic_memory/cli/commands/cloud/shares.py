@@ -160,8 +160,8 @@ def _format_timestamp(iso_timestamp: Optional[str]) -> str:
 def _parse_expires_at(value: str) -> str:
     """Validate an --expires-at value and normalize it to an ISO 8601 string.
 
-    Accepts either a full ISO timestamp ("2025-12-31T23:59:00") or a bare date
-    ("2025-12-31"). Exits with a clear error on anything we can't parse so the
+    Accepts either a full ISO timestamp ("2099-12-31T23:59:00") or a bare date
+    ("2099-12-31"). Exits with a clear error on anything we can't parse so the
     server never sees a malformed payload.
     """
     try:
@@ -169,7 +169,7 @@ def _parse_expires_at(value: str) -> str:
     except ValueError:
         console.print(
             f"[red]Invalid --expires-at value '{value}'. "
-            "Use ISO format, e.g. 2025-12-31 or 2025-12-31T23:59:00.[/red]"
+            "Use ISO format, e.g. 2099-12-31 or 2099-12-31T23:59:00.[/red]"
         )
         raise typer.Exit(1)
     return dt.isoformat()
@@ -201,7 +201,7 @@ def create(
         None,
         "--expires-at",
         "-e",
-        help="Optional expiration date/time (ISO 8601, e.g. 2025-12-31)",
+        help="Optional expiration date/time (ISO 8601, e.g. 2099-12-31)",
     ),
     workspace: Optional[str] = typer.Option(
         None,
@@ -213,7 +213,7 @@ def create(
 
     Examples:
       bm cloud share create my-project notes/my-idea
-      bm cloud share create my-project notes/my-idea --expires-at 2025-12-31
+      bm cloud share create my-project notes/my-idea --expires-at 2099-12-31
       bm cloud share create my-project notes/my-idea --workspace acme
     """
 
@@ -396,7 +396,7 @@ def update(
     Examples:
       bm cloud share update abc123 --disable
       bm cloud share update abc123 --enable
-      bm cloud share update abc123 --expires-at 2026-01-01
+      bm cloud share update abc123 --expires-at 2099-12-31
       bm cloud share update abc123 --expires-at none
       bm cloud share update abc123 --disable --workspace acme
     """
