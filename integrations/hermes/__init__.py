@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import signal
 import socket
 import subprocess
 import threading
@@ -640,6 +641,10 @@ class _BmMcpActor:
     def list_tools(self) -> list[dict[str, Any]]:
         return list(self._tools_cache)
 
+    def is_alive(self) -> bool:
+        """True while the actor loop thread is up and accepting calls."""
+        return self._running and self._thread is not None and self._thread.is_alive()
+
     def shutdown(self, timeout: float = 5.0) -> None:
         self._running = False
         if self._loop is not None and self._stop_future is not None:
@@ -863,6 +868,32 @@ class BasicMemoryProvider(MemoryProvider):
         if not self._verify_project_registered():
             self._log_missing_project()
             return
+
+        # Trigger: initialize() called while a previous actor is still running
+        # (Hermes re-initializes providers per session; _ensure_slash_ready's
+        # lazy init can also precede a later session initialize).
+        # Why: every _BmMcpActor owns one `bm mcp` child process. Allocating a
+        # fresh actor without stopping the old one orphans that child — issue
+        # #1017 saw 18 idle `bm mcp` processes (~2.3 GB) accumulate this way.
+        # Outcome: a healthy actor is reused — its argv is always `bm mcp` and
+        # project routing happens per call, so the config re-read above never
+        # invalidates the connection. A dead actor is shut down first (joining
+        # its thread reaps the child) and then replaced below.
+        if self._actor is not None and self._actor.is_alive():
+            self._session_started_at = datetime.now(timezone.utc)
+            self._initialized = True
+            logger.info(
+                "basic-memory provider ready (reusing running MCP actor): mode=%s project=%s",
+                self._mode,
+                self._project,
+            )
+            return
+        if self._actor is not None:
+            try:
+                self._actor.shutdown(timeout=5.0)
+            except Exception as e:
+                logger.debug("stale actor shutdown during initialize: %s", e)
+            self._actor = None
 
         try:
             argv = self._server_argv()
@@ -1802,7 +1833,7 @@ def _register_via_plugin_manager(
 
 
 # ---------------------------------------------------------------------------
-# atexit safety net (mirrors plugins/memory/openviking pattern)
+# atexit + SIGTERM safety nets (mirrors plugins/memory/openviking pattern)
 # ---------------------------------------------------------------------------
 
 _active_providers: list[BasicMemoryProvider] = []
@@ -1817,6 +1848,60 @@ def _atexit_cleanup() -> None:
 
 
 atexit.register(_atexit_cleanup)
+
+
+_sigterm_installed = False
+
+
+def _install_sigterm_cleanup() -> None:
+    """
+    Run _atexit_cleanup on SIGTERM as well as at interpreter exit.
+
+    atexit alone doesn't cover SIGTERM: Python's default action terminates the
+    process without unwinding, so gateway restarts (systemd stop, docker stop,
+    supervisor reload) orphan every `bm mcp` child (issue #1017).
+
+    Constraint: this plugin is a library embedded in a host process (Hermes),
+    so it must not stomp the host's signal handling:
+      - existing Python handler → chain: run our cleanup, then the host's
+        handler, preserving its semantics.
+      - SIG_DFL → install: run cleanup, restore SIG_DFL, and re-deliver the
+        signal so the process still dies by SIGTERM exactly as before.
+      - SIG_IGN, or None (a C-level handler unreachable from Python, so
+        chaining is impossible) → leave untouched.
+    signal.signal only works from the main thread and SIGTERM only exists on
+    platforms that define it, so this no-ops cleanly everywhere else.
+    """
+    global _sigterm_installed
+    if _sigterm_installed:
+        return
+    sigterm = getattr(signal, "SIGTERM", None)
+    if sigterm is None:  # pragma: no cover - every supported platform defines SIGTERM
+        return
+    if threading.current_thread() is not threading.main_thread():
+        return
+    previous = signal.getsignal(sigterm)
+    if previous is signal.SIG_IGN or previous is None:
+        return
+
+    def _handler(signum: int, frame: Any) -> None:
+        _atexit_cleanup()
+        if callable(previous):
+            previous(signum, frame)
+            return
+        # previous is SIG_DFL: restore it and re-deliver so the process
+        # terminates by SIGTERM exactly as it would have without us.
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    try:
+        signal.signal(sigterm, _handler)
+    except (ValueError, OSError):  # pragma: no cover - main-thread race at shutdown
+        return
+    _sigterm_installed = True
+
+
+_install_sigterm_cleanup()
 
 
 # ---------------------------------------------------------------------------
