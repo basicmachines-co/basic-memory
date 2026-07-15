@@ -145,6 +145,16 @@ def test_diagnostics_reports_invalid_json(tmp_path):
     assert "<error reading config:" in result
 
 
+def test_diagnostics_reports_invalid_utf8(tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_bytes(b'{"default_project": "main\xff"}')
+
+    result = basic_memory_diagnostics()
+
+    assert "<error reading config:" in result
+    assert "invalid start byte" in result
+
+
 def test_diagnostics_rejects_non_object_config(tmp_path):
     config_file = tmp_path / "config.json"
     config_file.write_text("[]", encoding="utf-8")

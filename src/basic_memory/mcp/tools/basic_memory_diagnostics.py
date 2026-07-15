@@ -148,7 +148,7 @@ def basic_memory_diagnostics() -> str:
     if config_exists:
         try:
             raw_config = json.loads(config_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             config_dump = f"<error reading config: {exc}>"
         else:
             if isinstance(raw_config, dict):
