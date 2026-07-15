@@ -1108,3 +1108,33 @@ def test_project_list_shows_configured_project_without_cloud_credentials(
     # The configured project is now visible instead of an empty table.
     main_line = next(line for line in result.stdout.splitlines() if "│ main" in line)
     assert "cloud" in main_line  # cloud-mode projects route to the cloud CLI
+
+
+def test_project_list_local_excludes_cloud_mode_config_fallback(
+    runner: CliRunner, write_config, mock_client, tmp_path, monkeypatch
+):
+    """An explicit local listing must only contain projects returned by the local API."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {
+                "main": {
+                    "path": "",
+                    "mode": "cloud",
+                    "workspace_id": None,
+                    "local_sync_path": None,
+                }
+            },
+            "default_project": "main",
+        }
+    )
+
+    async def fake_list_projects(self):
+        return ProjectList.model_validate({"projects": [], "default_project": "main"})
+
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list", "--local", "--json"])
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    assert json.loads(result.stdout) == {"projects": []}

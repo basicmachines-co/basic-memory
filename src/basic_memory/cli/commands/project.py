@@ -503,10 +503,10 @@ def list_projects(
         #   The two commands must agree on whether a configured project exists.
         # Outcome: seed a local-keyed row from config so the project still renders;
         #   the row-building logic below derives its display from the config entry.
-        # Constraint: only fill from config for the local-inclusive view. A pure
-        #   --cloud listing (no local_result) or a --workspace-filtered view is
-        #   deliberately scoped, so configured local projects must not leak into it.
-        if local_result is not None and not workspace_filter_requested:
+        # Constraint: only fill from config for the default combined view. Explicit
+        #   --local, --cloud, and --workspace listings are deliberately scoped, so
+        #   configured projects must not leak into them.
+        if not local and local_result is not None and not workspace_filter_requested:
             seeded_permalinks = {permalink for _, permalink in row_names_by_key}
             for permalink, project_name in configured_names_by_permalink.items():
                 if permalink not in seeded_permalinks:
