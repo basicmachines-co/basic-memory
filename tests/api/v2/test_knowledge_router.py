@@ -1180,6 +1180,10 @@ async def test_delete_entity_by_id_non_markdown_file_entity(
     rows_after = await search_repository.search(search_text="regression1033")
     assert not any(row.entity_id == entity_id for row in rows_after)
 
+    # The file is part of the delete contract too. Leaving it behind would let the
+    # next project scan recreate the entity and make the API deletion temporary.
+    assert not csv_path.exists()
+
 
 @pytest.mark.asyncio
 async def test_move_entity(
