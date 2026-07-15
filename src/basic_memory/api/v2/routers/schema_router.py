@@ -400,34 +400,53 @@ async def _schema_covered_note_types(
     session: AsyncSession,
     entity_repository: EntityRepositoryV2ExternalDep,
 ) -> dict[str, list[str]]:
-    """Map each schema-declared target type to the stored note_type values it covers.
+    """Map each schema-covered target type to the stored note_type values it covers.
 
-    Schema notes declare their target via the frontmatter `entity` field. Stored
-    note types are snake_case while schema authors may write "Person" or "person",
-    so both sides are compared through generate_permalink normalization — the same
-    matching rule _find_schema_entities uses for implicit type lookup. Targets with
-    no matching notes map to an empty list so they still appear in the report.
+    Coverage comes from both standalone schema notes and notes that carry inline
+    schemas or explicit schema references. Stored note types are snake_case while
+    schema authors may write "Person" or "person", so both sides are compared
+    through generate_permalink normalization — the same matching rule
+    _find_schema_entities uses for implicit type lookup. Standalone targets with no
+    matching notes map to an empty list so they still appear in the report.
     """
     schema_query = entity_repository.select().where(Entity.note_type == "schema")
     schema_result = await entity_repository.execute_query(session, schema_query)
 
-    # normalized target -> raw value as the schema author wrote it (first seen wins)
-    targets: dict[str, str] = {}
+    # normalized target -> (display label, stored note types); first label wins
+    targets: dict[str, tuple[str, set[str]]] = {}
     for schema_entity in schema_result.scalars().all():
         target = (schema_entity.entity_metadata or {}).get("entity")
         if isinstance(target, str) and target:
-            targets.setdefault(generate_permalink(target), target)
+            targets.setdefault(generate_permalink(target), (target, set()))
 
-    # Column-only select: skip eager-load options, they only apply to full-entity queries
-    type_query = entity_repository.select(Entity.note_type).distinct()
-    type_result = await entity_repository.execute_query(
-        session, type_query, use_query_options=False
+    # Column-only select: skip eager-load options, which apply only to full entities.
+    # Reading metadata here also discovers inline schemas and explicit references;
+    # those notes are covered even when their type differs from a schema's entity.
+    note_query = entity_repository.select(Entity.note_type, Entity.entity_metadata).where(
+        Entity.note_type != "schema"
     )
-    stored_types = [t for t in type_result.scalars().all() if t]
+    note_result = await entity_repository.execute_query(
+        session, note_query, use_query_options=False
+    )
+    for stored_type, metadata in note_result.all():
+        if not stored_type:
+            continue
+
+        normalized_type = generate_permalink(stored_type)
+        if normalized_type in targets:
+            targets[normalized_type][1].add(stored_type)
+
+        schema_value = (metadata or {}).get("schema")
+        has_direct_schema = isinstance(schema_value, dict) or (
+            isinstance(schema_value, str) and bool(schema_value)
+        )
+        if has_direct_schema:
+            _, stored_types = targets.setdefault(normalized_type, (stored_type, set()))
+            stored_types.add(stored_type)
 
     return {
-        raw: [t for t in stored_types if generate_permalink(t) == normalized]
-        for normalized, raw in sorted(targets.items())
+        display_label: sorted(stored_types)
+        for _, (display_label, stored_types) in sorted(targets.items())
     }
 
 

@@ -499,6 +499,103 @@ async def test_validate_all_types_normalizes_target_type(
     assert summaries["Person"]["valid_count"] == 3
 
 
+@pytest.mark.asyncio
+async def test_validate_all_types_discovers_inline_schema(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """No-argument validation includes types covered only by inline schemas."""
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Inline Task",
+            directory="tasks",
+            note_type="task",
+            entity_metadata={"schema": {"status": "string"}},
+            content=dedent("""\
+                ## Observations
+                - [status] active
+            """),
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(f"{v2_project_url}/schema/validate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_entities"] == 1
+    assert data["total_notes"] == 1
+    assert data["valid_count"] == 1
+    assert data["type_summaries"] == [
+        {
+            "note_type": "task",
+            "total_notes": 1,
+            "total_entities": 1,
+            "valid_count": 1,
+            "warning_count": 0,
+            "error_count": 0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_validate_all_types_discovers_cross_type_explicit_schema_reference(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Explicit schema references cover a type even when entity targets differ."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Reusable Work Schema",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "work_item",
+                "schema": {"status": "string"},
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Shared schema for work records
+            """),
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    task_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Referenced Task",
+            directory="tasks",
+            note_type="task",
+            entity_metadata={"schema": "reusable-work-schema"},
+            content=dedent("""\
+                ## Observations
+                - [status] active
+            """),
+        )
+    )
+    await search_service.index_entity(task_entity)
+
+    response = await client.post(f"{v2_project_url}/schema/validate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_entities"] == 1
+    assert data["total_notes"] == 1
+    assert data["valid_count"] == 1
+
+    summaries = {summary["note_type"]: summary for summary in data["type_summaries"]}
+    assert set(summaries) == {"task", "work_item"}
+    assert summaries["task"]["total_entities"] == 1
+    assert summaries["task"]["valid_count"] == 1
+    assert summaries["work_item"]["total_entities"] == 0
+
+
 # --- Frontmatter Validation Tests ---
 
 
