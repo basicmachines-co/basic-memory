@@ -1,0 +1,8 @@
+{
+  "session_id": "0198f2b4-77aa-7bbf-9c2d-51e60a92d3c4",
+  "transcript_path": "/Users/dev/.codex/sessions/0198f2b4.jsonl",
+  "cwd": "/Users/dev/projects/demo",
+  "turn_id": "turn-42",
+  "trigger": "auto",
+  "model": "gpt-5.2-codex"
+}

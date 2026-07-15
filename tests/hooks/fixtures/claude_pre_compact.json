@@ -1,0 +1,8 @@
+{
+  "session_id": "3f9a2b1c-4d5e-6f70-8a9b-0c1d2e3f4a5b",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-projects-demo/3f9a2b1c.jsonl",
+  "cwd": "/Users/dev/projects/demo",
+  "hook_event_name": "PreCompact",
+  "trigger": "auto",
+  "custom_instructions": ""
+}
