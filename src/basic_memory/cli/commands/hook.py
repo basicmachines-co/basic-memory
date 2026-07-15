@@ -14,17 +14,21 @@ Contracts:
   - Graph-derived brief content is fenced and labeled as reference data, not
     instructions — the prompt-injection boundary.
 
-Settings sources are the same files the plugin hook scripts read (ported here;
-the shell versions are deleted in the plugin-reshape phase): the ``basicMemory``
-block of ``.claude/settings.json`` / ``.claude/settings.local.json`` (nearest
-ancestor, over the user-level ``~/.claude/settings.json``) for Claude, and
-``.codex/basic-memory.json`` for Codex.
+Settings sources are the same files the original plugin hook scripts read
+(ported here; the plugin hooks are now zero-logic shims that exec these
+verbs): the ``basicMemory`` block of ``.claude/settings.json`` /
+``.claude/settings.local.json`` (nearest ancestor, over the user-level
+``~/.claude/settings.json``) for Claude, and ``.codex/basic-memory.json`` for
+Codex. ``install`` / ``remove`` wire the same verbs into the user-level
+harness config for standalone (non-marketplace) users, ownership-tagged so
+removal is surgical.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -407,6 +411,9 @@ def _build_brief(
     primary = str(cfg.get("primaryProject") or "").strip()
     timeframe = str(cfg.get("recallTimeframe") or profile.default_recall_timeframe)
     recall_prompt = str(cfg.get("recallPrompt") or profile.default_recall_prompt)
+    # `focus` is a short user-declared emphasis (ported from the Codex hook
+    # script's config schema); it surfaces in the header when set.
+    focus = str(cfg.get("focus") or "").strip()
     placement_conventions = str(cfg.get("placementConventions") or "").strip()
     capture_folder = str(cfg.get("captureFolder") or profile.default_capture_folder).strip()
     shared_refs, shared_capped = _shared_project_refs(cfg, primary)
@@ -430,6 +437,8 @@ def _build_brief(
     # --- Graph-derived data (fenced: reference data, not instructions) ---
     data_lines: list[str] = []
     header = f"**Project:** {primary or 'default project'}"
+    if focus:
+        header += f" · focus: {focus}"
     if shared_refs:
         header += f" · reading {len(shared_refs)} shared project(s)"
     data_lines.append(header)
@@ -785,6 +794,188 @@ def flush(
     )
     for note in result.notes:
         typer.echo(f"  wrote: {note}")
+
+
+# --- install / remove (standalone users, no plugin marketplace) ---
+
+# Ownership tag: entries we write are recognized by their command shape — the
+# codex-honcho ownership-regex approach. `remove` deletes exactly the entries
+# matching this pattern and never touches user-authored hooks.
+OWNED_HOOK_COMMAND_RE = re.compile(
+    r"\b(?:basic-memory|bm)(?:\.exe)?\s+hook\s+(?:session-start|pre-compact)\b"
+)
+
+
+def _hook_config_path(harness: Harness) -> Path:
+    """User-level hooks config per harness.
+
+    Claude Code reads hooks from the user settings file; Codex standalone
+    hooks use the same hooks.json schema the plugin ships, at the user level.
+    """
+    if harness is Harness.claude:
+        return Path.home() / ".claude" / "settings.json"
+    return Path.home() / ".codex" / "hooks.json"
+
+
+def _owned_hook_groups(harness: Harness) -> dict[str, dict[str, Any]]:
+    """The hook groups we install, mirroring the plugin hooks.json wiring."""
+
+    def group(verb: str, timeout: int, matcher: str | None) -> dict[str, Any]:
+        entry: dict[str, Any] = {
+            "type": "command",
+            # The ownership tag lives in the command itself: OWNED_HOOK_COMMAND_RE
+            # must match it, or `bm hook remove` would orphan the entry.
+            "command": f"basic-memory hook {verb} --harness {harness.value}",
+            "timeout": timeout,
+        }
+        wrapped: dict[str, Any] = {"hooks": [entry]}
+        if matcher:
+            wrapped["matcher"] = matcher
+        return wrapped
+
+    if harness is Harness.claude:
+        return {
+            "SessionStart": group("session-start", 20, None),
+            "PreCompact": group("pre-compact", 120, None),
+        }
+    return {
+        "SessionStart": group("session-start", 30, "startup|resume|compact"),
+        "PreCompact": group("pre-compact", 60, "manual|auto"),
+    }
+
+
+def _is_owned_hook(hook: Any) -> bool:
+    return (
+        isinstance(hook, dict)
+        and isinstance(hook.get("command"), str)
+        and OWNED_HOOK_COMMAND_RE.search(hook["command"]) is not None
+    )
+
+
+def _strip_owned_hooks(groups: list[Any]) -> list[Any]:
+    """Drop our hook entries from an event's groups, keeping everything else.
+
+    Surgical by construction: a group we don't understand passes through
+    untouched; a group mixing user hooks with ours keeps the user hooks; a
+    group left empty by the strip disappears.
+    """
+    kept: list[Any] = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            kept.append(group)
+            continue
+        remaining = [hook for hook in group["hooks"] if not _is_owned_hook(hook)]
+        if remaining:
+            kept.append({**group, "hooks": remaining})
+    return kept
+
+
+def _load_hook_config(path: Path) -> dict[str, Any]:
+    """Read the harness config, failing fast rather than clobbering it.
+
+    install/remove are operator commands, not the hook hot path — a malformed
+    file is the user's to fix, never ours to silently rewrite.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"error: {path} is not valid JSON ({exc}); fix it and retry", err=True)
+        raise typer.Exit(1)
+    if not isinstance(data, dict):
+        typer.echo(f"error: {path} is not a JSON object; fix it and retry", err=True)
+        raise typer.Exit(1)
+    return data
+
+
+def _write_hook_config(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _uv_install_hint() -> str:
+    if sys.platform == "win32":
+        return 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+    if sys.platform == "darwin":
+        return "brew install uv  (or: curl -LsSf https://astral.sh/uv/install.sh | sh)"
+    return "curl -LsSf https://astral.sh/uv/install.sh | sh"
+
+
+@hook_app.command("install")
+def install(harness: Harness = HARNESS_OPTION) -> None:
+    """Wire the lifecycle hooks into the user-level harness config (idempotent)."""
+    config_path = _hook_config_path(harness)
+    data = _load_hook_config(config_path)
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        typer.echo(f"error: {config_path}: 'hooks' is not an object; fix it and retry", err=True)
+        raise typer.Exit(1)
+
+    for event, group in _owned_hook_groups(harness).items():
+        existing = hooks.get(event)
+        if existing is not None and not isinstance(existing, list):
+            typer.echo(
+                f"error: {config_path}: hooks.{event} is not a list; fix it and retry", err=True
+            )
+            raise typer.Exit(1)
+        # Idempotent reinstall: strip any previous entry of ours, then append
+        # the current one — user entries keep their positions.
+        groups = _strip_owned_hooks(existing or [])
+        groups.append(group)
+        hooks[event] = groups
+
+    _write_hook_config(config_path, data)
+    typer.echo(f"installed {harness.value} hooks in {config_path}")
+
+    # Trigger: uv missing from PATH. Why: the shims and the recommended
+    # `uvx basic-memory` fallback need it; a fresh machine without uv would
+    # fail silently at hook time. Outcome: per-platform install hint, no error
+    # — a PATH-installed basic-memory works without uv.
+    if shutil.which("uv") is None:
+        typer.echo(
+            "warning: uv not found on PATH — the hooks' uvx fallback needs it.\n"
+            f"  install uv: {_uv_install_hint()}",
+            err=True,
+        )
+
+
+@hook_app.command("remove")
+def remove(harness: Harness = HARNESS_OPTION) -> None:
+    """Delete exactly the hook entries `bm hook install` wrote; user hooks stay."""
+    config_path = _hook_config_path(harness)
+    if not config_path.exists():
+        typer.echo(f"nothing to remove: {config_path} does not exist")
+        return
+    data = _load_hook_config(config_path)
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        typer.echo(f"no Basic Memory hook entries in {config_path}")
+        return
+
+    removed = False
+    for event in list(hooks):
+        groups = hooks[event]
+        if not isinstance(groups, list):
+            continue
+        stripped = _strip_owned_hooks(groups)
+        if stripped == groups:
+            continue
+        removed = True
+        if stripped:
+            hooks[event] = stripped
+        else:
+            del hooks[event]
+
+    if not removed:
+        typer.echo(f"no Basic Memory hook entries in {config_path}")
+        return
+    if not hooks:
+        del data["hooks"]
+    _write_hook_config(config_path, data)
+    typer.echo(f"removed {harness.value} hooks from {config_path}")
 
 
 def _uv_version() -> str | None:

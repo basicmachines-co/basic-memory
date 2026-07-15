@@ -259,6 +259,27 @@ def test_session_start_uses_payload_cwd_when_no_project_dir(
     assert mock_search.await_args_list[0].kwargs["project"] == "demo"
 
 
+def test_session_start_focus_surfaces_in_header(bm_home: Path, tmp_path: Path) -> None:
+    # `focus` comes from the Codex config schema; the unified brief keeps it.
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"primaryProject": "demo", "focus": "code/dev"}}),
+        encoding="utf-8",
+    )
+    with patch(
+        "basic_memory.mcp.tools.search_notes", new_callable=AsyncMock, return_value=SEARCH_EMPTY
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(project),
+        )
+
+    assert result.exit_code == 0
+    assert "**Project:** demo · focus: code/dev" in result.stdout
+
+
 def test_session_start_codex_profile(bm_home: Path, tmp_path: Path) -> None:
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
@@ -656,6 +677,277 @@ def test_status_defaults_when_nothing_configured(
     assert "primary project: (not set)" in result.stdout
     assert "capture events: off" in result.stdout
     assert "uv: (not found)" in result.stdout
+
+
+# --- install / remove ---
+
+
+def _claude_settings_path() -> Path:
+    return Path.home() / ".claude" / "settings.json"  # isolated_home → tmp_path
+
+
+def _codex_hooks_path() -> Path:
+    return Path.home() / ".codex" / "hooks.json"
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+USER_HOOK = {
+    "type": "command",
+    "command": "/usr/local/bin/my-linter --fix",
+}
+
+
+def test_install_claude_writes_hooks_into_user_settings() -> None:
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    assert "installed claude hooks" in result.stdout
+    data = _read_json(_claude_settings_path())
+    session_start = data["hooks"]["SessionStart"]
+    pre_compact = data["hooks"]["PreCompact"]
+    assert len(session_start) == 1
+    assert session_start[0]["hooks"][0]["command"] == (
+        "basic-memory hook session-start --harness claude"
+    )
+    assert session_start[0]["hooks"][0]["timeout"] == 20
+    assert pre_compact[0]["hooks"][0]["command"] == (
+        "basic-memory hook pre-compact --harness claude"
+    )
+    assert pre_compact[0]["hooks"][0]["timeout"] == 120
+
+
+def test_install_codex_writes_hooks_json_with_matchers() -> None:
+    result = runner.invoke(cli_app, ["hook", "install", "--harness", "codex"])
+
+    assert result.exit_code == 0
+    data = _read_json(_codex_hooks_path())
+    session_start = data["hooks"]["SessionStart"]
+    assert session_start[0]["matcher"] == "startup|resume|compact"
+    assert session_start[0]["hooks"][0]["command"] == (
+        "basic-memory hook session-start --harness codex"
+    )
+    assert data["hooks"]["PreCompact"][0]["matcher"] == "manual|auto"
+
+
+def test_install_preserves_existing_user_settings_and_hooks() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "model": "opus",
+                "hooks": {
+                    "SessionStart": [{"hooks": [USER_HOOK]}],
+                    "PostToolUse": [{"matcher": "Bash", "hooks": [USER_HOOK]}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    data = _read_json(path)
+    assert data["model"] == "opus"  # unrelated settings untouched
+    assert data["hooks"]["PostToolUse"] == [{"matcher": "Bash", "hooks": [USER_HOOK]}]
+    session_start = data["hooks"]["SessionStart"]
+    assert session_start[0] == {"hooks": [USER_HOOK]}  # user entry keeps its position
+    assert len(session_start) == 2
+    assert "basic-memory hook session-start" in session_start[1]["hooks"][0]["command"]
+
+
+def test_install_is_idempotent() -> None:
+    runner.invoke(cli_app, ["hook", "install"])
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    data = _read_json(_claude_settings_path())
+    assert len(data["hooks"]["SessionStart"]) == 1
+    assert len(data["hooks"]["PreCompact"]) == 1
+
+
+def test_install_fails_fast_on_malformed_config() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{broken", encoding="utf-8")
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 1
+    assert "not valid JSON" in result.stderr
+    assert path.read_text(encoding="utf-8") == "{broken"  # never clobbered
+
+
+def test_install_fails_fast_on_non_object_config() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[1, 2]", encoding="utf-8")
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 1
+    assert "not a JSON object" in result.stderr
+
+
+def test_install_fails_fast_on_non_object_hooks_block() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": "weird"}), encoding="utf-8")
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 1
+    assert "'hooks' is not an object" in result.stderr
+
+
+def test_install_fails_fast_on_non_list_event() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": {"SessionStart": {"bad": True}}}), encoding="utf-8")
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 1
+    assert "hooks.SessionStart is not a list" in result.stderr
+
+
+def test_install_hints_when_uv_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_module.shutil, "which", lambda name: None)
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    assert "uv not found on PATH" in result.stderr
+    assert "install uv:" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        ("win32", "astral.sh/uv/install.ps1"),
+        ("darwin", "brew install uv"),
+        ("linux", "astral.sh/uv/install.sh"),
+    ],
+)
+def test_uv_install_hint_is_platform_specific(
+    monkeypatch: pytest.MonkeyPatch, platform: str, expected: str
+) -> None:
+    monkeypatch.setattr(hook_module.sys, "platform", platform)
+
+    assert expected in hook_module._uv_install_hint()
+
+
+def test_remove_deletes_exactly_our_entries() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"model": "opus", "hooks": {"SessionStart": [{"hooks": [USER_HOOK]}]}}),
+        encoding="utf-8",
+    )
+    runner.invoke(cli_app, ["hook", "install"])
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    assert "removed claude hooks" in result.stdout
+    data = _read_json(path)
+    assert data["model"] == "opus"
+    # The user's SessionStart hook survives; our entries (and the PreCompact
+    # event we created) are gone.
+    assert data["hooks"]["SessionStart"] == [{"hooks": [USER_HOOK]}]
+    assert "PreCompact" not in data["hooks"]
+
+
+def test_remove_after_plain_install_leaves_no_hooks_block() -> None:
+    runner.invoke(cli_app, ["hook", "install"])
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    assert "hooks" not in _read_json(_claude_settings_path())
+
+
+def test_remove_strips_owned_hooks_from_mixed_group() -> None:
+    # A user may have folded our command into their own group; only our inner
+    # hook goes, the group and their hook stay.
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    owned = {"type": "command", "command": "bm hook session-start --harness claude"}
+    path.write_text(
+        json.dumps({"hooks": {"SessionStart": [{"hooks": [USER_HOOK, owned]}]}}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    data = _read_json(path)
+    assert data["hooks"]["SessionStart"] == [{"hooks": [USER_HOOK]}]
+
+
+def test_remove_missing_file_is_a_noop() -> None:
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    assert "nothing to remove" in result.stdout
+    assert not _claude_settings_path().exists()
+
+
+def test_remove_is_idempotent() -> None:
+    runner.invoke(cli_app, ["hook", "install"])
+    runner.invoke(cli_app, ["hook", "remove"])
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    assert "no Basic Memory hook entries" in result.stdout
+
+
+def test_remove_without_hooks_block_reports_nothing() -> None:
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    assert "no Basic Memory hook entries" in result.stdout
+    assert _read_json(path) == {"model": "opus"}
+
+
+def test_remove_leaves_unrecognized_structures_alone() -> None:
+    # Groups we don't understand pass through byte-for-byte (surgical strip).
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    weird = {"hooks": "not-a-list"}
+    owned_group = {
+        "hooks": [{"type": "command", "command": "basic-memory hook pre-compact --harness claude"}]
+    }
+    path.write_text(
+        json.dumps({"hooks": {"PreCompact": [weird, "junk", owned_group], "Odd": "scalar"}}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    data = _read_json(path)
+    assert data["hooks"]["PreCompact"] == [weird, "junk"]
+    assert data["hooks"]["Odd"] == "scalar"
+
+
+def test_install_then_codex_remove_does_not_touch_claude_config() -> None:
+    runner.invoke(cli_app, ["hook", "install"])
+
+    result = runner.invoke(cli_app, ["hook", "remove", "--harness", "codex"])
+
+    assert result.exit_code == 0
+    assert "nothing to remove" in result.stdout
+    assert _claude_settings_path().exists()
 
 
 # --- helper coverage ---
