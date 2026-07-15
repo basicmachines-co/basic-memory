@@ -214,9 +214,13 @@ def doctor(
         with force_routing(local=local, cloud=cloud):
             run_with_cleanup(run_doctor())
     except (ToolError, ValueError) as e:
-        console.print(f"[red]Doctor failed: {e}[/red]")
+        # str() of a message-less exception (e.g. httpx.ReadTimeout) is empty;
+        # fall back to repr so the failure line always names the error (#1027).
+        error_detail = str(e) or repr(e)
+        console.print(f"[red]Doctor failed: {error_detail}[/red]")
         raise typer.Exit(code=1)
     except Exception as e:
-        logger.error(f"Doctor failed: {e}")
-        typer.echo(f"Doctor failed: {e}", err=True)
+        error_detail = str(e) or repr(e)
+        logger.error(f"Doctor failed: {error_detail}")
+        typer.echo(f"Doctor failed: {error_detail}", err=True)
         raise typer.Exit(code=1)  # pragma: no cover
