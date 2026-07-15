@@ -204,7 +204,10 @@ async def test_delete_project_basic_operation(mcp_server, app, test_project, tmp
         assert "removed successfully" in delete_text
         assert "Removed project details:" in delete_text
         assert "Name: to-be-deleted" in delete_text
-        assert "Files remain on disk but project is no longer tracked" in delete_text
+        assert (
+            "Note files remain on disk but the project is no longer tracked by Basic Memory."
+            in delete_text
+        )
 
         # Verify project no longer appears in list
         list_result_after = await client.call_tool("list_memory_projects", {})
