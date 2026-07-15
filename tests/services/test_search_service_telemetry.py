@@ -44,7 +44,7 @@ async def test_search_service_wraps_repository_search(search_service, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_search_service_emits_relaxed_retry_span(search_service, monkeypatch) -> None:
+async def test_search_service_delegates_relaxed_retry(search_service, monkeypatch) -> None:
     import logfire
 
     spans, fake_span = _capture_spans()
@@ -59,19 +59,7 @@ async def test_search_service_emits_relaxed_retry_span(search_service, monkeypat
 
     await search_service.search(SearchQuery(text="who are our main competitors and partners"))
 
-    assert [name for name, _ in spans] == [
-        "search.execute",
-        "search.relaxed_fts_retry",
-    ]
-    assert spans[1] == (
-        "search.relaxed_fts_retry",
-        {
-            "retrieval_mode": "fts",
-            "token_count": 7,
-            "limit": 10,
-            "offset": 0,
-        },
-    )
-    assert len(calls) == 2
+    assert [name for name, _ in spans] == ["search.execute"]
+    assert len(calls) == 1
     assert calls[0]["search_text"] == "who are our main competitors and partners"
-    assert calls[1]["search_text"] == "main OR competitors OR partners"
+    assert calls[0]["allow_relaxed"] is True
