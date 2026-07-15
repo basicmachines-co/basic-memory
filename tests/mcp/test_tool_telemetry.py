@@ -219,6 +219,7 @@ async def test_edit_note_emits_root_operation_and_project_context(
             "has_section": False,
             "has_find_text": False,
             "expected_replacements": 1,
+            "replace_subsections": True,
         },
     )
     span_names = [name for name, _ in spans]
