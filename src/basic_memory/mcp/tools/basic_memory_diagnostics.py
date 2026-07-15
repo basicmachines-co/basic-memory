@@ -14,7 +14,7 @@ _SECRET_FIELDS = frozenset({"cloud_api_key", "semantic_embedding_api_key"})
 
 # Fields whose values are URLs that may embed user:password credentials.
 # The userinfo component is stripped before surfacing.
-_URL_FIELDS = frozenset({"database_url"})
+_URL_FIELDS = frozenset({"database_url", "semantic_embedding_api_base"})
 
 _SECRET_QUERY_KEYS = frozenset(
     {

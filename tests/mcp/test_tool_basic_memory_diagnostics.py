@@ -45,6 +45,21 @@ def test_redact_config_removes_semantic_embedding_api_key():
     assert result["semantic_embedding_api_base"] == "https://embeddings.example.com/v1"
 
 
+def test_redact_config_scrubs_semantic_embedding_api_base_credentials():
+    raw = {
+        "semantic_embedding_api_base": (
+            "https://provider-user:provider-password@embeddings.example.com/v1"
+            "?api_key=query-secret&timeout=30"
+        ),
+    }
+
+    result = _redact_config(raw)
+
+    assert result["semantic_embedding_api_base"] == (
+        "https://***@embeddings.example.com/v1?api_key=%2A%2A%2A&timeout=30"
+    )
+
+
 def test_redact_config_passes_through_safe_fields():
     raw = {"default_project": "main", "log_level": "INFO", "env": "dev"}
     result = _redact_config(raw)
@@ -130,7 +145,10 @@ def test_diagnostics_redacts_semantic_embedding_api_key(tmp_path):
     """Provider credentials must never appear in diagnostic output."""
     config_data = {
         "semantic_embedding_api_key": "provider-super-secret",
-        "semantic_embedding_api_base": "https://embeddings.example.com/v1",
+        "semantic_embedding_api_base": (
+            "https://provider-user:provider-password@embeddings.example.com/v1"
+            "?api_key=query-secret&timeout=30"
+        ),
         "projects": {},
     }
     config_file = tmp_path / "config.json"
@@ -139,8 +157,12 @@ def test_diagnostics_redacts_semantic_embedding_api_key(tmp_path):
     result = basic_memory_diagnostics()
 
     assert "provider-super-secret" not in result
+    assert "provider-user" not in result
+    assert "provider-password" not in result
+    assert "query-secret" not in result
     assert "semantic_embedding_api_key" not in result
     assert "embeddings.example.com" in result
+    assert "timeout=30" in result
 
 
 def test_diagnostics_config_missing(tmp_path):
