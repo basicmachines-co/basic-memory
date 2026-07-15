@@ -32,6 +32,19 @@ def _format_validation_report(report: ValidationReport) -> str:
     )
     lines.append("")
 
+    # --- Per-type breakdown (all-types mode) ---
+    if report.type_summaries:
+        lines.append("## By Type")
+        lines.append("")
+        for summary in report.type_summaries:
+            if summary.total_entities == 0:
+                lines.append(f"- **{summary.note_type}**: no notes")
+            else:
+                lines.append(
+                    f"- **{summary.note_type}**: {summary.valid_count}/{summary.total_notes} valid"
+                )
+        lines.append("")
+
     # --- Per-note results ---
     for r in report.results:
         status = "valid" if r.passed else "INVALID"
@@ -167,6 +180,26 @@ def _no_notes_guidance(note_type: str, tool_name: str) -> str:
     )
 
 
+def _no_schemas_defined_guidance(tool_name: str) -> str:
+    """Build guidance string when validating all types but no schemas exist.
+
+    Used by schema_validate when called without arguments in a project that
+    has no schema notes — there is nothing to validate yet.
+    """
+    return (
+        f"# No Schemas Defined\n\n"
+        f"`{tool_name}` was called without `note_type` or `identifier`, which "
+        f"validates every note type that has a schema — but this project has "
+        f"no schema notes yet, so there is nothing to validate.\n\n"
+        f"## Next Steps\n\n"
+        f'1. **Infer a schema** — run `schema_infer("<note_type>")` to analyze '
+        f"existing notes and get a suggested schema\n"
+        f"2. **Create a schema note** — write a note with `type: schema` and an "
+        f"`entity` field naming the note type it validates\n"
+        f"3. **Re-run** — call `{tool_name}()` again once a schema exists\n"
+    )
+
+
 def _no_schema_guidance(note_type: str, tool_name: str) -> str:
     """Build guidance string when no schema exists for a note type.
 
@@ -224,7 +257,9 @@ async def schema_validate(
 ) -> ValidationReport | str | dict:
     """Validate notes against their resolved schema.
 
-    Validates a specific note (by identifier) or all notes of a given type.
+    Validates a specific note (by identifier), all notes of a given type, or —
+    when called with neither — all notes of every type that has a schema
+    defined, with a per-type breakdown.
     Returns warnings/errors based on the schema's validation mode.
 
     Schemas are resolved in priority order:
@@ -258,6 +293,9 @@ async def schema_validate(
         # Validate a specific note
         schema_validate(identifier="people/paul-graham")
 
+        # Validate every type that has a schema defined
+        schema_validate()
+
         # Validate in a specific project
         schema_validate(note_type="person", project="my-research")
     """
@@ -284,6 +322,20 @@ async def schema_validate(
                 f"total={result.total_notes} valid={result.valid_count} "
                 f"warnings={result.warning_count} errors={result.error_count}"
             )
+
+            # --- All-types mode ---
+            # Trigger: called with neither identifier nor note_type (#1013)
+            # Why: an empty report here means "no schemas defined", not
+            #   "no notes of type 'unknown'" — the guards below would mislead
+            # Outcome: per-type summary, or guidance for defining a first schema
+            if note_type is None and identifier is None:
+                if not result.type_summaries:
+                    if output_format == "json":
+                        return {"error": "No schemas defined in this project"}
+                    return _no_schemas_defined_guidance("schema_validate")
+                if output_format == "json":
+                    return result.model_dump(mode="json", exclude_none=True)
+                return _format_validation_report(result)
 
             # --- No notes guard ---
             # Trigger: no entities of this type exist in the project

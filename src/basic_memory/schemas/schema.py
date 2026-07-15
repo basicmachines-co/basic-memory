@@ -42,6 +42,17 @@ class NoteValidationResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class TypeValidationSummary(BaseModel):
+    """Per-type rollup used when validating all schema-covered types at once."""
+
+    note_type: str
+    total_notes: int = 0
+    total_entities: int = 0
+    valid_count: int = 0
+    warning_count: int = 0
+    error_count: int = 0
+
+
 class ValidationReport(BaseModel):
     """Full validation report for one or more notes."""
 
@@ -52,6 +63,10 @@ class ValidationReport(BaseModel):
     warning_count: int = 0
     error_count: int = 0
     results: list[NoteValidationResponse] = Field(default_factory=list)
+    type_summaries: list[TypeValidationSummary] = Field(
+        default_factory=list,
+        description="Per-type breakdown, populated when validating all schema-covered types",
+    )
 
 
 # --- Inference Response Models ---

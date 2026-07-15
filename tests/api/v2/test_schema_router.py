@@ -366,6 +366,139 @@ async def test_validate_total_entities_without_schema(
     assert data["results"] == []
 
 
+# --- All-Types Validation Tests (#1013) ---
+
+
+@pytest.mark.asyncio
+async def test_validate_all_types_with_schemas(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Validate with no params covers every note type that has a schema defined."""
+    person_schema, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Person Schema",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "person",
+                "schema": {"name": "string", "role": "string"},
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Schema definition for person entities
+            """),
+        )
+    )
+    await search_service.index_entity(person_schema)
+
+    # Second schema whose target type has no notes yet
+    meeting_schema, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Meeting Schema",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "meeting",
+                "schema": {"date": "string"},
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Schema definition for meeting entities
+            """),
+        )
+    )
+    await search_service.index_entity(meeting_schema)
+
+    await create_person_entities(entity_service, search_service)
+
+    response = await client.post(f"{v2_project_url}/schema/validate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["note_type"] is None
+    assert data["total_entities"] == 3
+    assert data["total_notes"] == 3
+    assert data["valid_count"] == 3
+    assert len(data["results"]) == 3
+
+    summaries = {s["note_type"]: s for s in data["type_summaries"]}
+    assert set(summaries) == {"person", "meeting"}
+    assert summaries["person"]["total_entities"] == 3
+    assert summaries["person"]["total_notes"] == 3
+    assert summaries["person"]["valid_count"] == 3
+    assert summaries["meeting"]["total_entities"] == 0
+    assert summaries["meeting"]["total_notes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_all_types_no_schemas(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Validate with no params returns an empty report when no schemas are defined."""
+    # Notes exist, but nothing covers them
+    await create_person_entities(entity_service, search_service)
+
+    response = await client.post(f"{v2_project_url}/schema/validate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["note_type"] is None
+    assert data["total_notes"] == 0
+    assert data["total_entities"] == 0
+    assert data["results"] == []
+    assert data["type_summaries"] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_all_types_normalizes_target_type(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Schema declaring entity 'Person' still covers snake_case 'person' notes."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Person Schema",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "Person",
+                "schema": {"name": "string", "role": "string"},
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Schema with capitalized target type
+            """),
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    await create_person_entities(entity_service, search_service)
+
+    response = await client.post(f"{v2_project_url}/schema/validate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_entities"] == 3
+    assert data["total_notes"] == 3
+
+    summaries = {s["note_type"]: s for s in data["type_summaries"]}
+    # The summary carries the type label as the schema author wrote it
+    assert set(summaries) == {"Person"}
+    assert summaries["Person"]["total_entities"] == 3
+    assert summaries["Person"]["valid_count"] == 3
+
+
 # --- Frontmatter Validation Tests ---
 
 

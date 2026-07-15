@@ -81,6 +81,24 @@ permalink: people/{permalink}
 """
 
 
+MEETING_SCHEMA = """\
+---
+title: Meeting
+type: schema
+entity: meeting
+version: 1
+schema:
+  date: string, meeting date
+settings:
+  validation: warn
+---
+
+# Meeting
+
+Schema for meeting entities.
+"""
+
+
 # --- Success-path tests (full ASGI stack) ---
 
 
@@ -354,6 +372,99 @@ permalink: people/dave
     assert "Schema Drift: person" in result
     # Dave has a "hobby" field not in the schema, so drift should be detected
     assert "**hobby**" in result
+
+
+# --- All-types validation (#1013) ---
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_all_types(app, test_project, index_project):
+    """With no arguments, validate every note type that has a schema defined."""
+    project_path = Path(test_project.path)
+
+    _write_schema_file(project_path, "schemas/Person.md", PERSON_SCHEMA)
+    # Meeting schema exists but no meeting notes do
+    _write_schema_file(project_path, "schemas/Meeting.md", MEETING_SCHEMA)
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await index_project()
+
+    result = await schema_validate(project=test_project.name)
+
+    assert isinstance(result, str)
+    assert "Schema Validation: all" in result
+    assert "## By Type" in result
+    assert "- **person**: 1/1 valid" in result
+    assert "- **meeting**: no notes" in result
+    assert "**Alice**" in result
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_all_types_json(app, test_project, index_project):
+    """JSON output in all-types mode includes the per-type breakdown."""
+    project_path = Path(test_project.path)
+
+    _write_schema_file(project_path, "schemas/Person.md", PERSON_SCHEMA)
+    _write_schema_file(project_path, "schemas/Meeting.md", MEETING_SCHEMA)
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await index_project()
+
+    result = await schema_validate(project=test_project.name, output_format="json")
+
+    assert isinstance(result, dict)
+    assert result["total_notes"] == 1
+    assert result["valid_count"] == 1
+
+    summaries = {s["note_type"]: s for s in result["type_summaries"]}
+    assert set(summaries) == {"person", "meeting"}
+    assert summaries["person"]["valid_count"] == 1
+    assert summaries["meeting"]["total_entities"] == 0
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_all_types_no_schemas_returns_guidance(
+    app, test_project, index_project
+):
+    """With no arguments and no schemas defined, return guidance — not 'unknown'.
+
+    Regression test for issue #1013: schema_validate() without note_type or
+    identifier reported "No Notes Found of Type 'unknown'" instead of
+    explaining that no schemas exist yet.
+    """
+    project_path = Path(test_project.path)
+
+    # Notes exist, but no schema notes are defined
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await index_project()
+
+    result = await schema_validate(project=test_project.name)
+
+    assert isinstance(result, str)
+    assert "No Schemas Defined" in result
+    assert "unknown" not in result
+    assert "schema_infer" in result
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_all_types_no_schemas_json(app, test_project, index_project):
+    """JSON output with no schemas defined returns a clear error dict."""
+    result = await schema_validate(project=test_project.name, output_format="json")
+
+    assert result == {"error": "No schemas defined in this project"}
 
 
 # --- write_note metadata → schema workflow ---
