@@ -213,6 +213,11 @@ def test_redact_url_scrubs_credentials_from_malformed_url():
     assert _redact_url(url) == "postgresql://***@[::1"
 
 
+def test_redact_url_scrubs_query_credentials_from_malformed_url():
+    url = "postgresql://[::1?sslpassword=query-secret"
+    assert _redact_url(url) == "postgresql://[::1?sslpassword=%2A%2A%2A"
+
+
 def test_redact_url_leaves_malformed_url_without_credentials_unchanged():
     url = "postgresql://[::1"
     assert _redact_url(url) == url
@@ -221,6 +226,24 @@ def test_redact_url_leaves_malformed_url_without_credentials_unchanged():
 def test_redact_url_no_credentials_unchanged():
     url = "postgresql://db.internal:5432/prod"
     assert _redact_url(url) == url
+
+
+def test_redact_url_masks_query_password_and_preserves_safe_options():
+    url = "postgresql://db.internal/prod?sslmode=require&sslpassword=query-secret"
+    result = _redact_url(url)
+
+    assert "query-secret" not in result
+    assert result == "postgresql://db.internal/prod?sslmode=require&sslpassword=%2A%2A%2A"
+
+
+def test_redact_url_masks_userinfo_and_query_secrets_together():
+    url = "postgresql://dbuser:user-secret@db.internal/prod?password=query-secret"
+    result = _redact_url(url)
+
+    assert "dbuser" not in result
+    assert "user-secret" not in result
+    assert "query-secret" not in result
+    assert result == "postgresql://***@db.internal/prod?password=%2A%2A%2A"
 
 
 def test_redact_url_non_url_string_unchanged():
@@ -286,3 +309,23 @@ def test_diagnostics_redacts_database_url_password(tmp_path):
     # Host and port remain visible for diagnostics.
     assert "db.internal" in result
     assert "5432" in result
+
+
+def test_diagnostics_redacts_database_url_query_password(tmp_path):
+    """Query-string credentials must not escape through diagnostic output."""
+    config_data = {
+        "default_project": "main",
+        "database_url": (
+            "postgresql://db.internal:5432/basicmemory"
+            "?sslmode=require&sslpassword=query-supersecret"
+        ),
+        "projects": {},
+    }
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
+
+    result = basic_memory_diagnostics()
+
+    assert "query-supersecret" not in result
+    assert "sslmode=require" in result
+    assert "sslpassword=%2A%2A%2A" in result

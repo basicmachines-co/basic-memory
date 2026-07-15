@@ -3,7 +3,7 @@
 import json
 import platform
 import sys
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import basic_memory
 from basic_memory.config import CONFIG_FILE_NAME, resolve_data_dir
@@ -16,9 +16,39 @@ _SECRET_FIELDS = frozenset({"cloud_api_key"})
 # The userinfo component is stripped before surfacing.
 _URL_FIELDS = frozenset({"database_url"})
 
+_SECRET_QUERY_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "credential",
+        "password",
+        "passwd",
+        "pwd",
+        "secret",
+        "secret_key",
+        "sslpassword",
+        "token",
+    }
+)
+
+
+def _query_key_is_secret(key: str) -> bool:
+    normalized = key.strip().lower().replace("-", "_")
+    return normalized in _SECRET_QUERY_KEYS or normalized.endswith(
+        ("_password", "_secret", "_token", "_key")
+    )
+
+
+def _redact_query_secrets(query: str) -> str:
+    """Mask credential-bearing query values while preserving diagnostic options."""
+    pairs = parse_qsl(query, keep_blank_values=True)
+    if not any(_query_key_is_secret(key) for key, _ in pairs):
+        return query
+    return urlencode([(key, "***" if _query_key_is_secret(key) else value) for key, value in pairs])
+
 
 def _redact_url(url: str) -> str:
-    """Strip the userinfo (user:password) from a URL string.
+    """Strip userinfo and credential-bearing query values from a URL string.
 
     Replaces any credentials with *** so the host/path remain visible for
     diagnostics (e.g. ``postgresql://***@localhost/mydb``).  If the value
@@ -28,29 +58,36 @@ def _redact_url(url: str) -> str:
         parsed = urlparse(url)
     except ValueError:
         # A malformed authority can still contain credentials. Redact the
-        # userinfo conservatively rather than returning a secret unchanged.
-        scheme, separator, remainder = url.partition("://")
+        # userinfo and query conservatively rather than returning a secret unchanged.
+        base, query_separator, query = url.partition("?")
+        safe_url = f"{base}?{_redact_query_secrets(query)}" if query_separator else base
+        scheme, separator, remainder = safe_url.partition("://")
         if separator and "@" in remainder:
             _, _, authority = remainder.rpartition("@")
             return f"{scheme}://***@{authority}"
+        return safe_url
+
+    redacted_query = _redact_query_secrets(parsed.query)
+    if "@" not in parsed.netloc and redacted_query == parsed.query:
+        # Neither URL userinfo nor known secret query parameters are present.
         return url
 
-    if "@" not in parsed.netloc:
-        # No URL userinfo is present, so there are no credentials to redact.
-        return url
+    redacted_netloc = parsed.netloc
+    if "@" in parsed.netloc:
+        # Preserve the authority verbatim after the final @. In particular, using
+        # parsed.hostname here would discard the brackets required around IPv6 hosts.
+        _, _, authority = parsed.netloc.rpartition("@")
+        redacted_netloc = f"***@{authority}"
 
-    # Preserve the authority verbatim after the final @. In particular, using
-    # parsed.hostname here would discard the brackets required around IPv6 hosts.
-    _, _, authority = parsed.netloc.rpartition("@")
-    return urlunparse(parsed._replace(netloc=f"***@{authority}"))
+    return urlunparse(parsed._replace(netloc=redacted_netloc, query=redacted_query))
 
 
 def _redact_config(raw: dict) -> dict:
     """Return a copy of the raw config dict with secret fields removed.
 
     - Keys in ``_SECRET_FIELDS`` are dropped entirely.
-    - Keys in ``_URL_FIELDS`` have their userinfo component stripped so that
-      host and database name remain visible for diagnostics.
+    - Keys in ``_URL_FIELDS`` have userinfo and credential-bearing query values
+      stripped so that safe host, database, and connection options remain visible.
 
     Only top-level keys are processed. Nested keys within project entries are
     not currently credential-bearing, but the two sets make the pattern easy
