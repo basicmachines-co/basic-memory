@@ -158,6 +158,9 @@ def main() -> int:
     placement = str(cfg.get("placementConventions") or "").strip()
     focus = str(cfg.get("focus") or "").strip()
     capture_events = bool(cfg.get("captureEvents", False))
+    # Approximate retention cap for the local event log; the envelope module
+    # validates it (non-positive/junk values fall back to its default).
+    event_retention = cfg.get("eventRetention")
     shared_refs, shared_capped = shared_project_refs(cfg, primary_project)
 
     active_tasks = ["--type", "task", "--status", "active"]
@@ -266,7 +269,7 @@ def main() -> int:
                 project_hint=primary_project,
                 hook_name="SessionStart",
             )
-            append_to_event_log(envelope)
+            append_to_event_log(envelope, cap=event_retention)
         except Exception:
             pass  # event logging failure is non-fatal
 

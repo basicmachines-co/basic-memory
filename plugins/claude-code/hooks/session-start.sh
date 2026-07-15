@@ -179,6 +179,9 @@ recall_prompt = cfg.get("recallPrompt") or default_prompt
 placement_conventions = (cfg.get("placementConventions") or "").strip()
 capture_folder = (cfg.get("captureFolder") or "sessions").strip()
 capture_events = bool(cfg.get("captureEvents", False))
+# Approximate retention cap for the local event log; the envelope module
+# validates it (non-positive/junk values fall back to its default).
+event_retention = cfg.get("eventRetention")
 session_id = payload.get("session_id") or ""
 
 # --- Resolve the shared/team read set ---
@@ -374,7 +377,7 @@ if _HAS_ENVELOPE and capture_events and primary_project:
             project_hint=primary_project,
             hook_name="SessionStart",
         )
-        append_to_event_log(envelope)
+        append_to_event_log(envelope, cap=event_retention)
     except Exception:
         pass  # event logging failure is non-fatal
 PY

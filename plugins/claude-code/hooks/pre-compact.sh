@@ -152,6 +152,9 @@ capture_folder = (cfg.get("captureFolder") or "sessions").strip()
 capture_events = bool(cfg.get("captureEvents", False))
 redact_keys = cfg.get("redactKeys") or []
 redact_paths = cfg.get("redactPaths") or []
+# Approximate retention cap for the local event log; the envelope module
+# validates it (non-positive/junk values fall back to its default).
+event_retention = cfg.get("eventRetention")
 
 # Trigger: no project pinned for this Claude Code project.
 # Why: a checkpoint must land somewhere intentional. Writing to the default graph
@@ -313,7 +316,7 @@ if _HAS_ENVELOPE and envelope:
 # Trigger: captureEvents is enabled. Why: the local event log feeds future
 # memory routines (SPEC-61) without requiring the note to carry every detail.
 if _HAS_ENVELOPE and envelope and capture_events:
-    append_to_event_log(envelope)
+    append_to_event_log(envelope, cap=event_retention)
 
 content = "\n".join(frontmatter + body)
 
