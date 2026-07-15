@@ -347,8 +347,8 @@ def test_sqlite_embedding_model_key_includes_litellm_role_settings():
     assert "query_input_type=query" in passage_query_key
 
 
-def test_sqlite_embedding_model_key_tracks_litellm_api_base_without_exposing_it():
-    """LiteLLM endpoint changes invalidate vectors without storing endpoint credentials."""
+def test_sqlite_embedding_model_key_ignores_litellm_api_base():
+    """LiteLLM endpoint routing is not part of stored vector identity."""
     repo = _make_sqlite_repo_for_unit_tests()
     repo._embedding_provider = LiteLLMEmbeddingProvider(dimensions=3)
     default_endpoint_key = repo._embedding_model_key()
@@ -359,17 +359,9 @@ def test_sqlite_embedding_model_key_tracks_litellm_api_base_without_exposing_it(
     )
     custom_endpoint_key = repo._embedding_model_key()
 
-    assert default_endpoint_key != custom_endpoint_key
-    assert "api_base_sha256=" in custom_endpoint_key
+    assert default_endpoint_key == custom_endpoint_key
+    assert "api_base" not in custom_endpoint_key
     assert "token@example.test" not in custom_endpoint_key
-
-    repo._embedding_provider = LiteLLMEmbeddingProvider(
-        dimensions=3,
-        api_base="http://token@example.test/v1",
-        api_key="rotated-secret",
-    )
-    assert repo._embedding_model_key() == custom_endpoint_key
-    assert "rotated-secret" not in custom_endpoint_key
 
 
 @pytest.mark.asyncio
