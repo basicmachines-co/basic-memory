@@ -12,6 +12,7 @@ Replaces tenant-wide sync with project-scoped workflows.
 
 import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
@@ -614,8 +615,9 @@ def project_transfer(
 # a file uploaded before its pattern was added to .bmignore is stranded on the
 # cloud tenant. Prune targets exactly that set: it uses the *inverted* filter
 # (each ignore pattern becomes an include rule, everything else is excluded) so
-# rclone lsf/delete operate only on the ignored files. Preview and deletion use
-# the same filter file, so what the user confirms is what gets deleted.
+# rclone lsf finds the ignored files. Deletion receives that exact preview list
+# through stdin, so files uploaded or newly ignored during confirmation cannot
+# be deleted without appearing in the user's approved preview.
 
 
 def project_prune_preview(
@@ -669,18 +671,20 @@ def project_prune_preview(
 def project_prune(
     project: SyncProject,
     bucket_name: str,
+    matches: Sequence[str],
     *,
     verbose: bool = False,
     run: RunFunc = subprocess.run,
     is_installed: IsInstalledFunc = is_rclone_installed,
-    filter_path: Path | None = None,
 ) -> bool:
-    """Delete remote files that match the local .bmignore patterns.
+    """Delete exactly the remote files returned by the confirmed preview.
 
     Complements the one-way mirror's --delete-excluded pass (#1032): targeted
     cleanup for files uploaded before their pattern was added to .bmignore,
     without requiring a full mirror run or a configured local_sync_path.
-    Callers preview with ``project_prune_preview`` and confirm before invoking.
+    Callers preview with ``project_prune_preview`` and pass the confirmed result
+    here. ``--files-from-raw -`` keeps the delete set fixed even if the remote or
+    .bmignore changes while the confirmation prompt is open.
 
     Returns:
         True if the deletion succeeded, False otherwise.
@@ -689,23 +693,24 @@ def project_prune(
         RcloneError: If rclone is not installed.
     """
     check_rclone_installed(is_installed=is_installed)
+    if not matches:
+        return True
 
     remote_path = get_project_remote(project, bucket_name)
-    filter_path = filter_path or get_bmignore_prune_filter_path()
 
     cmd = [
         "rclone",
         "delete",
         remote_path,
         *TIGRIS_CONSISTENCY_HEADERS,
-        "--filter-from",
-        str(filter_path),
+        "--files-from-raw",
+        "-",
     ]
 
     if verbose:
         cmd.append("--verbose")
 
-    result = run(cmd, text=True)
+    result = run(cmd, input="".join(f"{path}\n" for path in matches), text=True)
     return result.returncode == 0
 
 

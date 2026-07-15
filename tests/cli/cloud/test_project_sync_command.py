@@ -49,25 +49,31 @@ def test_cloud_sync_commands_skip_explicit_cloud_project_sync(monkeypatch, argv,
     config_manager.save_config(config)
 
     monkeypatch.setattr(project_sync_command, "_require_cloud_credentials", lambda _config: None)
+    target_workspace = _workspace("personal-tenant", "personal", "personal", is_default=True)
     monkeypatch.setattr(
-        project_sync_command, "_require_personal_workspace", lambda _name, _config, **_kwargs: None
+        project_sync_command,
+        "_require_personal_workspace",
+        lambda _name, _config, **_kwargs: target_workspace,
     )
     monkeypatch.setattr(
         project_sync_command,
         "get_mount_info",
-        lambda: _async_value(SimpleNamespace(bucket_name="tenant-bucket")),
+        lambda **_kwargs: _async_value(SimpleNamespace(bucket_name="tenant-bucket")),
     )
     monkeypatch.setattr(
         project_sync_command,
         "_get_cloud_project",
-        lambda _name: _async_value(
+        lambda _name, **_kwargs: _async_value(
             SimpleNamespace(name="research", external_id="external-project-id", path="research")
         ),
     )
     monkeypatch.setattr(
         project_sync_command,
         "_get_sync_project",
-        lambda _name, _config, _project_data: (SimpleNamespace(name="research"), "/tmp/research"),
+        lambda _name, _config, _project_data, **_kwargs: (
+            SimpleNamespace(name="research"),
+            "/tmp/research",
+        ),
     )
     monkeypatch.setattr(project_sync_command, "project_sync", lambda *args, **kwargs: True)
     monkeypatch.setattr(project_sync_command, "project_bisync", lambda *args, **kwargs: True)
@@ -772,7 +778,7 @@ def test_cloud_prune_confirmation_accepted_deletes(monkeypatch, config_manager):
     assert "Pruned ignored files from research" in result.output
     assert recorder["args"][1] == "tenant-bucket"
     assert recorder["preview_kwargs"]["filter_path"] is recorder["prune_filter"]
-    assert recorder["kwargs"]["filter_path"] is recorder["prune_filter"]
+    assert recorder["args"][2] == ["secret.env"]
 
 
 def test_cloud_prune_routes_to_non_default_personal_workspace(monkeypatch, config_manager):

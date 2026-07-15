@@ -379,10 +379,9 @@ def prune_project_command(
 
         console.print(f"[blue]Scanning {name} for cloud files matching .bmignore...[/blue]")
         # Trigger: preview and deletion are separated by an interactive prompt.
-        # Why: .bmignore could change while the prompt is open; regenerating the
-        # filter would make rclone delete a different set than the user reviewed.
-        # Outcome: snapshot the generated filter once and use that exact file for
-        # both operations.
+        # Why: the remote and .bmignore can both change while the prompt is open.
+        # Outcome: pass the exact previewed paths to deletion so nothing outside
+        # the user's approved list can be removed.
         prune_filter_path = get_bmignore_prune_filter_path()
         matches = project_prune_preview(
             sync_project,
@@ -415,8 +414,8 @@ def prune_project_command(
         success = project_prune(
             sync_project,
             bucket_name,
+            matches,
             verbose=verbose,
-            filter_path=prune_filter_path,
         )
 
         if success:

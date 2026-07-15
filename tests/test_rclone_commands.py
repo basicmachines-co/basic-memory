@@ -1033,13 +1033,16 @@ def test_project_prune_preview_checks_rclone_installed():
     assert "rclone is not installed" in str(exc_info.value)
 
 
-def test_project_prune_deletes_with_filter(tmp_path):
+def test_project_prune_deletes_only_previewed_files():
     runner = _Runner(returncode=0)
-    filter_path = _write_filter_file(tmp_path)
     project = SyncProject(name="research", path="/research")
 
     result = project_prune(
-        project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+        project,
+        "my-bucket",
+        ["secret.env", "secrets/new.md"],
+        run=runner,
+        is_installed=lambda: True,
     )
 
     assert result is True
@@ -1047,37 +1050,36 @@ def test_project_prune_deletes_with_filter(tmp_path):
     assert cmd[:2] == ["rclone", "delete"]
     assert cmd[2] == "basic-memory-cloud:my-bucket/research"
     _assert_has_consistency_headers(cmd)
-    assert "--filter-from" in cmd
-    assert str(filter_path) in cmd
+    assert cmd[cmd.index("--files-from-raw") + 1] == "-"
+    assert "--filter-from" not in cmd
     assert "--verbose" not in cmd
+    assert kwargs["input"] == "secret.env\nsecrets/new.md\n"
     assert kwargs["text"] is True
 
 
-def test_project_prune_with_verbose(tmp_path):
+def test_project_prune_with_verbose():
     runner = _Runner(returncode=0)
-    filter_path = _write_filter_file(tmp_path)
     project = SyncProject(name="research", path="/research")
 
     project_prune(
         project,
         "my-bucket",
+        ["secret.env"],
         verbose=True,
         run=runner,
         is_installed=lambda: True,
-        filter_path=filter_path,
     )
 
     cmd, _ = runner.calls[0]
     assert "--verbose" in cmd
 
 
-def test_project_prune_returns_false_on_failure(tmp_path):
+def test_project_prune_returns_false_on_failure():
     runner = _Runner(returncode=1)
-    filter_path = _write_filter_file(tmp_path)
     project = SyncProject(name="research", path="/research")
 
     result = project_prune(
-        project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path
+        project, "my-bucket", ["secret.env"], run=runner, is_installed=lambda: True
     )
 
     assert result is False
@@ -1086,7 +1088,7 @@ def test_project_prune_returns_false_on_failure(tmp_path):
 def test_project_prune_checks_rclone_installed():
     project = SyncProject(name="research", path="/research")
     with pytest.raises(RcloneError) as exc_info:
-        project_prune(project, "my-bucket", is_installed=lambda: False)
+        project_prune(project, "my-bucket", ["secret.env"], is_installed=lambda: False)
     assert "rclone is not installed" in str(exc_info.value)
 
 
