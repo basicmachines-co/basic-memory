@@ -160,7 +160,8 @@ async def test_delete_project_delete_notes_removes_local_files(app, tmp_path_fac
 
     delete_result = await delete_project("Delete Notes Project", delete_notes=True)
     assert delete_result.startswith("✓")
-    assert "Note files on disk were deleted" in delete_result
+    assert "did not report a completion status" in delete_result
+    assert "Note files on disk were deleted" not in delete_result
     assert "Re-add the project" not in delete_result
     assert not project_root.exists()
 
@@ -606,7 +607,7 @@ def test_delete_routes_to_cloud_honors_explicit_routing_flags(monkeypatch):
         ("failed", True, "failed; note files may remain"),
         ("skipped", True, "was skipped; note files remain"),
         (None, True, "did not report a completion status"),
-        (None, False, "were deleted along with the project"),
+        (None, False, "did not report a completion status"),
     ],
 )
 def test_format_note_file_delete_result_reports_backend_status(status, cloud_routed, expected):
@@ -614,11 +615,10 @@ def test_format_note_file_delete_result_reports_backend_status(status, cloud_rou
     result = _format_note_file_delete_result(
         status,
         files_location="in cloud storage" if cloud_routed else "on disk",
-        cloud_routed=cloud_routed,
     )
 
     assert expected in result
-    if status in {"failed", "skipped"} or (status is None and cloud_routed):
+    if status in {"failed", "skipped"} or status is None:
         assert "were deleted" not in result
 
 

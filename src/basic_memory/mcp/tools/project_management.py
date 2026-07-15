@@ -676,13 +676,11 @@ def _format_note_file_delete_result(
     status: Literal["pending", "skipped", "complete", "failed"] | None,
     *,
     files_location: str,
-    cloud_routed: bool,
 ) -> str:
     """Describe note-file deletion without overstating backend completion."""
     if status == "pending":
         return f"Note-file deletion {files_location} was queued and is pending.\n"
-    if status == "complete" or (status is None and not cloud_routed):
-        # Local deletion is synchronous and older local responses omit the status.
+    if status == "complete":
         return f"Note files {files_location} were deleted along with the project.\n"
     if status == "failed":
         return f"Note-file deletion {files_location} failed; note files may remain.\n"
@@ -804,7 +802,6 @@ async def delete_project(
             result += _format_note_file_delete_result(
                 status_response.file_delete_status,
                 files_location=files_location,
-                cloud_routed=cloud_routed,
             )
         else:
             result += (
