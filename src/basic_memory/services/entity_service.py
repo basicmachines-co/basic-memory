@@ -191,16 +191,21 @@ def reconcile_prepared_edit_title_from_h1(
 def _markdown_heading_level(line: str) -> int | None:
     """Return the ATX heading level of a line, or None when it is not a heading.
 
-    Only 1-6 leading '#' characters followed by whitespace (or nothing) form a
-    heading, per CommonMark. '#hashtag' text and 7+ '#' runs are ordinary
-    content, so section boundaries never land on tag lines.
+    After up to three leading spaces, only 1-6 '#' characters followed by
+    whitespace (or nothing) form a heading, per CommonMark. '#hashtag' text and
+    7+ '#' runs are ordinary content, so boundaries never land on tag lines.
     """
-    if not line.startswith("#"):
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3:
         return None
-    level = len(line) - len(line.lstrip("#"))
+
+    candidate = line[indent:]
+    if not candidate.startswith("#"):
+        return None
+    level = len(candidate) - len(candidate.lstrip("#"))
     if level > 6:
         return None
-    rest = line[level:]
+    rest = candidate[level:]
     if rest and not rest.startswith((" ", "\t")):
         return None
     return level
