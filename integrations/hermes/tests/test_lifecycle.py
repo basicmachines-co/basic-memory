@@ -75,12 +75,17 @@ def test_double_initialize_reuses_running_actor(bm, monkeypatch, tmp_path):
     assert len(TrackingActor.instances) == 1
     first = TrackingActor.instances[0]
     assert p._actor is first
+    p._session_note_id = "hermes-sessions/session-one"
+    p._first_user_msg = "first session opener"
 
     p.initialize(session_id="two", hermes_home=str(tmp_path))
     assert p._initialized is True
     assert len(TrackingActor.instances) == 1, "second initialize() allocated a new actor"
     assert p._actor is first
     assert first.shutdown_calls == [], "healthy actor must be reused, not restarted"
+    assert p._session_id == "two"
+    assert p._session_note_id is None
+    assert p._first_user_msg is None
 
 
 def test_initialize_replaces_dead_actor_after_shutdown(bm, monkeypatch, tmp_path):
@@ -90,12 +95,16 @@ def test_initialize_replaces_dead_actor_after_shutdown(bm, monkeypatch, tmp_path
     p.initialize(session_id="one", hermes_home=str(tmp_path))
     first = TrackingActor.instances[0]
     first.alive = False  # simulate actor loop death (bm mcp crashed)
+    p._session_note_id = "hermes-sessions/session-one"
+    p._first_user_msg = "session opener"
 
-    p.initialize(session_id="two", hermes_home=str(tmp_path))
+    p.initialize(session_id="one", hermes_home=str(tmp_path))
     assert first.shutdown_calls, "dead actor was replaced without shutdown"
     assert len(TrackingActor.instances) == 2
     assert p._actor is TrackingActor.instances[1]
     assert p._initialized is True
+    assert p._session_note_id == "hermes-sessions/session-one"
+    assert p._first_user_msg == "session opener"
 
 
 def test_initialize_replaces_dead_actor_even_if_shutdown_raises(bm, monkeypatch, tmp_path):
@@ -150,6 +159,27 @@ def test_initialize_reaps_actor_when_start_fails(bm, monkeypatch, tmp_path):
     assert p._actor is None, "failed-start actor must not remain attached"
     failed = TrackingActor.instances[0]
     assert failed.shutdown_calls, "failed-start actor must be shut down to reap its child"
+
+
+def test_initialize_does_not_resurrect_actor_detached_during_start(bm, monkeypatch, tmp_path):
+    """SIGTERM cleanup must own and detach an actor even while start() is waiting."""
+    p = _make_initializable_provider(bm, monkeypatch, tmp_path)
+
+    class CleanupDuringStartActor(TrackingActor):
+        def start(self, timeout: float = 25.0) -> None:
+            self.started = True
+            self.alive = True
+            monkeypatch.setattr(bm, "_active_providers", [p])
+            bm._atexit_cleanup()
+
+    monkeypatch.setattr(bm, "_BmMcpActor", CleanupDuringStartActor)
+
+    p.initialize(session_id="one", hermes_home=str(tmp_path))
+
+    actor = TrackingActor.instances[0]
+    assert actor.shutdown_calls
+    assert p._actor is None
+    assert p._initialized is False
 
 
 # ---- SIGTERM cleanup chain ----
