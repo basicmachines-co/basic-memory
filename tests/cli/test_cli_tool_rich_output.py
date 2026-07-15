@@ -38,6 +38,21 @@ READ_NOTE_RESULT_WITH_FRONTMATTER = {
     "frontmatter": {"title": "Test Note", "tags": ["test"]},
 }
 
+READ_NOTE_NOT_FOUND_RESULT = {
+    "title": None,
+    "permalink": None,
+    "file_path": None,
+    "content": None,
+    "frontmatter": None,
+    "related_results": [
+        {
+            "title": "Related [draft] Note",
+            "permalink": "notes/related-note",
+            "file_path": "notes/Related Note.md",
+        }
+    ],
+}
+
 SEARCH_RESULT = {
     # Real SearchResponse.model_dump() uses "current_page", not "page".
     # No "query" key in the response -- the query comes from the CLI argument.
@@ -290,6 +305,41 @@ def test_read_note_rich_empty_content(mock_mcp):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "no content" in result.output.lower()
+
+
+@patch(
+    "basic_memory.mcp.tools.read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_NOT_FOUND_RESULT,
+)
+def test_read_note_rich_not_found_renders_related_results(mock_mcp):
+    """A normal miss renders suggestions instead of failing on nullable fields."""
+    result = _tty_runner(["tool", "read-note", "missing-note"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Note not found" in result.output
+    assert "Related [draft] Note" in result.output
+    assert "notes/related-note" in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.read_note",
+    new_callable=AsyncMock,
+    return_value={
+        "title": None,
+        "permalink": None,
+        "file_path": None,
+        "content": None,
+        "frontmatter": None,
+    },
+)
+def test_read_note_rich_not_found_without_suggestions(mock_mcp):
+    """A miss without fallback matches still returns a clear, successful result."""
+    result = _tty_runner(["tool", "read-note", "missing-note"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Note not found" in result.output
+    assert "No note or related content found" in result.output
 
 
 @patch(
@@ -780,6 +830,19 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert result.output == READ_NOTE_RESULT_WITH_FRONTMATTER["content"]
+
+
+@patch(
+    "basic_memory.mcp.tools.read_note",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_NOT_FOUND_RESULT,
+)
+def test_read_note_plain_include_frontmatter_not_found_is_empty(mock_mcp):
+    """Byte-faithful frontmatter mode emits no bytes when no note exists."""
+    result = _tty_runner(["tool", "read-note", "missing-note", "--plain", "--frontmatter"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert result.output == ""
 
 
 @patch(

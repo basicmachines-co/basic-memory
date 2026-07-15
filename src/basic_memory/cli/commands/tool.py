@@ -177,10 +177,47 @@ def _display_search_results(result: dict[str, Any], query: str = "") -> None:
 
 def _display_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
     """Render read-note result: header panel + optional frontmatter + rendered Markdown content."""
-    title = result.get("title", "")
-    permalink = result.get("permalink", "")
-    content = result.get("content", "")
-    frontmatter: dict[str, Any] = result.get("frontmatter") or {}
+    title = str(result.get("title") or "")
+    permalink = str(result.get("permalink") or "")
+    raw_content = result.get("content")
+    content = raw_content if isinstance(raw_content, str) else ""
+    raw_frontmatter = result.get("frontmatter")
+    frontmatter: dict[str, Any] = raw_frontmatter if isinstance(raw_frontmatter, dict) else {}
+
+    # Trigger: read_note returns an explicit all-None payload when no note resolves.
+    # Why: treating those values as strings crashes Rich and hides any related-note
+    #      suggestions that the MCP fallback already found.
+    # Outcome: render a stable not-found panel, including safe, copyable suggestions.
+    if raw_content is None and not title and not permalink:
+        raw_related = result.get("related_results")
+        related_results: list[dict[str, Any]] = (
+            [item for item in raw_related if isinstance(item, dict)]
+            if isinstance(raw_related, list)
+            else []
+        )
+        if related_results:
+            table = Table(show_header=True, header_style="bold", expand=False)
+            table.add_column("Title", style="bold cyan")
+            table.add_column("Permalink", style="green")
+            table.add_column("File", style="dim")
+            for item in related_results:
+                table.add_row(
+                    markup_escape(str(item.get("title") or "")),
+                    markup_escape(str(item.get("permalink") or "")),
+                    markup_escape(str(item.get("file_path") or "")),
+                )
+            console.print(
+                Panel(
+                    table,
+                    title="Note not found",
+                    subtitle=f"{len(related_results)} related result(s)",
+                    expand=False,
+                )
+            )
+        else:
+            message = str(result.get("error") or "No note or related content found.")
+            console.print(Panel(Text(message, style="dim"), title="Note not found", expand=False))
+        return
 
     # The header already uses Text.append so title is never markup-interpreted.
     header = Text()
@@ -390,7 +427,8 @@ def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = Fals
     --frontmatter, write the literal file exactly so redirection round-trips
     every boundary newline (e.g. ``read-note X --plain --frontmatter > note.md``).
     """
-    content = result.get("content", "")
+    raw_content = result.get("content")
+    content = raw_content if isinstance(raw_content, str) else ""
     if include_frontmatter:
         sys.stdout.write(content)
         return
