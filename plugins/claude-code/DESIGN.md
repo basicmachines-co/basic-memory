@@ -689,12 +689,21 @@ PreCompact checkpoints gain two additions:
 ### 14.5 Local event log
 
 When `captureEvents: true` is set, both SessionStart and PreCompact append a JSONL
-record to `<cwd>/.basic-memory/events.jsonl`. This log:
+record to the project's event log under the Basic Memory data dir:
+`<data-dir>/events/<project-or-cwd-slug>/events.jsonl`, where `<data-dir>` follows
+core's `resolve_data_dir()` (`BASIC_MEMORY_CONFIG_DIR`, then `XDG_CONFIG_HOME`,
+then `~/.basic-memory`). The log deliberately does **not** live in the working
+directory — capture must never dirty the user's repository. This log:
 
-- Is append-only (no reads during hook execution)
-- Is capped at 1000 lines (configurable via `eventRetention`); oldest half rotates out
+- Keeps the hook hot path cheap: each write is one append plus one `stat()`.
+  Rotation (drop the oldest half, bounded at `eventRetention` lines) only runs
+  when the file passes `eventRetention × 512` bytes, so retention is approximate.
 - Feeds future SPEC-61 memory routines (nightly coalescing, session summaries)
 - Never blocks the hook — write failures are silently swallowed
+
+A future version may write events through Basic Memory MCP/API calls instead of a
+local file — issue #997 explicitly leaves that open. The envelope shape is the
+contract; the transport can change without touching the hooks' capture logic.
 
 ### 14.6 Configuration
 

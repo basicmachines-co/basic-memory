@@ -79,6 +79,11 @@ MAX_PAYLOAD_VALUE_LEN = 500
 # Maximum event log entries before rotation.
 DEFAULT_EVENT_LOG_CAP = 1000
 
+# Rotation is size-triggered (a single stat per append), so the cap in lines is
+# converted to a byte threshold using this conservative per-entry estimate.
+# Envelope JSON lines run ~300-600 bytes (payload values truncate at 500 chars).
+APPROX_BYTES_PER_EVENT = 512
+
 
 @dataclass(frozen=True)
 class HarnessEnvelope:
@@ -274,39 +279,90 @@ def envelope_to_json(envelope: HarnessEnvelope) -> str:
     return json.dumps(asdict(envelope), separators=(",", ":"))
 
 
+def _events_root() -> Path:
+    """Resolve the root directory for local event logs.
+
+    Mirrors core's ``basic_memory.config.resolve_data_dir()`` (stdlib-only, so
+    no import): ``BASIC_MEMORY_CONFIG_DIR`` first, then ``XDG_CONFIG_HOME``,
+    then ``~/.basic-memory``. Event logs live under the per-user Basic Memory
+    data dir — never inside the working directory, where they would dirty the
+    user's repository.
+    """
+    if config_dir := os.environ.get("BASIC_MEMORY_CONFIG_DIR"):
+        return Path(config_dir) / "events"
+    if xdg_config := os.environ.get("XDG_CONFIG_HOME"):
+        return Path(xdg_config) / "basic-memory" / "events"
+    return Path.home() / ".basic-memory" / "events"
+
+
+def _event_log_slug(project_hint: str, cwd: str) -> str:
+    """Directory name isolating one project's event log from another's.
+
+    Prefers the configured project (stable across checkouts of the same
+    project); falls back to the working directory. A short digest of the raw
+    seed disambiguates values that slug identically ("my/proj" vs "my-proj").
+    """
+    seed = (project_hint or "").strip() or cwd
+    slug = re.sub(r"[^a-z0-9]+", "-", seed.lower()).strip("-") or "default"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    return f"{slug[:48]}-{digest}"
+
+
+def event_log_path(envelope: HarnessEnvelope) -> Path:
+    """Compute where this envelope's event log lives (see _events_root)."""
+    return _events_root() / _event_log_slug(envelope.project_hint, envelope.cwd) / "events.jsonl"
+
+
+def _normalize_cap(cap) -> int:
+    # Trigger: eventRetention comes straight from user JSON config.
+    # Why: a junk value must neither break best-effort logging nor unbound the
+    #      log. Outcome: positive ints win; anything else uses the default cap.
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+        return DEFAULT_EVENT_LOG_CAP
+    return cap
+
+
 def append_to_event_log(
     envelope: HarnessEnvelope,
-    cwd: str,
-    cap: int = DEFAULT_EVENT_LOG_CAP,
+    cap: int | None = None,
 ) -> bool:
     """Append a serialized envelope to the local event log.
 
-    The event log lives at <cwd>/.basic-memory/events.jsonl and stores raw
-    envelopes for later coalescing by memory routines (SPEC-61). The log is
-    capped at `cap` lines; when exceeded, the oldest half is rotated out.
+    The event log lives under the Basic Memory data dir at
+    ``<data-dir>/events/<project-or-cwd-slug>/events.jsonl`` and stores raw
+    envelopes for later coalescing by memory routines (SPEC-61). ``cap`` is the
+    approximate retention limit in entries (the ``eventRetention`` setting);
+    ``None`` uses DEFAULT_EVENT_LOG_CAP.
+
+    The hot path stays cheap: one append plus one stat. Rotation only runs when
+    the file size passes ``cap * APPROX_BYTES_PER_EVENT`` bytes; it then drops
+    the oldest half (bounded at ``cap`` lines), so the file halves and the next
+    many appends are stat-only again.
 
     Returns True if the write succeeded, False on any error (best-effort).
     """
-    log_dir = Path(cwd) / ".basic-memory"
-    log_path = log_dir / "events.jsonl"
+    cap = _normalize_cap(cap)
+    log_path = event_log_path(envelope)
 
     try:
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Append the new event
         line = envelope_to_json(envelope) + "\n"
-        with open(log_path, "a") as fh:
+        with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(line)
 
-        # --- Rotation check ---
-        # Trigger: log exceeds the cap. Why: unbounded growth would fill disk
-        # on long-running projects. Outcome: keep the newest half.
+        # --- Rotation check (stat-only on the hot path) ---
+        # Trigger: log size passes the byte threshold derived from the cap.
+        # Why: unbounded growth would fill disk on long-running projects, but
+        #      counting lines on every hook write would make the hot path O(n).
+        # Outcome: the oldest half rotates out; retention is approximate.
         try:
-            with open(log_path) as fh:
-                lines = fh.readlines()
-            if len(lines) > cap:
-                keep = lines[len(lines) // 2 :]
-                with open(log_path, "w") as fh:
+            if log_path.stat().st_size > cap * APPROX_BYTES_PER_EVENT:
+                with open(log_path, encoding="utf-8") as fh:
+                    lines = fh.readlines()
+                keep = lines[len(lines) // 2 :][-cap:]
+                with open(log_path, "w", encoding="utf-8") as fh:
                     fh.writelines(keep)
         except Exception:
             pass  # rotation failure is non-fatal

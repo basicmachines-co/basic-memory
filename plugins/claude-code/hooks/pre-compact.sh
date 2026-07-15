@@ -313,7 +313,7 @@ if _HAS_ENVELOPE and envelope:
 # Trigger: captureEvents is enabled. Why: the local event log feeds future
 # memory routines (SPEC-61) without requiring the note to carry every detail.
 if _HAS_ENVELOPE and envelope and capture_events:
-    append_to_event_log(envelope, cwd)
+    append_to_event_log(envelope)
 
 content = "\n".join(frontmatter + body)
 

@@ -253,7 +253,8 @@ def main() -> int:
     # Why: the local event log records session starts for later coalescing by
     #      memory routines (SPEC-61). This is separate from the brief printed
     #      above — it's durable metadata, not context for the current session.
-    # Outcome: a JSONL line is appended to <cwd>/.basic-memory/events.jsonl.
+    # Outcome: a JSONL line is appended to the project's event log under the
+    #          Basic Memory data dir (never inside the user's repository).
     if _HAS_ENVELOPE and capture_events and primary_project:
         try:
             session_id = payload.get("session_id") or ""
@@ -265,7 +266,7 @@ def main() -> int:
                 project_hint=primary_project,
                 hook_name="SessionStart",
             )
-            append_to_event_log(envelope, str(cwd))
+            append_to_event_log(envelope)
         except Exception:
             pass  # event logging failure is non-fatal
 
