@@ -56,6 +56,7 @@ dependencies = [
     # asyncpg engine-dispose race ("IndexError: pop from an empty deque") that
     # crashes the Postgres backend cannot fire under it. Not available on Windows.
     "uvloop>=0.21.0; sys_platform != 'win32'",
+    "detect-secrets>=1.5",
 ]
 
 [project.urls]

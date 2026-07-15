@@ -1,0 +1,188 @@
+"""Unit tests for the Stage-1 deterministic redaction floor."""
+
+import copy
+from pathlib import Path
+
+from basic_memory.hooks.redaction import (
+    MAX_PAYLOAD_VALUE_LEN,
+    REDACTED,
+    REDACTED_PATH,
+    TRUNCATION_MARKER,
+    redact_payload,
+)
+
+# --- Deny-key rules (recursive) ---
+
+
+def test_redacts_nested_dict_secrets_by_key() -> None:
+    payload = {"config": {"api_key": "sk-" + "a" * 30, "region": "us-east-1"}}
+
+    redacted = redact_payload(payload)
+
+    assert redacted["config"]["api_key"] == REDACTED
+    assert redacted["config"]["region"] == "us-east-1"
+
+
+def test_redacts_secrets_inside_lists() -> None:
+    payload = {
+        "env_dump": ["PATH=/usr/bin", "AWS_SECRET_ACCESS_KEY=" + "s" * 30],
+        "steps": [{"auth_token": "t" * 30}, {"note": "safe"}],
+    }
+
+    redacted = redact_payload(payload)
+
+    assert redacted["env_dump"][0] == "PATH=/usr/bin"
+    assert redacted["env_dump"][1] == REDACTED
+    assert redacted["steps"][0]["auth_token"] == REDACTED
+    assert redacted["steps"][1]["note"] == "safe"
+
+
+def test_denied_key_redacts_whole_subtree() -> None:
+    payload = {"auth": {"user": "alice", "nested": {"deep": "value"}}}
+
+    assert redact_payload(payload)["auth"] == REDACTED
+
+
+def test_benign_key_names_pass_through() -> None:
+    payload = {"safe_key": "value", "monkey": "value"}
+
+    assert redact_payload(payload) == payload
+
+
+def test_extra_keys_apply_at_depth() -> None:
+    payload = {"outer": {"internal_id": "abc"}}
+
+    redacted = redact_payload(payload, extra_redact_keys=["internal_id"])
+
+    assert redacted["outer"]["internal_id"] == REDACTED
+
+
+def test_non_string_scalars_pass_through() -> None:
+    payload = {"count": 3, "ratio": 0.5, "flag": True, "nothing": None}
+
+    assert redact_payload(payload) == payload
+
+
+def test_tuples_normalize_to_lists() -> None:
+    assert redact_payload({"steps": ("a", "b")})["steps"] == ["a", "b"]
+
+
+# --- Deny-path rules ---
+
+
+def test_deny_paths_apply_at_depth() -> None:
+    home_ssh = str(Path("~/.ssh/id_rsa").expanduser())
+    payload = {"files": [{"path": home_ssh, "preview": "y" * 600}]}
+
+    redacted = redact_payload(payload)
+
+    entry = redacted["files"][0]
+    assert entry["path"] == REDACTED_PATH
+    assert entry["preview"].endswith(TRUNCATION_MARKER)
+    assert len(entry["preview"]) < 600
+
+
+def test_deny_paths_match_across_windows_separators() -> None:
+    # Windows payload values carry backslashes while deny paths are usually
+    # written with forward slashes; both sides normalize before comparison.
+    payload = {"path": "C:\\Users\\dev\\vault\\key.txt"}
+
+    redacted = redact_payload(payload, extra_redact_paths=["C:/Users/dev/vault/"])
+
+    assert redacted["path"] == REDACTED_PATH
+
+
+def test_extra_deny_paths_accept_backslash_prefixes() -> None:
+    payload = {"path": "C:/Users/dev/vault/key.txt"}
+
+    redacted = redact_payload(payload, extra_redact_paths=["C:\\Users\\dev\\vault\\"])
+
+    assert redacted["path"] == REDACTED_PATH
+
+
+# --- Env-pair and truncation rules ---
+
+
+def test_env_style_pairs_redact_wholesale() -> None:
+    assert redact_payload({"line": "MY_TOKEN_VALUE=" + "v" * 25})["line"] == REDACTED
+
+
+def test_truncation_caps_long_values() -> None:
+    redacted = redact_payload({"long": "z" * (MAX_PAYLOAD_VALUE_LEN + 100)})
+
+    assert redacted["long"] == "z" * MAX_PAYLOAD_VALUE_LEN + TRUNCATION_MARKER
+
+
+# --- detect-secrets hits ---
+
+
+def test_detect_secrets_redacts_aws_key_in_prose() -> None:
+    payload = {"opening": "use key AKIAIOSFODNN7EXAMPLE for the deploy"}
+
+    redacted = redact_payload(payload)
+
+    assert "AKIAIOSFODNN7EXAMPLE" not in redacted["opening"]
+    assert REDACTED in redacted["opening"]
+    assert "for the deploy" in redacted["opening"]
+
+
+def test_detect_secrets_redacts_github_token() -> None:
+    token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    redacted = redact_payload({"opening": f"push with {token} now"})
+
+    assert token not in redacted["opening"]
+
+
+def test_detect_secrets_redacts_keyword_assignments() -> None:
+    redacted = redact_payload({"opening": "password = 'hunter2-super-secret-value'"})
+
+    assert "hunter2-super-secret-value" not in redacted["opening"]
+
+
+def test_detect_secrets_redacts_private_key_blocks_multiline() -> None:
+    value = "context\n-----BEGIN RSA PRIVATE KEY-----\nplain trailing line"
+    redacted = redact_payload({"dump": value})
+
+    assert "BEGIN RSA PRIVATE KEY" not in redacted["dump"]
+    assert "plain trailing line" in redacted["dump"]
+
+
+def test_detect_secrets_redacts_high_entropy_strings() -> None:
+    opaque = "Zm9vYmFyYmF6cXV4cXV1eDEyMzQ1Njc4OTBhYmNkZWY="
+    redacted = redact_payload({"opening": f"blob {opaque} end"})
+
+    assert opaque not in redacted["opening"]
+    assert "end" in redacted["opening"]
+
+
+def test_ordinary_prose_survives_entropy_scan() -> None:
+    prose = "totally benign sentence about coffee brewing methods"
+
+    assert redact_payload({"opening": prose})["opening"] == prose
+
+
+# --- Purity and idempotence ---
+
+
+def test_redaction_is_pure() -> None:
+    payload = {"config": {"api_key": "sk-" + "a" * 30}, "items": ["MY_TOKEN=" + "v" * 25]}
+    snapshot = copy.deepcopy(payload)
+
+    redact_payload(payload)
+
+    assert payload == snapshot
+
+
+def test_redaction_is_idempotent() -> None:
+    payload = {
+        "config": {"api_key": "sk-" + "a" * 30},
+        "opening": "use key AKIAIOSFODNN7EXAMPLE plus password = 'hunter2-super-secret-value'",
+        "long": "z" * (MAX_PAYLOAD_VALUE_LEN + 100),
+        "env": "MY_TOKEN_VALUE=" + "v" * 25,
+        "nested": [{"path": "C:\\Users\\dev\\vault\\key.txt"}],
+    }
+
+    once = redact_payload(payload, extra_redact_paths=["C:/Users/dev/vault/"])
+    twice = redact_payload(once, extra_redact_paths=["C:/Users/dev/vault/"])
+
+    assert once == twice
