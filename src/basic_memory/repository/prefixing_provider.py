@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import json
+import hashlib
 from typing import Any
 
-from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.embedding_provider import (
+    EmbeddingProvider,
+    embedding_provider_identity,
+)
 
 
 def normalize_embedding_prefix(value: str | None) -> str | None:
@@ -13,6 +16,14 @@ def normalize_embedding_prefix(value: str | None) -> str | None:
     if value == "":
         return None
     return value
+
+
+def embedding_prefix_digest(value: str | None) -> str:
+    """Return a stable non-secret prefix identity, reserving ``-`` for unset."""
+    normalized = normalize_embedding_prefix(value)
+    if normalized is None:
+        return "-"
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 class PrefixingEmbeddingProvider(EmbeddingProvider):
@@ -62,15 +73,10 @@ class PrefixingEmbeddingProvider(EmbeddingProvider):
         return attrs
 
     def identity_key(self) -> str:
-        """Return embedding semantics including literal text-prefix transforms."""
-        provider_identity_key = getattr(self.provider, "identity_key", None)
-        if callable(provider_identity_key):
-            provider_identity = provider_identity_key()
-        else:
-            provider_identity = f"{self.provider.model_name}:{self.provider.dimensions}"
-
+        """Return embedding semantics without exposing literal prefix content."""
+        provider_identity = embedding_provider_identity(self.provider)
         return (
             f"{type(self.provider).__name__}:{provider_identity}:"
-            f"document_prefix={json.dumps(self.document_prefix, ensure_ascii=True)}:"
-            f"query_prefix={json.dumps(self.query_prefix, ensure_ascii=True)}"
+            f"document_prefix_sha256={embedding_prefix_digest(self.document_prefix)}:"
+            f"query_prefix_sha256={embedding_prefix_digest(self.query_prefix)}"
         )

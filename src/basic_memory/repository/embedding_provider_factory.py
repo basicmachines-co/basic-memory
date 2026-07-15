@@ -10,6 +10,7 @@ from basic_memory.config import BasicMemoryConfig, default_fastembed_cache_dir
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.prefixing_provider import (
     PrefixingEmbeddingProvider,
+    embedding_prefix_digest,
     normalize_embedding_prefix,
 )
 
@@ -130,8 +131,8 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         app_config.semantic_embedding_request_concurrency,
         app_config.semantic_embedding_document_input_type,
         app_config.semantic_embedding_query_input_type,
-        normalize_embedding_prefix(app_config.semantic_embedding_document_prefix),
-        normalize_embedding_prefix(app_config.semantic_embedding_query_prefix),
+        embedding_prefix_digest(app_config.semantic_embedding_document_prefix),
+        embedding_prefix_digest(app_config.semantic_embedding_query_prefix),
         _resolve_cache_dir(app_config),
     )
 

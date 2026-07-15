@@ -18,7 +18,10 @@ from sqlalchemy import Executable, Result, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.embedding_provider import (
+    EmbeddingProvider,
+    embedding_provider_identity,
+)
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
@@ -692,18 +695,12 @@ class SearchRepositoryBase(ABC):
         """Build a stable model identity for vector invalidation checks."""
         assert self._embedding_provider is not None
         provider = self._embedding_provider
-
-        provider_identity_key = getattr(provider, "identity_key", None)
-        if callable(provider_identity_key):
-            # Trigger: providers can change request/input semantics without changing
-            # model/dimensions.
-            # Why: asymmetric providers may use role-specific API params or literal
-            # text-prefix transforms that change stored vector meaning.
-            # Outcome: reindex treats those semantic config changes as stale vectors.
-            provider_identity = provider_identity_key()
-        else:
-            provider_identity = f"{provider.model_name}:{provider.dimensions}"
-
+        # Trigger: providers can change request/input semantics without changing
+        # model/dimensions.
+        # Why: asymmetric providers may use role-specific API params or literal
+        # text-prefix transforms that change stored vector meaning.
+        # Outcome: reindex treats those semantic config changes as stale vectors.
+        provider_identity = embedding_provider_identity(provider)
         return f"{type(provider).__name__}:{provider_identity}"
 
     def _plan_entity_vector_shard(

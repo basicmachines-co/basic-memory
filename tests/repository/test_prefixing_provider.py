@@ -1,10 +1,13 @@
 """Tests for role-specific literal embedding text prefixes."""
 
+import hashlib
 from typing import Any
 
 import pytest
 
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.embedding_provider_factory import _provider_cache_key
 from basic_memory.repository.prefixing_provider import (
     PrefixingEmbeddingProvider,
     normalize_embedding_prefix,
@@ -62,8 +65,8 @@ async def test_prefixing_provider_preserves_unset_and_empty_prefix_behavior():
     assert normalize_embedding_prefix("") is None
 
 
-def test_prefixing_provider_identity_key_includes_prefix_values():
-    """Prefix changes should alter the stored vector identity key."""
+def test_prefixing_provider_identity_key_uses_prefix_digests():
+    """Prefix changes should alter identity without exposing literal values."""
     first = PrefixingEmbeddingProvider(
         _RecordingEmbeddingProvider(),
         document_prefix="doc: ",
@@ -79,8 +82,10 @@ def test_prefixing_provider_identity_key_includes_prefix_values():
     second_key = second.identity_key()
 
     assert first_key != second_key
-    assert 'document_prefix="doc: "' in first_key
-    assert 'query_prefix="query: "' in first_key
+    assert f"document_prefix_sha256={hashlib.sha256(b'doc: ').hexdigest()}" in first_key
+    assert f"query_prefix_sha256={hashlib.sha256(b'query: ').hexdigest()}" in first_key
+    assert "doc: " not in first_key
+    assert "query: " not in first_key
 
 
 def test_prefixing_provider_identity_key_distinguishes_unset_from_literal_dash():
@@ -100,8 +105,30 @@ def test_prefixing_provider_identity_key_distinguishes_unset_from_literal_dash()
     dash_key = dash_document.identity_key()
 
     assert unset_key != dash_key
-    assert "document_prefix=null" in unset_key
-    assert 'document_prefix="-"' in dash_key
+    assert "document_prefix_sha256=-" in unset_key
+    assert f"document_prefix_sha256={hashlib.sha256(b'-').hexdigest()}" in dash_key
+
+
+def test_provider_cache_key_does_not_expose_prefix_values():
+    """Process-local cache diagnostics should contain digests, not configured text."""
+    first = BasicMemoryConfig(
+        semantic_embedding_document_prefix="private document role: ",
+        semantic_embedding_query_prefix="private query role: ",
+    )
+    second = BasicMemoryConfig(
+        semantic_embedding_document_prefix="different document role: ",
+        semantic_embedding_query_prefix="private query role: ",
+    )
+
+    first_key = _provider_cache_key(first)
+    second_key = _provider_cache_key(second)
+    cache_key_text = repr(first_key)
+
+    assert first_key != second_key
+    assert "private document role: " not in cache_key_text
+    assert "private query role: " not in cache_key_text
+    assert hashlib.sha256(b"private document role: ").hexdigest() in cache_key_text
+    assert hashlib.sha256(b"private query role: ").hexdigest() in cache_key_text
 
 
 def test_prefixing_provider_reports_runtime_prefix_status():

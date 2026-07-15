@@ -1,6 +1,7 @@
 """SQLite sqlite-vec search repository tests."""
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -391,12 +392,13 @@ def test_sqlite_embedding_model_key_includes_literal_prefixes():
 
     key = repo._embedding_model_key()
 
-    assert key == (
-        "PrefixingEmbeddingProvider:"
-        "StubEmbeddingProvider:stub:4:"
-        'document_prefix="title: none | text: ":'
-        'query_prefix="task: search result | query: "'
+    assert key.startswith("PrefixingEmbeddingProvider:StubEmbeddingProvider:stub:4:")
+    assert f"document_prefix_sha256={hashlib.sha256(b'title: none | text: ').hexdigest()}" in key
+    assert (
+        f"query_prefix_sha256={hashlib.sha256(b'task: search result | query: ').hexdigest()}" in key
     )
+    assert "title: none | text: " not in key
+    assert "task: search result | query: " not in key
 
 
 @pytest.mark.asyncio
