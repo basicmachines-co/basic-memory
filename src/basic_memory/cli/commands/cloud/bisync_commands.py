@@ -106,14 +106,20 @@ async def generate_mount_credentials(tenant_id: str) -> MountCredentials:
         raise BisyncError(f"Failed to generate credentials: {e}") from e
 
 
-def convert_bmignore_to_rclone_filters(*, force: bool = False) -> Path:
+def convert_bmignore_to_rclone_filters(
+    *,
+    force: bool = False,
+    fail_on_read_error: bool = False,
+) -> Path:
     """Convert .bmignore patterns to rclone filter format.
 
     Reads ~/.basic-memory/.bmignore (gitignore-style) and converts to
     ~/.basic-memory/.bmignore.rclone (rclone filter format).
 
     Only regenerates if .bmignore has been modified since last conversion,
-    unless force=True is used for a destructive filter consumer.
+    unless force=True is used for a destructive filter consumer. Destructive
+    callers also set fail_on_read_error so a guessed fallback filter can never
+    drive deletion.
 
     Returns:
         Path to converted rclone filter file
@@ -145,7 +151,9 @@ def convert_bmignore_to_rclone_filters(*, force: bool = False) -> Path:
 
                 patterns.extend(_rclone_exclude_filters(line))
 
-    except Exception:
+    except OSError as error:
+        if fail_on_read_error:
+            raise BisyncError(f"Failed to read {bmignore_path}: {error}") from error
         # If we can't read the file, create a minimal filter
         patterns = ["# Error reading .bmignore, using minimal filters", "- .git", "- .git/**"]
 
