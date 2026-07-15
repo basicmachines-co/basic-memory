@@ -45,12 +45,35 @@ Plugin skills are namespaced under the plugin name:
 
 ## Requirements
 
-- [Basic Memory](https://github.com/basicmachines-co/basic-memory) `>= 0.19.0`
-  connected as an MCP server. `uv tool install basic-memory` is recommended (it puts
-  a `basic-memory` binary on PATH, which the hooks call directly). A `uvx
-  basic-memory mcp`-only setup also works — the hooks fall back to `uvx`/`uv` when no
-  binary is on PATH.
+- **[uv](https://docs.astral.sh/uv/)** — the documented prerequisite for the hooks'
+  fallback path. Install per platform:
+  - macOS: `brew install uv` (or the curl installer below)
+  - Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+- [Basic Memory](https://github.com/basicmachines-co/basic-memory) connected as an
+  MCP server. `uv tool install basic-memory` is recommended — it puts a
+  `basic-memory` binary on PATH, which the hooks call directly and which keeps the
+  hook version consistent with your MCP server.
 - Claude Code.
+
+### What the hooks execute
+
+The hook scripts are zero-logic shims: they resolve the Basic Memory CLI
+(`BM_BIN` override → `basic-memory` / `bm` on PATH → `uvx "basic-memory>=<floor>"`)
+and exec `basic-memory hook <event>` with the hook JSON on stdin. All behavior
+lives in the released Python package — versioned, typed, and tested. Two
+disclosures:
+
+- **Network fetch on first run.** When no binary is on PATH, the `uvx` fallback
+  downloads `basic-memory` from PyPI at a pinned minimum version (bumped by
+  release tooling); later runs use uv's cache.
+- **Event capture is opt-in and off by default.** Setting `captureEvents: true`
+  (the JSON boolean — strings never enable it) records redacted lifecycle-event
+  envelopes to a local inbox under your Basic Memory home. Inspect with
+  `basic-memory hook status`, project with `basic-memory hook flush`.
+
+If nothing is resolvable the shims exit silently — the plugin stays invisible
+when Basic Memory isn't installed.
 
 ## Installation
 
@@ -101,6 +124,7 @@ settings (or select it via `/config`).
 | `recallTimeframe` | `3d` | Recency window for the session brief |
 | `recallPrompt` | _(built-in)_ | The instruction appended to the brief |
 | `preCompactCapture` | `extractive` | How checkpoints are produced |
+| `captureEvents` | `false` | Opt-in: record redacted lifecycle-event envelopes to the local inbox (see `basic-memory hook status` / `flush`). Only the JSON boolean `true` enables it. |
 
 See [DESIGN.md](./DESIGN.md) for the complete configuration schema, the
 Claude-Code-project ↔ Basic-Memory-project mapping, and team-workspace behavior.

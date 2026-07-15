@@ -62,6 +62,14 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Changed
 
+- **Hooks are now zero-logic shims** (SPEC-55, #997). `session-start.sh` and
+  `pre-compact.sh` resolve the Basic Memory CLI (`BM_BIN` → `basic-memory`/`bm`
+  on PATH → `uvx "basic-memory>=<floor>"`, floor bumped by release tooling) and
+  exec `basic-memory hook <event> --harness claude` with the hook JSON on
+  stdin. The brief/checkpoint logic lives in the released package; opt-in
+  `captureEvents: true` additionally records redacted event envelopes to a
+  local inbox. uv is the documented prerequisite; the uvx fallback fetches from
+  PyPI on first run.
 - **SessionStart hook now nudges toward `/basic-memory:bm-setup` on first run** — when
   no `basicMemory` config block is present in either settings file. The nudge
   survives a failed/empty task query (so a brand-new user with no project yet still
