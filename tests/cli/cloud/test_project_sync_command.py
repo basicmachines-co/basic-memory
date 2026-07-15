@@ -645,6 +645,7 @@ def test_get_workspace_for_project_override_no_match_raises(monkeypatch, config_
 
 def _stub_prune_env(monkeypatch, module, *, matches, prune_result=True, recorder=None):
     """Stub the prune dependency chain so only preview/confirm/delete logic runs."""
+    prune_filter = object()
     monkeypatch.setattr(module, "_require_cloud_credentials", lambda _config: None)
     monkeypatch.setattr(
         module, "_require_personal_workspace", lambda _name, _config, **_kwargs: None
@@ -659,7 +660,15 @@ def _stub_prune_env(monkeypatch, module, *, matches, prune_result=True, recorder
         "_get_cloud_project",
         lambda _name: _async_value(SimpleNamespace(name="research", path="research")),
     )
-    monkeypatch.setattr(module, "project_prune_preview", lambda *args, **kwargs: matches)
+    monkeypatch.setattr(module, "get_bmignore_prune_filter_path", lambda: prune_filter)
+
+    def _fake_preview(*args, **kwargs):
+        if recorder is not None:
+            recorder["preview_kwargs"] = kwargs
+            recorder["prune_filter"] = prune_filter
+        return matches
+
+    monkeypatch.setattr(module, "project_prune_preview", _fake_preview)
 
     def _fake_prune(*args, **kwargs):
         if recorder is not None:
@@ -713,6 +722,8 @@ def test_cloud_prune_confirmation_accepted_deletes(monkeypatch, config_manager):
     assert result.exit_code == 0, result.output
     assert "Pruned ignored files from research" in result.output
     assert recorder["args"][1] == "tenant-bucket"
+    assert recorder["preview_kwargs"]["filter_path"] is recorder["prune_filter"]
+    assert recorder["kwargs"]["filter_path"] is recorder["prune_filter"]
 
 
 def test_cloud_prune_yes_skips_confirmation(monkeypatch, config_manager):

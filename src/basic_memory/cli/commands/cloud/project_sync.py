@@ -19,6 +19,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     SyncProject,
     TransferDirection,
     TransferPlan,
+    get_bmignore_prune_filter_path,
     get_project_bisync_state,
     project_bisync,
     project_check,
@@ -356,7 +357,17 @@ def prune_project_command(
         )
 
         console.print(f"[blue]Scanning {name} for cloud files matching .bmignore...[/blue]")
-        matches = project_prune_preview(sync_project, bucket_name)
+        # Trigger: preview and deletion are separated by an interactive prompt.
+        # Why: .bmignore could change while the prompt is open; regenerating the
+        # filter would make rclone delete a different set than the user reviewed.
+        # Outcome: snapshot the generated filter once and use that exact file for
+        # both operations.
+        prune_filter_path = get_bmignore_prune_filter_path()
+        matches = project_prune_preview(
+            sync_project,
+            bucket_name,
+            filter_path=prune_filter_path,
+        )
 
         if not matches:
             console.print(f"[green]No cloud files in {name} match .bmignore[/green]")
@@ -380,7 +391,12 @@ def prune_project_command(
             console.print("[yellow]Prune cancelled - nothing deleted[/yellow]")
             raise typer.Exit(0)
 
-        success = project_prune(sync_project, bucket_name, verbose=verbose)
+        success = project_prune(
+            sync_project,
+            bucket_name,
+            verbose=verbose,
+            filter_path=prune_filter_path,
+        )
 
         if success:
             console.print(f"[green]Pruned ignored files from {name}[/green]")
