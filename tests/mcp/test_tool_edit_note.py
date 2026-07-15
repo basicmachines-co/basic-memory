@@ -189,6 +189,83 @@ async def test_edit_note_replace_section_operation(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_edit_note_replace_section_consumes_subsections_by_default(client, test_project):
+    """replace_section is level-aware by default: h3 subsections go with their h2 (#1012)."""
+    await write_note(
+        project=test_project.name,
+        title="Level Aware Spec",
+        directory="specs",
+        content=(
+            "# Spec\n\n"
+            "## Implementation\n"
+            "Old details.\n\n"
+            "### Internals\n"
+            "Old internals.\n\n"
+            "## Testing\n"
+            "Test info here."
+        ),
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="specs/level-aware-spec",
+        operation="replace_section",
+        content="New details.\n\n## Rollout\nShip behind a flag.\n",
+        section="## Implementation",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (replace_section)" in result
+
+    # The h2 section was replaced through the next h2, subsections included, and the
+    # replacement's new h2 caused no duplicated re-emitted content
+    content = await read_note("specs/level-aware-spec", project=test_project.name)
+    assert "New details." in content
+    assert "## Rollout" in content
+    assert "### Internals" not in content
+    assert "Old internals." not in content
+    assert "Test info here." in content  # next h2 section untouched
+
+
+@pytest.mark.asyncio
+async def test_edit_note_replace_section_opt_out_preserves_subsections(client, test_project):
+    """replace_subsections=False keeps h3 subsections, replacing only the immediate body."""
+    await write_note(
+        project=test_project.name,
+        title="Opt Out Spec",
+        directory="specs",
+        content=(
+            "# Spec\n\n"
+            "## Implementation\n"
+            "Old details.\n\n"
+            "### Internals\n"
+            "Internals stay.\n\n"
+            "## Testing\n"
+            "Test info here."
+        ),
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="specs/opt-out-spec",
+        operation="replace_section",
+        content="New details.\n",
+        section="## Implementation",
+        replace_subsections=False,
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (replace_section)" in result
+
+    content = await read_note("specs/opt-out-spec", project=test_project.name)
+    assert "New details." in content
+    assert "Old details." not in content
+    assert "### Internals" in content  # subsections preserved by the opt-out
+    assert "Internals stay." in content
+    assert "Test info here." in content
+
+
+@pytest.mark.asyncio
 async def test_edit_note_nonexistent_note_find_replace(client, test_project):
     """Test find_replace on a note that doesn't exist - should return helpful guidance."""
     result = await edit_note(

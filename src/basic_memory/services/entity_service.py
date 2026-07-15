@@ -188,6 +188,43 @@ def reconcile_prepared_edit_title_from_h1(
     )
 
 
+def _markdown_heading_level(line: str) -> int | None:
+    """Return the ATX heading level of a line, or None when it is not a heading.
+
+    Only 1-6 leading '#' characters followed by whitespace (or nothing) form a
+    heading, per CommonMark. '#hashtag' text and 7+ '#' runs are ordinary
+    content, so section boundaries never land on tag lines.
+    """
+    if not line.startswith("#"):
+        return None
+    level = len(line) - len(line.lstrip("#"))
+    if level > 6:
+        return None
+    rest = line[level:]
+    if rest and not rest.startswith((" ", "\t")):
+        return None
+    return level
+
+
+def _fenced_code_line_flags(lines: list[str]) -> list[bool]:
+    """Mark which lines sit inside (or delimit) ``` fenced code blocks.
+
+    Fenced code often contains '# comment' lines that look exactly like markdown
+    headings. Section matching and boundary detection must skip those lines, or a
+    code comment would match or terminate a section.
+    """
+    flags: list[bool] = []
+    in_fence = False
+    for line in lines:
+        # Delimiter lines are marked as fenced too: they can never be headings or
+        # section matches, and treating them uniformly keeps the scan branch-free.
+        is_delimiter = line.lstrip().startswith("```")
+        flags.append(in_fence or is_delimiter)
+        if is_delimiter:
+            in_fence = not in_fence
+    return flags
+
+
 class EntityService(BaseService[EntityModel]):
     """Service for managing entities in the database."""
 
@@ -686,6 +723,7 @@ class EntityService(BaseService[EntityModel]):
         section: Optional[str] = None,
         find_text: Optional[str] = None,
         expected_replacements: int = 1,
+        replace_subsections: bool = True,
         skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
@@ -707,6 +745,7 @@ class EntityService(BaseService[EntityModel]):
             section,
             find_text,
             expected_replacements,
+            replace_subsections,
         )
 
         title = entity.title
@@ -1348,6 +1387,7 @@ class EntityService(BaseService[EntityModel]):
         section: Optional[str] = None,
         find_text: Optional[str] = None,
         expected_replacements: int = 1,
+        replace_subsections: bool = True,
     ) -> EntityModel:
         """Edit an existing entity's content using various operations.
 
@@ -1358,6 +1398,9 @@ class EntityService(BaseService[EntityModel]):
             section: For replace_section operation - the markdown header
             find_text: For find_replace operation - the text to find and replace
             expected_replacements: For find_replace operation - expected number of replacements (default: 1)
+            replace_subsections: For replace_section operation - replace nested
+                subsections along with the section body (default True); False stops
+                at the first heading of any level, preserving them
 
         Returns:
             The updated entity model
@@ -1374,6 +1417,7 @@ class EntityService(BaseService[EntityModel]):
                 section=section,
                 find_text=find_text,
                 expected_replacements=expected_replacements,
+                replace_subsections=replace_subsections,
             )
         ).entity
 
@@ -1385,6 +1429,7 @@ class EntityService(BaseService[EntityModel]):
         section: Optional[str] = None,
         find_text: Optional[str] = None,
         expected_replacements: int = 1,
+        replace_subsections: bool = True,
     ) -> EntityWriteResult:
         """Edit an entity and return both the entity row and written markdown."""
         logger.debug(f"Editing entity: {identifier}, operation: {operation}")
@@ -1411,6 +1456,7 @@ class EntityService(BaseService[EntityModel]):
                 section=section,
                 find_text=find_text,
                 expected_replacements=expected_replacements,
+                replace_subsections=replace_subsections,
                 session=session,
             )
 
@@ -1448,6 +1494,7 @@ class EntityService(BaseService[EntityModel]):
         section: Optional[str] = None,
         find_text: Optional[str] = None,
         expected_replacements: int = 1,
+        replace_subsections: bool = True,
     ) -> str:
         """Apply the specified edit operation to the current content."""
 
@@ -1487,7 +1534,12 @@ class EntityService(BaseService[EntityModel]):
                 raise ValueError("section is required for replace_section operation")
             if not section.strip():
                 raise ValueError("section cannot be empty or whitespace only")
-            return self.replace_section_content(current_content, section, content)
+            return self.replace_section_content(
+                current_content,
+                section,
+                content,
+                replace_subsections=replace_subsections,
+            )
 
         elif operation in ("insert_before_section", "insert_after_section"):
             if not section:
@@ -1501,22 +1553,36 @@ class EntityService(BaseService[EntityModel]):
             raise ValueError(f"Unsupported operation: {operation}")
 
     def replace_section_content(
-        self, current_content: str, section_header: str, new_content: str
+        self,
+        current_content: str,
+        section_header: str,
+        new_content: str,
+        replace_subsections: bool = True,
     ) -> str:
         """Replace content under a specific markdown section header.
 
-        This method uses a simple, safe approach: when replacing a section, it only
-        replaces the immediate content under that header until it encounters the next
-        header of ANY level. This means:
+        By default a section owns everything through the next heading of the same
+        or higher level in the original document (issue #1012):
 
-        - Replacing "# Header" replaces content until "## Subsection" (preserves subsections)
-        - Replacing "## Section" replaces content until "### Subsection" (preserves subsections)
-        - More predictable and safer than trying to consume entire hierarchies
+        - Replacing "## Section" replaces its body and all "###"+ subsections,
+          stopping at the next "##" or "#" heading — how Obsidian and most
+          markdown tools scope a section.
+        - Passing replace_subsections=False restores the earlier conservative
+          behavior: only the immediate content under the header is replaced and
+          consumption stops at the next heading of ANY level, preserving
+          subsections.
+
+        The boundary is always computed from the original document, so new_content
+        may freely introduce new headings without shifting where the replaced span
+        ends. Heading detection ignores lines inside ``` fenced code blocks, so a
+        '# comment' in a code sample never matches or terminates a section.
 
         Args:
             current_content: The current markdown content
             section_header: The section header to find and replace (e.g., "## Section Name")
             new_content: The new content to replace the section with (should not include the header itself)
+            replace_subsections: Replace nested subsections along with the section
+                body (default True); False stops at the first heading of any level.
 
         Returns:
             The updated content with the section replaced
@@ -1535,13 +1601,18 @@ class EntityService(BaseService[EntityModel]):
             # Remove the duplicate header line
             new_content = "\n".join(new_content_lines[1:]).lstrip()
 
-        # First pass: count matching sections to check for duplicates
         lines = current_content.split("\n")
-        matching_sections = []
+        # Fenced code can contain lines identical to the requested header, so section
+        # matching must skip fenced lines or a code sample would trigger the
+        # duplicate-header error (or match as the section itself).
+        fenced = _fenced_code_line_flags(lines)
 
-        for i, line in enumerate(lines):
-            if line.strip() == section_header.strip():
-                matching_sections.append(i)
+        # First pass: count matching sections to check for duplicates
+        matching_sections = [
+            i
+            for i, line in enumerate(lines)
+            if not fenced[i] and line.strip() == section_header.strip()
+        ]
 
         # Handle multiple sections error
         if len(matching_sections) > 1:
@@ -1556,36 +1627,29 @@ class EntityService(BaseService[EntityModel]):
             separator = "\n\n" if current_content and not current_content.endswith("\n\n") else ""
             return current_content + separator + section_header + "\n" + new_content
 
-        # Replace the single matching section
-        result_lines = []
+        # Replace the single matching section. The replaced span always ends at a
+        # boundary computed from the ORIGINAL lines, so headings inside new_content
+        # cannot extend or shorten what gets consumed (issue #1012).
         section_line_idx = matching_sections[0]
+        target_level = len(section_header) - len(section_header.lstrip("#"))
 
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-
-            # Check if this is our target section header
-            if i == section_line_idx:
-                # Add the section header and new content
-                result_lines.append(line)
-                result_lines.append(new_content)
-                i += 1
-
-                # Skip the original section content until next header or end
-                while i < len(lines):
-                    next_line = lines[i]
-                    # Stop consuming when we hit any header (preserve subsections)
-                    if next_line.startswith("#"):
-                        # We found another header - continue processing from here
-                        break
-                    i += 1
-                # Continue processing from the next header (don't increment i again)
+        end_idx = len(lines)
+        for i in range(section_line_idx + 1, len(lines)):
+            if fenced[i]:
                 continue
+            heading_level = _markdown_heading_level(lines[i])
+            if heading_level is None:
+                continue
+            # Level-aware default: an h2 section owns its h3+ subsections, so only a
+            # heading at the same or higher level ends it. The opt-out stops at any
+            # heading, preserving subsections (pre-#1012 behavior).
+            if not replace_subsections or heading_level <= target_level:
+                end_idx = i
+                break
 
-            # Add all other lines (including subsequent sections)
-            result_lines.append(line)
-            i += 1
-
+        result_lines = lines[: section_line_idx + 1]
+        result_lines.append(new_content)
+        result_lines.extend(lines[end_idx:])
         return "\n".join(result_lines)
 
     def insert_relative_to_section(
@@ -1618,8 +1682,13 @@ class EntityService(BaseService[EntityModel]):
             section_header = "## " + section_header
 
         lines = current_content.split("\n")
+        # Fenced code can contain a line identical to the requested heading; skip
+        # fenced lines so a code sample never anchors (or duplicates) the section.
+        fenced = _fenced_code_line_flags(lines)
         matching_indices = [
-            i for i, line in enumerate(lines) if line.strip() == section_header.strip()
+            i
+            for i, line in enumerate(lines)
+            if not fenced[i] and line.strip() == section_header.strip()
         ]
 
         if len(matching_indices) == 0:

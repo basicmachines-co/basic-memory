@@ -77,6 +77,10 @@ class EditEntityRequest(BaseModel):
     section: Optional[str] = None
     find_text: Optional[str] = None
     expected_replacements: int = 1
+    # replace_section boundary control (issue #1012): True replaces the whole
+    # level-aware section including subsections; False stops at the first heading
+    # of any level, preserving them.
+    replace_subsections: bool = True
 
     @field_validator("section")
     @classmethod

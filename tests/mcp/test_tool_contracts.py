@@ -45,6 +45,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "section",
         "find_text",
         "expected_replacements",
+        "replace_subsections",
         "output_format",
     ],
     "fetch": ["id"],

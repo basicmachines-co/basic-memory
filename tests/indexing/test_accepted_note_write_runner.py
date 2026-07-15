@@ -201,7 +201,7 @@ class _EditPreparer:
     def __init__(self, prepared: _PreparedWrite) -> None:
         self.prepared = prepared
         self.calls: list[
-            tuple[Entity, str, str, str, str | None, str | None, int, AsyncSession | None]
+            tuple[Entity, str, str, str, str | None, str | None, int, bool, AsyncSession | None]
         ] = []
 
     async def prepare_edit_entity_content(
@@ -214,6 +214,7 @@ class _EditPreparer:
         section: str | None = None,
         find_text: str | None = None,
         expected_replacements: int = 1,
+        replace_subsections: bool = True,
         session: AsyncSession | None = None,
     ) -> _PreparedWrite:
         self.calls.append(
@@ -225,6 +226,7 @@ class _EditPreparer:
                 section,
                 find_text,
                 expected_replacements,
+                replace_subsections,
                 session,
             )
         )
@@ -451,6 +453,7 @@ async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
         section=None,
         find_text="# Accepted",
         expected_replacements=1,
+        replace_subsections=True,
         now=now,
         user_profile_value=None,
     )
@@ -466,6 +469,7 @@ async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
             None,
             "# Accepted",
             1,
+            True,
             cast(AsyncSession, session),
         )
     ]

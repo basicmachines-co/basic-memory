@@ -139,6 +139,7 @@ class AcceptedNoteEditPreparer(Protocol):
         section: str | None = ...,
         find_text: str | None = ...,
         expected_replacements: int = ...,
+        replace_subsections: bool = ...,
         session: AsyncSession | None = ...,
     ) -> AcceptedPreparedMarkdownWriteSource: ...
 
@@ -367,6 +368,7 @@ async def prepare_accepted_note_edit(
     section: str | None,
     find_text: str | None,
     expected_replacements: int,
+    replace_subsections: bool,
     now: datetime,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteWrite:
@@ -379,6 +381,7 @@ async def prepare_accepted_note_edit(
         section=section,
         find_text=find_text,
         expected_replacements=expected_replacements,
+        replace_subsections=replace_subsections,
         session=session,
     )
     result = AcceptedPreparedNoteWrite(

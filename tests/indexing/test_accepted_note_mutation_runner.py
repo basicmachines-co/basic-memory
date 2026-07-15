@@ -109,7 +109,7 @@ class _CreatePreparer:
         self.calls: list[tuple[EntitySchema, bool, AsyncSession | None]] = []
         self.replace_calls: list[tuple[Entity, EntitySchema, str, AsyncSession | None]] = []
         self.edit_calls: list[
-            tuple[Entity, str, str, str, str | None, str | None, int, AsyncSession | None]
+            tuple[Entity, str, str, str, str | None, str | None, int, bool, AsyncSession | None]
         ] = []
         self.move_calls: list[tuple[Entity, str, str, AsyncSession | None]] = []
 
@@ -144,6 +144,7 @@ class _CreatePreparer:
         section: str | None = None,
         find_text: str | None = None,
         expected_replacements: int = 1,
+        replace_subsections: bool = True,
         session: AsyncSession | None = None,
     ) -> _PreparedWrite:
         self.edit_calls.append(
@@ -155,6 +156,7 @@ class _CreatePreparer:
                 section,
                 find_text,
                 expected_replacements,
+                replace_subsections,
                 session,
             )
         )
@@ -951,6 +953,7 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content() -> None
             None,
             "# Old",
             1,
+            True,
             cast(AsyncSession, session),
         )
     ]

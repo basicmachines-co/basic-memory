@@ -357,6 +357,7 @@ async def edit_note(
         ),
     ] = None,
     expected_replacements: Optional[int] = None,
+    replace_subsections: Optional[bool] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -376,7 +377,9 @@ async def edit_note(
                   - "append": Add content to the end of the note (creates the note if it doesn't exist)
                   - "prepend": Add content to the beginning of the note (creates the note if it doesn't exist)
                   - "find_replace": Replace occurrences of find_text with content (note must exist)
-                  - "replace_section": Replace content under a specific markdown header (note must exist)
+                  - "replace_section": Replace a markdown section identified by its header (note must exist).
+                    By default the section spans through the next heading of the same or higher
+                    level, so its subsections are replaced too; see replace_subsections.
                   - "insert_before_section": Insert content before a section heading without consuming it (note must exist)
                   - "insert_after_section": Insert content after a section heading without consuming it (note must exist)
         content: The content to add or use for replacement
@@ -391,6 +394,12 @@ async def edit_note(
         section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
+        replace_subsections: For replace_section operation. Default (true): the section
+            spans everything through the next heading of the same or higher level in the
+            original note, so replacing "## Section" also replaces its "###" subsections —
+            the replacement content may freely introduce new headings. Set to false to
+            replace only the immediate content under the header, stopping at the next
+            heading of any level and preserving subsections.
         output_format: "text" returns the existing markdown summary. "json" returns
             machine-readable edit metadata.
         context: Optional FastMCP context for performance caching.
@@ -415,8 +424,11 @@ async def edit_note(
         # Replace text that appears multiple times - validate count first
         edit_note("team-docs", "docs/guide", "find_replace", "new-api", find_text="old-api", expected_replacements=5)
 
-        # Replace implementation section
+        # Replace implementation section (subsections under it are replaced too)
         edit_note("specs", "api-spec", "replace_section", "New implementation approach...\\n", section="## Implementation")
+
+        # Replace only the intro text under a header, keeping its subsections
+        edit_note("specs", "api-spec", "replace_section", "New intro...\\n", section="## Implementation", replace_subsections=False)
 
         # Replace subsection with more specific header
         edit_note("docs", "docs/setup", "replace_section", "Updated install steps\\n", section="### Installation")
@@ -447,8 +459,9 @@ async def edit_note(
         indexes that file automatically and retries the edit. The tool provides detailed
         error messages with suggestions if operations fail.
     """
-    # Resolve effective default: allow MCP clients to send null for optional int field
+    # Resolve effective defaults: allow MCP clients to send null for optional scalar fields
     effective_replacements = expected_replacements if expected_replacements is not None else 1
+    effective_replace_subsections = replace_subsections if replace_subsections is not None else True
     project = _compose_workspace_project_route(
         workspace=workspace,
         project=project,
@@ -510,6 +523,7 @@ async def edit_note(
         has_section=bool(section),
         has_find_text=bool(find_text),
         expected_replacements=effective_replacements,
+        replace_subsections=effective_replace_subsections,
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -635,6 +649,8 @@ async def edit_note(
                         edit_data["find_text"] = find_text
                     if effective_replacements != 1:  # Only send if different from default
                         edit_data["expected_replacements"] = str(effective_replacements)
+                    if not effective_replace_subsections:  # Only send if different from default
+                        edit_data["replace_subsections"] = False
 
                     # Call the PATCH endpoint
                     result = await knowledge_client.patch_entity(entity_id, edit_data)

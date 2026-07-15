@@ -1357,12 +1357,13 @@ async def test_edit_entity_replace_section_header_variations(
         section="Section Name",  # No ## prefix
     )
 
-    # Verify replacement worked
+    # Verify replacement worked (level-aware default consumes the h3 subsection too)
     file_path = file_service.get_entity_path(updated)
     file_content, _ = await file_service.read_file(file_path)
     assert "New section content" in file_content
     assert "Original content" not in file_content
-    assert "### Subsection" in file_content  # Subsection preserved
+    assert "### Subsection" not in file_content  # Subsection replaced with the section
+    assert "Sub content" not in file_content
 
 
 @pytest.mark.asyncio
@@ -1409,7 +1410,7 @@ async def test_edit_entity_replace_section_at_end_of_document(
 async def test_edit_entity_replace_section_with_subsections(
     entity_service: EntityService, file_service: FileService
 ):
-    """Test replace_section preserves subsections (stops at any header)."""
+    """Test replace_section consumes subsections by default (level-aware, issue #1012)."""
     # Create test entity with nested sections
     content = dedent("""
         # Main Title
@@ -1436,7 +1437,7 @@ async def test_edit_entity_replace_section_with_subsections(
         )
     )
 
-    # Replace parent section (should only replace content until first subsection)
+    # Replace parent section (level-aware: consumes h3 subsections, stops at next h2)
     updated = await entity_service.edit_entity(
         identifier=_permalink(entity),
         operation="replace_section",
@@ -1444,15 +1445,225 @@ async def test_edit_entity_replace_section_with_subsections(
         section="## Parent Section",
     )
 
-    # Verify replacement worked - only immediate content replaced, subsections preserved
+    # Verify the whole level-aware section was replaced, subsections included (#1012)
     file_path = file_service.get_entity_path(updated)
     file_content, _ = await file_service.read_file(file_path)
     assert "New parent content" in file_content
     assert "Parent content" not in file_content  # Original content replaced
-    assert "Child 1 content" in file_content  # Child sections preserved
-    assert "Child 2 content" in file_content  # Child sections preserved
-    assert "## Another Section" in file_content  # Next section preserved
+    assert "### Child Section 1" not in file_content  # Subsections replaced with the section
+    assert "Child 1 content" not in file_content
+    assert "### Child Section 2" not in file_content
+    assert "Child 2 content" not in file_content
+    assert "## Another Section" in file_content  # Next same-level section preserved
     assert "Other content" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_new_headings_no_duplication(
+    entity_service: EntityService, file_service: FileService
+):
+    """Replacement introducing new headings must not duplicate re-emitted content (#1012).
+
+    The old any-heading boundary stopped at the first h3 subsection and re-emitted it
+    (and everything after it) behind the replacement, so a replacement that restated
+    that material produced silent duplicate sections.
+    """
+    content = dedent("""
+        # Ticket
+
+        ## Observations
+        - [status] open
+        - [priority] high
+
+        ### Follow-up
+        - call Jamie back
+
+        ## Relations
+        - reported_by [[Jamie Rivera]]
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Ticket Note",
+            directory="tickets",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    # The replacement rewrites the subsection and adds a brand-new h2 of its own
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="replace_section",
+        content=(
+            "- [status] resolved\n"
+            "\n"
+            "### Follow-up\n"
+            "- called Jamie back\n"
+            "\n"
+            "## Resolution\n"
+            "Restarted the sync worker."
+        ),
+        section="## Observations",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    # The whole level-aware section was consumed, so the replacement's headings appear
+    # exactly once — no original content re-emitted after the new sections
+    assert file_content.count("### Follow-up") == 1
+    assert file_content.count("## Resolution") == 1
+    assert "- called Jamie back" in file_content
+    assert "- call Jamie back" not in file_content
+    assert "Restarted the sync worker." in file_content
+    # The true boundary — the next h2 in the original — is untouched
+    assert "## Relations" in file_content
+    assert "reported_by" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_opt_out_preserves_subsections(
+    entity_service: EntityService, file_service: FileService
+):
+    """replace_subsections=False restores the pre-#1012 stop-at-any-heading behavior."""
+    content = dedent("""
+        # Main Title
+
+        ## Parent Section
+        Parent content
+
+        ### Child Section
+        Child content
+
+        ## Another Section
+        Other content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Opt Out Note",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="replace_section",
+        content="New parent content",
+        section="## Parent Section",
+        replace_subsections=False,
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "New parent content" in file_content
+    assert "Parent content" not in file_content  # Immediate content replaced
+    assert "### Child Section" in file_content  # Subsections preserved
+    assert "Child content" in file_content
+    assert "## Another Section" in file_content
+    assert "Other content" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_ignores_fenced_code_headings(
+    entity_service: EntityService, file_service: FileService
+):
+    """Heading-like lines inside ``` fences neither match nor terminate a section."""
+    content = dedent("""
+        # Main Title
+
+        ## Usage
+        Run the setup script:
+
+        ```bash
+        # install dependencies
+        ./setup.sh
+
+        ## this comment looks like a heading
+        ```
+
+        More usage notes.
+
+        ## Reference
+        Reference content
+
+        ```python
+        ## Usage
+        ```
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Fenced Note",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    # The fenced '## Usage' under '## Reference' must not count as a duplicate
+    # section, and the fenced '# install dependencies' comment must not end the
+    # '## Usage' section early.
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="replace_section",
+        content="Updated usage instructions.",
+        section="## Usage",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Updated usage instructions." in file_content
+    # The fenced block belonged to the section, so it was consumed with it
+    assert "./setup.sh" not in file_content
+    assert "# install dependencies" not in file_content
+    assert "More usage notes." not in file_content
+    # The next real h2 section is intact, including its fenced '## Usage' decoy
+    assert "Reference content" in file_content
+    assert "```python\n## Usage\n```" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_ignores_fenced_code_headings(
+    entity_service: EntityService, file_service: FileService
+):
+    """Section insertion must anchor on the real heading, not a fenced code copy."""
+    content = dedent("""
+        # Main Title
+
+        ```markdown
+        ## Target Section
+        ```
+
+        ## Target Section
+        Target content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Fenced Insert Note",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    # Without fence awareness this would fail with a multiple-sections error
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="insert_after_section",
+        content="Inserted after the real heading",
+        section="## Target Section",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Inserted after the real heading" in file_content
+    assert "Target content" in file_content
+    # Inserted content lands after the real heading, which follows the fenced decoy
+    assert file_content.index("```markdown") < file_content.index("Inserted after the real heading")
 
 
 @pytest.mark.asyncio
