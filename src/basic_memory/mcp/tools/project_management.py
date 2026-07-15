@@ -778,7 +778,10 @@ async def delete_project(
 
         files_location = "in cloud storage" if _delete_routes_to_cloud(workspace_id) else "on disk"
         if delete_notes:
-            result += f"Note files {files_location} were deleted along with the project.\n"
+            if status_response.file_delete_status == "pending":
+                result += f"Note-file deletion {files_location} was queued and is pending.\n"
+            else:
+                result += f"Note files {files_location} were deleted along with the project.\n"
         else:
             result += (
                 f"Note files remain {files_location} but the project is no longer "

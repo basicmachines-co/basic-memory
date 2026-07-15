@@ -403,6 +403,8 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
         status="success",
         default=False,
         old_project=target_project,
+        deletion_status="pending",
+        file_delete_status="pending" if delete_notes else "skipped",
     )
 
     with (
@@ -451,7 +453,8 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
     assert result.startswith("✓")
     # Cloud-routed delete: result text must not claim "files remain on disk" (#1034).
     if delete_notes:
-        assert "Note files in cloud storage were deleted" in result
+        assert "Note-file deletion in cloud storage was queued and is pending" in result
+        assert "were deleted" not in result
     else:
         assert "Note files remain in cloud storage" in result
         assert "Re-add the project" in result

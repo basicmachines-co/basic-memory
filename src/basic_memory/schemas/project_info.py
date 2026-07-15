@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import Field, BaseModel
 
@@ -240,4 +240,10 @@ class ProjectStatusResponse(BaseModel):
     )
     new_project: Optional[ProjectItem] = Field(
         None, description="Information about the project being switched to"
+    )
+    deletion_status: Optional[Literal["pending", "complete", "failed"]] = Field(
+        None, description="Background project deletion status when returned by the backend"
+    )
+    file_delete_status: Optional[Literal["pending", "skipped", "complete", "failed"]] = Field(
+        None, description="Background note-file deletion status when returned by the backend"
     )
