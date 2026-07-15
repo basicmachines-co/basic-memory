@@ -1,8 +1,9 @@
 """Codex hook stdin adapter.
 
-Ground truth for the payload shape: the shipped Codex hook scripts
-(plugins/codex/hooks/session-start.py, pre-compact.py), which read these
-fields from stdin JSON:
+Ground truth for the payload shape: the original Codex hook scripts (replaced
+by zero-logic shims in plugins/codex/hooks/; the recorded fixtures in
+tests/hooks/fixtures/ preserve the shapes), which read these fields from
+stdin JSON:
 
   session-start: cwd, source (startup|resume|compact), session_id,
                  transcript_path

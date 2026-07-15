@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 #
-# SessionStart hook - brief Codex from Basic Memory at thread start.
+# SessionStart shim — the entire hook. All logic (config resolution, the
+# Codex memory brief, opt-in envelope capture) lives in the released
+# basic-memory package behind `basic-memory hook session-start`; the plugin
+# ships configuration, not code.
 #
-# Contract: best effort only. A missing Basic Memory install, empty project, slow
-# cloud read, or bad config must never disrupt a Codex thread.
-
+# Resolution order: BM_BIN (explicit override) → basic-memory / bm on PATH
+# (preferred — keeps the hook's version consistent with the user's MCP server)
+# → uvx at a released floor (fetches from PyPI on first run; uv is the
+# documented prerequisite). Nothing resolvable → silent exit 0: the plugin
+# must stay invisible to non-Basic-Memory users (fail-open).
 set -u
 
-if ! command -v uv >/dev/null 2>&1; then
+if [[ -n "${BM_BIN:-}" ]]; then
+    # An explicit executable path (may contain spaces) stays one word; any
+    # other value is a multi-token launcher like "uvx basic-memory".
+    if [[ -x "$BM_BIN" ]]; then BM=("$BM_BIN"); else read -r -a BM <<<"$BM_BIN"; fi
+elif command -v basic-memory >/dev/null 2>&1; then
+    BM=(basic-memory)
+elif command -v bm >/dev/null 2>&1; then
+    BM=(bm)
+elif command -v uvx >/dev/null 2>&1; then
+    BM=(uvx "basic-memory>=0.22.1")
+else
     exit 0
 fi
 
-script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-uv run --script "$script_dir/session-start.py" 2>/dev/null || exit 0
+# Codex has no project-dir env var; project mapping uses the payload cwd.
+# The hook JSON on stdin passes through untouched.
+exec "${BM[@]}" hook session-start --harness codex

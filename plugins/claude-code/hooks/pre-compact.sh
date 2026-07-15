@@ -1,273 +1,34 @@
 #!/usr/bin/env bash
 #
-# PreCompact hook — checkpoint the session to Basic Memory before compaction.
+# PreCompact shim — the entire hook. All logic (settings resolution, the
+# extractive checkpoint note, opt-in envelope capture) lives in the released
+# basic-memory package behind `basic-memory hook pre-compact`; the plugin
+# ships configuration, not code.
 #
-# This is the write side of the memory bridge: right before Claude Code compacts
-# the context window (and the texture of the session is about to be lost), we
-# write a durable SessionNote to the graph so the next session can resume from it.
-#
-# Phase 1 is the *extractive* cut (see DESIGN.md): we lift the opening request and
-# the most recent turns straight from the transcript — no LLM call. Verified (Q2)
-# that PreCompact has a ~600s budget, so a real LLM-summarized checkpoint is the
-# planned "enrich later" upgrade; extractive is the safe, fast first version.
-#
-# Contract: advisory, never blocks compaction. Every failure path exits 0. We only
-# write when a primaryProject is configured — we never write to a user's default
-# graph unless they've explicitly pointed the plugin at a project.
-
+# Resolution order: BM_BIN (explicit override) → basic-memory / bm on PATH
+# (preferred — keeps the hook's version consistent with the user's MCP server)
+# → uvx at a released floor (fetches from PyPI on first run; uv is the
+# documented prerequisite). Nothing resolvable → silent exit 0: the plugin
+# must stay invisible to non-Basic-Memory users (fail-open).
 set -u
 
-input="$(cat 2>/dev/null || true)"
-
-# Resolve how to invoke the Basic Memory CLI — prefer an explicit command when the
-# host configured one, then a binary on PATH. Fall back to uvx / uv so checkpointing
-# still works when BM was connected only as an ephemeral `uvx basic-memory mcp`
-# server (no persistent CLI). Silent no-op if none available.
 if [[ -n "${BM_BIN:-}" ]]; then
-    BM="$BM_BIN"
+    # An explicit executable path (may contain spaces) stays one word; any
+    # other value is a multi-token launcher like "uvx basic-memory".
+    if [[ -x "$BM_BIN" ]]; then BM=("$BM_BIN"); else read -r -a BM <<<"$BM_BIN"; fi
 elif command -v basic-memory >/dev/null 2>&1; then
-    BM="basic-memory"
+    BM=(basic-memory)
 elif command -v bm >/dev/null 2>&1; then
-    BM="bm"
+    BM=(bm)
 elif command -v uvx >/dev/null 2>&1; then
-    BM="uvx basic-memory"
-elif command -v uv >/dev/null 2>&1; then
-    BM="uv tool run basic-memory"
+    BM=(uvx "basic-memory>=0.22.1")
 else
     exit 0
 fi
 
-BM_HOOK_INPUT="$input" BM_BIN="$BM" python3 <<'PY' 2>/dev/null || exit 0
-import json
-import os
-import re
-import shlex
-import subprocess
-import sys
-from datetime import datetime
-
-def command_argv(configured):
-    """Preserve one literal executable path, otherwise parse a shell-style command."""
-    # Trigger: Windows paths commonly contain spaces and backslashes.
-    # Why: POSIX shlex would split the spaces and consume backslashes from an
-    # unquoted native path such as C:\Program Files\Basic Memory\basic-memory.exe.
-    # Outcome: an existing executable path stays one argv element; multi-token
-    # launchers such as "uvx basic-memory" retain the existing command contract.
-    if os.path.isfile(configured):
-        return [configured]
-    return shlex.split(configured)
-
-
-bm_cmd = command_argv(os.environ.get("BM_BIN") or "basic-memory")
-
-# A project ref can be a workspace-qualified name (route via --project) or an
-# external_id UUID (route via --project-id) — names collide across workspaces, so
-# bare names won't route. Mirror session-start.sh's detection.
-UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
-)
-
-try:
-    payload = json.loads(os.environ.get("BM_HOOK_INPUT") or "{}")
-except Exception:
-    payload = {}
-
-cwd = payload.get("cwd") or os.getcwd()
-transcript_path = payload.get("transcript_path") or ""
-session_id = payload.get("session_id") or ""
-
-
-def _read_block(path):
-    try:
-        with open(path) as fh:
-            block = json.load(fh).get("basicMemory")
-    except Exception:
-        return None
-    return block if isinstance(block, dict) else None
-
-
-def _project_dir(directory):
-    # Nearest ancestor (including directory) holding a .claude settings file.
-    d = os.path.abspath(directory)
-    while True:
-        for name in ("settings.json", "settings.local.json"):
-            if os.path.isfile(os.path.join(d, ".claude", name)):
-                return d
-        parent = os.path.dirname(d)
-        if parent == d:
-            return os.path.abspath(directory)
-        d = parent
-
-
-def load_settings(directory):
-    # Same precedence as session-start.sh: user-level ~/.claude/settings.json is
-    # the base (no user-level settings.local.json — it isn't a real Claude Code
-    # source), then the nearest project .claude (settings.json, then
-    # settings.local.json) overrides it. cwd may be a repo subdirectory, so walk
-    # ancestors to the project root rather than reading cwd alone.
-    merged = {}
-    home = os.path.expanduser("~")
-    sources = [(home, ("settings.json",))]
-    project = _project_dir(directory)  # already absolute
-    if project != home:
-        sources.append((project, ("settings.json", "settings.local.json")))
-    for d, names in sources:
-        for name in names:
-            block = _read_block(os.path.join(d, ".claude", name))
-            if block is not None:
-                merged.update(block)
-    return merged
-
-
-cfg = load_settings(cwd)
-primary_project = (cfg.get("primaryProject") or "").strip()
-capture_folder = (cfg.get("captureFolder") or "sessions").strip()
-
-# Trigger: no project pinned for this Claude Code project.
-# Why: a checkpoint must land somewhere intentional. Writing to the default graph
-#      on every compaction would pollute it without consent.
-# Outcome: silent no-op until the user sets basicMemory.primaryProject.
-if not primary_project:
-    sys.exit(0)
-
-
-# --- Extract conversation text from the transcript (JSONL) ---
-# The transcript is one JSON object per line. Schemas vary across Claude Code
-# versions, so we probe a few shapes defensively rather than assume one.
-def text_of(content):
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                t = block.get("text")
-                if isinstance(t, str):
-                    parts.append(t)
-        return "\n".join(parts)
-    return ""
-
-
-def turns(path):
-    collected = []
-    try:
-        with open(path) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                # Skip injected/meta frames and tool results — only real human
-                # input and assistant prose count. Claude Code marks tool results
-                # with a `toolUseResult` field and injected/meta turns (command
-                # wrappers, system reminders, auto-continuations) with `isMeta`.
-                # Filtering on those flags — not a "<" content prefix — avoids both
-                # dropping legitimate messages that start with "<" and capturing
-                # tool-result noise.
-                if obj.get("isMeta") or obj.get("toolUseResult") is not None:
-                    continue
-                msg = obj.get("message") if isinstance(obj.get("message"), dict) else obj
-                role = msg.get("role") or obj.get("type")
-                if role not in ("user", "assistant"):
-                    continue
-                text = text_of(msg.get("content")).strip()
-                if not text:
-                    continue
-                collected.append((role, text))
-    except Exception:
-        return []
-    return collected
-
-
-conversation = turns(transcript_path)
-
-# Trigger: nothing usable in the transcript, or no real human turn in it.
-# Why: an empty or human-less checkpoint is worse than none — it would write a
-#      note with a dangling title and no opening request. Require a user turn.
-# Outcome: silent no-op.
-if not conversation or not any(role == "user" for role, _ in conversation):
-    sys.exit(0)
-
-user_msgs = [t for r, t in conversation if r == "user"]
-opening = user_msgs[0] if user_msgs else ""
-recent_user = user_msgs[-3:]
-
-
-def clip(s, n):
-    s = " ".join(s.split())
-    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
-
-
-# --- Build a schema-conforming SessionNote ---
-# Frontmatter carries type/status/started so structured recall (SessionStart) can
-# find it with metadata filters. BM merges a leading frontmatter block from the
-# content into the note's frontmatter (verified empirically).
-now = datetime.now()
-iso = now.strftime("%Y-%m-%dT%H:%M")
-# Second precision keeps the title — and therefore the note's permalink — unique
-# across rapid compactions within the same minute (otherwise the second write
-# would collide with the first and be dropped or overwrite it).
-title = f"Session {now.strftime('%Y-%m-%d %H:%M:%S')} — {clip(opening, 40)}"
-
-frontmatter = [
-    "---",
-    "type: session",
-    "status: open",
-    f"started: {iso}",
-    f"ended: {iso}",
-    f"project: {primary_project}",
-    f"cwd: {cwd}",
-]
-if session_id:
-    frontmatter.append(f"claude_session_id: {session_id}")
-frontmatter += ["capture: extractive", "---"]
-
-body = [
-    "",
-    f"# {title}",
-    "",
-    "_Automatic pre-compaction checkpoint (extractive). Full detail lives in the "
-    "session transcript; this note captures the thread so the next session can "
-    "resume._",
-    "",
-    "## Summary",
-    f"Working in `{cwd}`.",
-    f"- Opening request: {clip(opening, 300)}" if opening else "",
-    "",
-    "## Recent thread",
-]
-body += [f"- {clip(m, 200)}" for m in recent_user] or ["- (no recent user messages captured)"]
-body += [
-    "",
-    "## Observations",
-    f"- [context] Session opened with: {clip(opening, 200)}" if opening else "- [context] Session checkpointed before compaction",
-    "- [next_step] Review this checkpoint and continue where the thread left off",
-]
-
-content = "\n".join(frontmatter + body)
-
-# --- Write the checkpoint (best-effort) ---
-# A UUID primaryProject must route via --project-id, not --project, or the write
-# silently fails to land in a UUID-configured project.
-project_flag = "--project-id" if UUID_RE.match(primary_project) else "--project"
-try:
-    subprocess.run(
-        [
-            *bm_cmd, "tool", "write-note",
-            "--title", title,
-            "--folder", capture_folder,
-            project_flag, primary_project,
-            "--tags", "session",
-            "--tags", "auto-capture",
-        ],
-        input=content,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-except Exception:
-    sys.exit(0)
-PY
+# ${CLAUDE_PROJECT_DIR} pins project mapping to the session's project root
+# instead of trusting cwd; the hook JSON on stdin passes through untouched.
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+    exec "${BM[@]}" hook pre-compact --harness claude --project-dir "${CLAUDE_PROJECT_DIR}"
+fi
+exec "${BM[@]}" hook pre-compact --harness claude

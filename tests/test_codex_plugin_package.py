@@ -1,3 +1,4 @@
+import re
 import subprocess
 from pathlib import Path
 
@@ -23,27 +24,24 @@ def test_codex_plugin_mcp_config_is_tracked_and_not_ignored() -> None:
     assert tracked.returncode == 0, tracked.stderr
 
 
-def test_codex_plugin_hooks_use_clear_portable_runtime_patterns() -> None:
+def test_codex_plugin_hooks_are_zero_logic_shims() -> None:
+    # The plugin ships configuration plus shims only: the Python hook bodies
+    # moved into the basic-memory package behind `bm hook` (SPEC-55).
     repo_root = Path(__file__).resolve().parents[1]
-    pre_compact_sh = (repo_root / "plugins/codex/hooks/pre-compact.sh").read_text(encoding="utf-8")
-    pre_compact_py = (repo_root / "plugins/codex/hooks/pre-compact.py").read_text(encoding="utf-8")
-    session_start_sh = (repo_root / "plugins/codex/hooks/session-start.sh").read_text(
-        encoding="utf-8"
-    )
-    session_start_py = (repo_root / "plugins/codex/hooks/session-start.py").read_text(
-        encoding="utf-8"
-    )
+    hooks_dir = repo_root / "plugins/codex/hooks"
 
-    assert "python3 <<'PY'" not in pre_compact_sh
-    assert "python3 <<'PY'" not in session_start_sh
-    assert 'uv run --script "$script_dir/pre-compact.py"' in pre_compact_sh
-    assert 'uv run --script "$script_dir/session-start.py"' in session_start_sh
-    assert pre_compact_py.startswith("#!/usr/bin/env -S uv run --script\n")
-    assert session_start_py.startswith("#!/usr/bin/env -S uv run --script\n")
-    assert "from datetime import datetime, timezone" in pre_compact_py
-    assert "datetime.now(timezone.utc)" in pre_compact_py
-    assert 'now.isoformat(timespec="seconds")' in pre_compact_py
-    assert "if r not in codex_rows" not in session_start_py
+    assert not (hooks_dir / "session-start.py").exists()
+    assert not (hooks_dir / "pre-compact.py").exists()
+    for script, verb in (
+        ("session-start.sh", "session-start"),
+        ("pre-compact.sh", "pre-compact"),
+    ):
+        text = (hooks_dir / script).read_text(encoding="utf-8")
+        assert "python3" not in text
+        assert "uv run --script" not in text
+        assert f"hook {verb} --harness codex" in text
+        # The uvx fallback must pin a released floor (bumped by update_versions).
+        assert re.search(r'BM=\(uvx "basic-memory>=\d', text)
 
 
 def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:

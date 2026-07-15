@@ -1,13 +1,53 @@
+"""E2E tests for the plugin hook shims (Claude Code and Codex).
+
+The shims are the entire plugin hook surface: resolve the Basic Memory CLI
+(BM_BIN → basic-memory/bm on PATH → uvx at a released floor) and exec
+``bm hook <event> --harness <harness>`` with the hook JSON passed through on
+stdin. All behavior lives in the package (covered by tests/cli/); these tests
+pin the shim contract itself with fake binaries that record argv and stdin.
+"""
+
 import json
 import os
-import shlex
+import re
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# The floor the shims pass to uvx must be the released version — read it from
+# the package so `scripts/update_versions.py` keeps this suite green.
+_version_match = re.search(
+    r'^__version__ = "(.+)"$',
+    (REPO_ROOT / "src/basic_memory/__init__.py").read_text(encoding="utf-8"),
+    re.MULTILINE,
+)
+assert _version_match is not None, "no __version__ in src/basic_memory/__init__.py"
+CURRENT_VERSION = _version_match.group(1)
+
+# (plugin hooks dir, --harness value the shims must pass)
+PLUGINS = [
+    pytest.param("plugins/claude-code/hooks", "claude", id="claude-code"),
+    pytest.param("plugins/codex/hooks", "codex", id="codex"),
+]
+EVENTS = [
+    pytest.param("session-start.sh", "session-start", id="session-start"),
+    pytest.param("pre-compact.sh", "pre-compact", id="pre-compact"),
+]
+
+# A fake CLI that records its argv (one arg per line) and its stdin, so tests
+# can assert which binary the shim resolved and what flowed through. Pure bash
+# builtins, and deliberately shebang-less: the tests replace PATH with the
+# fake bin dirs, so `#!/usr/bin/env bash` couldn't find bash — the shim's
+# `exec` relies on bash's ENOEXEC fallback to run the file as a bash script.
+FAKE_CLI = """{{ printf '%s\\n' "$@"; }} > "$BM_SHIM_LOG_DIR/{name}.argv"
+IFS= read -r -d '' stdin_data || true
+printf '%s' "$stdin_data" > "$BM_SHIM_LOG_DIR/{name}.stdin"
+"""
 
 
 def _resolve_bash_executable(*, platform_name: str = os.name) -> str | None:
@@ -22,98 +62,77 @@ def _resolve_bash_executable(*, platform_name: str = os.name) -> str | None:
 
 
 BASH_EXECUTABLE = _resolve_bash_executable()
-HOOK_RUNTIME_AVAILABLE = BASH_EXECUTABLE is not None and shutil.which("python3") is not None
 pytestmark = pytest.mark.skipif(
-    not HOOK_RUNTIME_AVAILABLE,
-    reason="Claude Code hook tests require bash and python3",
+    BASH_EXECUTABLE is None,
+    reason="hook shim tests require bash",
 )
 
 
 @dataclass(frozen=True, slots=True)
-class HookHarness:
-    repo_root: Path
-    home: Path
+class ShimHarness:
     bin_dir: Path
-    command_log: Path
+    log_dir: Path
 
-    def write_settings(self, directory: Path, name: str, basic_memory: dict[str, object]) -> None:
-        settings_dir = directory / ".claude"
-        settings_dir.mkdir(parents=True, exist_ok=True)
-        (settings_dir / name).write_text(
-            json.dumps({"basicMemory": basic_memory}),
-            encoding="utf-8",
-        )
+    def add_fake(self, name: str, directory: Path | None = None) -> Path:
+        """Install a fake recording CLI named `name` (default: on the fake PATH)."""
+        target_dir = directory or self.bin_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        fake = target_dir / name
+        fake.write_text(FAKE_CLI.format(name=name), encoding="utf-8")
+        fake.chmod(0o755)
+        return fake
 
-    def run_hook(
+    def run(
         self,
-        hook_name: str,
-        payload: dict[str, str],
+        plugin_hooks_dir: str,
+        script: str,
+        payload: dict[str, str] | None = None,
         *,
-        basic_memory_command: str | None = None,
-        use_default_cli_discovery: bool = False,
+        bm_bin: str | None = None,
+        claude_project_dir: str | None = None,
+        path_dirs: list[Path] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         assert BASH_EXECUTABLE is not None
         env = os.environ.copy()
-        env.update(
-            {
-                "BM_TEST_COMMAND_LOG": str(self.command_log),
-                "HOME": str(self.home),
-                "PATH": f"{self.bin_dir}{os.pathsep}{env['PATH']}",
-                "USERPROFILE": str(self.home),
-            }
-        )
-        if use_default_cli_discovery:
-            env.pop("BM_BIN", None)
-        else:
-            env["BM_BIN"] = basic_memory_command or shlex.join(
-                [sys.executable, str(self.bin_dir / "basic memory")]
-            )
+        # PATH is replaced (not prepended) so a developer's real basic-memory
+        # install can never satisfy the resolver and mask an ordering bug.
+        dirs = path_dirs if path_dirs is not None else [self.bin_dir]
+        env["PATH"] = os.pathsep.join(str(d) for d in dirs)
+        # as_posix() keeps the paths bash-friendly under Git Bash on Windows.
+        env["BM_SHIM_LOG_DIR"] = self.log_dir.as_posix()
+        env.pop("BM_BIN", None)
+        env.pop("CLAUDE_PROJECT_DIR", None)
+        if bm_bin is not None:
+            env["BM_BIN"] = bm_bin
+        if claude_project_dir is not None:
+            env["CLAUDE_PROJECT_DIR"] = claude_project_dir
         return subprocess.run(
-            [BASH_EXECUTABLE, str(self.repo_root / "plugins/claude-code/hooks" / hook_name)],
-            input=json.dumps(payload),
+            [BASH_EXECUTABLE, str(REPO_ROOT / plugin_hooks_dir / script)],
+            input=json.dumps(payload if payload is not None else {"cwd": "/work/repo"}),
             capture_output=True,
             check=False,
             env=env,
             text=True,
         )
 
-    def logged_commands(self) -> list[list[str]]:
-        if not self.command_log.exists():
-            return []
-        return [json.loads(line) for line in self.command_log.read_text().splitlines()]
+    def argv(self, name: str) -> list[str] | None:
+        record = self.log_dir / f"{name}.argv"
+        if not record.exists():
+            return None
+        return record.read_text(encoding="utf-8").splitlines()
+
+    def stdin(self, name: str) -> str | None:
+        record = self.log_dir / f"{name}.stdin"
+        return record.read_text(encoding="utf-8") if record.exists() else None
 
 
 @pytest.fixture
-def hook_harness(tmp_path: Path) -> HookHarness:
-    repo_root = Path(__file__).resolve().parents[1]
-    home = tmp_path / "home"
+def shim(tmp_path: Path) -> ShimHarness:
     bin_dir = tmp_path / "bin"
-    home.mkdir()
+    log_dir = tmp_path / "log"
     bin_dir.mkdir()
-    command_log = tmp_path / "basic-memory-commands.jsonl"
-
-    fake_script = """#!/usr/bin/env python3
-import json
-import os
-import sys
-
-with open(os.environ["BM_TEST_COMMAND_LOG"], "a", encoding="utf-8") as command_log:
-    command_log.write(json.dumps(sys.argv[1:]) + "\\n")
-
-if sys.argv[1:3] == ["tool", "search-notes"]:
-    print(json.dumps({"results": []}))
-"""
-    for command_name in ("basic memory", "basic-memory"):
-        fake_basic_memory = bin_dir / command_name
-        fake_basic_memory.write_text(fake_script, encoding="utf-8")
-        fake_basic_memory.chmod(0o755)
-
-    return HookHarness(
-        repo_root=repo_root,
-        home=home,
-        bin_dir=bin_dir,
-        command_log=command_log,
-    )
+    log_dir.mkdir()
+    return ShimHarness(bin_dir=bin_dir, log_dir=log_dir)
 
 
 def test_resolve_bash_executable_prefers_git_bash_on_windows(
@@ -140,161 +159,134 @@ def test_resolve_bash_executable_prefers_git_bash_on_windows(
     assert _resolve_bash_executable(platform_name="nt") == str(git_bash)
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason="Windows cannot execute the fixture's extensionless shebang script directly",
-)
-def test_session_start_preserves_raw_cli_path_with_spaces(hook_harness: HookHarness) -> None:
-    hook_harness.write_settings(
-        hook_harness.home,
-        "settings.json",
-        {"primaryProject": "global-project"},
-    )
-    cwd = hook_harness.home / "work/repo"
-    cwd.mkdir(parents=True)
-
-    result = hook_harness.run_hook(
-        "session-start.sh",
-        {"cwd": str(cwd)},
-        basic_memory_command=str(hook_harness.bin_dir / "basic memory"),
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "**Project:** global-project" in result.stdout
+# --- Resolver order and exec contract ---
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason="Windows cannot execute the fixture's extensionless shebang script directly",
-)
-def test_session_start_discovers_basic_memory_from_path(hook_harness: HookHarness) -> None:
-    hook_harness.write_settings(
-        hook_harness.home,
-        "settings.json",
-        {"primaryProject": "global-project"},
-    )
-    cwd = hook_harness.home / "work/repo"
-    cwd.mkdir(parents=True)
-
-    result = hook_harness.run_hook(
-        "session-start.sh",
-        {"cwd": str(cwd)},
-        use_default_cli_discovery=True,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "**Project:** global-project" in result.stdout
-    assert hook_harness.logged_commands()
-
-
-def test_session_start_uses_user_settings_without_project_config(
-    hook_harness: HookHarness,
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+@pytest.mark.parametrize(("script", "verb"), EVENTS)
+def test_shim_prefers_basic_memory_and_passes_stdin(
+    shim: ShimHarness, hooks_dir: str, harness: str, script: str, verb: str
 ) -> None:
-    hook_harness.write_settings(
-        hook_harness.home,
-        "settings.json",
-        {"primaryProject": "global-project", "captureFolder": "global-sessions"},
-    )
-    # Claude Code does not treat this as a user-level settings source. A stale
-    # file must not silently reroute hooks away from the visible global config.
-    hook_harness.write_settings(
-        hook_harness.home,
-        "settings.local.json",
-        {"primaryProject": "stale-project"},
-    )
-    cwd = hook_harness.home / "work/repo/src"
-    cwd.mkdir(parents=True)
+    shim.add_fake("basic-memory")
+    shim.add_fake("bm")
+    shim.add_fake("uvx")
+    payload = {"cwd": "/work/repo", "session_id": "s-1"}
 
-    result = hook_harness.run_hook("session-start.sh", {"cwd": str(cwd)})
+    result = shim.run(hooks_dir, script, payload)
 
     assert result.returncode == 0, result.stderr
-    assert "**Project:** global-project" in result.stdout
-    assert "`global-sessions/`" in result.stdout
-    assert "stale-project" not in result.stdout
+    assert shim.argv("basic-memory") == ["hook", verb, "--harness", harness]
+    # Stdin passthrough: the hook JSON arrives at the CLI byte-identical.
+    assert shim.stdin("basic-memory") == json.dumps(payload)
+    assert shim.argv("bm") is None
+    assert shim.argv("uvx") is None
 
 
-def test_session_start_merges_nearest_ancestor_project_settings_over_user_settings(
-    hook_harness: HookHarness,
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+def test_shim_prefers_bm_before_uvx(shim: ShimHarness, hooks_dir: str, harness: str) -> None:
+    shim.add_fake("bm")
+    shim.add_fake("uvx")
+
+    result = shim.run(hooks_dir, "session-start.sh")
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("bm") == ["hook", "session-start", "--harness", harness]
+    assert shim.argv("uvx") is None
+
+
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+def test_shim_falls_back_to_uvx_with_released_floor(
+    shim: ShimHarness, hooks_dir: str, harness: str
 ) -> None:
-    hook_harness.write_settings(
-        hook_harness.home,
-        "settings.json",
-        {"primaryProject": "global-project", "captureFolder": "global-sessions"},
-    )
-    project_root = hook_harness.home / "work/repo"
-    hook_harness.write_settings(
-        project_root,
-        "settings.json",
-        {"primaryProject": "project-override"},
-    )
-    hook_harness.write_settings(
-        project_root,
-        "settings.local.json",
-        {"captureFolder": "local-sessions"},
-    )
-    cwd = project_root / "packages/client/src"
-    cwd.mkdir(parents=True)
+    shim.add_fake("uvx")
 
-    result = hook_harness.run_hook("session-start.sh", {"cwd": str(cwd)})
+    result = shim.run(hooks_dir, "session-start.sh")
 
     assert result.returncode == 0, result.stderr
-    assert "**Project:** project-override" in result.stdout
-    assert "`local-sessions/`" in result.stdout
-    search_commands = [
-        command
-        for command in hook_harness.logged_commands()
-        if command[:2] == ["tool", "search-notes"]
+    # The floor must be the released version so a cold uvx resolves a
+    # basic-memory that ships the `bm hook` verbs.
+    assert shim.argv("uvx") == [
+        f"basic-memory>={CURRENT_VERSION}",
+        "hook",
+        "session-start",
+        "--harness",
+        harness,
     ]
-    assert len(search_commands) == 3
-    assert all(
-        command[command.index("--project") + 1] == "project-override" for command in search_commands
-    )
 
 
-def test_pre_compact_uses_merged_project_and_capture_folder(
-    hook_harness: HookHarness,
-    tmp_path: Path,
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+@pytest.mark.parametrize(("script", "verb"), EVENTS)
+def test_shim_exits_silently_when_nothing_resolvable(
+    shim: ShimHarness, hooks_dir: str, harness: str, script: str, verb: str
 ) -> None:
-    hook_harness.write_settings(
-        hook_harness.home,
-        "settings.json",
-        {"primaryProject": "global-project", "captureFolder": "global-sessions"},
-    )
-    project_root = hook_harness.home / "work/repo"
-    hook_harness.write_settings(
-        project_root,
-        "settings.json",
-        {"primaryProject": "project-override"},
-    )
-    hook_harness.write_settings(
-        project_root,
-        "settings.local.json",
-        {"captureFolder": "local-sessions"},
-    )
-    cwd = project_root / "src"
-    cwd.mkdir(parents=True)
-    transcript = tmp_path / "transcript.jsonl"
-    transcript.write_text(
-        json.dumps({"message": {"role": "user", "content": "Ship the settings fallback"}}) + "\n",
-        encoding="utf-8",
-    )
+    # Fail-open: no BM_BIN, empty PATH — the plugin must be invisible.
+    result = shim.run(hooks_dir, script)
 
-    result = hook_harness.run_hook(
-        "pre-compact.sh",
-        {
-            "cwd": str(cwd),
-            "session_id": "session-123",
-            "transcript_path": str(transcript),
-        },
-    )
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+# --- BM_BIN override ---
+
+
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+def test_bm_bin_overrides_path_resolution(shim: ShimHarness, hooks_dir: str, harness: str) -> None:
+    shim.add_fake("basic-memory")
+    custom = shim.add_fake("custom-bm")
+
+    result = shim.run(hooks_dir, "session-start.sh", bm_bin=str(custom))
 
     assert result.returncode == 0, result.stderr
-    write_commands = [
-        command
-        for command in hook_harness.logged_commands()
-        if command[:2] == ["tool", "write-note"]
+    assert shim.argv("custom-bm") == ["hook", "session-start", "--harness", harness]
+    assert shim.argv("basic-memory") is None
+
+
+def test_bm_bin_executable_path_with_spaces_stays_one_word(
+    shim: ShimHarness, tmp_path: Path
+) -> None:
+    spaced = shim.add_fake("basic memory", directory=tmp_path / "with space")
+
+    result = shim.run("plugins/claude-code/hooks", "session-start.sh", bm_bin=str(spaced))
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("basic memory") == ["hook", "session-start", "--harness", "claude"]
+
+
+def test_bm_bin_multi_token_launcher_word_splits(shim: ShimHarness) -> None:
+    shim.add_fake("uvx")
+
+    result = shim.run("plugins/claude-code/hooks", "session-start.sh", bm_bin="uvx basic-memory")
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("uvx") == ["basic-memory", "hook", "session-start", "--harness", "claude"]
+
+
+# --- Project-dir plumbing ---
+
+
+@pytest.mark.parametrize(("script", "verb"), EVENTS)
+def test_claude_shim_passes_claude_project_dir(shim: ShimHarness, script: str, verb: str) -> None:
+    shim.add_fake("basic-memory")
+
+    result = shim.run("plugins/claude-code/hooks", script, claude_project_dir="/work/repo root")
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("basic-memory") == [
+        "hook",
+        verb,
+        "--harness",
+        "claude",
+        "--project-dir",
+        "/work/repo root",
     ]
-    assert len(write_commands) == 1
-    write_command = write_commands[0]
-    assert write_command[write_command.index("--project") + 1] == "project-override"
-    assert write_command[write_command.index("--folder") + 1] == "local-sessions"
+
+
+def test_codex_shim_ignores_claude_project_dir(shim: ShimHarness) -> None:
+    # Codex has no project-dir env contract; mapping comes from the payload cwd.
+    shim.add_fake("basic-memory")
+
+    result = shim.run("plugins/codex/hooks", "session-start.sh", claude_project_dir="/work/repo")
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("basic-memory") == ["hook", "session-start", "--harness", "codex"]
