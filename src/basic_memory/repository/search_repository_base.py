@@ -48,7 +48,21 @@ RELAXATION_STOPWORDS = frozenset(
     "or our that the their they this to was we were what when where which who whom whose why "
     "will with you your".split()
 )
-RELAXATION_CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+RELAXATION_CJK_PATTERN = re.compile(
+    r"["
+    r"\u1100-\u11ff"  # Hangul Jamo
+    r"\u3040-\u30ff"  # Hiragana and Katakana
+    r"\u3130-\u318f"  # Hangul Compatibility Jamo
+    r"\u31f0-\u31ff"  # Katakana Phonetic Extensions
+    r"\u3400-\u4dbf"  # CJK Unified Ideographs Extension A
+    r"\u4e00-\u9fff"  # CJK Unified Ideographs
+    r"\ua960-\ua97f"  # Hangul Jamo Extended-A
+    r"\uac00-\ud7af"  # Hangul Syllables
+    r"\ud7b0-\ud7ff"  # Hangul Jamo Extended-B
+    r"\uf900-\ufaff"  # CJK Compatibility Ideographs
+    r"\uff65-\uff9f"  # Halfwidth Katakana
+    r"]"
+)
 RELAXATION_ASCII_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 
