@@ -14,12 +14,20 @@ supported embedding models.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import os
 from typing import Any
 
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+
+
+def _identity_digest(value: str | None) -> str:
+    """Return a stable non-secret identity token for optional endpoint routing."""
+    if value is None:
+        return "-"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _default_input_types(model_name: str) -> tuple[str | None, str | None]:
@@ -136,7 +144,8 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
             f"{self.model_name}:{self.dimensions}:"
             f"document_input_type={document_input_type}:"
             f"query_input_type={query_input_type}:"
-            f"forward_dimensions={forward_dimensions}"
+            f"forward_dimensions={forward_dimensions}:"
+            f"api_base_sha256={_identity_digest(self._api_base)}"
         )
         return identity
 

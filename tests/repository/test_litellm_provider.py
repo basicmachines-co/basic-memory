@@ -149,21 +149,28 @@ async def test_litellm_provider_api_base_omitted_when_none(monkeypatch):
     assert "api_base" not in calls[0]
 
 
-def test_litellm_provider_identity_key_ignores_api_base():
-    """Endpoint routing is not part of Basic Memory's persisted vector identity."""
+def test_litellm_provider_identity_key_tracks_api_base_without_exposing_it():
+    """Endpoint routing changes vector identity without persisting endpoint credentials."""
     default_endpoint = LiteLLMEmbeddingProvider(dimensions=3)
     custom_endpoint = LiteLLMEmbeddingProvider(
         dimensions=3,
         api_base="http://127.0.0.1:8080/v1",
     )
+    rotated_key = LiteLLMEmbeddingProvider(
+        dimensions=3,
+        api_base="http://127.0.0.1:8080/v1",
+        api_key="rotated-secret",
+    )
 
     assert default_endpoint.identity_key() == (
         "openai/text-embedding-3-small:3:document_input_type=-:"
-        "query_input_type=-:forward_dimensions=true"
+        "query_input_type=-:forward_dimensions=true:api_base_sha256=-"
     )
-    assert custom_endpoint.identity_key() == default_endpoint.identity_key()
-    assert "api_base" not in custom_endpoint.identity_key()
+    assert custom_endpoint.identity_key() != default_endpoint.identity_key()
+    assert rotated_key.identity_key() == custom_endpoint.identity_key()
+    assert "api_base_sha256=" in custom_endpoint.identity_key()
     assert "127.0.0.1" not in custom_endpoint.identity_key()
+    assert "rotated-secret" not in rotated_key.identity_key()
 
 
 @pytest.mark.asyncio
