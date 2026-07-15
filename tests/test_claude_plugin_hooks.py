@@ -8,7 +8,19 @@ from pathlib import Path
 import pytest
 
 
-HOOK_RUNTIME_AVAILABLE = shutil.which("bash") is not None and shutil.which("python3") is not None
+def _resolve_bash_executable(*, platform_name: str = os.name) -> str | None:
+    """Prefer Git Bash over Windows' WSL launcher for hook execution."""
+    if platform_name == "nt":
+        git_executable = shutil.which("git")
+        if git_executable:
+            git_bash = Path(git_executable).resolve().parent.parent / "bin" / "bash.exe"
+            if git_bash.is_file():
+                return str(git_bash)
+    return shutil.which("bash")
+
+
+BASH_EXECUTABLE = _resolve_bash_executable()
+HOOK_RUNTIME_AVAILABLE = BASH_EXECUTABLE is not None and shutil.which("python3") is not None
 pytestmark = pytest.mark.skipif(
     not HOOK_RUNTIME_AVAILABLE,
     reason="Claude Code hook tests require bash and python3",
@@ -31,6 +43,7 @@ class HookHarness:
         )
 
     def run_hook(self, hook_name: str, payload: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        assert BASH_EXECUTABLE is not None
         env = os.environ.copy()
         env.update(
             {
@@ -40,7 +53,7 @@ class HookHarness:
             }
         )
         return subprocess.run(
-            ["bash", str(self.repo_root / "plugins/claude-code/hooks" / hook_name)],
+            [BASH_EXECUTABLE, str(self.repo_root / "plugins/claude-code/hooks" / hook_name)],
             input=json.dumps(payload),
             capture_output=True,
             check=False,
@@ -86,6 +99,30 @@ if sys.argv[1:3] == ["tool", "search-notes"]:
         bin_dir=bin_dir,
         command_log=command_log,
     )
+
+
+def test_resolve_bash_executable_prefers_git_bash_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    git_root = tmp_path / "Git"
+    git_executable = git_root / "cmd/git.exe"
+    git_bash = git_root / "bin/bash.exe"
+    git_executable.parent.mkdir(parents=True)
+    git_executable.touch()
+    git_bash.parent.mkdir(parents=True)
+    git_bash.touch()
+
+    def fake_which(command: str) -> str | None:
+        if command == "git":
+            return str(git_executable)
+        if command == "bash":
+            return "C:/Windows/System32/bash.exe"
+        return None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+
+    assert _resolve_bash_executable(platform_name="nt") == str(git_bash)
 
 
 def test_session_start_uses_user_settings_without_project_config(
