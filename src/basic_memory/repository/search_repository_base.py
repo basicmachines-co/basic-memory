@@ -121,7 +121,12 @@ def relaxed_query_words(search_text: Optional[str]) -> Optional[list[str]]:
             for word in cjk_words
             if word.isalnum() and word.lower() not in RELAXATION_STOPWORDS
         ]
-        return _dedupe_relaxation_words(pruned_words or cjk_words) or None
+        relaxed_words = _dedupe_relaxation_words(pruned_words)
+        # Trigger: punctuation/stopword pruning or deduplication leaves only one term.
+        # Why: the raw whitespace count can make an identifier-like mixed query
+        # appear multi-term even though only one backend-safe CJK prefix remains.
+        # Outcome: preserve the short-query guard after pruning to avoid a broad retry.
+        return relaxed_words if len(relaxed_words) >= 2 else None
 
     tokens = RELAXATION_ASCII_TOKEN_PATTERN.findall(stripped.lower())
     if len(tokens) < 3 or any(token.isdigit() for token in tokens):

@@ -19,3 +19,17 @@ def test_relaxed_query_words_supports_whitespace_separated_cjk_scripts(
 ) -> None:
     """Han, kana, and Hangul terms all bypass the ASCII three-token gate."""
     assert relaxed_query_words(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SPEC-16 设计",
+        "foo/bar 季度",
+        "季度 季度",
+        "the 季度",
+    ],
+)
+def test_relaxed_query_words_preserves_short_query_guard_after_cjk_pruning(query: str) -> None:
+    """Unsafe, duplicate, or stopword terms cannot pad a one-term CJK relaxation."""
+    assert relaxed_query_words(query) is None
