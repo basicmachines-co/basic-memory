@@ -44,12 +44,19 @@ class HookHarness:
             encoding="utf-8",
         )
 
-    def run_hook(self, hook_name: str, payload: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    def run_hook(
+        self,
+        hook_name: str,
+        payload: dict[str, str],
+        *,
+        basic_memory_command: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         assert BASH_EXECUTABLE is not None
         env = os.environ.copy()
         env.update(
             {
-                "BM_BIN": shlex.join([sys.executable, str(self.bin_dir / "basic-memory")]),
+                "BM_BIN": basic_memory_command
+                or shlex.join([sys.executable, str(self.bin_dir / "basic memory")]),
                 "BM_TEST_COMMAND_LOG": str(self.command_log),
                 "HOME": str(self.home),
                 "PATH": f"{self.bin_dir}{os.pathsep}{env['PATH']}",
@@ -80,7 +87,7 @@ def hook_harness(tmp_path: Path) -> HookHarness:
     bin_dir.mkdir()
     command_log = tmp_path / "basic-memory-commands.jsonl"
 
-    fake_basic_memory = bin_dir / "basic-memory"
+    fake_basic_memory = bin_dir / "basic memory"
     fake_basic_memory.write_text(
         """#!/usr/bin/env python3
 import json
@@ -127,6 +134,29 @@ def test_resolve_bash_executable_prefers_git_bash_on_windows(
     monkeypatch.setattr(shutil, "which", fake_which)
 
     assert _resolve_bash_executable(platform_name="nt") == str(git_bash)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows cannot execute the fixture's extensionless shebang script directly",
+)
+def test_session_start_preserves_raw_cli_path_with_spaces(hook_harness: HookHarness) -> None:
+    hook_harness.write_settings(
+        hook_harness.home,
+        "settings.json",
+        {"primaryProject": "global-project"},
+    )
+    cwd = hook_harness.home / "work/repo"
+    cwd.mkdir(parents=True)
+
+    result = hook_harness.run_hook(
+        "session-start.sh",
+        {"cwd": str(cwd)},
+        basic_memory_command=str(hook_harness.bin_dir / "basic memory"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "**Project:** global-project" in result.stdout
 
 
 def test_session_start_uses_user_settings_without_project_config(

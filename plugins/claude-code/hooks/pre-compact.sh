@@ -46,9 +46,19 @@ import subprocess
 import sys
 from datetime import datetime
 
-# May be a single binary ("basic-memory") or a multi-token launcher
-# ("uvx basic-memory"); split so it prepends cleanly onto the write command.
-bm_cmd = shlex.split(os.environ.get("BM_BIN") or "basic-memory")
+def command_argv(configured):
+    """Preserve one literal executable path, otherwise parse a shell-style command."""
+    # Trigger: Windows paths commonly contain spaces and backslashes.
+    # Why: POSIX shlex would split the spaces and consume backslashes from an
+    # unquoted native path such as C:\Program Files\Basic Memory\basic-memory.exe.
+    # Outcome: an existing executable path stays one argv element; multi-token
+    # launchers such as "uvx basic-memory" retain the existing command contract.
+    if os.path.isfile(configured):
+        return [configured]
+    return shlex.split(configured)
+
+
+bm_cmd = command_argv(os.environ.get("BM_BIN") or "basic-memory")
 
 # A project ref can be a workspace-qualified name (route via --project) or an
 # external_id UUID (route via --project-id) — names collide across workspaces, so
