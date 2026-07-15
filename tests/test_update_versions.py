@@ -68,6 +68,8 @@ def test_update_versions_writes_npm_semver_prerelease(
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
     write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
+    for shim in update_versions.HOOK_SHIMS:
+        write(shim, 'BM=(uvx "basic-memory>=0.0.0")\n')
 
     update_versions.update_versions("v0.21.3b1", dry_run=False)
 
@@ -79,6 +81,9 @@ def test_update_versions_writes_npm_semver_prerelease(
     assert openclaw_package["version"] == "0.21.3-beta.1"
     codex_plugin = json.loads((tmp_path / "plugins/codex/.codex-plugin/plugin.json").read_text())
     assert codex_plugin["version"] == "0.21.3-beta.1"
+    # The shim floor is a pip requirement spec: Python prerelease form, not npm.
+    for shim in update_versions.HOOK_SHIMS:
+        assert 'BM=(uvx "basic-memory>=0.21.3b1")' in (tmp_path / shim).read_text()
 
 
 def _seed_repo(tmp_path: Path) -> None:
@@ -112,6 +117,8 @@ def _seed_repo(tmp_path: Path) -> None:
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
     write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
+    for shim in update_versions.HOOK_SHIMS:
+        write(shim, 'BM=(uvx "basic-memory>=0.0.0")\n')
 
 
 def _plugin_version(tmp_path: Path) -> str:
@@ -139,6 +146,20 @@ def test_scope_packages_leaves_core_untouched(
     assert _codex_plugin_version(tmp_path) == "0.21.6"
 
 
+def test_scope_packages_bumps_uvx_floor_in_every_hook_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Regression: the shims' uvx fallback must track the release, or a cold
+    # machine resolves a basic-memory too old to ship the `bm hook` verbs.
+    monkeypatch.setattr(update_versions, "ROOT", tmp_path)
+    _seed_repo(tmp_path)
+
+    update_versions.update_versions("v0.21.6", scope="packages", dry_run=False)
+
+    for shim in update_versions.HOOK_SHIMS:
+        assert (tmp_path / shim).read_text() == 'BM=(uvx "basic-memory>=0.21.6")\n'
+
+
 def test_scope_core_leaves_packages_untouched(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -150,6 +171,8 @@ def test_scope_core_leaves_packages_untouched(
     assert (tmp_path / "src/basic_memory/__init__.py").read_text() == '__version__ = "0.21.6"\n'
     assert _plugin_version(tmp_path) == "0.0.0"
     assert _codex_plugin_version(tmp_path) == "0.0.0"
+    for shim in update_versions.HOOK_SHIMS:
+        assert (tmp_path / shim).read_text() == 'BM=(uvx "basic-memory>=0.0.0")\n'
 
 
 def test_invalid_scope_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -96,6 +96,17 @@ def set_package_version(data: dict[str, Any], version: str) -> None:
     data["version"] = version
 
 
+# Plugin hook shims whose uvx fallback pins a released floor. The floor moves
+# with every release so a cold machine resolves a basic-memory that actually
+# ships the `bm hook` verbs the shims exec.
+HOOK_SHIMS = (
+    "plugins/claude-code/hooks/session-start.sh",
+    "plugins/claude-code/hooks/pre-compact.sh",
+    "plugins/codex/hooks/session-start.sh",
+    "plugins/codex/hooks/pre-compact.sh",
+)
+
+
 # Version scopes. The two groups map to the two distribution tracks:
 #   core     — the Python package and its MCP registry manifest
 #   packages — the host-native agent artifacts (Claude Code plugin + marketplaces,
@@ -139,6 +150,15 @@ def _update_packages(version: str, *, dry_run: bool) -> None:
         lambda data: set_package_version(data, npm_package_version(version)),
         dry_run=dry_run,
     )
+    # The uvx floor is a pip requirement spec, so it keeps the Python version
+    # form (0.21.3b1), not the npm semver mapping.
+    for shim in HOOK_SHIMS:
+        update_text(
+            shim,
+            r"basic-memory>=[0-9A-Za-z.]+",
+            f"basic-memory>={version}",
+            dry_run=dry_run,
+        )
     update_text(
         "integrations/hermes/plugin.yaml",
         r"^version:\s*.*$",
