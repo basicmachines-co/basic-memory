@@ -102,6 +102,7 @@ BUILD_CONTEXT_RESULT = {
                 "title": "Test Note",
                 "permalink": "notes/test-note",
                 "file_path": "notes/Test Note.md",
+                "content": "Primary note prose that must stay visible.",
                 "created_at": "2025-01-01T00:00:00",
             },
             "observations": [
@@ -157,6 +158,11 @@ RECENT_ACTIVITY_RESULT = [
         "file_path": "notes/Note B.md",
         "created_at": "2025-01-02 00:00:00",
     },
+]
+
+RECENT_ACTIVITY_PROJECT_RESULT = [
+    {**RECENT_ACTIVITY_RESULT[0], "project": "research"},
+    {**RECENT_ACTIVITY_RESULT[1], "project": "work"},
 ]
 
 
@@ -372,6 +378,7 @@ def test_build_context_rich_output_default(mock_mcp):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "notes/test-note" in result.output
+    assert "Primary note prose that must stay visible." in result.output
     assert "Related Note" in result.output
     # Not raw JSON
     with pytest.raises((json.JSONDecodeError, ValueError)):
@@ -443,6 +450,21 @@ def test_recent_activity_rich_output_default(mock_mcp):
     # Not raw JSON
     with pytest.raises((json.JSONDecodeError, ValueError)):
         json.loads(result.output)
+
+
+@patch(
+    "basic_memory.mcp.tools.recent_activity",
+    new_callable=AsyncMock,
+    return_value=RECENT_ACTIVITY_PROJECT_RESULT,
+)
+def test_recent_activity_rich_includes_project_when_present(mock_mcp):
+    """Cross-project activity remains attributable in the Rich table."""
+    result = _tty_runner(["tool", "recent-activity"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "Project" in result.output
+    assert "research" in result.output
+    assert "work" in result.output
 
 
 @patch(
@@ -702,6 +724,12 @@ SEARCH_RESULT_ZERO_TOTAL = {
     ],
 }
 
+SEARCH_RESULT_UNKNOWN_TOTAL_WITH_MORE = {
+    **SEARCH_RESULT_ZERO_TOTAL,
+    "page_size": 2,
+    "has_more": True,
+}
+
 
 @patch(
     "basic_memory.mcp.tools.search_notes",
@@ -725,6 +753,20 @@ def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
     # The subtitle must show the real count (2), not 0
     assert "2 result(s)" in result.output
     assert "0 result(s)" not in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.search_notes",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_UNKNOWN_TOTAL_WITH_MORE,
+)
+def test_search_notes_rich_unknown_total_preserves_has_more(mock_mcp):
+    """Unknown totals never produce a false final-page claim when more results exist."""
+    result = _tty_runner(["tool", "search-notes", "found"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "page 1 of 1" not in result.output
+    assert "more results available" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +826,20 @@ def test_search_notes_plain_zero_total_fallback(mock_mcp):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "2 result(s)" in result.output
     assert "0 result(s)" not in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.search_notes",
+    new_callable=AsyncMock,
+    return_value=SEARCH_RESULT_UNKNOWN_TOTAL_WITH_MORE,
+)
+def test_search_notes_plain_unknown_total_preserves_has_more(mock_mcp):
+    """Plain output also reports that another page exists when totals are unknown."""
+    result = _tty_runner(["tool", "search-notes", "found", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "page 1 of 1" not in result.output
+    assert "more results available" in result.output
 
 
 @patch(
@@ -917,6 +973,7 @@ def test_build_context_plain_output(mock_mcp):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Context: notes/test-note" in result.output
     assert "Test Note" in result.output
+    assert "Primary note prose that must stay visible." in result.output
     # Observation rendered with literal bracketed category, indented
     assert "  [fact] This is a key fact about the test note" in result.output
     # Related item with relation type, indented
@@ -969,6 +1026,20 @@ def test_recent_activity_plain_output(mock_mcp):
     # Not JSON
     with pytest.raises((json.JSONDecodeError, ValueError)):
         json.loads(result.output)
+
+
+@patch(
+    "basic_memory.mcp.tools.recent_activity",
+    new_callable=AsyncMock,
+    return_value=RECENT_ACTIVITY_PROJECT_RESULT,
+)
+def test_recent_activity_plain_includes_project_when_present(mock_mcp):
+    """Cross-project activity remains attributable in plain output."""
+    result = _tty_runner(["tool", "recent-activity", "--plain"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "[project: research]" in result.output
+    assert "[project: work]" in result.output
 
 
 @patch(

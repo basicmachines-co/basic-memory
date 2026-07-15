@@ -112,6 +112,23 @@ def _print_json(result: Any) -> None:
     print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
 
 
+def _search_result_summary(result: dict[str, Any]) -> str:
+    """Describe search count and pagination without inventing a final page."""
+    results = result.get("results", [])
+    raw_total = result.get("total")
+    total_is_known = isinstance(raw_total, int) and raw_total > 0
+    total = raw_total if total_is_known else len(results)
+    page = result.get("current_page") or result.get("page", 1)
+    page_size = result.get("page_size", len(results)) or 1
+
+    summary = f"{total} result(s)  •  page {page}"
+    if total_is_known:
+        summary += f" of {max(1, -(-total // page_size))}"
+    if result.get("has_more") is True:
+        summary += "  •  more results available"
+    return summary
+
+
 # --- Rich formatters ---
 
 
@@ -126,24 +143,13 @@ def _display_search_results(result: dict[str, Any], query: str = "") -> None:
       has_more: bool
     """
     results = result.get("results", [])
-    # Trigger: API returns total=0 even when results is non-empty (upstream quirk).
-    # Why: the key exists with value 0, so result.get("total", len(results)) never
-    #      applies its default, leaving the subtitle as "0 result(s)" under a
-    #      populated table.
-    # Outcome: fall back to len(results) when total is falsy but results is non-empty.
-    raw_total = result.get("total", len(results))
-    total = raw_total if raw_total else len(results)
-    # Real key is "current_page"; fall back to "page" for forward-compat.
-    page = result.get("current_page") or result.get("page", 1)
-    page_size = result.get("page_size", len(results)) or 1
-
     # Trigger: query is user-supplied text that may contain Rich markup characters.
     # Why: interpolating it directly into a markup string causes brackets to be
     #      parsed as style tags, swallowing or restyling bracketed content.
     # Outcome: escape the query so its literal characters are always displayed.
     escaped_query = markup_escape(query) if query else query
     title = f"Search: [bold cyan]{escaped_query}[/bold cyan]" if query else "Search results"
-    subtitle = f"{total} result(s)  •  page {page} of {max(1, -(-total // page_size))}"
+    subtitle = _search_result_summary(result)
 
     if not results:
         console.print(Panel(Text("No results found.", style="dim"), title=title, expand=False))
@@ -301,6 +307,18 @@ def _display_build_context(result: dict[str, Any]) -> None:
                 primary_label = f"[dim]{p_type}[/dim]  {primary_label}"
             primary_node = tree.add(primary_label)
 
+            # Entity summaries can carry the note body independently of observations.
+            # Preserve it so human-readable output contains the same primary context
+            # as JSON, even for prose-heavy notes with no structured observations.
+            raw_primary_content = primary.get("content")
+            primary_content = (
+                raw_primary_content.strip()
+                if isinstance(raw_primary_content, str) and raw_primary_content.strip()
+                else ""
+            )
+            if primary_content:
+                primary_node.add(Text(primary_content, style="dim"))
+
             # --- Observations as children (category + truncated content) ---
             # Trigger: ContextResult.observations exists in the JSON output but was
             #          never rendered in the Rich path.
@@ -360,6 +378,9 @@ def _display_recent_activity(result: list[dict[str, Any]]) -> None:
     table = Table(show_header=True, header_style="bold", expand=False)
     table.add_column("Type", style="dim", width=12)
     table.add_column("Title", style="bold cyan")
+    show_project = any(item.get("project") for item in result)
+    if show_project:
+        table.add_column("Project", style="magenta")
     table.add_column("Permalink", style="green")
     table.add_column("Updated", style="dim")
 
@@ -371,9 +392,14 @@ def _display_recent_activity(result: list[dict[str, Any]]) -> None:
         #      bracketed content would be silently consumed or restyled.
         # Outcome: escape all user-sourced cell values before adding to the table.
         item_title = markup_escape(item.get("title") or item.get("permalink", ""))
+        project = markup_escape(str(item.get("project") or ""))
         permalink = markup_escape(item.get("permalink", ""))
         updated = str(item.get("updated_at") or item.get("created_at") or "")
-        table.add_row(item_type, item_title, permalink, updated)
+        row = [item_type, item_title]
+        if show_project:
+            row.append(project)
+        row.extend((permalink, updated))
+        table.add_row(*row)
 
     console.print(Panel(table, title="Recent Activity", expand=False))
 
@@ -393,14 +419,9 @@ def _plain_search_results(result: dict[str, Any], query: str = "") -> None:
     result (title / score / permalink) with an indented snippet line.
     """
     results = result.get("results", [])
-    # Mirror the Rich path's total fix: the API can return total=0 with a
-    # populated results list, so fall back to len(results) when total is falsy.
-    raw_total = result.get("total", len(results))
-    total = raw_total if raw_total else len(results)
-
     header = f"Search: {query}" if query else "Search results"
     print(header)
-    print(f"{total} result(s)")
+    print(_search_result_summary(result).replace("  •  ", " | "))
 
     if not results:
         print("No results found.")
@@ -484,6 +505,16 @@ def _plain_build_context(result: dict[str, Any]) -> None:
         primary_line = f"{p_type}  {p_title}" if p_type else p_title
         print(primary_line)
 
+        raw_primary_content = primary.get("content")
+        primary_content = (
+            raw_primary_content.strip()
+            if isinstance(raw_primary_content, str) and raw_primary_content.strip()
+            else ""
+        )
+        if primary_content:
+            for line in primary_content.splitlines():
+                print(f"  {line}")
+
         observations: list[dict[str, Any]] = list(context_result.get("observations", []))
         for obs in observations:
             category = obs.get("category", "")
@@ -508,12 +539,15 @@ def _plain_recent_activity(result: list[dict[str, Any]]) -> None:
         return
 
     print("Recent Activity")
+    show_project = any(item.get("project") for item in result)
     for item in result:
         item_type = item.get("type", "")
         item_title = item.get("title") or item.get("permalink", "")
+        project = str(item.get("project") or "")
         permalink = item.get("permalink", "")
         updated = str(item.get("updated_at") or item.get("created_at") or "")
-        print(f"- {item_title} ({item_type}) {permalink} {updated}".rstrip())
+        project_label = f" [project: {project}]" if show_project and project else ""
+        print(f"- {item_title} ({item_type}){project_label} {permalink} {updated}".rstrip())
 
 
 def _delete_note_failure_message(result: dict[str, Any]) -> str | None:
