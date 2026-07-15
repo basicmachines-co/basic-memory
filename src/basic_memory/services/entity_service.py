@@ -206,22 +206,64 @@ def _markdown_heading_level(line: str) -> int | None:
     return level
 
 
+def _fence_marker(line: str) -> tuple[str, int, str] | None:
+    """Return a CommonMark fence marker, length, and suffix for a delimiter candidate."""
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3:
+        return None
+
+    candidate = line[indent:]
+    if not candidate or candidate[0] not in ("`", "~"):
+        return None
+
+    marker = candidate[0]
+    marker_length = len(candidate) - len(candidate.lstrip(marker))
+    if marker_length < 3:
+        return None
+    return marker, marker_length, candidate[marker_length:]
+
+
 def _fenced_code_line_flags(lines: list[str]) -> list[bool]:
-    """Mark which lines sit inside (or delimit) ``` fenced code blocks.
+    """Mark which lines sit inside (or delimit) CommonMark fenced code blocks.
 
     Fenced code often contains '# comment' lines that look exactly like markdown
     headings. Section matching and boundary detection must skip those lines, or a
-    code comment would match or terminate a section.
+    code comment would match or terminate a section. CommonMark permits backtick
+    and tilde fences indented by at most three spaces; four-space-indented markers
+    are literal code and must not hide later real headings.
     """
     flags: list[bool] = []
-    in_fence = False
+    open_marker: str | None = None
+    open_length = 0
     for line in lines:
-        # Delimiter lines are marked as fenced too: they can never be headings or
-        # section matches, and treating them uniformly keeps the scan branch-free.
-        is_delimiter = line.lstrip().startswith("```")
-        flags.append(in_fence or is_delimiter)
-        if is_delimiter:
-            in_fence = not in_fence
+        marker = _fence_marker(line)
+
+        if open_marker is None:
+            if marker is None:
+                flags.append(False)
+                continue
+
+            marker_char, marker_length, suffix = marker
+            # Backtick fence info strings cannot contain a backtick. Treat such a
+            # line as ordinary text instead of opening a fence that never closes.
+            if marker_char == "`" and "`" in suffix:
+                flags.append(False)
+                continue
+
+            flags.append(True)
+            open_marker = marker_char
+            open_length = marker_length
+            continue
+
+        # Every line inside a fence, including its closing delimiter, is skipped
+        # by heading detection. A close must use the same marker, be at least as
+        # long as the opener, and contain only trailing whitespace.
+        flags.append(True)
+        if marker is not None:
+            marker_char, marker_length, suffix = marker
+            if marker_char == open_marker and marker_length >= open_length and not suffix.strip():
+                open_marker = None
+                open_length = 0
     return flags
 
 

@@ -443,6 +443,34 @@ def test_edit_note_json_output(mock_mcp_edit):
     assert data["operation"] == "append"
     mock_mcp_edit.assert_called_once()
     assert mock_mcp_edit.call_args.kwargs["output_format"] == "json"
+    assert mock_mcp_edit.call_args.kwargs["replace_subsections"] is True
+
+
+@patch(
+    "basic_memory.mcp.tools.edit_note",
+    new_callable=AsyncMock,
+    return_value=EDIT_NOTE_RESULT,
+)
+def test_edit_note_no_replace_subsections_passthrough(mock_mcp_edit):
+    """--no-replace-subsections forwards the conservative section boundary mode."""
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "edit-note",
+            "test-note",
+            "--operation",
+            "replace_section",
+            "--section",
+            "## Notes",
+            "--content",
+            "new content",
+            "--no-replace-subsections",
+        ],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert mock_mcp_edit.call_args.kwargs["replace_subsections"] is False
 
 
 @patch(

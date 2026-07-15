@@ -16,7 +16,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
-from basic_memory.services.entity_service import EntityService
+from basic_memory.services.entity_service import EntityService, _fenced_code_line_flags
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import generate_permalink
@@ -26,6 +26,25 @@ def _permalink(entity: EntityModel | EntitySchema) -> str:
     permalink = entity.permalink
     assert permalink is not None
     return permalink
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        (["", "ordinary", "``", "## Heading"], [False, False, False, False]),
+        (["    ```", "## Heading"], [False, False]),
+        (["```bad`info", "## Heading"], [False, False]),
+        (["```python", "## Fake", "```", "## Real"], [True, True, True, False]),
+        (["~~~python", "## Fake", "~~~~", "## Real"], [True, True, True, False]),
+        (
+            ["````python", "~~~", "```", "## Still fenced", "````", "## Real"],
+            [True, True, True, True, True, False],
+        ),
+    ],
+)
+def test_fenced_code_line_flags_follow_commonmark(lines: list[str], expected: list[bool]) -> None:
+    """Fence flags honor indentation, marker type, and closing-marker length."""
+    assert _fenced_code_line_flags(lines) == expected
 
 
 class _DeleteTestEmbeddingProvider:
@@ -1623,6 +1642,47 @@ async def test_edit_entity_replace_section_ignores_fenced_code_headings(
     # The next real h2 section is intact, including its fenced '## Usage' decoy
     assert "Reference content" in file_content
     assert "```python\n## Usage\n```" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_does_not_open_four_space_indented_fence(
+    entity_service: EntityService, file_service: FileService
+):
+    """A four-space-indented backtick line must not hide the next real heading."""
+    content = dedent("""
+        # Main Title
+
+        ## Usage
+        Old usage content.
+
+            ```
+
+        ## Reference
+        Reference content.
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Indented Fence Note",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="replace_section",
+        content="Updated usage instructions.",
+        section="## Usage",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Updated usage instructions." in file_content
+    assert "Old usage content." not in file_content
+    assert "## Reference" in file_content
+    assert "Reference content." in file_content
 
 
 @pytest.mark.asyncio
