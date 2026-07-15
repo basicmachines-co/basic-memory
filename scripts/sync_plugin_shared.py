@@ -56,8 +56,7 @@ def main() -> int:
             else:
                 shutil.copyfile(source, target)
                 print(
-                    f"vendored {source.relative_to(REPO_ROOT)}"
-                    f" -> {target.relative_to(REPO_ROOT)}"
+                    f"vendored {source.relative_to(REPO_ROOT)} -> {target.relative_to(REPO_ROOT)}"
                 )
 
     if stale:
