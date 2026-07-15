@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
+import logfire
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1013,8 +1014,19 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             if relaxed and params.get("text"):
                 params["text"] = relaxed
-                result = await active_session.execute(text(sql), params)
-                rows = result.fetchall()
+                logger.debug(
+                    "Strict Postgres FTS returned 0 results; retrying relaxed FTS query "
+                    f"strict='{search_text}' relaxed='{relaxed}'"
+                )
+                with logfire.span(
+                    "search.relaxed_fts_retry",
+                    backend="postgres",
+                    token_count=len(relaxed_query_words(search_text) or ()),
+                    limit=limit,
+                    offset=offset,
+                ):
+                    result = await active_session.execute(text(sql), params)
+                    rows = result.fetchall()
             return rows
 
         try:
@@ -1135,8 +1147,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 if relaxed and params.get("text"):
                     params["text"] = relaxed
-                    result = await session.execute(text(sql), params)
-                    total = int(result.scalar_one())
+                    with logfire.span(
+                        "search.count.relaxed_fts_retry",
+                        backend="postgres",
+                        token_count=len(relaxed_query_words(search_text) or ()),
+                    ):
+                        result = await session.execute(text(sql), params)
+                        total = int(result.scalar_one())
                 return total
         except Exception as e:
             if self._is_tsquery_syntax_error(e):

@@ -68,7 +68,6 @@ class SearchRepository(Protocol):
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
-        allow_relaxed: bool = False,
     ) -> int:
         """Count indexed content matching the same filters as search."""
         ...
