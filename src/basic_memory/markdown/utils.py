@@ -10,7 +10,10 @@ from frontmatter import Post
 
 from basic_memory.file_utils import has_frontmatter, remove_frontmatter, parse_frontmatter
 from basic_memory.markdown import EntityMarkdown
-from basic_memory.markdown.entity_parser import normalize_frontmatter_metadata
+from basic_memory.markdown.entity_parser import (
+    normalize_frontmatter_metadata,
+    normalize_frontmatter_value,
+)
 from basic_memory.models import Entity
 from basic_memory.models import Observation as ObservationModel
 
@@ -106,6 +109,16 @@ def apply_default_timestamps(
         metadata["created"] = fallback_created.isoformat()
     if "modified" not in incoming_metadata:
         metadata["modified"] = now.isoformat()
+
+    # Normalize to ISO strings so both timestamps round-trip identically and match how BM
+    # already serializes every other frontmatter date (#236). A user-supplied value arrives
+    # as a YAML-parsed date/datetime object; left as-is it dumps unquoted and reparses to a
+    # date object, while BM's own isoformat() values are strings that SafeDumper quotes —
+    # normalizing both here removes that quoted/unquoted split on disk.
+    for key in ("created", "modified"):
+        value = metadata.get(key)
+        if value is not None:
+            metadata[key] = normalize_frontmatter_value(value)
 
 
 async def schema_to_markdown(schema: Any) -> Post:
