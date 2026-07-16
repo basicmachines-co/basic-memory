@@ -240,7 +240,9 @@ class DirectoryService:
         total = len(result)
         start = (page - 1) * page_size
         end = start + page_size
-        nodes = result[start:end]
+        # Directory nodes in the collection still reference their complete child trees.
+        # Returning those trees would bypass the page bound when the response is serialized.
+        nodes = [node.model_copy(update={"children": []}) for node in result[start:end]]
         return DirectoryListResponse(
             nodes=nodes,
             page=page,

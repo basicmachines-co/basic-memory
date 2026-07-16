@@ -79,6 +79,21 @@ async def test_list_directory_root(directory_service: DirectoryService, test_gra
     assert result.nodes[0].name == "test"
     assert result.nodes[0].type == "directory"
     assert result.nodes[0].directory_path == "/test"
+    assert result.nodes[0].children == []
+
+
+@pytest.mark.asyncio
+async def test_list_directory_page_does_not_embed_descendants(
+    directory_service: DirectoryService,
+    test_graph,
+):
+    """A paginated directory node must not smuggle its full child tree into JSON."""
+    result = await directory_service.list_directory(dir_name="/", depth=1, page_size=1)
+
+    assert len(result.nodes) == 1
+    assert result.nodes[0].name == "test"
+    assert result.nodes[0].children == []
+    assert "Connected Entity 1.md" not in result.model_dump_json()
 
 
 @pytest.mark.asyncio
