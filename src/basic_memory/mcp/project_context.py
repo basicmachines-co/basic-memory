@@ -1411,6 +1411,8 @@ async def resolve_project_and_path(
                 project_route_missing = "project not found" in error_message
                 project_route_hidden_by_scope = (
                     "does not have access to this project" in error_message
+                    and cached_project is not None
+                    and _project_matches_identifier(cached_project, project)
                     and not strict_project_routing
                 )
                 if not project_route_missing and not project_route_hidden_by_scope:

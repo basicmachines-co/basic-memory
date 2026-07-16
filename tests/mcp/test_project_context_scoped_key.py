@@ -91,3 +91,25 @@ async def test_mutating_route_keeps_scope_rejection_fail_closed(
             context=cast(Any, context),
             strict_project_routing=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_read_route_requires_an_authorized_cached_project(
+    config_manager,
+    monkeypatch,
+) -> None:
+    """An access denial without an established project must still propagate."""
+    context = ContextState()
+
+    async def reject_project_route(*args: object, **kwargs: object) -> None:
+        raise ToolError("This API key does not have access to this project")
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", reject_project_route)
+
+    with pytest.raises(ToolError, match="does not have access"):
+        await resolve_project_and_path(
+            client=cast(Any, None),
+            identifier="memory://other-project/cloud-smoke",
+            project="ci-acceptance",
+            context=cast(Any, context),
+        )
