@@ -5,6 +5,7 @@ CLI command group (#991) so both surfaces apply identical scrubbing rules
 instead of drifting apart over time.
 """
 
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 # Fields in BasicMemoryConfig that contain secrets and must never be surfaced.
@@ -80,7 +81,7 @@ def redact_url(url: str) -> str:
     return urlunparse(parsed._replace(netloc=redacted_netloc, query=redacted_query))
 
 
-def redact_config(raw: dict) -> dict:
+def redact_config(raw: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of a raw config dict with secret fields removed.
 
     - Keys in ``SECRET_FIELDS`` are dropped entirely.
@@ -91,7 +92,7 @@ def redact_config(raw: dict) -> dict:
     not currently credential-bearing, but the two sets make the pattern easy
     to extend.
     """
-    result: dict = {}
+    result: dict[str, Any] = {}
     for k, v in raw.items():
         if k in SECRET_FIELDS:
             # Drop entirely — value has no diagnostic value.
