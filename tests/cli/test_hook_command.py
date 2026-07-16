@@ -1,6 +1,7 @@
 """Tests for the `bm hook` command group (SPEC-55 front door)."""
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -13,6 +14,19 @@ from basic_memory.cli.main import app as cli_app
 runner = CliRunner()
 
 SEARCH_EMPTY = {"results": [], "total": 0}
+
+# Captured before the autouse stub patches the module attribute, so the probe's
+# own unit tests can exercise the real function while install tests use the stub.
+_REAL_SUPPORTS_HOOK = hook_module._supports_hook
+
+
+@pytest.fixture(autouse=True)
+def _hook_probe_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    # install() probes PATH launchers for `hook` support by shelling out to the
+    # ambient basic-memory, which on some dev machines is a stale release. Pin
+    # the probe to "supported" so install tests resolve launchers deterministically
+    # without spawning subprocesses; tests needing a stale launcher override it.
+    monkeypatch.setattr(hook_module, "_supports_hook", lambda binary: True)
 
 
 def _search_result(*titles: str) -> dict:
@@ -913,6 +927,57 @@ def test_install_prefers_bm_when_basic_memory_absent(monkeypatch: pytest.MonkeyP
     assert result.exit_code == 0
     command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     assert command == "bm hook session-start --harness claude"
+
+
+def test_install_skips_stale_basic_memory_and_uses_uvx(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A stale pre-hook basic-memory is on PATH alongside uvx: install must not
+    # bake the stale binary into the config (it would fail at hook time), and
+    # falls back to the pinned uvx form.
+    monkeypatch.setattr(
+        hook_module.shutil,
+        "which",
+        lambda name: f"/opt/bin/{name}" if name in {"basic-memory", "uvx"} else None,
+    )
+    monkeypatch.setattr(hook_module, "_supports_hook", lambda binary: False)
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith('uvx "basic-memory>=')
+    assert command.endswith("hook session-start --harness claude")
+
+
+def test_supports_hook_true_on_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["stdin"] = kwargs.get("stdin")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(hook_module.subprocess, "run", fake_run)
+
+    assert _REAL_SUPPORTS_HOOK("basic-memory") is True
+    assert captured["cmd"] == ["basic-memory", "hook", "--help"]
+    assert captured["stdin"] == subprocess.DEVNULL  # never blocks on stdin
+
+
+def test_supports_hook_false_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        hook_module.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(cmd, 2)
+    )
+
+    assert _REAL_SUPPORTS_HOOK("basic-memory") is False
+
+
+def test_supports_hook_false_when_binary_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(cmd, **kwargs):
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(hook_module.subprocess, "run", boom)
+
+    assert _REAL_SUPPORTS_HOOK("does-not-exist") is False
 
 
 @pytest.mark.parametrize(

@@ -828,21 +828,41 @@ OWNED_HOOK_COMMAND_RE = re.compile(
 )
 
 
+def _supports_hook(binary: str) -> bool:
+    """Whether a PATH-resolved CLI actually ships the ``hook`` command group.
+
+    Mirrors the shim probe: a stale pre-hook ``basic-memory``/``bm`` left on PATH
+    must not be written into the hook config, or SessionStart/PreCompact would
+    invoke a CLI whose ``hook`` group doesn't exist. stdin is detached so the
+    probe never blocks; any failure means "don't trust it".
+    """
+    try:
+        probe = subprocess.run(
+            [binary, "hook", "--help"],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
 def _hook_launcher() -> str:
     """The command prefix installed hooks use to reach the Basic Memory CLI.
 
     Mirrors the shim resolution so a standalone install writes a command that
-    actually resolves at hook time: a PATH binary first (keeps the hook's
-    version aligned with the user's install), else a uvx fallback pinned to the
-    running release floor so a cold cache still fetches a CLI that ships the
-    ``hook`` group. With nothing resolvable we still write the ``basic-memory``
-    form as a best effort — ``install`` warns about the missing uv the fallback
-    would otherwise need.
+    actually resolves — and works — at hook time: a PATH binary first (keeps the
+    hook's version aligned with the user's install) but only when it ships the
+    ``hook`` group, so a stale pre-hook binary on PATH is skipped rather than
+    baked into the config; else a uvx fallback pinned to the running release
+    floor so a cold cache still fetches a CLI that ships ``hook``. With nothing
+    resolvable we still write the ``basic-memory`` form as a best effort —
+    ``install`` warns about the missing uv the fallback would otherwise need.
     """
-    if shutil.which("basic-memory"):
-        return "basic-memory"
-    if shutil.which("bm"):
-        return "bm"
+    for binary in ("basic-memory", "bm"):
+        if shutil.which(binary) and _supports_hook(binary):
+            return binary
     if shutil.which("uvx"):
         # Strip any .dev / +local / build suffix so the constraint is a clean
         # release floor (the shims pin the same way, bumped by update_versions).

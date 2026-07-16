@@ -353,6 +353,20 @@ async def test_flush_prunes_expired_unresolved_pending_envelopes(bm_home: Path) 
     mock_write.assert_not_awaited()
 
 
+async def test_flush_prune_skips_non_file_glob_matches(bm_home: Path) -> None:
+    # A directory whose name happens to match *.json must be skipped by
+    # retention, not unlinked (which would crash the sweep).
+    stray = inbox.inbox_dir() / f"{_uuid7_aged(45)}.json"
+    stray.mkdir(parents=True)
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    assert stray.is_dir()  # never unlinked
+    assert result.pruned == 0
+
+
 async def test_flush_keeps_recent_unmapped_pending_envelopes(bm_home: Path) -> None:
     # Within the window, unmapped trace is kept — a mapping may still resolve it.
     fresh = _plant_pending_with_age(days_old=1)
