@@ -224,7 +224,18 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
     for path in inbox.list_envelopes():
         result.swept += 1
         try:
-            entries.append((path, envelope_from_json(path.read_text(encoding="utf-8"))))
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            # Trigger: the file vanished (a concurrent flush retired it) or is
+            # transiently unreadable between listing and reading.
+            # Why: one missing/locked file must never abort the whole sweep and
+            #      skip the remaining valid envelopes + the flush marker.
+            # Outcome: skip it — it isn't corrupt trace, just gone or busy; the
+            #      sweep that owns it handles it. Not counted as invalid.
+            logger.debug(f"skipping unreadable envelope {path.name}: {exc}")
+            continue
+        try:
+            entries.append((path, envelope_from_json(text)))
         except (ValueError, json.JSONDecodeError) as exc:
             # Trigger: corrupt or future-versioned envelope file.
             # Why: deleting it would destroy trace; projecting it would guess.

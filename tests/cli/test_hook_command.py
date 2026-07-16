@@ -882,6 +882,39 @@ def test_install_hints_when_uv_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "install uv:" in result.stderr
 
 
+def test_install_uses_uvx_launcher_when_no_binary_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A uvx-only user (uv present, no basic-memory/bm on PATH): the installed
+    # command must resolve via the uvx fallback, not a bare basic-memory that
+    # would hit command-not-found at hook time.
+    monkeypatch.setattr(
+        hook_module.shutil, "which", lambda name: "/opt/bin/uvx" if name == "uvx" else None
+    )
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith('uvx "basic-memory>=')
+    assert command.endswith("hook session-start --harness claude")
+
+    # remove must still recognize the uvx form via the suffix-based ownership tag.
+    remove_result = runner.invoke(cli_app, ["hook", "remove"])
+    assert remove_result.exit_code == 0
+    assert "hooks" not in _read_json(_claude_settings_path())
+
+
+def test_install_prefers_bm_when_basic_memory_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        hook_module.shutil, "which", lambda name: "/opt/bin/bm" if name == "bm" else None
+    )
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command == "bm hook session-start --harness claude"
+
+
 @pytest.mark.parametrize(
     ("platform", "expected"),
     [

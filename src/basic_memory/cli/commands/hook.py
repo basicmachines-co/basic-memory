@@ -41,6 +41,7 @@ from typing import Any, Callable, Optional
 import typer
 from loguru import logger
 
+import basic_memory
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.hooks.adapters import NormalizedHookEvent, for_harness
@@ -818,10 +819,36 @@ def flush(
 
 # Ownership tag: entries we write are recognized by their command shape — the
 # codex-honcho ownership-regex approach. `remove` deletes exactly the entries
-# matching this pattern and never touches user-authored hooks.
+# matching this pattern and never touches user-authored hooks. Keying on the
+# ``hook <verb> --harness <harness>`` suffix (rather than the launcher prefix)
+# matches every launcher form we may write — ``basic-memory``, ``bm``, and the
+# ``uvx "basic-memory>=X"`` fallback — while staying distinctive to our CLI.
 OWNED_HOOK_COMMAND_RE = re.compile(
-    r"\b(?:basic-memory|bm)(?:\.exe)?\s+hook\s+(?:session-start|pre-compact)\b"
+    r"\bhook\s+(?:session-start|pre-compact)\s+--harness\s+(?:claude|codex)\b"
 )
+
+
+def _hook_launcher() -> str:
+    """The command prefix installed hooks use to reach the Basic Memory CLI.
+
+    Mirrors the shim resolution so a standalone install writes a command that
+    actually resolves at hook time: a PATH binary first (keeps the hook's
+    version aligned with the user's install), else a uvx fallback pinned to the
+    running release floor so a cold cache still fetches a CLI that ships the
+    ``hook`` group. With nothing resolvable we still write the ``basic-memory``
+    form as a best effort — ``install`` warns about the missing uv the fallback
+    would otherwise need.
+    """
+    if shutil.which("basic-memory"):
+        return "basic-memory"
+    if shutil.which("bm"):
+        return "bm"
+    if shutil.which("uvx"):
+        # Strip any .dev / +local / build suffix so the constraint is a clean
+        # release floor (the shims pin the same way, bumped by update_versions).
+        floor = basic_memory.__version__.split(".dev")[0].split("+")[0]
+        return f'uvx "basic-memory>={floor}"'
+    return "basic-memory"
 
 
 def _hook_config_path(harness: Harness) -> Path:
@@ -837,13 +864,15 @@ def _hook_config_path(harness: Harness) -> Path:
 
 def _owned_hook_groups(harness: Harness) -> dict[str, dict[str, Any]]:
     """The hook groups we install, mirroring the plugin hooks.json wiring."""
+    launcher = _hook_launcher()
 
     def group(verb: str, timeout: int, matcher: str | None) -> dict[str, Any]:
         entry: dict[str, Any] = {
             "type": "command",
-            # The ownership tag lives in the command itself: OWNED_HOOK_COMMAND_RE
-            # must match it, or `bm hook remove` would orphan the entry.
-            "command": f"basic-memory hook {verb} --harness {harness.value}",
+            # The ownership tag lives in the command's `hook <verb> --harness`
+            # suffix: OWNED_HOOK_COMMAND_RE must match it, or `bm hook remove`
+            # would orphan the entry.
+            "command": f"{launcher} hook {verb} --harness {harness.value}",
             "timeout": timeout,
         }
         wrapped: dict[str, Any] = {"hooks": [entry]}

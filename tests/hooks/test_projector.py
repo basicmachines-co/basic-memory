@@ -239,6 +239,26 @@ async def test_flush_leaves_group_pending_on_error_result(bm_home: Path) -> None
     assert inbox.list_envelopes() == [path]
 
 
+async def test_flush_skips_vanished_inbox_file(bm_home: Path) -> None:
+    # A pending file that disappears (a concurrent flush retired it) or is
+    # transiently unreadable between listing and reading must not abort the
+    # sweep: the valid envelope still projects and the flush marker is recorded.
+    good = _capture()
+    ghost = inbox.inbox_dir() / "gone.json"  # listed but never on disk
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with (
+        patch("basic_memory.mcp.tools.write_note", mock_write),
+        patch.object(inbox, "list_envelopes", return_value=[good, ghost]),
+    ):
+        result = await flush()
+
+    assert result.projected == 1
+    assert result.swept == 2
+    assert result.invalid == 0  # a vanished file is skipped, not counted corrupt
+    assert inbox.last_flush() is not None
+
+
 async def test_flush_counts_invalid_envelopes_and_leaves_them(bm_home: Path) -> None:
     valid = _capture()
     broken = valid.parent / f"{'0' * 8}-0000-7000-8000-{'0' * 12}.json"
