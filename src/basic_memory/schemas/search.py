@@ -9,7 +9,7 @@ The search system supports three primary modes:
 from typing import Optional, List, Union, Any
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from basic_memory.schemas.base import Permalink
 
@@ -146,5 +146,12 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
     current_page: int
     page_size: int
-    total: int = 0
+    total: int = Field(
+        default=0,
+        description="Total matching results when total_is_exact is true; otherwise a sentinel or estimate",
+    )
+    total_is_exact: bool = Field(
+        default=True,
+        description="Whether total is an exact count that clients can use for pagination",
+    )
     has_more: bool = False

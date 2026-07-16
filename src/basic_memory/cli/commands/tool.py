@@ -116,7 +116,13 @@ def _search_result_summary(result: dict[str, Any]) -> str:
     """Describe search count and pagination without inventing a final page."""
     results = result.get("results", [])
     raw_total = result.get("total")
-    total_is_known = isinstance(raw_total, int) and raw_total > 0
+    raw_total_is_exact = result.get("total_is_exact")
+    if isinstance(raw_total_is_exact, bool):
+        total_is_known = raw_total_is_exact and isinstance(raw_total, int)
+    else:
+        # Older payloads used a positive total for exact counts and zero as the
+        # unknown-total sentinel, so retain that fallback during compatibility.
+        total_is_known = isinstance(raw_total, int) and raw_total > 0
     total = raw_total if total_is_known else len(results)
     page = result.get("current_page") or result.get("page", 1)
     page_size = result.get("page_size", len(results)) or 1
@@ -140,6 +146,7 @@ def _display_search_results(result: dict[str, Any], query: str = "") -> None:
       current_page: int   (NOT "page")
       page_size: int
       total: int
+      total_is_exact: bool
       has_more: bool
     """
     results = result.get("results", [])

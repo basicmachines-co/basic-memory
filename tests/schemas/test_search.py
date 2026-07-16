@@ -131,3 +131,8 @@ def test_search_response():
     assert len(response.results) == 2
     assert response.results[0].score > response.results[1].score
     assert response.total == 2
+    assert response.total_is_exact is True
+
+    unknown_response = response.model_copy(update={"total": 0, "total_is_exact": False})
+    assert unknown_response.total == 0
+    assert unknown_response.total_is_exact is False

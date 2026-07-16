@@ -57,6 +57,7 @@ SEARCH_RESULT = {
     # Real SearchResponse.model_dump() uses "current_page", not "page".
     # No "query" key in the response -- the query comes from the CLI argument.
     "total": 2,
+    "total_is_exact": True,
     "current_page": 1,
     "page_size": 10,
     "has_more": False,
@@ -84,6 +85,7 @@ SEARCH_RESULT = {
 
 SEARCH_RESULT_EMPTY = {
     "total": 0,
+    "total_is_exact": True,
     "current_page": 1,
     "page_size": 10,
     "has_more": False,
@@ -241,6 +243,7 @@ def test_search_notes_json_flag_overrides_tty(mock_mcp):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
     assert data["total"] == 2
+    assert data["total_is_exact"] is True
     assert data["results"][0]["title"] == "Test Note"
 
 
@@ -599,6 +602,7 @@ def test_build_context_rich_renders_observations(mock_mcp):
 # Search result whose title contains a bracket expression like "[draft]".
 SEARCH_RESULT_BRACKETED_TITLE = {
     "total": 1,
+    "total_is_exact": True,
     "current_page": 1,
     "page_size": 10,
     "has_more": False,
@@ -696,9 +700,10 @@ def test_build_context_rich_observation_category_bracket_survives(mock_mcp):
 # search-notes – total=0 with non-empty results subtitle (Bug 3, issue #678)
 # ---------------------------------------------------------------------------
 
-# Fixture that mirrors the upstream quirk: total=0 but results is non-empty.
+# Semantic-search payload: total=0 is an unknown sentinel, made explicit by the flag.
 SEARCH_RESULT_ZERO_TOTAL = {
     "total": 0,
+    "total_is_exact": False,
     "current_page": 1,
     "page_size": 10,
     "has_more": False,
@@ -724,17 +729,26 @@ SEARCH_RESULT_ZERO_TOTAL = {
     ],
 }
 
+SEARCH_RESULT_LEGACY_ZERO_TOTAL = {
+    key: value for key, value in SEARCH_RESULT_ZERO_TOTAL.items() if key != "total_is_exact"
+}
+
 SEARCH_RESULT_UNKNOWN_TOTAL_WITH_MORE = {
     **SEARCH_RESULT_ZERO_TOTAL,
     "page_size": 2,
     "has_more": True,
 }
 
+SEARCH_RESULT_APPROXIMATE_TOTAL_WITH_MORE = {
+    **SEARCH_RESULT_UNKNOWN_TOTAL_WITH_MORE,
+    "total": 2,
+}
+
 
 @patch(
     "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
-    return_value=SEARCH_RESULT_ZERO_TOTAL,
+    return_value=SEARCH_RESULT_LEGACY_ZERO_TOTAL,
 )
 def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
     """When the API returns total=0 but results is non-empty, subtitle shows real count.
@@ -758,10 +772,10 @@ def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
 @patch(
     "basic_memory.mcp.tools.search_notes",
     new_callable=AsyncMock,
-    return_value=SEARCH_RESULT_UNKNOWN_TOTAL_WITH_MORE,
+    return_value=SEARCH_RESULT_APPROXIMATE_TOTAL_WITH_MORE,
 )
 def test_search_notes_rich_unknown_total_preserves_has_more(mock_mcp):
-    """Unknown totals never produce a false final-page claim when more results exist."""
+    """An explicit unknown flag overrides a positive aggregate estimate."""
     result = _tty_runner(["tool", "search-notes", "found"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"

@@ -106,7 +106,7 @@ async def search(
             else:
                 # Trigger: semantic modes would need another vector/hybrid retrieval to count.
                 # Why: search requests should not pay for a second semantic pass.
-                # Outcome: preserve probe pagination for semantic search and leave total at 0.
+                # Outcome: preserve probe pagination, leave total at 0, and mark it unknown.
                 has_more = len(results) > page_size
                 if has_more:
                     results = results[:page_size]
@@ -131,6 +131,7 @@ async def search(
                 current_page=page,
                 page_size=page_size,
                 total=total,
+                total_is_exact=exact_count_available,
                 has_more=has_more,
             )
 

@@ -490,6 +490,11 @@ def _result_total(results: dict[str, Any], raw_results: list[SearchResult | dict
     return len(raw_results) + (1 if results.get("has_more") is True else 0)
 
 
+def _result_total_is_exact(results: dict[str, Any]) -> bool:
+    """Return whether a per-project payload explicitly guarantees an exact total."""
+    return results.get("total_is_exact") is True
+
+
 def _project_ref_label(project_ref: dict[str, str | None]) -> str:
     """Return a stable log label for a project search ref."""
     return project_ref.get("project") or project_ref.get("project_id") or "<unknown project>"
@@ -522,6 +527,7 @@ async def _search_all_projects(
             current_page=requested_page,
             page_size=requested_page_size,
             total=0,
+            total_is_exact=True,
             has_more=False,
         )
         if output_format == "json":
@@ -531,6 +537,7 @@ async def _search_all_projects(
     per_project_page_size = requested_page * requested_page_size
     merged_results: list[dict[str, Any]] = []
     total = 0
+    total_is_exact = True
     any_project_has_more = False
 
     # Trigger: caller asked for an account-wide search.
@@ -576,6 +583,7 @@ async def _search_all_projects(
             logger.warning(
                 f"Multi-project search failed for project {_project_ref_label(project_ref)}: {exc}"
             )
+            total_is_exact = False
             continue
 
         if isinstance(results, str):
@@ -585,10 +593,12 @@ async def _search_all_projects(
                 "Multi-project search failed for project "
                 f"{_project_ref_label(project_ref)}: {results}"
             )
+            total_is_exact = False
             continue
 
         raw_results = _raw_results_from_search_payload(results)
         total += _result_total(results, raw_results)
+        total_is_exact = total_is_exact and _result_total_is_exact(results)
         any_project_has_more = any_project_has_more or results.get("has_more") is True
         merged_results.extend(_qualify_results_for_project(raw_results, project_ref))
 
@@ -602,6 +612,7 @@ async def _search_all_projects(
             "current_page": requested_page,
             "page_size": requested_page_size,
             "total": total,
+            "total_is_exact": total_is_exact,
             "has_more": any_project_has_more or total > end or len(sorted_results) > end,
         }
     )
@@ -833,10 +844,10 @@ async def search_notes(
         Formatted markdown text (output_format="text"), dict (output_format="json"),
         or helpful error guidance string if search fails
 
-        Pagination note: `total` is exact only for text/title/permalink searches.
+        Pagination note: use `total` as a count only when `total_is_exact` is true.
         Vector and hybrid searches skip the count query (it would cost a second
-        semantic retrieval pass) and report `total: 0` even when results are
-        returned — use `has_more` for pagination in those modes.
+        semantic retrieval pass), report `total: 0` with `total_is_exact: false`,
+        and use `has_more` for pagination.
 
     Examples:
         # Basic text search

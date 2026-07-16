@@ -119,6 +119,7 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
         "team-paul/main/tests/mcp-test-note",
         "personal/main/tests/mcp-test-note",
     ]
+    assert result["total_is_exact"] is True
 
 
 @pytest.mark.asyncio
@@ -193,6 +194,7 @@ async def test_search_notes_search_all_projects_with_no_refs_returns_empty_all_p
         "current_page": 1,
         "page_size": 10,
         "total": 0,
+        "total_is_exact": True,
         "has_more": False,
     }
 
@@ -282,6 +284,7 @@ async def test_search_notes_search_all_projects_continues_after_project_failure(
         "personal/main/tests/mcp-test-note",
     ]
     assert result["total"] == 1
+    assert result["total_is_exact"] is False
     assert any("team-paul/main" in warning for warning in warnings)
     assert any("team index unavailable" in warning for warning in warnings)
 
@@ -364,3 +367,4 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
         "take the name-routed path."
     )
     assert result["total"] == 2
+    assert result["total_is_exact"] is True
