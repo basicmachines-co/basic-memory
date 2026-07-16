@@ -988,6 +988,30 @@ def test_hook_command_fails_open_on_broken_global_config(
     assert result.exit_code == 0
 
 
+def test_hook_command_fails_open_when_logging_setup_raises(
+    bm_home: Path, claude_project: Path
+) -> None:
+    # init_cli_logging() runs first in the callback and loads config via Logfire
+    # setup, so a malformed config makes it raise SystemExit before the container
+    # step. The hook fail-open guard now wraps logging setup too, so the verb
+    # still exits 0.
+    with (
+        patch("basic_memory.cli.app.init_cli_logging", side_effect=SystemExit(1)),
+        patch(
+            "basic_memory.mcp.tools.search_notes",
+            new_callable=AsyncMock,
+            return_value=SEARCH_EMPTY,
+        ),
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+
+
 def test_hook_install_works_despite_broken_global_config(bm_home: Path) -> None:
     # The operator verb `bm hook install` writes harness config and needs no
     # Basic Memory config, so a broken global config must not turn it into a

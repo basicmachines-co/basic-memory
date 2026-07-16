@@ -41,38 +41,33 @@ def app_callback(
 ) -> None:
     """Basic Memory - Local-first personal knowledge management."""
 
-    # Initialize logging for CLI (file only, no stdout)
-    init_cli_logging()
     command_name = ctx.invoked_subcommand or "root"
-    ctx.with_resource(
-        logfire.span(
-            f"cli.command.{command_name}",
-            entrypoint="cli",
-            command_name=command_name,
-        )
-    )
 
     # Trigger: a `hook` invocation (the advisory harness front door, SPEC-55).
-    # Why: the hook verbs need none of the global composition root here — they
-    # resolve config lazily via ConfigManager when they run, the lifecycle verbs
-    # (session-start/pre-compact) are each wrapped in their own _run_fail_open
-    # guard, and the operator verbs (install/remove) touch no global config at
-    # all. Building the container here instead (a) crashes the harness on a
-    # malformed ~/.basic-memory/config.json *before* a lifecycle verb's fail-open
-    # guard, and (b) would put DB/network/promo work on the session-start/
-    # pre-compact hot path and risk polluting the brief.
-    # Outcome: set the container when config is valid (unchanged normal path) but
-    # never raise from the callback for a hook, and skip init + all messaging.
-    # A broken config then surfaces where it belongs: swallowed by a lifecycle
-    # verb's fail-open guard, or raised by an operator verb that needs it.
+    # Why: the hook verbs need none of the global composition root — they resolve
+    # config lazily via ConfigManager when they run, the lifecycle verbs
+    # (session-start/pre-compact) each wrap their body in _run_fail_open, and the
+    # operator verbs (install/remove) touch no global config at all. Everything
+    # the callback does here — logging setup (Logfire loads config), the span,
+    # the container, uvloop — can raise SystemExit on a malformed config
+    # (ConfigManager reports bad JSON that way), and none of it may abort the verb
+    # before its own guard: even config-free work (envelope capture, `hook
+    # install`) must still run.
+    # Outcome: run that setup best-effort, swallowing (Exception, SystemExit) so a
+    # broken config surfaces only where it belongs — a lifecycle verb's fail-open
+    # guard, or an operator verb that needs config. Skip global init and the
+    # promo/init-line/auto-update messaging (off the session-start/pre-compact hot
+    # path, out of the brief). KeyboardInterrupt is left to propagate.
     if ctx.invoked_subcommand == "hook":
-        # SystemExit is caught alongside Exception: ConfigManager.load_config()
-        # raises SystemExit (not Exception) on a malformed config, and letting it
-        # escape here would abort the verb before its own _run_fail_open guard —
-        # so even config-free work like envelope capture would be lost. Swallow
-        # both and let the verb run (it fails open per-verb). KeyboardInterrupt is
-        # left to propagate.
         try:
+            init_cli_logging()
+            ctx.with_resource(
+                logfire.span(
+                    f"cli.command.{command_name}",
+                    entrypoint="cli",
+                    command_name=command_name,
+                )
+            )
             container = CliContainer.create()
             set_container(container)
             # uvloop must own the event-loop policy before the hook verbs run
@@ -85,6 +80,16 @@ def app_callback(
         except (Exception, SystemExit):
             pass
         return
+
+    # Initialize logging for CLI (file only, no stdout)
+    init_cli_logging()
+    ctx.with_resource(
+        logfire.span(
+            f"cli.command.{command_name}",
+            entrypoint="cli",
+            command_name=command_name,
+        )
+    )
 
     # --- Composition Root ---
     # Create container and read config (single point of config access)
