@@ -93,6 +93,23 @@ def test_deny_paths_redact_embedded_substring_in_value() -> None:
     assert redacted["note"] == f"copied {REDACTED_PATH} to backup"
 
 
+def test_deny_paths_redact_whole_value_path_with_spaces() -> None:
+    # A whole-value path with spaces (a client/project dir) must redact fully —
+    # the substring pass's \S* tail would stop at the first space and leak the
+    # rest. Path-prefix logic on the whole value handles it.
+    redacted = redact_payload(
+        {"cwd": "/srv/clients/acme corp/secret.txt"}, extra_redact_paths=["/srv/clients/"]
+    )
+    assert redacted["cwd"] == REDACTED_PATH
+
+
+def test_redact_text_redacts_whole_value_path_with_spaces() -> None:
+    assert (
+        redact_text("/srv/clients/acme corp/repo", extra_redact_paths=["/srv/clients/"])
+        == REDACTED_PATH
+    )
+
+
 def test_deny_paths_match_across_windows_separators() -> None:
     # Windows payload values carry backslashes while deny paths are usually
     # written with forward slashes; both sides normalize before comparison.
