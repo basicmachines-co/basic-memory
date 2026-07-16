@@ -715,14 +715,19 @@ def _checkpoint_note(
 def _run_fail_open(verb: str, run: Callable[[], None]) -> None:
     """Fail-open execution for harness-invoked verbs.
 
-    Trigger: any exception escaping a hook verb.
+    Trigger: any failure escaping a hook verb.
     Why: hooks are advisory and must never disrupt an agent session (SPEC-55);
          stdout stays clean because verbs print only once, at the end.
-    Outcome: diagnostics to stderr and the log file; exit code 0.
+    Outcome: diagnostics to stderr and the log file; the verb returns cleanly.
+
+    SystemExit is caught alongside Exception: a malformed global config makes
+    ConfigManager.load_config() raise SystemExit (not Exception), and that must
+    fail open like any other error rather than abort the verb. KeyboardInterrupt
+    (also BaseException) is deliberately left to propagate.
     """
     try:
         run()
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         logger.exception(f"bm hook {verb} failed")
         print(f"bm hook {verb}: {exc}", file=sys.stderr)
 

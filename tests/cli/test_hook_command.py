@@ -972,11 +972,12 @@ def test_hook_command_fails_open_on_broken_global_config(
     bm_home: Path, claude_project: Path
 ) -> None:
     # The composition root (container/config load) runs in app_callback before
-    # the hook verb's fail-open guard. A broken global config must still exit 0
-    # for a hook — never surface a non-zero status to the harness.
+    # the hook verb's fail-open guard. ConfigManager raises SystemExit (not
+    # Exception) on a malformed config, so both app_callback and _run_fail_open
+    # must catch it — a hook still exits 0, never a non-zero status to the harness.
     with patch(
         "basic_memory.cli.app.CliContainer.create",
-        side_effect=RuntimeError("malformed config.json"),
+        side_effect=SystemExit(1),
     ):
         result = runner.invoke(
             cli_app,
@@ -994,13 +995,22 @@ def test_hook_install_works_despite_broken_global_config(bm_home: Path) -> None:
     # hook, so install still runs and actually writes the harness entries.
     with patch(
         "basic_memory.cli.app.CliContainer.create",
-        side_effect=RuntimeError("malformed config.json"),
+        side_effect=SystemExit(1),
     ):
         result = runner.invoke(cli_app, ["hook", "install"])
 
     assert result.exit_code == 0
     hooks = _read_json(_claude_settings_path())["hooks"]
     assert "SessionStart" in hooks and "PreCompact" in hooks
+
+
+def test_run_fail_open_swallows_systemexit() -> None:
+    # A verb that raises SystemExit (e.g. ConfigManager on a malformed config)
+    # must fail open, not propagate — SystemExit isn't an Exception.
+    def boom() -> None:
+        raise SystemExit(2)
+
+    hook_module._run_fail_open("session-start", boom)  # must return without raising
 
 
 def test_hook_command_installs_uvloop_for_async_work(bm_home: Path, claude_project: Path) -> None:

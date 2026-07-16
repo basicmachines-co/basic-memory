@@ -66,6 +66,12 @@ def app_callback(
     # A broken config then surfaces where it belongs: swallowed by a lifecycle
     # verb's fail-open guard, or raised by an operator verb that needs it.
     if ctx.invoked_subcommand == "hook":
+        # SystemExit is caught alongside Exception: ConfigManager.load_config()
+        # raises SystemExit (not Exception) on a malformed config, and letting it
+        # escape here would abort the verb before its own _run_fail_open guard —
+        # so even config-free work like envelope capture would be lost. Swallow
+        # both and let the verb run (it fails open per-verb). KeyboardInterrupt is
+        # left to propagate.
         try:
             container = CliContainer.create()
             set_container(container)
@@ -76,7 +82,7 @@ def app_callback(
             from basic_memory.db import maybe_install_uvloop
 
             maybe_install_uvloop(container.config)
-        except Exception:
+        except (Exception, SystemExit):
             pass
         return
 
