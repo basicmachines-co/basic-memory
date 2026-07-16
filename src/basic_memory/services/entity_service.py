@@ -658,6 +658,18 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.directory}/{schema.title} already exists: {file_path}"
             )
 
+        if not skip_conflict_check:
+            conflicts = await self.detect_file_path_conflicts(
+                file_path.as_posix(),
+                session=session,
+            )
+            if conflicts:
+                raise EntityAlreadyExistsError(
+                    f"file path conflicts with existing note(s): {', '.join(conflicts)}"
+                )
+            # The create path has completed the same check resolve_permalink would perform.
+            skip_conflict_check = True
+
         content_markdown = self._apply_schema_frontmatter_overrides(schema)
         permalink = await self._resolve_schema_permalink(
             schema,

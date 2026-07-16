@@ -462,6 +462,48 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_p
 
 
 @pytest.mark.asyncio
+async def test_write_note_rejects_existing_note_with_legacy_filename(
+    mcp_server, app, test_project, app_config
+):
+    """A naming-convention change must not create a second note with the same title."""
+    app_config.kebab_filenames = True
+    app_config.permalinks_include_project = False
+    ConfigManager().save_config(app_config)
+
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Site Roadmap",
+                "directory": "",
+                "content": "Legacy content.",
+            },
+        )
+        assert "file_path: site-roadmap.md" in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+
+        app_config.kebab_filenames = False
+        app_config.permalinks_include_project = True
+        ConfigManager().save_config(app_config)
+
+        duplicate = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Site Roadmap",
+                "directory": "",
+                "content": "Replacement content.",
+            },
+        )
+
+        response_text = duplicate.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Error: Note already exists" in response_text
+        project_path = Path(test_project.path)
+        assert (project_path / "site-roadmap.md").exists()
+        assert not (project_path / "Site Roadmap.md").exists()
+
+
+@pytest.mark.asyncio
 async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, app_config):
     """Test that os.path.join logic in Entity.file_path works for various folder/title combinations."""
 
