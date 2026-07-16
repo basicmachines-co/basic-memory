@@ -37,6 +37,14 @@ fi
 # ${CLAUDE_PROJECT_DIR} pins project mapping to the session's project root
 # instead of trusting cwd; the hook JSON on stdin passes through untouched.
 if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-    exec "${BM[@]}" hook session-start --harness claude --project-dir "${CLAUDE_PROJECT_DIR}"
+    "${BM[@]}" hook session-start --harness claude --project-dir "${CLAUDE_PROJECT_DIR}"
+else
+    "${BM[@]}" hook session-start --harness claude
 fi
-exec "${BM[@]}" hook session-start --harness claude
+
+# Fail-open: run instead of exec, then always exit 0. A launcher that resolves
+# but errors at runtime — a cold uvx that cannot reach PyPI, an unbuildable
+# floor, a bad BM_BIN — would otherwise tail-exec its non-zero status to the
+# harness and disrupt the session. The CLI's stdout still reaches the session
+# context and stdin still passes through.
+exit 0

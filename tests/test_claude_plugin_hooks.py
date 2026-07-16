@@ -280,6 +280,23 @@ def test_shim_exits_silently_when_nothing_resolvable(
     assert result.stderr == ""
 
 
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+@pytest.mark.parametrize(("script", "verb"), EVENTS)
+def test_shim_exits_zero_when_resolved_command_fails_at_runtime(
+    shim: ShimHarness, hooks_dir: str, harness: str, script: str, verb: str, tmp_path: Path
+) -> None:
+    # Fail-open: a launcher that resolves but errors at runtime (a cold uvx that
+    # cannot reach PyPI, an unbuildable floor, a bad BM_BIN) must not propagate
+    # its non-zero exit — the shim runs the command rather than tail-exec-ing it.
+    failing = tmp_path / "failing-bm"
+    failing.write_text("exit 17\n", encoding="utf-8")
+    failing.chmod(0o755)
+
+    result = shim.run(hooks_dir, script, bm_bin=str(failing))
+
+    assert result.returncode == 0, result.stderr
+
+
 # --- BM_BIN override ---
 
 

@@ -36,4 +36,10 @@ fi
 
 # Codex has no project-dir env var; project mapping uses the payload cwd.
 # The hook JSON on stdin passes through untouched.
-exec "${BM[@]}" hook session-start --harness codex
+#
+# Fail-open: run instead of exec, then always exit 0. A launcher that resolves
+# but errors at runtime — a cold uvx that cannot reach PyPI, an unbuildable
+# floor, a bad BM_BIN — would otherwise tail-exec its non-zero status to the
+# harness and disrupt the session.
+"${BM[@]}" hook session-start --harness codex
+exit 0

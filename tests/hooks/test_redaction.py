@@ -244,3 +244,19 @@ def test_redact_text_redacts_multiple_embedded_paths() -> None:
     assert ssh not in scrubbed
     assert aws not in scrubbed
     assert scrubbed == f"compare {REDACTED_PATH} and {REDACTED_PATH} carefully"
+
+
+def test_redact_text_redacts_unexpanded_tilde_home_path() -> None:
+    # Prose commonly names the shell form (~/.ssh/id_rsa) rather than the
+    # expanded absolute path; the literal ~/ prefix must be denied too.
+    scrubbed = redact_text("please read ~/.ssh/id_rsa then continue")
+
+    assert "~/.ssh/id_rsa" not in scrubbed
+    assert scrubbed == f"please read {REDACTED_PATH} then continue"
+
+
+def test_redact_payload_redacts_unexpanded_tilde_home_path() -> None:
+    redacted = redact_payload({"note": "key at ~/.aws/credentials please"})
+
+    assert "~/.aws/credentials" not in redacted["note"]
+    assert redacted["note"] == f"key at {REDACTED_PATH} please"

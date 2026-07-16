@@ -62,13 +62,22 @@ def _normalize_path(path: str) -> str:
     return path.replace("\\", "/")
 
 
+# Sensitive home directories, in the ``~/`` shell form users actually type.
+_SENSITIVE_HOME_DIRS = ("~/.ssh/", "~/.aws/", "~/.gnupg/")
+
+
 def _default_redact_paths() -> tuple[str, ...]:
     # Resolved per call, not at import: tests (and long-lived processes) may
     # repoint HOME, and a stale import-time expansion would silently miss.
-    return tuple(
-        _normalize_path(os.path.expanduser(prefix))
-        for prefix in ("~/.ssh/", "~/.aws/", "~/.gnupg/")
-    )
+    #
+    # Both forms are denied: the expanded absolute path (payload values usually
+    # carry it resolved) and the literal ``~/`` prefix (prose and transcript
+    # excerpts commonly write ``~/.ssh/id_rsa`` unexpanded — the expanded pattern
+    # alone would let that survive). dict.fromkeys dedupes while preserving order
+    # in case expanduser is a no-op (HOME unset).
+    expanded = (_normalize_path(os.path.expanduser(prefix)) for prefix in _SENSITIVE_HOME_DIRS)
+    literal = (_normalize_path(prefix) for prefix in _SENSITIVE_HOME_DIRS)
+    return tuple(dict.fromkeys((*expanded, *literal)))
 
 
 def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
