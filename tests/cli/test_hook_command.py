@@ -987,6 +987,22 @@ def test_hook_command_fails_open_on_broken_global_config(
     assert result.exit_code == 0
 
 
+def test_hook_install_works_despite_broken_global_config(bm_home: Path) -> None:
+    # The operator verb `bm hook install` writes harness config and needs no
+    # Basic Memory config, so a broken global config must not turn it into a
+    # silent no-op (round-14 regression): the composition root is best-effort for
+    # hook, so install still runs and actually writes the harness entries.
+    with patch(
+        "basic_memory.cli.app.CliContainer.create",
+        side_effect=RuntimeError("malformed config.json"),
+    ):
+        result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    hooks = _read_json(_claude_settings_path())["hooks"]
+    assert "SessionStart" in hooks and "PreCompact" in hooks
+
+
 def test_hook_command_skips_global_initialization(bm_home: Path, claude_project: Path) -> None:
     # Hook verbs are fail-open (SPEC-55): global DB/config/migration init must not
     # run before the hook's own guard (it could return non-zero to the harness)

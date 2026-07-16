@@ -52,44 +52,52 @@ def app_callback(
         )
     )
 
-    # Trigger: a `hook` invocation (advisory, fail-open per SPEC-55).
-    # Why: adding `hook` to skip_init_commands below is not enough — the callback
-    # builds the container (reading global config) *before* that check, so a
-    # malformed ~/.basic-memory/config.json would raise here and surface a
-    # non-zero exit to the harness before the hook's own _run_fail_open guard.
-    # And the promo/init-line/auto-update chatter (with its network work) must
-    # not touch the session-start/pre-compact hot path or pollute the brief.
-    # Outcome: the hook path builds the container fail-open (exit 0 on failure)
-    # and skips the cosmetic messaging entirely.
-    is_hook = ctx.invoked_subcommand == "hook"
+    # Trigger: a `hook` invocation (the advisory harness front door, SPEC-55).
+    # Why: the hook verbs need none of the global composition root here — they
+    # resolve config lazily via ConfigManager when they run, the lifecycle verbs
+    # (session-start/pre-compact) are each wrapped in their own _run_fail_open
+    # guard, and the operator verbs (install/remove) touch no global config at
+    # all. Building the container here instead (a) crashes the harness on a
+    # malformed ~/.basic-memory/config.json *before* a lifecycle verb's fail-open
+    # guard, and (b) would put DB/network/promo work on the session-start/
+    # pre-compact hot path and risk polluting the brief.
+    # Outcome: set the container when config is valid (unchanged normal path) but
+    # never raise from the callback for a hook, and skip init + all messaging.
+    # A broken config then surfaces where it belongs: swallowed by a lifecycle
+    # verb's fail-open guard, or raised by an operator verb that needs it.
+    if ctx.invoked_subcommand == "hook":
+        try:
+            set_container(CliContainer.create())
+        except Exception:
+            pass
+        return
 
     # --- Composition Root ---
-    # Create container and read config (single point of config access). uvloop
-    # must own the event-loop policy before any asyncio.run() so the asyncpg
-    # engine-dispose race (#831/#877) cannot fire; no-op for SQLite.
+    # Create container and read config (single point of config access)
+    container = CliContainer.create()
+    set_container(container)
+
+    # Trigger: Postgres backend resolved at CLI startup, before any asyncio.run().
+    # Why: uvloop must own the event-loop policy before the loop is created so the
+    # asyncpg engine-dispose race (#831/#877) cannot fire. No-op for SQLite.
+    # Outcome: subsequent asyncio.run() calls in CLI commands use uvloop on Postgres.
     from basic_memory.db import maybe_install_uvloop
 
-    try:
-        container = CliContainer.create()
-        set_container(container)
-        maybe_install_uvloop(container.config)
-    except Exception:
-        if is_hook:
-            # Fail open: the hook can't run without config, but it must never
-            # return non-zero to the harness — exit 0 silently.
-            raise typer.Exit(0)
-        raise
+    maybe_install_uvloop(container.config)
 
-    if not is_hook:
-        # Informational "initialized" line above command output; promo/update
-        # notices below it. Neither belongs on a hook invocation.
-        maybe_show_init_line(ctx.invoked_subcommand)
+    # Trigger: first-run init confirmation before command output.
+    # Why: informational "initialized" message belongs above command results, not in the upsell panel.
+    # Outcome: one-time plain line printed before the subcommand runs.
+    maybe_show_init_line(ctx.invoked_subcommand)
 
-        def _post_command_messages() -> None:
-            maybe_show_cloud_promo(ctx.invoked_subcommand)
-            maybe_run_periodic_auto_update(ctx.invoked_subcommand)
+    # Trigger: register post-command messaging callbacks.
+    # Why: informational/promo/update output belongs below command results.
+    # Outcome: command output remains primary, with optional follow-up notices afterwards.
+    def _post_command_messages() -> None:
+        maybe_show_cloud_promo(ctx.invoked_subcommand)
+        maybe_run_periodic_auto_update(ctx.invoked_subcommand)
 
-        ctx.call_on_close(_post_command_messages)
+    ctx.call_on_close(_post_command_messages)
 
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization
@@ -97,13 +105,9 @@ def app_callback(
     # Skip for 'reset' command - it manages its own database lifecycle
     # Skip for 'man' - it only copies packaged files; a broken local database
     # must not block installing the offline docs
-    # Skip for 'hook' - lifecycle hooks are advisory and fail-open (SPEC-55): a
-    # DB/config/migration failure here would exec before the hook's own fail-open
-    # guard and surface a non-zero exit to the harness, and init would add startup
-    # cost to every session-start/pre-compact on the hot path.
+    # ('hook' returns above, before this point.)
     skip_init_commands = {
         "doctor",
-        "hook",
         "man",
         "mcp",
         "status",
