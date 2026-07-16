@@ -505,6 +505,23 @@ async def test_write_note_rejects_existing_note_with_legacy_filename(
         assert (project_path / "site-roadmap.md").exists()
         assert not (project_path / "Site Roadmap.md").exists()
 
+        overwritten = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Site Roadmap",
+                "directory": "",
+                "content": "Replacement content.",
+                "overwrite": True,
+            },
+        )
+
+        overwrite_text = overwritten.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Updated note" in overwrite_text
+        assert "file_path: Site Roadmap.md" in overwrite_text
+        assert not (project_path / "site-roadmap.md").exists()
+        assert (project_path / "Site Roadmap.md").read_text().endswith("Replacement content.")
+
 
 @pytest.mark.asyncio
 async def test_write_note_allows_note_beside_non_markdown_resource(
