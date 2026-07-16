@@ -170,12 +170,14 @@ def test_envelope_json_roundtrip() -> None:
 
 
 def test_envelope_from_json_rejects_non_object() -> None:
-    with pytest.raises(ValueError, match="must be an object"):
+    # pydantic.ValidationError is a ValueError, so callers' existing handlers
+    # (projector flush, inbox prune gate) catch strict-validation failures too.
+    with pytest.raises(ValueError, match="should be an object"):
         envelope_from_json("[1, 2]")
 
 
 def test_envelope_from_json_rejects_missing_fields() -> None:
-    with pytest.raises(ValueError, match="missing"):
+    with pytest.raises(ValueError, match="Field required"):
         envelope_from_json(json.dumps({"id": "x"}))
 
 
@@ -183,7 +185,7 @@ def test_envelope_from_json_rejects_unknown_fields() -> None:
     data = json.loads(envelope_to_json(_envelope()))
     data["surprise"] = 1
 
-    with pytest.raises(ValueError, match="unknown=\\['surprise'\\]"):
+    with pytest.raises(ValueError, match="surprise"):
         envelope_from_json(json.dumps(data))
 
 
@@ -191,7 +193,7 @@ def test_envelope_from_json_rejects_non_dict_payload() -> None:
     data = json.loads(envelope_to_json(_envelope()))
     data["payload"] = "oops"
 
-    with pytest.raises(ValueError, match="payload must be an object"):
+    with pytest.raises(ValueError, match="payload"):
         envelope_from_json(json.dumps(data))
 
 
@@ -204,12 +206,12 @@ def test_envelope_from_json_rejects_future_version() -> None:
 
 
 def test_envelope_from_json_rejects_non_string_session_id() -> None:
-    # A corrupt file can have every key present with the wrong scalar type; the
-    # dataclass wouldn't reject it and flush would crash grouping on a list.
+    # A corrupt file can have every key present with the wrong scalar type;
+    # strict mode rejects the list instead of letting flush crash grouping on it.
     data = json.loads(envelope_to_json(_envelope()))
     data["source_session_id"] = []
 
-    with pytest.raises(ValueError, match="source_session_id.*must be a string"):
+    with pytest.raises(ValueError, match="source_session_id"):
         envelope_from_json(json.dumps(data))
 
 
@@ -217,7 +219,7 @@ def test_envelope_from_json_rejects_non_string_project_hint() -> None:
     data = json.loads(envelope_to_json(_envelope()))
     data["project_hint"] = 1
 
-    with pytest.raises(ValueError, match="project_hint.*must be a string"):
+    with pytest.raises(ValueError, match="project_hint"):
         envelope_from_json(json.dumps(data))
 
 
@@ -225,7 +227,7 @@ def test_envelope_from_json_rejects_non_string_optional_field() -> None:
     data = json.loads(envelope_to_json(_envelope()))
     data["caused_by"] = 5
 
-    with pytest.raises(ValueError, match="caused_by.*must be a string or null"):
+    with pytest.raises(ValueError, match="caused_by"):
         envelope_from_json(json.dumps(data))
 
 
@@ -233,7 +235,7 @@ def test_envelope_from_json_rejects_non_int_version() -> None:
     data = json.loads(envelope_to_json(_envelope()))
     data["envelope_version"] = "1"
 
-    with pytest.raises(ValueError, match="envelope_version.*must be an int"):
+    with pytest.raises(ValueError, match="envelope_version"):
         envelope_from_json(json.dumps(data))
 
 

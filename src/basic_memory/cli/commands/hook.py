@@ -657,18 +657,21 @@ def _checkpoint_note(
     # (#997: redact obvious secrets before writing artifacts). Redact once at
     # extraction — every downstream use draws from the redacted strings.
     # Deferred import: redaction pulls detect-secrets, too heavy for CLI start (#886).
-    from basic_memory.hooks.redaction import redact_text
+    from basic_memory.hooks.redaction import Redactor
 
-    user_messages = [
-        redact_text(text, extra_redact_paths) for role, text in conversation if role == "user"
-    ]
+    # One ruleset for the whole checkpoint: every turn, the cwd, and each git
+    # status row share the same deny rules, so compile the patterns once here
+    # rather than per redacted string.
+    redactor = Redactor.build(extra_redact_paths=extra_redact_paths)
+
+    user_messages = [redactor.redact_text(text) for role, text in conversation if role == "user"]
     assistant_messages = [
-        redact_text(text, extra_redact_paths) for role, text in conversation if role == "assistant"
+        redactor.redact_text(text) for role, text in conversation if role == "assistant"
     ]
     # cwd is a user path too: a session under a configured redactPaths (or a
     # default deny dir) must not leak the raw path into the note frontmatter or
     # body. Redact once so both draw from the scrubbed string.
-    safe_cwd = redact_text(event.cwd, extra_redact_paths)
+    safe_cwd = redactor.redact_text(event.cwd)
     opening = user_messages[0]
     recent_user = user_messages[-3:]
 
@@ -723,7 +726,7 @@ def _checkpoint_note(
             # same floor as the transcript text and cwd (a secret token in a
             # filename, or a denied path, must not leak into the note).
             body += ["", "## Working tree"]
-            body += [f"- `{redact_text(line, extra_redact_paths)}`" for line in status_lines]
+            body += [f"- `{redactor.redact_text(line)}`" for line in status_lines]
     body += [
         "",
         "## Observations",

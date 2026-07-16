@@ -27,6 +27,7 @@ from loguru import logger
 from basic_memory.hooks import inbox
 from basic_memory.hooks.envelope import (
     Envelope,
+    SessionKey,
     envelope_from_json,
     to_frontmatter_fields,
     to_provenance_observations,
@@ -73,8 +74,8 @@ def split_project_ref(ref: str) -> tuple[str | None, str | None]:
     return ref, None
 
 
-def _processed_envelopes_by_session() -> dict[tuple[str, str], list[Envelope]]:
-    """Already-projected envelopes, grouped by ``(source, session_id)``.
+def _processed_envelopes_by_session() -> dict[SessionKey, list[Envelope]]:
+    """Already-projected envelopes, grouped by session key.
 
     A session's artifacts are overwritten in full on every sweep, so re-deriving
     them from only the still-pending envelopes would drop everything projected on
@@ -83,13 +84,13 @@ def _processed_envelopes_by_session() -> dict[tuple[str, str], list[Envelope]]:
     complete session history (bounded by retention). Corrupt processed files are
     skipped, never deleted.
     """
-    grouped: dict[tuple[str, str], list[Envelope]] = {}
+    grouped: dict[SessionKey, list[Envelope]] = {}
     for path in inbox.processed_dir().glob("*.json"):
         try:
             envelope = envelope_from_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, json.JSONDecodeError):
             continue
-        grouped.setdefault((envelope.source, envelope.source_session_id), []).append(envelope)
+        grouped.setdefault(envelope.session_key, []).append(envelope)
     return grouped
 
 
@@ -256,11 +257,9 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
             result.invalid += 1
 
     # --- Group by session, preserving capture order within each group ---
-    groups: dict[tuple[str, str], list[tuple[Path, Envelope]]] = {}
+    groups: dict[SessionKey, list[tuple[Path, Envelope]]] = {}
     for path, envelope in entries:
-        groups.setdefault((envelope.source, envelope.source_session_id), []).append(
-            (path, envelope)
-        )
+        groups.setdefault(envelope.session_key, []).append((path, envelope))
 
     processed_by_session = _processed_envelopes_by_session()
     seen_keys = {
@@ -284,7 +283,8 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         if any(envelope.project_hint.strip() for envelope in envelopes)
     )
 
-    for (source, session_id), group in groups.items():
+    for session_key, group in groups.items():
+        source, session_id = session_key
         # --- Dedup: envelopes are hints, never double-write ---
         # Two replay kinds, retired at different times: one duplicating an
         # already-projected envelope (durable in processed/ — safe to retire now)
@@ -320,7 +320,7 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         # projected on an earlier sweep. Dedup by idempotency key so a replay
         # that was retired into processed/ next to its original doesn't resurface
         # as a duplicate row here.
-        prior = processed_by_session.get((source, session_id), [])
+        prior = processed_by_session.get(session_key, [])
         replay_envelopes = [envelope for _, envelope in group_replays]
         # Routing scans the COMPLETE, UN-deduped history — prior processed
         # envelopes, fresh, and in-group replays alike. A mapping can land on the

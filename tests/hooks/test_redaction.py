@@ -8,9 +8,34 @@ from basic_memory.hooks.redaction import (
     REDACTED,
     REDACTED_PATH,
     TRUNCATION_MARKER,
+    DenyPath,
+    Redactor,
     redact_payload,
     redact_text,
 )
+
+# --- Redactor value object ---
+
+
+def test_redactor_is_reusable_across_values() -> None:
+    # The whole point of the value object: compile the ruleset once, apply it to
+    # many payloads/strings (every turn of a transcript) without rebuilding.
+    redactor = Redactor.build(extra_redact_paths=["/srv/clients/"])
+
+    assert redactor.redact_text("/srv/clients/a/b") == REDACTED_PATH
+    assert redactor.redact_text("ordinary prose") == "ordinary prose"
+    assert redactor.redact_payload({"cwd": "/srv/clients/x"})["cwd"] == REDACTED_PATH
+    # Reuse is pure: a later call is unaffected by an earlier one.
+    assert redactor.redact_text("/srv/clients/a/b") == REDACTED_PATH
+
+
+def test_denypath_compile_skips_bare_root() -> None:
+    # A bare "/" or empty prefix would redact every path, so it compiles to None
+    # and is dropped from the ruleset.
+    assert DenyPath.compile("/", case_insensitive=False) is None
+    assert DenyPath.compile("", case_insensitive=False) is None
+    assert DenyPath.compile("/srv/secrets/", case_insensitive=False) is not None
+
 
 # --- Deny-key rules (recursive) ---
 

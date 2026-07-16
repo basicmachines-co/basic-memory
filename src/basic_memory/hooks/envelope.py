@@ -14,14 +14,19 @@ so redaction never changes identity.
 from __future__ import annotations
 
 import hashlib
-import json
-from dataclasses import MISSING, asdict, dataclass, field, fields
 from datetime import datetime, timezone
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 from basic_memory.hooks._uuid7 import uuid7
-from basic_memory.hooks.redaction import redact_payload, redact_text
+from basic_memory.hooks.redaction import Redactor
 
 ENVELOPE_VERSION = 1
+
+# A harness session, identified by its producing surface and opaque session id.
+# The inbox groups, prunes, and routes by this pair, so it earns a name rather
+# than an anonymous ``tuple[str, str]`` threaded through the projector.
+type SessionKey = tuple[str, str]
 
 # --- Event registry ---
 # V0 ships the three events exposed through supported harness hooks. The other
@@ -40,33 +45,24 @@ PROMOTION_RAW = "raw"
 # or a named routine).
 ACTOR_RUNTIME = "runtime"
 
-# Fields the projector treats as strings (groups on, sorts by, calls .strip()).
-# A corrupt inbox file can carry the right keys with wrong scalar types, which
-# the dataclass won't reject — validate them before constructing so a bad file
-# is counted invalid, not allowed to crash the sweep.
-_STR_FIELDS = (
-    "id",
-    "source",
-    "event",
-    "source_session_id",
-    "ts",
-    "cwd",
-    "project_hint",
-    "idempotency_key",
-    "actor",
-    "promotion_status",
-)
-_OPTIONAL_STR_FIELDS = ("source_turn_id", "caused_by")
 
-
-@dataclass(frozen=True)
-class Envelope:
+class Envelope(BaseModel):
     """Normalized event record from a harness lifecycle hook (SPEC-55 Contract 1).
 
     Each field is chosen so the downstream consumer (the projector today, the
     SPEC-54 worker later) can coalesce SessionNote / ToolLedger artifacts
     without understanding raw hook payload formats.
+
+    This is a persistence boundary: the inbox is a durable WAL that outlives code
+    versions, so parsing must fail fast on junk — a shape mismatch means
+    corruption or a future ``envelope_version``, never a silently misread event.
+    ``strict`` (no scalar coercion — a corrupt file's ``"source": []`` is
+    rejected, not stringified), ``extra="forbid"`` (unknown keys rejected), and
+    ``frozen`` (envelopes are immutable trace) enforce that at the type layer,
+    replacing the hand-rolled field/scalar checks this model used to carry.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     id: str  # UUIDv7 — doubles as the inbox filename and caused_by target
     source: str  # "claude-code" | "codex" (enum grows per SPEC-55 registry)
@@ -81,7 +77,21 @@ class Envelope:
     actor: str = ACTOR_RUNTIME  # "runtime" | "user" | routine name
     caused_by: str | None = None  # id of the triggering event, when known
     promotion_status: str = PROMOTION_RAW
-    payload: dict = field(default_factory=dict)  # redacted summary only
+    payload: dict = Field(default_factory=dict)  # redacted summary only
+
+    @field_validator("envelope_version")
+    @classmethod
+    def _supported_version(cls, version: int) -> int:
+        # A future version is a forward-compat signal, not corruption — surface
+        # it as an error the projector counts and `bm hook status` shows.
+        if version != ENVELOPE_VERSION:
+            raise ValueError(f"unsupported envelope_version {version!r}")
+        return version
+
+    @property
+    def session_key(self) -> SessionKey:
+        """The ``(source, session_id)`` pair the inbox groups and routes by."""
+        return (self.source, self.source_session_id)
 
 
 def idempotency_key(source: str, session_id: str, event: str, ts: str) -> str:
@@ -129,14 +139,15 @@ def create_envelope(
         raise ValueError(f"Unknown event {event!r}; v0 supports: {sorted(V0_EVENTS)}")
 
     resolved_ts = ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    safe_payload = redact_payload(
-        payload or {},
-        extra_redact_keys=extra_redact_keys,
-        extra_redact_paths=extra_redact_paths,
+    # One ruleset for both the payload and the cwd: they share the same deny
+    # rules, so compiling once avoids re-expanding paths and recompiling patterns.
+    redactor = Redactor.build(
+        extra_redact_keys=extra_redact_keys, extra_redact_paths=extra_redact_paths
     )
+    safe_payload = redactor.redact_payload(payload or {})
     # cwd is a user path: a session under a configured redactPaths (or a default
     # deny dir) must not persist the raw path in the inbox WAL.
-    safe_cwd = redact_text(cwd, extra_redact_paths=extra_redact_paths)
+    safe_cwd = redactor.redact_text(cwd)
 
     return Envelope(
         id=str(uuid7()),
@@ -197,47 +208,15 @@ def to_frontmatter_fields(envelope: Envelope) -> dict[str, str]:
 
 def envelope_to_json(envelope: Envelope) -> str:
     """Serialize an envelope to a compact JSON string for inbox storage."""
-    return json.dumps(asdict(envelope), separators=(",", ":"))
+    return envelope.model_dump_json()
 
 
 def envelope_from_json(text: str) -> Envelope:
     """Parse an inbox file back into an Envelope, failing fast on junk.
 
-    The inbox is a durable WAL that outlives code versions; a shape mismatch
-    means either corruption or a future envelope_version — both must surface as
-    an error the projector can count, never as a silently misread event.
+    Delegates to the model's strict validation (see :class:`Envelope`): a shape
+    mismatch, wrong scalar type, unknown key, or unsupported version raises a
+    ``pydantic.ValidationError`` — itself a ``ValueError`` — which the projector
+    and inbox already catch and count.
     """
-    data = json.loads(text)
-    if not isinstance(data, dict):
-        raise ValueError("envelope JSON must be an object")
-
-    field_names = {f.name for f in fields(Envelope)}
-    required = {
-        f.name for f in fields(Envelope) if f.default is MISSING and f.default_factory is MISSING
-    }
-    unknown = set(data) - field_names
-    missing = required - set(data)
-    if unknown or missing:
-        raise ValueError(
-            f"envelope shape mismatch (unknown={sorted(unknown)}, missing={sorted(missing)})"
-        )
-    if not isinstance(data.get("payload", {}), dict):
-        raise ValueError("envelope payload must be an object")
-
-    # Scalar type checks: keys can be present with the wrong type (e.g.
-    # "source_session_id": [], "project_hint": 1). bool is excluded from the int
-    # check since it is an int subclass.
-    for name in _STR_FIELDS:
-        if name in data and not isinstance(data[name], str):
-            raise ValueError(f"envelope field {name!r} must be a string")
-    for name in _OPTIONAL_STR_FIELDS:
-        if data.get(name) is not None and not isinstance(data[name], str):
-            raise ValueError(f"envelope field {name!r} must be a string or null")
-    version = data.get("envelope_version")
-    if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
-        raise ValueError("envelope field 'envelope_version' must be an int")
-
-    envelope = Envelope(**data)
-    if envelope.envelope_version != ENVELOPE_VERSION:
-        raise ValueError(f"unsupported envelope_version {envelope.envelope_version!r}")
-    return envelope
+    return Envelope.model_validate_json(text)

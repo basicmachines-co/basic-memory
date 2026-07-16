@@ -21,7 +21,12 @@ from pathlib import Path
 
 from basic_memory.config import CONFIG_DIR_MODE, CONFIG_FILE_MODE, resolve_data_dir
 from basic_memory.hooks._uuid7 import uuid7_unix_ms
-from basic_memory.hooks.envelope import Envelope, envelope_from_json, envelope_to_json
+from basic_memory.hooks.envelope import (
+    Envelope,
+    SessionKey,
+    envelope_from_json,
+    envelope_to_json,
+)
 
 INBOX_DIR_NAME = "inbox"
 PROCESSED_DIR_NAME = "processed"
@@ -108,7 +113,7 @@ def mark_processed(path: Path) -> Path:
 
 
 def _unresolvable_pending_gate(
-    routable_sessions: frozenset[tuple[str, str]],
+    routable_sessions: frozenset[SessionKey],
 ) -> Callable[[Path], bool]:
     """Build the prune gate: a pending envelope is unresolvable only if it can
     *never* flush — it parses, carries no project hint, and its session is not
@@ -129,7 +134,7 @@ def _unresolvable_pending_gate(
             return False
         if envelope.project_hint.strip():
             return False
-        return (envelope.source, envelope.source_session_id) not in routable_sessions
+        return envelope.session_key not in routable_sessions
 
     return gate
 
@@ -179,7 +184,7 @@ def prune_processed(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
 
 def prune_pending(
     older_than_days: int = DEFAULT_RETENTION_DAYS,
-    routable_sessions: frozenset[tuple[str, str]] = frozenset(),
+    routable_sessions: frozenset[SessionKey] = frozenset(),
 ) -> int:
     """Delete pending envelopes older than the retention window.
 
