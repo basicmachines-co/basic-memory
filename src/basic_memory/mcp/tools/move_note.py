@@ -643,7 +643,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
                 result = await knowledge_client.move_directory(source_directory, destination_path)
                 if output_format == "json":
                     return {
-                        "moved": result.failed_moves == 0,
+                        "moved": result.total_files > 0 and result.failed_moves == 0,
                         "title": None,
                         "permalink": None,
                         "file_path": None,
@@ -653,7 +653,19 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
                         "total_files": result.total_files,
                         "successful_moves": result.successful_moves,
                         "failed_moves": result.failed_moves,
+                        **(
+                            {"error": "Directory not found or empty: no files matched"}
+                            if result.total_files == 0
+                            else {}
+                        ),
                     }
+
+                if result.total_files == 0:
+                    return f"""# Directory Move Failed - No Files Found
+
+No files matched source directory `{identifier}`.
+
+<!-- Project: {active_project.name} -->"""
 
                 # Build success message for directory move
                 result_lines = [

@@ -5,6 +5,7 @@ import importlib
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
+from basic_memory.mcp.tools.delete_note import delete_note
 from basic_memory.mcp.tools.move_note import move_note
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
@@ -94,3 +95,36 @@ async def test_directory_move_normalizes_project_memory_url(client, test_project
         project=test_project.name,
     )
     assert "Move this note with a memory URL." in moved_note
+
+
+@pytest.mark.asyncio
+async def test_missing_directory_delete_is_not_reported_as_success(client, test_project) -> None:
+    """A missing-route path fallback must still require files to delete."""
+    result = await delete_note(
+        project=test_project.name,
+        identifier="memory://missing-directory-route/missing-child",
+        is_directory=True,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["deleted"] is False
+    assert result["total_files"] == 0
+    assert result["error"] == "Directory not found or empty: no files matched"
+
+
+@pytest.mark.asyncio
+async def test_missing_directory_move_is_not_reported_as_success(client, test_project) -> None:
+    """A missing-route path fallback must still require files to move."""
+    result = await move_note(
+        project=test_project.name,
+        identifier="memory://missing-directory-route/missing-child",
+        destination_path="archive/missing-child",
+        is_directory=True,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["moved"] is False
+    assert result["total_files"] == 0
+    assert result["error"] == "Directory not found or empty: no files matched"

@@ -325,7 +325,7 @@ async def delete_note(
                 result = await knowledge_client.delete_directory(directory_identifier)
                 if output_format == "json":
                     response = {
-                        "deleted": result.failed_deletes == 0,
+                        "deleted": result.total_files > 0 and result.failed_deletes == 0,
                         "is_directory": True,
                         "identifier": identifier,
                         "total_files": result.total_files,
@@ -334,12 +334,21 @@ async def delete_note(
                         "deleted_files": result.deleted_files,
                         "errors": [error.model_dump() for error in result.errors],
                     }
-                    if result.failed_deletes > 0:
+                    if result.total_files == 0:
+                        response["error"] = "Directory not found or empty: no files matched"
+                    elif result.failed_deletes > 0:
                         response["error"] = (
                             "Directory delete incomplete: "
                             f"{result.failed_deletes} of {result.total_files} file(s) failed"
                         )
                     return response
+
+                if result.total_files == 0:
+                    return f"""# Directory Delete Failed - No Files Found
+
+No files matched directory `{identifier}`.
+
+<!-- Project: {active_project.name} -->"""
 
                 # Build success message for directory delete
                 result_lines = [
