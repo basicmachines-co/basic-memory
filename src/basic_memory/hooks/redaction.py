@@ -90,9 +90,12 @@ def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], .
 
     The pattern matches the denied directory **root itself** (``~/.ssh``) as well
     as any descendant (``~/.ssh/id_rsa``): the trailing slash is stripped, then a
-    boundary lookahead requires a separator, whitespace, or end after the root so
-    a sibling like ``/srv/clientsbackup`` (for ``/srv/clients/``) can't match, and
-    an optional ``[/\\]\\S*`` consumes a descendant path token when present.
+    negative-lookahead boundary ``(?![A-Za-z0-9_-])`` rejects only a bare
+    alphanumeric/underscore/hyphen continuation — so a sibling like
+    ``/srv/clientsbackup`` (for ``/srv/clients/``) can't match — while allowing a
+    separator, whitespace, end, or punctuation to end the token. That last part
+    matters for prose: a root followed by ``,`` or ``.`` (``read ~/.ssh, then``)
+    must still redact. An optional ``[/\\]\\S*`` consumes a descendant when present.
     """
     patterns: list[re.Pattern[str]] = []
     for prefix in deny_paths:
@@ -101,7 +104,7 @@ def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], .
             # A bare "/" (or empty) deny path would redact everything; skip it.
             continue
         escaped = re.escape(root).replace("/", r"[/\\]")
-        patterns.append(re.compile(escaped + r"(?=[/\\]|\s|$)(?:[/\\]\S*)?"))
+        patterns.append(re.compile(escaped + r"(?![A-Za-z0-9_-])(?:[/\\]\S*)?"))
     return tuple(patterns)
 
 

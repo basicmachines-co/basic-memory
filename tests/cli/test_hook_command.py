@@ -968,6 +968,28 @@ def test_install_fails_fast_on_non_list_event() -> None:
     assert "hooks.SessionStart is not a list" in result.stderr
 
 
+def test_hook_command_skips_global_initialization(bm_home: Path, claude_project: Path) -> None:
+    # Hook verbs are fail-open (SPEC-55): global DB/config/migration init must not
+    # run before the hook's own guard (it could return non-zero to the harness)
+    # and must stay off the session-start/pre-compact hot path.
+    with (
+        patch("basic_memory.services.initialization.ensure_initialization") as mock_init,
+        patch(
+            "basic_memory.mcp.tools.search_notes",
+            new_callable=AsyncMock,
+            return_value=SEARCH_EMPTY,
+        ),
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+    mock_init.assert_not_called()
+
+
 def test_install_hints_when_uv_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hook_module.shutil, "which", lambda name: None)
 

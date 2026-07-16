@@ -85,8 +85,13 @@ def app_callback(
     # Skip for 'reset' command - it manages its own database lifecycle
     # Skip for 'man' - it only copies packaged files; a broken local database
     # must not block installing the offline docs
+    # Skip for 'hook' - lifecycle hooks are advisory and fail-open (SPEC-55): a
+    # DB/config/migration failure here would exec before the hook's own fail-open
+    # guard and surface a non-zero exit to the harness, and init would add startup
+    # cost to every session-start/pre-compact on the hot path.
     skip_init_commands = {
         "doctor",
+        "hook",
         "man",
         "mcp",
         "status",

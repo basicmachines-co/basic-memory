@@ -246,6 +246,13 @@ def test_redact_text_ignores_bare_root_deny_path() -> None:
     assert redact_text("/opt/app/main.py", extra_redact_paths=["/"]) == "/opt/app/main.py"
 
 
+def test_redact_text_redacts_denied_root_before_punctuation() -> None:
+    # Prose puts punctuation right after a path; the root must still redact.
+    home_ssh = str(Path("~/.ssh").expanduser())
+    assert redact_text(f"key at {home_ssh}, done") == f"key at {REDACTED_PATH}, done"
+    assert redact_text("/srv/clients.", extra_redact_paths=["/srv/clients/"]) == f"{REDACTED_PATH}."
+
+
 def test_redact_text_redacts_denied_path_embedded_in_prose() -> None:
     # A checkpoint excerpt may reference a secret path mid-sentence; the whole
     # path token is replaced in place while the surrounding prose survives.
