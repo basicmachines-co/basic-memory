@@ -621,47 +621,83 @@ async def create_memory_project(
             )
 
         status_response = await project_client.create_project(project_request.model_dump())
-        from basic_memory.mcp.project_context import invalidate_workspace_project_index
+        from basic_memory.mcp.project_context import invalidate_project_caches
 
-        await invalidate_workspace_project_index(context)
+        await invalidate_project_caches(context)
+
+        new_project = status_response.new_project
+        if new_project is None:
+            raise RuntimeError("Project creation succeeded without returning the new project")
+
+        # Local indexing can finish inline, so retained files are immediately
+        # available. Cloud must use its durable background workflow; that route
+        # awaits the PGQueuer handoff before acknowledging the request (#1084).
+        index_in_background = _routes_to_cloud(workspace_id)
+        index_response = await project_client.index(
+            new_project.external_id,
+            run_in_background=index_in_background,
+        )
+        indexing = {
+            **index_response,
+            "state": "accepted" if index_in_background else "completed",
+        }
 
         if output_format == "json":
-            new_project = status_response.new_project
             return {
-                "name": new_project.name if new_project else project_name,
-                "external_id": new_project.external_id if new_project else None,
-                "path": new_project.path if new_project else project_path,
-                "is_default": bool(
-                    (new_project.is_default if new_project else False) or set_default
-                ),
+                "name": new_project.name,
+                "external_id": new_project.external_id,
+                "path": new_project.path,
+                "is_default": bool(new_project.is_default or set_default),
                 "created": True,
                 "already_exists": False,
+                "indexing": indexing,
             }
 
         result = f"✓ {status_response.message}\n\n"
 
-        if status_response.new_project:
-            result += "Project Details:\n"
-            result += f"• Name: {status_response.new_project.name}\n"
-            result += f"• External ID: {status_response.new_project.external_id}\n"
-            result += f"• Path: {status_response.new_project.path}\n"
+        result += "Project Details:\n"
+        result += f"• Name: {new_project.name}\n"
+        result += f"• External ID: {new_project.external_id}\n"
+        result += f"• Path: {new_project.path}\n"
 
-            if set_default:
-                result += "• Set as default project\n"
+        if set_default:
+            result += "• Set as default project\n"
 
-        result += "\nProject is now available for use in tool calls.\n"
+        result += "\nIndexing:\n"
+        result += f"• State: {indexing['state']}\n"
+        if status := indexing.get("status"):
+            result += f"• Status: {status}\n"
+        if message := indexing.get("message"):
+            result += f"• Message: {message}\n"
+        if job_id := indexing.get("job_id"):
+            result += f"• Job ID: {job_id}\n"
+        for key, label in (
+            ("total_files", "Files discovered"),
+            ("enqueued_files", "Files enqueued"),
+            ("enqueued_batches", "Batches enqueued"),
+            ("deleted_files", "Orphans deleted"),
+        ):
+            if key in indexing:
+                result += f"• {label}: {indexing[key]}\n"
+
+        if index_in_background:
+            result += (
+                "\nProject created. Retained content will become readable and searchable "
+                "when indexing completes.\n"
+            )
+        else:
+            result += "\nProject is now available for use in tool calls; indexing completed.\n"
         result += f"Use '{project_name}' as the project parameter in MCP tool calls.\n"
 
         return result
 
 
-def _delete_routes_to_cloud(workspace_id: str | None) -> bool:
-    """Mirror get_client's non-project routing to describe where a delete landed.
+def _routes_to_cloud(workspace_id: str | None) -> bool:
+    """Mirror get_client's non-project routing for project lifecycle operations.
 
-    Trigger: delete_project's result text must say whether the project's note
-        files live on local disk or in cloud storage.
-    Why: the previous text always claimed "Files remain on disk", which is
-        wrong for cloud-routed deletes (#1034).
+    Trigger: project creation and deletion need backend-specific behavior.
+    Why: cloud indexing must be asynchronous, and delete output must describe
+        whether retained files live on local disk or in cloud storage.
     Outcome: True when get_client(workspace=...) serves the request from a
         cloud backend (factory mode, explicit --cloud, or a workspace selector).
     """
@@ -784,9 +820,9 @@ async def delete_project(
         status_response = await project_client.delete_project(
             target_project.external_id, delete_notes=delete_notes
         )
-        from basic_memory.mcp.project_context import invalidate_workspace_project_index
+        from basic_memory.mcp.project_context import invalidate_project_caches
 
-        await invalidate_workspace_project_index(context)
+        await invalidate_project_caches(context)
 
         result = f"✓ {status_response.message}\n\n"
 
@@ -803,7 +839,7 @@ async def delete_project(
             if status_response.job_id:
                 result += f"• Deletion job ID: {status_response.job_id}\n"
 
-        cloud_routed = _delete_routes_to_cloud(workspace_id)
+        cloud_routed = _routes_to_cloud(workspace_id)
         files_location = "in cloud storage" if cloud_routed else "on disk"
         if delete_notes:
             result += _format_note_file_delete_result(

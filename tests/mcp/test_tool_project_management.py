@@ -219,19 +219,36 @@ async def test_create_memory_project_resolves_workspace_slug(app, tmp_path_facto
             new_callable=AsyncMock,
             return_value=fake_status,
         ),
+        patch.object(
+            ProjectClient,
+            "index",
+            new_callable=AsyncMock,
+            return_value={"status": "index_started", "message": "Indexing accepted"},
+        ) as mock_index,
         patch(
-            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            "basic_memory.mcp.project_context.invalidate_project_caches",
             new_callable=AsyncMock,
         ),
     ):
-        await create_memory_project(
+        result = await create_memory_project(
             project_name="WS Project",
             project_path=str(project_root),
             workspace="team-paul",
+            output_format="json",
         )
 
     mock_resolve_workspace.assert_awaited_once_with(workspace="team-paul", context=None)
     assert captured["workspace"] == "tenant-abc-123"
+    assert isinstance(result, dict)
+    assert result["indexing"] == {
+        "status": "index_started",
+        "message": "Indexing accepted",
+        "state": "accepted",
+    }
+    mock_index.assert_awaited_once_with(
+        "00000000-0000-0000-0000-000000000001",
+        run_in_background=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -285,12 +302,22 @@ async def test_create_memory_project_workspace_is_local_noop(app, tmp_path_facto
             new_callable=AsyncMock,
             return_value=fake_status,
         ),
+        patch.object(
+            ProjectClient,
+            "index",
+            new_callable=AsyncMock,
+            return_value={
+                "status": "index_started",
+                "message": "Indexing accepted",
+                "job_id": "index-job-123",
+            },
+        ),
         patch(
-            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            "basic_memory.mcp.project_context.invalidate_project_caches",
             new_callable=AsyncMock,
         ),
     ):
-        await create_memory_project(
+        result = await create_memory_project(
             project_name="Local WS Project",
             project_path=str(project_root),
             workspace="team-paul",
@@ -298,6 +325,53 @@ async def test_create_memory_project_workspace_is_local_noop(app, tmp_path_facto
 
     mock_resolve_workspace.assert_not_awaited()
     assert captured["workspace"] == "team-paul"
+    assert "State: accepted" in result
+    assert "Job ID: index-job-123" in result
+
+
+@pytest.mark.asyncio
+async def test_create_memory_project_requires_created_project(app, tmp_path_factory):
+    """A malformed create response fails before attempting to index."""
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.schemas.project_info import ProjectStatusResponse
+
+    project_root = tmp_path_factory.mktemp("missing-created-project-home")
+    fake_status = ProjectStatusResponse(
+        message="Project created",
+        status="success",
+        default=False,
+        new_project=None,
+    )
+
+    with (
+        patch.object(
+            ProjectClient,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=_make_list([], default=None),
+        ),
+        patch.object(
+            ProjectClient,
+            "create_project",
+            new_callable=AsyncMock,
+            return_value=fake_status,
+        ),
+        patch.object(ProjectClient, "index", new_callable=AsyncMock) as mock_index,
+        patch(
+            "basic_memory.mcp.project_context.invalidate_project_caches",
+            new_callable=AsyncMock,
+        ),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="Project creation succeeded without returning the new project",
+        ):
+            await create_memory_project(
+                project_name="Missing Created Project",
+                project_path=str(project_root),
+            )
+
+    mock_index.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -339,8 +413,19 @@ async def test_create_memory_project_default_workspace_is_none(app, tmp_path_fac
             new_callable=AsyncMock,
             return_value=fake_status,
         ),
+        patch.object(
+            ProjectClient,
+            "index",
+            new_callable=AsyncMock,
+            return_value={
+                "total_files": 0,
+                "enqueued_files": 0,
+                "enqueued_batches": 0,
+                "deleted_files": 0,
+            },
+        ) as mock_index,
         patch(
-            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            "basic_memory.mcp.project_context.invalidate_project_caches",
             new_callable=AsyncMock,
         ),
     ):
@@ -350,6 +435,10 @@ async def test_create_memory_project_default_workspace_is_none(app, tmp_path_fac
         )
 
     assert captured["workspace"] is None
+    mock_index.assert_awaited_once_with(
+        "00000000-0000-0000-0000-000000000001",
+        run_in_background=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -445,7 +534,7 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
             return_value=fake_status,
         ) as mock_delete_project,
         patch(
-            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            "basic_memory.mcp.project_context.invalidate_project_caches",
             new_callable=AsyncMock,
         ),
     ):
@@ -524,7 +613,7 @@ async def test_delete_project_workspace_is_local_noop(app):
             return_value=fake_status,
         ),
         patch(
-            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            "basic_memory.mcp.project_context.invalidate_project_caches",
             new_callable=AsyncMock,
         ),
     ):
@@ -578,7 +667,7 @@ async def test_delete_project_default_workspace_is_none(app):
             return_value=fake_status,
         ),
         patch(
-            "basic_memory.mcp.project_context.invalidate_workspace_project_index",
+            "basic_memory.mcp.project_context.invalidate_project_caches",
             new_callable=AsyncMock,
         ),
     ):
@@ -587,19 +676,19 @@ async def test_delete_project_default_workspace_is_none(app):
     assert captured["workspace"] is None
 
 
-def test_delete_routes_to_cloud_honors_explicit_routing_flags(monkeypatch):
-    """Explicit --cloud/--local routing decides where the delete's files live (#1034)."""
-    from basic_memory.mcp.tools.project_management import _delete_routes_to_cloud
+def test_routes_to_cloud_honors_explicit_routing_flags(monkeypatch):
+    """Explicit --cloud/--local routing decides the project lifecycle backend."""
+    from basic_memory.mcp.tools.project_management import _routes_to_cloud
 
     monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
 
     monkeypatch.setenv("BASIC_MEMORY_FORCE_CLOUD", "true")
-    assert _delete_routes_to_cloud(None) is True
+    assert _routes_to_cloud(None) is True
 
     monkeypatch.setenv("BASIC_MEMORY_FORCE_CLOUD", "false")
     monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
     # Explicit local wins even when a workspace selector was supplied.
-    assert _delete_routes_to_cloud("some-workspace") is False
+    assert _routes_to_cloud("some-workspace") is False
 
 
 @pytest.mark.parametrize(

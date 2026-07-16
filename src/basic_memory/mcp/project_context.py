@@ -749,6 +749,12 @@ async def invalidate_workspace_project_index(context: Optional[Context] = None) 
         await context.set_state(_WORKSPACE_PROJECT_INDEX_STATE_KEY, None)
 
 
+async def invalidate_project_caches(context: Optional[Context] = None) -> None:
+    """Invalidate project identity caches after a project lifecycle change."""
+    await _clear_cached_active_project(context)
+    await invalidate_workspace_project_index(context)
+
+
 async def _fetch_workspace_project_entries(
     workspace: WorkspaceInfo,
     context: Optional[Context] = None,
