@@ -37,9 +37,12 @@ jobs:
       )
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      # write access lets @claude push its working branch and open the PR;
+      # with contents:read the push failed as github-actions[bot] (403) and the
+      # run dead-ended after committing locally (see #1084).
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
@@ -64,7 +67,11 @@ jobs:
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
-          # Optional: Add claude_args to customize behavior and configuration
+          # Allow the interpreters @claude needs to self-verify a change before
+          # opening the PR. The default Bash allowlist already covers git/gh and
+          # file edits (that part worked in #1084); it only blocked test runners,
+          # so this list is additive and scoped to project quality gates.
+          claude_args: '--allowed-tools "Bash(just:*),Bash(uv:*),Bash(uvx:*),Bash(pytest:*),Bash(ruff:*),Bash(python:*),Bash(python3:*)"'
+
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
-          # claude_args: '--model claude-opus-4-1-20250805 --allowed-tools Bash(gh pr:*)'
