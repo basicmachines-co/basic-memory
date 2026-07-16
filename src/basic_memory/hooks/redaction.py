@@ -222,3 +222,19 @@ def redact_payload(
     # default configuration and restores whatever was active before.
     with default_settings():
         return _redact_dict(payload, deny_key_patterns, deny_paths, _entropy_plugins())
+
+
+def redact_text(value: str, extra_redact_paths: list[str] | None = None) -> str:
+    """Strip secrets and denied paths from a single free-text string.
+
+    The pre-compaction checkpoint lifts transcript excerpts straight into the
+    graph, so that text must pass the same secret floor as inbox payloads
+    (issue #997: "redact obvious secrets before writing artifacts"). Key-based
+    denial has no meaning for free text; secret/entropy scanning and path denial
+    do, so this reuses the per-string floor rather than the dict traversal.
+    """
+    deny_paths = _default_redact_paths()
+    if extra_redact_paths:
+        deny_paths = deny_paths + tuple(_normalize_path(path) for path in extra_redact_paths)
+    with default_settings():
+        return _redact_str(value, deny_paths, _entropy_plugins())

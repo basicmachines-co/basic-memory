@@ -63,11 +63,21 @@ def list_envelopes() -> list[Path]:
 
 
 def mark_processed(path: Path) -> Path:
-    """Retire a projected envelope into processed/ (kept for audit, then pruned)."""
+    """Retire a projected envelope into processed/ (kept for audit, then pruned).
+
+    Tolerant of a concurrent flush that already retired this envelope: a missing
+    source with the destination already present means another sweep moved it
+    first, so return that instead of aborting the current sweep midway.
+    """
     directory = processed_dir()
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / path.name
-    os.replace(path, destination)
+    try:
+        os.replace(path, destination)
+    except FileNotFoundError:
+        if destination.exists():
+            return destination
+        raise
     return destination
 
 

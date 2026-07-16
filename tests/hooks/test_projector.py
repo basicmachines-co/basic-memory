@@ -233,3 +233,42 @@ async def test_flush_ignores_unreadable_processed_files_for_dedup(bm_home: Path)
         result = await flush()
 
     assert result.projected == 1
+
+
+async def test_flush_preserves_prior_events_on_incremental_flush(bm_home: Path) -> None:
+    """Regression: a later sweep must not erase events an earlier sweep projected.
+
+    session_started is projected and retired to processed/ on flush 1; when
+    compaction_imminent arrives, flush 2 must rebuild the note from the full
+    session, not just the pending envelope. Overwriting from fresh alone would
+    drop session_started.
+    """
+    mock_write = AsyncMock(return_value=WRITE_OK)
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:00+00:00")
+        await flush()
+        _capture(event=COMPACTION_IMMINENT, ts="2026-07-15T10:30:00+00:00")
+        await flush()
+
+    last_session = [
+        call for call in mock_write.await_args_list if call.kwargs["title"].startswith("Session ")
+    ][-1]
+    content = last_session.kwargs["content"]
+    assert "session_started at 2026-07-15T10:00:00+00:00" in content
+    assert "compaction_imminent at 2026-07-15T10:30:00+00:00" in content
+
+
+async def test_flush_distinguishes_sessions_sharing_a_prefix(bm_home: Path) -> None:
+    """Regression: sessions sharing an 8-char prefix get distinct titles/permalinks."""
+    _capture(session_id="abcd1234-session-one")
+    _capture(session_id="abcd1234-session-two")
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    session_titles = {title for title in result.notes if title.startswith("Session ")}
+    assert session_titles == {
+        "Session abcd1234-session-one (claude-code)",
+        "Session abcd1234-session-two (claude-code)",
+    }

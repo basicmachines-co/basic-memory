@@ -44,3 +44,16 @@ def test_uuid7_random_bits_differ_within_same_millisecond(
     monkeypatch.setattr(_uuid7.time, "time_ns", lambda: fixed_ns)
 
     assert uuid7() != uuid7()
+
+
+def test_uuid7_unix_ms_rejects_non_v7_uuid() -> None:
+    """Only v7 carries a timestamp; shifting a v4 would fabricate a capture time."""
+    with pytest.raises(ValueError):
+        uuid7_unix_ms(uuid.uuid4())
+
+
+def test_uuid7_unix_ms_roundtrips_a_generated_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixed_ms = 1_752_580_800_123
+    monkeypatch.setattr(_uuid7.time, "time_ns", lambda: fixed_ms * 1_000_000)
+
+    assert uuid7_unix_ms(uuid7()) == fixed_ms

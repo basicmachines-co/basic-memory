@@ -408,6 +408,33 @@ def test_pre_compact_writes_checkpoint_note(
     assert "tool noise" not in content
 
 
+def test_pre_compact_redacts_secrets_in_checkpoint(
+    bm_home: Path, claude_project: Path, tmp_path: Path
+) -> None:
+    """Regression: transcript excerpts pass the secret floor before landing in
+    the checkpoint note or its title (#997)."""
+    lines = [
+        {
+            "message": {"role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE please"},
+            "type": "user",
+        },
+    ]
+    transcript = tmp_path / "secret.jsonl"
+    transcript.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+    mock_write = AsyncMock(return_value={"action": "created"})
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--project-dir", str(claude_project)],
+            input=_payload(claude_project, transcript_path=str(transcript), trigger="auto"),
+        )
+
+    assert result.exit_code == 0
+    kwargs = mock_write.await_args.kwargs
+    assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["content"]
+    assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["title"]
+
+
 def test_pre_compact_without_primary_project_is_silent(bm_home: Path, tmp_path: Path) -> None:
     project = tmp_path / "unmapped"
     (project / ".claude").mkdir(parents=True)

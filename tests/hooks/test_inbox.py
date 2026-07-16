@@ -103,6 +103,45 @@ def test_prune_processed_never_deletes_non_uuid_files(bm_home: Path) -> None:
     assert stray.exists()
 
 
+def test_prune_processed_never_deletes_non_v7_uuid_files(bm_home: Path) -> None:
+    """A parseable but non-v7 UUID name has no capture time — never age it out.
+
+    A blind 80-bit shift of a v4 UUID yields a garbage timestamp that could
+    fall before any cutoff; retention must not act on data it can't date.
+    """
+    directory = inbox.processed_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    stray = directory / f"{uuid.uuid4()}.json"
+    stray.write_text("{}", encoding="utf-8")
+
+    assert inbox.prune_processed(older_than_days=0) == 0
+    assert stray.exists()
+
+
+def test_mark_processed_tolerates_already_retired_envelope(bm_home: Path) -> None:
+    """Regression: a concurrent sweep that already moved the envelope must not crash.
+
+    Two flushes can retire the same envelope; the loser sees a missing source but
+    the destination already present, and returns it instead of aborting midway.
+    """
+    path = inbox.write_envelope(_envelope())
+
+    first = inbox.mark_processed(path)
+    second = inbox.mark_processed(path)
+
+    assert first == second
+    assert second.exists()
+
+
+def test_mark_processed_reraises_when_source_and_dest_missing(bm_home: Path) -> None:
+    """A genuinely missing envelope (no source, no destination) is a real error."""
+    inbox.inbox_dir().mkdir(parents=True, exist_ok=True)
+    missing = inbox.inbox_dir() / f"{uuid.uuid4()}.json"
+
+    with pytest.raises(FileNotFoundError):
+        inbox.mark_processed(missing)
+
+
 def test_prune_processed_handles_missing_dir(bm_home: Path) -> None:
     assert inbox.prune_processed() == 0
 

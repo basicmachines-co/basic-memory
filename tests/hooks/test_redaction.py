@@ -9,6 +9,7 @@ from basic_memory.hooks.redaction import (
     REDACTED_PATH,
     TRUNCATION_MARKER,
     redact_payload,
+    redact_text,
 )
 
 # --- Deny-key rules (recursive) ---
@@ -186,3 +187,30 @@ def test_redaction_is_idempotent() -> None:
     twice = redact_payload(once, extra_redact_paths=["C:/Users/dev/vault/"])
 
     assert once == twice
+
+
+# --- redact_text: single free-text string (checkpoint excerpts, #997) ---
+
+
+def test_redact_text_scrubs_secret_embedded_in_prose() -> None:
+    scrubbed = redact_text("deploy with AKIAIOSFODNN7EXAMPLE now")
+
+    assert "AKIAIOSFODNN7EXAMPLE" not in scrubbed
+    assert "deploy with" in scrubbed
+
+
+def test_redact_text_leaves_ordinary_prose_intact() -> None:
+    assert redact_text("Fix the login bug in the auth handler") == (
+        "Fix the login bug in the auth handler"
+    )
+
+
+def test_redact_text_redacts_denied_path() -> None:
+    home_ssh = str(Path("~/.ssh/id_rsa").expanduser())
+    assert redact_text(home_ssh) == REDACTED_PATH
+
+
+def test_redact_text_honors_extra_deny_paths() -> None:
+    assert redact_text("/srv/secrets/prod.env", extra_redact_paths=["/srv/secrets/"]) == (
+        REDACTED_PATH
+    )

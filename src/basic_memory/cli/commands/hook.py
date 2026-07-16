@@ -597,6 +597,7 @@ def _checkpoint_note(
     event: NormalizedHookEvent,
     conversation: list[tuple[str, str]],
     primary: str,
+    extra_redact_paths: list[str],
 ) -> tuple[str, str]:
     """Build the pre-compaction checkpoint note (title, content).
 
@@ -604,8 +605,19 @@ def _checkpoint_note(
     from the transcript — no LLM call. Frontmatter carries type/status/started
     so structured recall (session-start) finds it with metadata filters.
     """
-    user_messages = [text for role, text in conversation if role == "user"]
-    assistant_messages = [text for role, text in conversation if role == "assistant"]
+    # Transcript text is lifted verbatim into the graph (title, summary, and
+    # observations), so it must pass the same secret floor as inbox payloads
+    # (#997: redact obvious secrets before writing artifacts). Redact once at
+    # extraction — every downstream use draws from the redacted strings.
+    # Deferred import: redaction pulls detect-secrets, too heavy for CLI start (#886).
+    from basic_memory.hooks.redaction import redact_text
+
+    user_messages = [
+        redact_text(text, extra_redact_paths) for role, text in conversation if role == "user"
+    ]
+    assistant_messages = [
+        redact_text(text, extra_redact_paths) for role, text in conversation if role == "assistant"
+    ]
     opening = user_messages[0]
     recent_user = user_messages[-3:]
 
@@ -724,7 +736,9 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
     if not conversation or not any(role == "user" for role, _ in conversation):
         return
 
-    title, content = _checkpoint_note(profile, event, conversation, primary)
+    title, content = _checkpoint_note(
+        profile, event, conversation, primary, _string_list(cfg.get("redactPaths"))
+    )
 
     # Deferred import (#886); same internal write path as `bm tool write-note`.
     from basic_memory.hooks.projector import split_project_ref

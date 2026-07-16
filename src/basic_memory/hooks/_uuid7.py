@@ -32,5 +32,12 @@ def uuid7_unix_ms(value: uuid.UUID) -> int:
 
     Inbox retention derives envelope age from the id itself, so pruning never
     depends on filesystem mtimes (which rename/copy can disturb).
+
+    Only version 7 carries a timestamp in those bits: shifting a v1/v4 UUID
+    would yield a garbage "capture time" that retention could act on — so any
+    other version fails fast with ValueError (callers treat that as "not a
+    UUIDv7 name", never as an age).
     """
+    if value.version != 7:
+        raise ValueError(f"not a UUIDv7: {value}")
     return value.int >> 80

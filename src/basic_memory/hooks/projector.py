@@ -67,21 +67,30 @@ def split_project_ref(ref: str) -> tuple[str | None, str | None]:
     return ref, None
 
 
-def _processed_idempotency_keys() -> set[str]:
-    """Idempotency keys already represented in artifacts (bounded by retention)."""
-    keys: set[str] = set()
+def _processed_envelopes_by_session() -> dict[tuple[str, str], list[Envelope]]:
+    """Already-projected envelopes, grouped by ``(source, session_id)``.
+
+    A session's artifacts are overwritten in full on every sweep, so re-deriving
+    them from only the still-pending envelopes would drop everything projected on
+    an earlier sweep (session_started vanishing once session_ended arrives).
+    Reloading the processed envelopes lets each sweep rebuild the note from the
+    complete session history (bounded by retention). Corrupt processed files are
+    skipped, never deleted.
+    """
+    grouped: dict[tuple[str, str], list[Envelope]] = {}
     for path in inbox.processed_dir().glob("*.json"):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            envelope = envelope_from_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
             continue
-        if isinstance(data, dict) and isinstance(data.get("idempotency_key"), str):
-            keys.add(data["idempotency_key"])
-    return keys
+        grouped.setdefault((envelope.source, envelope.source_session_id), []).append(envelope)
+    return grouped
 
 
-def _short_session(session_id: str) -> str:
-    return session_id[:8] or "unknown"
+def _session_label(session_id: str) -> str:
+    # Full id, not a prefix: two sessions sharing an 8-char prefix would derive
+    # the same title, the same permalink, and clobber each other's notes.
+    return session_id or "unknown"
 
 
 def _capture_folder(envelopes: list[Envelope]) -> str:
@@ -110,7 +119,7 @@ def _artifact_frontmatter(note_type: str, first: Envelope) -> list[str]:
 def _session_note(source: str, session_id: str, envelopes: list[Envelope]) -> tuple[str, str]:
     """Derive the SessionNote skeleton (title, content) for one session group."""
     first = envelopes[0]
-    title = f"Session {_short_session(session_id)} ({source})"
+    title = f"Session {_session_label(session_id)} ({source})"
     frontmatter = _artifact_frontmatter("session", first)
     # status/open mirrors the checkpoint notes so structured recall finds both.
     frontmatter.insert(2, "status: open")
@@ -137,7 +146,7 @@ def _tool_ledger_note(source: str, session_id: str, envelopes: list[Envelope]) -
     entries join when PostToolUse capture lands.
     """
     first = envelopes[0]
-    title = f"Tool Ledger {_short_session(session_id)} ({source})"
+    title = f"Tool Ledger {_session_label(session_id)} ({source})"
     frontmatter = _artifact_frontmatter("tool_ledger", first)
 
     entries = [
@@ -211,7 +220,12 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
             (path, envelope)
         )
 
-    seen_keys = _processed_idempotency_keys()
+    processed_by_session = _processed_envelopes_by_session()
+    seen_keys = {
+        envelope.idempotency_key
+        for envelopes in processed_by_session.values()
+        for envelope in envelopes
+    }
 
     for (source, session_id), group in groups.items():
         # --- Dedup: envelopes are hints, never double-write ---
@@ -234,7 +248,13 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         if not fresh:
             continue
 
-        envelopes = [envelope for _, envelope in fresh]
+        fresh_envelopes = [envelope for _, envelope in fresh]
+        # Rebuild from the COMPLETE session: previously-projected envelopes (now
+        # in processed/) merged with the fresh ones in capture order (uuid7 ids
+        # sort chronologically). Overwriting from fresh alone would erase events
+        # projected on an earlier sweep.
+        prior = processed_by_session.get((source, session_id), [])
+        envelopes = sorted(prior + fresh_envelopes, key=lambda envelope: envelope.id)
         project_hint = next(
             (
                 envelope.project_hint.strip()
