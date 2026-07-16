@@ -24,8 +24,29 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true  # Show triage progress
+          settings: |
+            {
+              "includeGitInstructions": false,
+              "permissions": {
+                "deny": [
+                  "Edit",
+                  "Write",
+                  "NotebookEdit",
+                  "Bash(git add *)",
+                  "Bash(git commit *)",
+                  "Bash(git rm *)",
+                  "Bash(git push *)",
+                  "Bash(*git-push.sh *)"
+                ]
+              }
+            }
           prompt: |
-            Analyze this new Basic Memory issue and perform triage:
+            Analyze this new Basic Memory issue and perform triage only.
+
+            **Scope Boundary:**
+            - Do not implement a fix, edit repository files, run tests, create a branch, commit, or push.
+            - The only permitted write actions are adding issue labels and posting issue comments.
+            - Even when the issue includes a root cause, suggested fix, or acceptance criteria, stop after triage.
 
             **Issue Analysis:**
             1. **Type Classification:**
@@ -69,5 +90,8 @@ jobs:
             - Complexity: simple, medium, complex
             - Status: needs-reproduction, needs-clarification, duplicate
 
-            Read the issue carefully and provide helpful triage with appropriate labels.
-          claude_args: '--allowed-tools "Bash(gh issue:*),Bash(gh search:*),Read"'
+            Read the issue carefully, apply appropriate labels, post any necessary triage comment,
+            and then stop. Do not begin implementation work.
+          claude_args: |
+            --permission-mode dontAsk
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh search issues:*),Read,Grep,Glob"
