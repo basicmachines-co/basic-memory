@@ -4,16 +4,18 @@ from .note_content_repository import (
     NoteContentRepository,
     NoteContentVersionConflict,
 )
-from .observation_repository import ObservationRepository
+from .observation_repository import AcceptedObservationWrite, ObservationRepository
 from .project_repository import ProjectRepository
-from .relation_repository import RelationRepository
+from .relation_repository import AcceptedRelationWrite, RelationRepository
 
 __all__ = [
     "EntityRepository",
     "AcceptedNoteContentWrite",
     "NoteContentRepository",
     "NoteContentVersionConflict",
+    "AcceptedObservationWrite",
     "ObservationRepository",
     "ProjectRepository",
+    "AcceptedRelationWrite",
     "RelationRepository",
 ]

@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      # contents: write lets Claude push an implementation branch and
+      # pull-requests: write lets it open the PR. Without contents: write the
+      # GITHUB_TOKEN is read-only and git push fails with a 403 for
+      # github-actions[bot] (issue #1076).
+      contents: write
+      pull-requests: write
       id-token: write
     steps:
       - name: Checkout repository
@@ -71,4 +77,17 @@ jobs:
 
             Read the issue carefully and provide helpful triage with appropriate labels.
 
-          claude_args: '--allowed-tools "Bash(gh issue:*),Bash(gh search:*),Read"'
+            **If the issue includes a concrete fix or clear reproduction and you can address it:**
+            After triage, you may implement the fix on a new branch, verify it, and open a PR:
+            1. Create a branch: `claude/issue-${{ github.event.issue.number }}-<short-slug>`
+            2. Make the change and add regression tests.
+            3. Verify locally: `just fast-check` and the narrowest `uv run pytest ...` that proves the change.
+            4. Sign off commits (`git commit -s`) so DCO passes.
+            5. Push the branch and open a PR with a semantic title (`fix(scope): summary`)
+               referencing this issue with `Closes #${{ github.event.issue.number }}`.
+            If tests fail or the fix is not clear-cut, stop and comment with your findings instead.
+
+          # Write access + verify/implement tooling: contents:write (above) lets the
+          # push land, and these tools let Claude edit, run the test suite, and open a PR.
+          claude_args: >-
+            --allowed-tools "Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(git:*),Bash(just:*),Bash(uv:*),Bash(pytest:*),Bash(python:*),Bash(python3:*),Edit,Write,Read,Glob,Grep"

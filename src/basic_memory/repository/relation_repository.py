@@ -1,5 +1,6 @@
 """Repository for managing Relation objects."""
 
+from dataclasses import dataclass
 from typing import Sequence, List, Optional, Any, cast
 
 from sqlalchemy import and_, delete, select
@@ -12,6 +13,21 @@ from sqlalchemy.orm.interfaces import LoaderOption
 
 from basic_memory.models import Relation, Entity
 from basic_memory.repository.repository import Repository
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedRelationWrite:
+    """One outgoing relation parsed from accepted markdown, ready to persist.
+
+    Targets are carried by name only; the accepted-write path persists them
+    unresolved (``to_id=None``) and lets the forward-reference resolution job
+    link them later, matching cloud's one-file materialization semantics
+    (issue #1076).
+    """
+
+    relation_type: str
+    target_name: str
+    context: str | None
 
 
 class RelationRepository(Repository[Relation]):
@@ -149,6 +165,40 @@ class RelationRepository(Repository[Relation]):
             stmt = stmt.on_conflict_do_nothing()
             result = cast(CursorResult[Any], await session.execute(stmt))
             return result.rowcount if result.rowcount > 0 else 0
+
+    async def replace_accepted_outgoing_relations(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        relations: Sequence[AcceptedRelationWrite],
+    ) -> None:
+        """Replace an entity's outgoing relations with the accepted markdown set.
+
+        Delete-then-insert mirrors ``EntityService.update_entity_relations``:
+        the markdown file owns its outgoing links, so an accepted write replaces
+        the prior set. Targets are written unresolved (``to_id=None``,
+        ``to_name`` = the link text); the forward-reference resolution job fills
+        in ``to_id`` later, so the accepted transaction stays cheap and avoids
+        inline link resolution (issue #1076). Runs inside the caller's
+        transaction so the graph commits atomically with note_content/search.
+        """
+        await self.delete_outgoing_relations_from_entity(session, entity_id)
+        if not relations:
+            return
+        rows = [
+            Relation(
+                project_id=self.project_id,
+                from_id=entity_id,
+                to_id=None,
+                to_name=rel.target_name,
+                relation_type=rel.relation_type,
+                context=rel.context,
+            )
+            for rel in relations
+        ]
+        # A single markdown file can repeat the same link; ignore-duplicates keeps
+        # the unique (from_id, to_name, relation_type) constraint from aborting.
+        await self.add_all_ignore_duplicates(session, rows)
 
     def get_load_options(self) -> List[LoaderOption]:
         return [selectinload(Relation.from_entity), selectinload(Relation.to_entity)]

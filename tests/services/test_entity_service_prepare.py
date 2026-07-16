@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from basic_memory.file_utils import ParseError, parse_frontmatter, remove_frontmatter
+from basic_memory.repository import AcceptedObservationWrite, AcceptedRelationWrite
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.entity_service import PreparedEntityFields
@@ -61,6 +62,55 @@ async def test_prepare_create_entity_content_returns_typed_entity_fields(entity_
     )
     with pytest.raises(FrozenInstanceError):
         setattr(prepared.entity_fields, "title", "Changed")
+
+
+@pytest.mark.asyncio
+async def test_prepare_create_entity_content_exposes_parsed_graph(entity_service) -> None:
+    """PreparedEntityWrite maps the parsed markdown graph for the accepted-write path.
+
+    The DB-first accepted-write path reuses this parsed graph instead of
+    reparsing the materialized file, so a mapping regression here would leave
+    the observation/relation tables empty after a successful write (issue #1076).
+    """
+    prepared = await entity_service.prepare_create_entity_content(
+        EntitySchema(
+            title="Ada Acceptance",
+            directory="notes",
+            note_type="dev_accept_person",
+            content=(
+                "## Observations\n"
+                "- [name] Ada Acceptance #person\n"
+                "- [role] Engineer (staff)\n"
+                "\n"
+                "## Relations\n"
+                "- works_at [[XSYS Target]]\n"
+            ),
+        )
+    )
+
+    assert prepared.observations == [
+        AcceptedObservationWrite(
+            # The parser keeps the inline #tag in the content and also extracts it,
+            # matching how the file-index path stores observation rows.
+            content="Ada Acceptance #person",
+            category="name",
+            context=None,
+            tags=["person"],
+        ),
+        AcceptedObservationWrite(
+            content="Engineer",
+            category="role",
+            context="staff",
+            tags=None,
+        ),
+    ]
+    assert prepared.relations == [
+        AcceptedRelationWrite(
+            relation_type="works_at",
+            target_name="XSYS Target",
+            context=None,
+        )
+    ]
 
 
 @pytest.mark.asyncio

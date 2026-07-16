@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,7 +33,11 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
 )
 from basic_memory.indexing.accepted_note_search import AcceptedNoteSearchRow
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.repository import AcceptedNoteContentWrite
+from basic_memory.repository import (
+    AcceptedNoteContentWrite,
+    AcceptedObservationWrite,
+    AcceptedRelationWrite,
+)
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -59,6 +64,8 @@ class _PreparedWrite:
     markdown_content: str
     search_content: str
     entity_fields: _PreparedFields
+    observations: Sequence[AcceptedObservationWrite] = ()
+    relations: Sequence[AcceptedRelationWrite] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,11 +349,41 @@ class _MutationLookupRepositories:
         return self.note_content_lookup_repository
 
 
+class _ObservationRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, Sequence[AcceptedObservationWrite]]] = []
+
+    async def replace_accepted_observations(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        observations: Sequence[AcceptedObservationWrite],
+    ) -> None:
+        _ = session
+        self.calls.append((entity_id, list(observations)))
+
+
+class _RelationRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
+
+    async def replace_accepted_outgoing_relations(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        relations: Sequence[AcceptedRelationWrite],
+    ) -> None:
+        _ = session
+        self.calls.append((entity_id, list(relations)))
+
+
 @dataclass(frozen=True, slots=True)
 class _MutationWriteRepositories:
     pending_entity_repository_result: _PendingEntityRepository
     note_content_accept_repository_result: _NoteContentAcceptRepository
     search_repository_result: _SearchRepository
+    observation_repository_result: _ObservationRepository
+    relation_repository_result: _RelationRepository
 
     def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
         _ = project_id
@@ -359,6 +396,14 @@ class _MutationWriteRepositories:
     def search_repository(self, project_id: int) -> _SearchRepository:
         _ = project_id
         return self.search_repository_result
+
+    def observation_repository(self, project_id: int) -> _ObservationRepository:
+        _ = project_id
+        return self.observation_repository_result
+
+    def relation_repository(self, project_id: int) -> _RelationRepository:
+        _ = project_id
+        return self.relation_repository_result
 
 
 def _project() -> Project:
@@ -464,6 +509,8 @@ def _dependencies(
     pending_entity_repository: _PendingEntityRepository,
     note_content_accept_repository: _NoteContentAcceptRepository,
     search_repository: _SearchRepository,
+    observation_repository: _ObservationRepository | None = None,
+    relation_repository: _RelationRepository | None = None,
     move_policy: AcceptedNoteMutationMovePolicy | None = None,
     verify_storage_absent_on_create: bool = False,
 ) -> AcceptedNoteMutationDependencies:
@@ -478,6 +525,8 @@ def _dependencies(
             pending_entity_repository_result=pending_entity_repository,
             note_content_accept_repository_result=note_content_accept_repository,
             search_repository_result=search_repository,
+            observation_repository_result=observation_repository or _ObservationRepository(),
+            relation_repository_result=relation_repository or _RelationRepository(),
         ),
         move_policy=move_policy
         or AcceptedNoteMutationMovePolicy(
@@ -1111,3 +1160,162 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"
     assert change.file_delete.file_checksum == "file-checksum"
+
+
+def _prepared_with_graph(
+    *,
+    observations: Sequence[AcceptedObservationWrite],
+    relations: Sequence[AcceptedRelationWrite],
+) -> _PreparedWrite:
+    """A prepared accepted write carrying a parsed observation/relation graph."""
+    return _PreparedWrite(
+        markdown_content="# Accepted\n",
+        search_content="Accepted",
+        entity_fields=_PreparedFields(
+            title="Accepted",
+            note_type="dev_accept_person",
+            entity_metadata={"type": "dev_accept_person"},
+            content_type="text/markdown",
+            permalink="accepted",
+            file_path="notes/accepted.md",
+        ),
+        observations=observations,
+        relations=relations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_persists_graph_rows() -> None:
+    """Create persists observations/relations in the accept transaction (issue #1076).
+
+    Regression for the DB-first write that returned 201 but left the observation
+    and relation tables empty until a later index_file pass.
+    """
+    session = cast(AsyncSession, object())
+    observations = [
+        AcceptedObservationWrite(
+            content="Ada Acceptance", category="name", context=None, tags=None
+        ),
+        AcceptedObservationWrite(content="Engineer", category="role", context=None, tags=None),
+    ]
+    relations = [
+        AcceptedRelationWrite(relation_type="works_at", target_name="XSYS Target", context=None)
+    ]
+    prepared = _prepared_with_graph(observations=observations, relations=relations)
+    entity = _entity()
+    note_content = _note_content(entity)
+    preparer_factory = _PreparerFactory(_CreatePreparer(prepared))
+    observation_repository = _ObservationRepository()
+    relation_repository = _RelationRepository()
+
+    change = await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(),
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=preparer_factory,
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+            observation_repository=observation_repository,
+            relation_repository=relation_repository,
+        ),
+    )
+
+    assert change.status_code == 201
+    # The parsed graph is persisted against the new entity in the same transaction.
+    assert observation_repository.calls == [(entity.id, observations)]
+    assert relation_repository.calls == [(entity.id, relations)]
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_replaces_graph_rows() -> None:
+    """A PUT replace rewrites the note's full observation/relation set (issue #1076)."""
+    session = _MutationSession()
+    observations = [
+        AcceptedObservationWrite(content="Replaced", category="note", context=None, tags=None)
+    ]
+    relations = [
+        AcceptedRelationWrite(relation_type="relates_to", target_name="Other", context=None)
+    ]
+    prepared = _prepared_with_graph(observations=observations, relations=relations)
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    observation_repository = _ObservationRepository()
+    relation_repository = _RelationRepository()
+
+    change = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(_CreatePreparer(prepared)),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+            observation_repository=observation_repository,
+            relation_repository=relation_repository,
+        ),
+    )
+
+    assert change.status_code == 200
+    assert observation_repository.calls == [(entity.id, observations)]
+    assert relation_repository.calls == [(entity.id, relations)]
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_edit_clears_graph_when_markdown_drops_it() -> None:
+    """An edit that removes all observations/relations clears the graph rows (issue #1076)."""
+    session = _MutationSession()
+    prepared = _prepared_with_graph(observations=[], relations=[])
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    observation_repository = _ObservationRepository()
+    relation_repository = _RelationRepository()
+
+    change = await run_accepted_note_edit(
+        cast(AsyncSession, session),
+        request=AcceptedNoteEditMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=EditEntityRequest(
+                operation="find_replace",
+                content="# Replacement",
+                find_text="# Old",
+                expected_replacements=1,
+            ),
+            actor=AcceptedNoteMutationActor(user_profile_id=None),
+            source="mcp",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(_CreatePreparer(prepared)),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+            observation_repository=observation_repository,
+            relation_repository=relation_repository,
+        ),
+    )
+
+    assert change.status_code == 200
+    # An empty parsed set still hits the repos so stale rows are cleared, not left behind.
+    assert observation_repository.calls == [(entity.id, [])]
+    assert relation_repository.calls == [(entity.id, [])]

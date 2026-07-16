@@ -9,7 +9,10 @@ from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
 from basic_memory.models import Entity, Observation, Project
-from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.observation_repository import (
+    AcceptedObservationWrite,
+    ObservationRepository,
+)
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -543,3 +546,90 @@ async def test_observation_permalink_disambiguates_truncated_content(
         session.add(obs_beta_dup)
         await session.flush()
         assert obs_beta_dup.permalink == obs_beta.permalink
+
+
+@pytest.mark.asyncio
+async def test_replace_accepted_observations_inserts_full_set(
+    observation_repository: ObservationRepository,
+    sample_entity: Entity,
+    session_maker,
+):
+    """Accepted-write graph persistence inserts the full parsed observation set."""
+    writes = [
+        AcceptedObservationWrite(
+            content="Pour over gives clarity",
+            category="method",
+            context="brewing",
+            tags=["coffee"],
+        ),
+        AcceptedObservationWrite(
+            content="Water at 205F",
+            category="technique",
+            context=None,
+            tags=None,
+        ),
+    ]
+    async with db.scoped_session(session_maker) as session:
+        await observation_repository.replace_accepted_observations(
+            session, sample_entity.id, writes
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        observations = await observation_repository.find_by_entity(session, sample_entity.id)
+
+    by_content = {obs.content: obs for obs in observations}
+    assert set(by_content) == {"Pour over gives clarity", "Water at 205F"}
+    assert by_content["Pour over gives clarity"].category == "method"
+    assert by_content["Pour over gives clarity"].context == "brewing"
+    assert by_content["Pour over gives clarity"].tags == ["coffee"]
+    assert by_content["Water at 205F"].context is None
+
+
+@pytest.mark.asyncio
+async def test_replace_accepted_observations_replaces_existing_set(
+    observation_repository: ObservationRepository,
+    sample_entity: Entity,
+    session_maker,
+):
+    """A second accepted write replaces the prior observation set, not merges it."""
+    async with db.scoped_session(session_maker) as session:
+        await observation_repository.replace_accepted_observations(
+            session,
+            sample_entity.id,
+            [AcceptedObservationWrite(content="old", category="note", context=None, tags=None)],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        await observation_repository.replace_accepted_observations(
+            session,
+            sample_entity.id,
+            [AcceptedObservationWrite(content="new", category="note", context=None, tags=None)],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        observations = await observation_repository.find_by_entity(session, sample_entity.id)
+
+    assert [obs.content for obs in observations] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_replace_accepted_observations_clears_when_empty(
+    observation_repository: ObservationRepository,
+    sample_entity: Entity,
+    session_maker,
+):
+    """An empty accepted observation set clears any prior rows for the entity."""
+    async with db.scoped_session(session_maker) as session:
+        await observation_repository.replace_accepted_observations(
+            session,
+            sample_entity.id,
+            [AcceptedObservationWrite(content="stale", category="note", context=None, tags=None)],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        await observation_repository.replace_accepted_observations(session, sample_entity.id, [])
+
+    async with db.scoped_session(session_maker) as session:
+        observations = await observation_repository.find_by_entity(session, sample_entity.id)
+
+    assert observations == []

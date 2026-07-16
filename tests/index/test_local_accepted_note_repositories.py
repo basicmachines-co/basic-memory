@@ -3,7 +3,11 @@
 from basic_memory.index.local_notes import LocalAcceptedNoteRepositories
 from basic_memory.indexing.accepted_note_mutation_runner import AcceptedNoteMutationRepositories
 from basic_memory.indexing.accepted_note_write_runner import AcceptedNoteWriteRepositories
-from basic_memory.repository import NoteContentRepository
+from basic_memory.repository import (
+    NoteContentRepository,
+    ObservationRepository,
+    RelationRepository,
+)
 from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.entity_repository import EntityRepository
 
@@ -25,3 +29,7 @@ def test_local_accepted_note_repositories_wires_project_scoped_repositories() ->
     assert repositories.note_content_repository(9).project_id == 9
     assert isinstance(repositories.search_repository(10), AcceptedNoteSearchRepository)
     assert repositories.search_repository(10).project_id == 10
+    assert isinstance(repositories.observation_repository(11), ObservationRepository)
+    assert repositories.observation_repository(11).project_id == 11
+    assert isinstance(repositories.relation_repository(12), RelationRepository)
+    assert repositories.relation_repository(12).project_id == 12

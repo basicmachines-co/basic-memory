@@ -109,6 +109,12 @@ class LocalAcceptedNoteRepositories:
     def search_repository(self, project_id: ProjectId) -> AcceptedNoteSearchRepository:
         return AcceptedNoteSearchRepository(project_id=project_id)
 
+    def observation_repository(self, project_id: ProjectId) -> ObservationRepository:
+        return ObservationRepository(project_id=project_id)
+
+    def relation_repository(self, project_id: ProjectId) -> RelationRepository:
+        return RelationRepository(project_id=project_id)
+
 
 # --- Current-Note Content Freshening ---
 

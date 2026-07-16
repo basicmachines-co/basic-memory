@@ -1,5 +1,6 @@
 """Repository for managing Observation objects."""
 
+from dataclasses import dataclass
 from typing import Dict, List, Sequence
 
 from sqlalchemy import select
@@ -9,6 +10,21 @@ from sqlalchemy.orm.interfaces import LoaderOption
 
 from basic_memory.models import Observation
 from basic_memory.repository.repository import Repository
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedObservationWrite:
+    """One observation parsed from accepted markdown, ready to persist.
+
+    Mirrors the markdown ``Observation`` fields so the accepted-write path can
+    persist the graph without constructing ORM rows in the storage-neutral
+    runner (issue #1076).
+    """
+
+    content: str
+    category: str | None
+    context: str | None
+    tags: list[str] | None
 
 
 class ObservationRepository(Repository[Observation]):
@@ -78,3 +94,33 @@ class ObservationRepository(Repository[Observation]):
             observations_by_entity[obs.entity_id].append(obs)
 
         return observations_by_entity
+
+    async def replace_accepted_observations(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        observations: Sequence[AcceptedObservationWrite],
+    ) -> None:
+        """Replace an entity's observations with the accepted markdown set.
+
+        Observations are owned by the markdown file, so an accepted write
+        replaces the prior set rather than merging — the same delete-then-insert
+        semantics ``EntityService.update_entity_and_observations`` uses for the
+        file-indexing path. Runs inside the caller's transaction so the graph
+        commits atomically with the note_content and search rows (issue #1076).
+        """
+        await self.delete_by_fields(session, entity_id=entity_id)
+        if not observations:
+            return
+        rows = [
+            Observation(
+                project_id=self.project_id,
+                entity_id=entity_id,
+                content=obs.content,
+                category=obs.category,
+                context=obs.context,
+                tags=obs.tags,
+            )
+            for obs in observations
+        ]
+        await self.add_all_no_return(session, rows)

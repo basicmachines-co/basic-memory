@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -28,10 +29,15 @@ from basic_memory.indexing.accepted_note_write_runner import (
     prepare_accepted_note_move,
     prepare_accepted_note_replace,
     refresh_accepted_note_search_index,
+    replace_accepted_note_graph,
     delete_accepted_note_search_index,
 )
 from basic_memory.models import Entity, NoteContent
-from basic_memory.repository import AcceptedNoteContentWrite
+from basic_memory.repository import (
+    AcceptedNoteContentWrite,
+    AcceptedObservationWrite,
+    AcceptedRelationWrite,
+)
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.schemas.base import Entity as EntitySchema
 
@@ -51,6 +57,8 @@ class _PreparedWrite:
     markdown_content: str
     search_content: str
     entity_fields: _PreparedFields
+    observations: Sequence[AcceptedObservationWrite] = ()
+    relations: Sequence[AcceptedRelationWrite] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +138,32 @@ class _SearchRepository:
             self.events.append(("vectors", entity_id))
 
 
+class _ObservationRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, Sequence[AcceptedObservationWrite]]] = []
+
+    async def replace_accepted_observations(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        observations: Sequence[AcceptedObservationWrite],
+    ) -> None:
+        self.calls.append((entity_id, observations))
+
+
+class _RelationRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
+
+    async def replace_accepted_outgoing_relations(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        relations: Sequence[AcceptedRelationWrite],
+    ) -> None:
+        self.calls.append((entity_id, relations))
+
+
 def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
     """Accepted-note persistence should be a behavior capability, not Callable aliases."""
 
@@ -146,11 +180,21 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
             assert project_id == 7
             return _SearchRepository()
 
+        def observation_repository(self, project_id: int) -> _ObservationRepository:
+            assert project_id == 7
+            return _ObservationRepository()
+
+        def relation_repository(self, project_id: int) -> _RelationRepository:
+            assert project_id == 7
+            return _RelationRepository()
+
     repositories: AcceptedNoteWriteRepositories = _Repositories()
 
     assert isinstance(repositories.pending_entity_repository(7), _PendingEntityRepository)
     assert isinstance(repositories.note_content_repository(7), _NoteContentRepository)
     assert isinstance(repositories.search_repository(7), _SearchRepository)
+    assert isinstance(repositories.observation_repository(7), _ObservationRepository)
+    assert isinstance(repositories.relation_repository(7), _RelationRepository)
 
 
 class _DeleteSession:
@@ -270,11 +314,21 @@ def _unexpected_search_repository(_project_id: int) -> _SearchRepository:
     raise AssertionError("search repository was not expected")
 
 
+def _unexpected_observation_repository(_project_id: int) -> _ObservationRepository:
+    raise AssertionError("observation repository was not expected")
+
+
+def _unexpected_relation_repository(_project_id: int) -> _RelationRepository:
+    raise AssertionError("relation repository was not expected")
+
+
 @dataclass(frozen=True, slots=True)
 class _RepositoryProvider:
     pending_entity_repository_result: _PendingEntityRepository | None = None
     note_content_repository_result: _NoteContentRepository | None = None
     search_repository_result: _SearchRepository | None = None
+    observation_repository_result: _ObservationRepository | None = None
+    relation_repository_result: _RelationRepository | None = None
 
     def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
         if self.pending_entity_repository_result is None:
@@ -291,16 +345,30 @@ class _RepositoryProvider:
             return _unexpected_search_repository(project_id)
         return self.search_repository_result
 
+    def observation_repository(self, project_id: int) -> _ObservationRepository:
+        if self.observation_repository_result is None:
+            return _unexpected_observation_repository(project_id)
+        return self.observation_repository_result
+
+    def relation_repository(self, project_id: int) -> _RelationRepository:
+        if self.relation_repository_result is None:
+            return _unexpected_relation_repository(project_id)
+        return self.relation_repository_result
+
 
 def _repository_provider(
     *,
     pending_entity_repository: _PendingEntityRepository | None = None,
     note_content_repository: _NoteContentRepository | None = None,
     search_repository: _SearchRepository | None = None,
+    observation_repository: _ObservationRepository | None = None,
+    relation_repository: _RelationRepository | None = None,
 ) -> AcceptedNoteWriteRepositories:
     """Build a fail-fast fake repository provider for one focused test."""
     return _RepositoryProvider(
         pending_entity_repository_result=pending_entity_repository,
+        observation_repository_result=observation_repository,
+        relation_repository_result=relation_repository,
         note_content_repository_result=note_content_repository,
         search_repository_result=search_repository,
     )
@@ -856,3 +924,74 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
     assert accepted.file_delete.entity_id == entity.id
     assert accepted.file_delete.file_path == entity.file_path
     assert accepted.file_delete.file_checksum == "note-file-checksum"
+
+
+@pytest.mark.asyncio
+async def test_replace_accepted_note_graph_persists_observations_and_relations() -> None:
+    """The graph handoff forwards the prepared observation/relation set to the repos."""
+    observation_repository = _ObservationRepository()
+    relation_repository = _RelationRepository()
+    repositories = _repository_provider(
+        observation_repository=observation_repository,
+        relation_repository=relation_repository,
+    )
+    prepared = _PreparedWrite(
+        markdown_content="# Accepted\n",
+        search_content="Accepted",
+        entity_fields=_PreparedFields(
+            title="Accepted",
+            note_type="note",
+            entity_metadata=None,
+            content_type="text/markdown",
+            permalink="accepted",
+            file_path="notes/accepted.md",
+        ),
+        observations=[
+            AcceptedObservationWrite(
+                content="Ada Acceptance",
+                category="name",
+                context=None,
+                tags=None,
+            )
+        ],
+        relations=[
+            AcceptedRelationWrite(
+                relation_type="works_at",
+                target_name="XSYS Target",
+                context=None,
+            )
+        ],
+    )
+
+    await replace_accepted_note_graph(
+        cast(AsyncSession, _FlushSession()),
+        entity=_entity(),
+        prepared=prepared,
+        repositories=repositories,
+    )
+
+    # Both repos are scoped to the entity's project (7) and receive the parsed set.
+    assert observation_repository.calls == [(42, prepared.observations)]
+    assert relation_repository.calls == [(42, prepared.relations)]
+
+
+@pytest.mark.asyncio
+async def test_replace_accepted_note_graph_forwards_empty_sets() -> None:
+    """A note with no observations/relations still clears the graph (empty replace)."""
+    observation_repository = _ObservationRepository()
+    relation_repository = _RelationRepository()
+    repositories = _repository_provider(
+        observation_repository=observation_repository,
+        relation_repository=relation_repository,
+    )
+    prepared = _prepared()
+
+    await replace_accepted_note_graph(
+        cast(AsyncSession, _FlushSession()),
+        entity=_entity(),
+        prepared=prepared,
+        repositories=repositories,
+    )
+
+    assert observation_repository.calls == [(42, ())]
+    assert relation_repository.calls == [(42, ())]
