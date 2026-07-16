@@ -1,5 +1,15 @@
 name: Claude Code
 
+# KNOWN LIMITATION — CI does not run on @claude-authored PRs.
+# This job pushes the working branch with the default GITHUB_TOKEN. GitHub does not
+# fire `push`-triggered workflows for commits pushed by GITHUB_TOKEN, and test.yml is
+# push-only, so a claude/** branch never runs the test suite — the PR looks mergeable
+# but is unvalidated. The setup steps below let @claude self-verify in-run, which is a
+# partial mitigation. The proper fix is to push with a PAT or GitHub App token: create a
+# fine-grained token with contents+pull-requests write, store it as a secret, and pass it
+# to the action as `github_token`. Until then, verify @claude PRs locally (or re-push the
+# branch with a human token to trigger test.yml) before merging.
+
 on:
   issue_comment:
     types: [created]
@@ -52,6 +62,26 @@ jobs:
           # For pull_request_target, checkout the PR head to review the actual changes
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
+
+      # Provision the toolchain @claude needs to self-verify a change before pushing.
+      # Without this the runner has no just/uv, so a run burns its whole time budget on
+      # pip workarounds and can time out AFTER writing the code but BEFORE committing
+      # (that is what happened on the first #1011 run). Mirrors test.yml's known-good setup.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install uv
+        run: pip install uv
+
+      - uses: extractions/setup-just@v4
+
+      - name: Create virtual env and install dependencies
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
 
       - name: Run Claude Code
         id: claude
