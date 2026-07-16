@@ -76,7 +76,11 @@ class HarnessProfile:
 
     default_recall_timeframe: str
     default_capture_folder: str
-    session_note_type: str
+    session_note_type: str  # type stamped on this harness's checkpoint notes
+    # Types the session-start brief recalls. Includes the generic ``session``
+    # the `bm hook flush` projector writes, so flushed/legacy sessions surface
+    # even when the harness stamps its checkpoints with a distinct type.
+    recall_session_types: tuple[str, ...]
     session_id_key: str
     checkpoint_title_prefix: str
     checkpoint_tags: tuple[str, ...]
@@ -92,6 +96,7 @@ PROFILES: dict[Harness, HarnessProfile] = {
         default_recall_timeframe="3d",
         default_capture_folder="sessions",
         session_note_type="session",
+        recall_session_types=("session",),
         session_id_key="claude_session_id",
         checkpoint_title_prefix="Session",
         checkpoint_tags=("session", "auto-capture"),
@@ -118,6 +123,9 @@ PROFILES: dict[Harness, HarnessProfile] = {
         default_recall_timeframe="7d",
         default_capture_folder="codex-sessions",
         session_note_type="codex_session",
+        # Codex stamps checkpoints codex_session, but the projector writes plain
+        # `session` — recall both so flushed sessions aren't invisible to Codex.
+        recall_session_types=("codex_session", "session"),
         session_id_key="codex_session_id",
         checkpoint_title_prefix="Codex session",
         checkpoint_tags=("codex", "auto-capture"),
@@ -375,7 +383,7 @@ async def _gather_context(
     results = await asyncio.gather(
         _query(project, note_types=["task"], status="active"),
         _query(project, note_types=["decision"], status="open"),
-        _query(project, note_types=[profile.session_note_type], after_date=timeframe),
+        _query(project, note_types=list(profile.recall_session_types), after_date=timeframe),
         *[_query(ref, note_types=["decision"], status="open") for ref in shared_refs],
     )
     return _BriefContext(

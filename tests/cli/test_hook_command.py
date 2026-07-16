@@ -310,11 +310,36 @@ def test_session_start_codex_profile(bm_home: Path, tmp_path: Path) -> None:
         )
 
     assert result.exit_code == 0
-    # Codex recalls codex_session checkpoints over a 7d default window.
+    # Codex recalls its own codex_session checkpoints *and* the generic `session`
+    # notes the flush projector writes, over a 7d default window.
     session_query = mock_search.await_args_list[2].kwargs
-    assert session_query["note_types"] == ["codex_session"]
+    assert session_query["note_types"] == ["codex_session", "session"]
     assert session_query["after_date"] == "7d"
     assert "codex-sessions/" in result.stdout
+
+
+def test_session_start_codex_recalls_flushed_generic_session(bm_home: Path, tmp_path: Path) -> None:
+    # Regression: `bm hook flush` writes session artifacts as type `session`.
+    # The Codex brief must recall them, not only `codex_session` checkpoints.
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"primaryProject": "demo"}}), encoding="utf-8"
+    )
+    flushed = _search_result("Session s-1 (codex)")
+    with patch(
+        "basic_memory.mcp.tools.search_notes",
+        new_callable=AsyncMock,
+        side_effect=[SEARCH_EMPTY, SEARCH_EMPTY, flushed],
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(project),
+        )
+
+    assert result.exit_code == 0
+    assert "Session s-1 (codex)" in result.stdout
 
 
 # --- session-start / pre-compact: envelope capture gate ---
