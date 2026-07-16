@@ -586,6 +586,34 @@ async def test_replace_accepted_observations_inserts_full_set(
 
 
 @pytest.mark.asyncio
+async def test_replace_accepted_observations_uses_model_default_for_missing_category(
+    observation_repository: ObservationRepository,
+    sample_entity: Entity,
+    session_maker,
+):
+    """Category-less markdown keeps the existing ``note`` persistence default."""
+    async with db.scoped_session(session_maker) as session:
+        await observation_repository.replace_accepted_observations(
+            session,
+            sample_entity.id,
+            [
+                AcceptedObservationWrite(
+                    content="Remember this #todo",
+                    category=None,
+                    context=None,
+                    tags=["todo"],
+                )
+            ],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        observations = await observation_repository.find_by_entity(session, sample_entity.id)
+
+    assert len(observations) == 1
+    assert observations[0].category == "note"
+
+
+@pytest.mark.asyncio
 async def test_replace_accepted_observations_replaces_existing_set(
     observation_repository: ObservationRepository,
     sample_entity: Entity,
