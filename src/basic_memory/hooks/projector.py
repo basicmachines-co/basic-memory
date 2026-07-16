@@ -269,6 +269,21 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         for envelope in envelopes
     }
 
+    # Sessions with a hint *anywhere* (a pending envelope this sweep, or an
+    # already-processed one) are routable: a hint-less pending envelope in such a
+    # session self-heals via the merge, so retention must not prune it even when
+    # it's past the window (e.g. captured before primaryProject was set, during a
+    # prolonged write outage). Only fully-unmapped sessions are prunable.
+    routable_sessions = frozenset(
+        key
+        for source_map in (
+            {k: [e for _, e in v] for k, v in groups.items()},
+            processed_by_session,
+        )
+        for key, envelopes in source_map.items()
+        if any(envelope.project_hint.strip() for envelope in envelopes)
+    )
+
     for (source, session_id), group in groups.items():
         # --- Dedup: envelopes are hints, never double-write ---
         # Two replay kinds, retired at different times: one duplicating an
@@ -364,7 +379,12 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         result.notes += [session_title, ledger_title]
 
     # Retire both sides on the same window: processed audit copies, and pending
-    # trace that never resolved a mapping (so the inbox can't grow without limit).
-    result.pruned = inbox.prune_processed(older_than_days) + inbox.prune_pending(older_than_days)
+    # trace from fully-unmapped sessions (so the inbox can't grow without limit).
+    # routable_sessions are spared — a hint-less file whose session is routable
+    # self-heals, so pruning it would drop events from a session that still
+    # rebuilds in full on a later successful sweep.
+    result.pruned = inbox.prune_processed(older_than_days) + inbox.prune_pending(
+        older_than_days, routable_sessions
+    )
     inbox.record_flush()
     return result

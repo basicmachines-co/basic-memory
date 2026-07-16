@@ -334,17 +334,24 @@ def _plant_processed_with_age(days_old: int) -> Path:
     return path
 
 
-def _plant_pending_with_age(days_old: int, project_hint: str = "") -> Path:
+def _plant_pending_with_age(
+    days_old: int,
+    project_hint: str = "",
+    *,
+    event: str = SESSION_STARTED,
+    session_id: str = "stale",
+    ts: str = "2026-07-15T10:00:00+00:00",
+) -> Path:
     """Plant a pending inbox envelope with a valid body and an aged filename."""
     from basic_memory.hooks.envelope import envelope_to_json
 
     envelope = create_envelope(
         source="claude-code",
-        event=SESSION_STARTED,
-        session_id="stale",
+        event=event,
+        session_id=session_id,
         cwd="/tmp/workdir",
         project_hint=project_hint,
-        ts="2026-07-15T10:00:00+00:00",
+        ts=ts,
     )
     directory = inbox.inbox_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -401,6 +408,32 @@ async def test_flush_keeps_recent_unmapped_pending_envelopes(bm_home: Path) -> N
 
     assert result.pruned == 0
     assert fresh.exists()
+
+
+async def test_flush_keeps_hintless_envelope_when_session_is_routable(bm_home: Path) -> None:
+    # e1 captured before primaryProject was set (hint-less), e2 after (hinted),
+    # same session, both past retention, and the write still fails (outage). The
+    # session is routable via e2, so retention must keep BOTH — pruning the
+    # hint-less e1 would drop its event from the session the next successful
+    # sweep rebuilds.
+    e1 = _plant_pending_with_age(
+        days_old=46, project_hint="", event=SESSION_STARTED, session_id="s-mixed"
+    )
+    e2 = _plant_pending_with_age(
+        days_old=45,
+        project_hint="demo",
+        event=COMPACTION_IMMINENT,
+        session_id="s-mixed",
+        ts="2026-07-15T10:05:00+00:00",
+    )
+    failing = AsyncMock(side_effect=RuntimeError("cloud down"))
+
+    with patch("basic_memory.mcp.tools.write_note", failing):
+        result = await flush()
+
+    assert e1.exists()  # hint-less, but its session is routable via e2
+    assert e2.exists()
+    assert result.pruned == 0
 
 
 async def test_flush_keeps_write_failed_mapped_envelope_past_retention(bm_home: Path) -> None:

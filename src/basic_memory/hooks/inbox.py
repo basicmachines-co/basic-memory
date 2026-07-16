@@ -82,20 +82,31 @@ def mark_processed(path: Path) -> Path:
     return destination
 
 
-def _is_unresolvable_pending(path: Path) -> bool:
-    """A pending envelope that can *never* flush: it parses but carries no
-    project hint, so the projector has nowhere to route it.
+def _unresolvable_pending_gate(
+    routable_sessions: frozenset[tuple[str, str]],
+) -> Callable[[Path], bool]:
+    """Build the prune gate: a pending envelope is unresolvable only if it can
+    *never* flush — it parses, carries no project hint, and its session is not
+    routable through any sibling.
 
-    A parse failure (corrupt or future-versioned — the trace ``bm hook status``
-    surfaces for a human) or a present hint (mapped: pending only because a write
-    failed, and must self-heal on a later sweep) is deliberately NOT unresolvable,
-    so retention leaves both in place.
+    Kept (not pruned): a parse failure (corrupt/future-versioned — the trace
+    ``bm hook status`` surfaces for a human); a present hint (mapped, pending
+    only because a write failed and must self-heal); and — crucially — a
+    hint-less file whose ``(source, session_id)`` appears in ``routable_sessions``
+    (another envelope in that session, pending or already processed, carries a
+    hint, so the group self-heals and rebuilds the full session on a later sweep).
     """
-    try:
-        envelope = envelope_from_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # ValueError covers json.JSONDecodeError
-        return False
-    return not envelope.project_hint.strip()
+
+    def gate(path: Path) -> bool:
+        try:
+            envelope = envelope_from_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # ValueError covers json.JSONDecodeError
+            return False
+        if envelope.project_hint.strip():
+            return False
+        return (envelope.source, envelope.source_session_id) not in routable_sessions
+
+    return gate
 
 
 def _prune_dir(
@@ -141,7 +152,10 @@ def prune_processed(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
     return _prune_dir(processed_dir(), older_than_days)
 
 
-def prune_pending(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
+def prune_pending(
+    older_than_days: int = DEFAULT_RETENTION_DAYS,
+    routable_sessions: frozenset[tuple[str, str]] = frozenset(),
+) -> int:
     """Delete pending envelopes older than the retention window.
 
     A session that never resolves a project mapping (``primaryProject`` unset for
@@ -152,12 +166,19 @@ def prune_pending(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
     still giving a mapping the full window to appear (a later same-session
     capture carrying a hint resolves the whole group via the projector's merge).
 
-    Only *unresolvable* pending entries are pruned (``_is_unresolvable_pending``):
-    a corrupt file and a mapped write-failure — pending for reasons that can
-    still resolve — are both left in place, so retention never defeats self-heal
-    or eats the corruption trace ``bm hook status`` surfaces.
+    ``routable_sessions`` is the set of ``(source, session_id)`` the caller knows
+    to be routable (a hinted envelope somewhere in the session — pending or
+    processed). Only *unresolvable* pending entries are pruned: a corrupt file, a
+    mapped write-failure, and a hint-less file belonging to a routable session
+    are all left in place, so retention never defeats self-heal (the session
+    still rebuilds in full on a later sweep) or eats the corruption trace
+    ``bm hook status`` surfaces.
     """
-    return _prune_dir(inbox_dir(), older_than_days, should_prune=_is_unresolvable_pending)
+    return _prune_dir(
+        inbox_dir(),
+        older_than_days,
+        should_prune=_unresolvable_pending_gate(routable_sessions),
+    )
 
 
 # --- Flush bookkeeping (the `bm hook status` debuggability surface) ---
