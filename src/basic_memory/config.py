@@ -1068,25 +1068,18 @@ class ConfigManager:
                                 needs_resave = True
                                 break
 
-                # First, create config from environment variables (Pydantic will read them)
-                # Then overlay with file data for fields that aren't set via env vars
-                # This ensures env vars take precedence
-
-                # Get env-based config fields that are actually set
-                env_config = BasicMemoryConfig()
-                env_dict = env_config.model_dump()
-
-                # Merge: file data as base, but only use it for fields not set by env
-                # We detect env-set fields by comparing to default values
                 merged_data = file_data.copy()
-
-                # For fields that have env var overrides, use those instead of file values
-                # The env_prefix is "BASIC_MEMORY_" so we check those
                 for field_name in BasicMemoryConfig.model_fields.keys():
                     env_var_name = f"BASIC_MEMORY_{field_name.upper()}"
                     if env_var_name in os.environ:
-                        # Environment variable is set, use it
-                        merged_data[field_name] = env_dict[field_name]
+                        # Trigger: the file and environment both configure this field.
+                        # Why: BaseSettings only gives environment values precedence when the
+                        # field is absent from constructor data. Removing the file value lets
+                        # Pydantic parse the environment value without constructing a throwaway
+                        # config that seeds and creates an unused default project directory.
+                        # Outcome: environment keeps precedence and config loading has no phantom
+                        # filesystem side effect before the real merged config is validated.
+                        merged_data.pop(field_name, None)
 
                 _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
 
