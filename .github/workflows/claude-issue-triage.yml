@@ -77,7 +77,8 @@ jobs:
                - Complex: Major feature work, architectural changes
 
             **Actions to Take:**
-            1. Add appropriate labels using: `gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"`
+            1. Add appropriate labels using:
+               `./scripts/edit-issue-labels.sh --add-label label1 --add-label label2`
             2. Check for duplicates using: `gh search issues`
             3. If duplicate found, comment mentioning the original issue
             4. For feature requests, ask clarifying questions if needed
@@ -94,4 +95,4 @@ jobs:
             and then stop. Do not begin implementation work.
           claude_args: |
             --permission-mode dontAsk
-            --allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh search issues:*),Read,Grep,Glob"
+            --allowedTools "Bash(./scripts/edit-issue-labels.sh:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh search issues:*),Read,Grep,Glob"
