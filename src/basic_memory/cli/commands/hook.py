@@ -880,19 +880,22 @@ def _hook_launcher() -> str:
     actually resolves — and works — at hook time: a PATH binary first (keeps the
     hook's version aligned with the user's install) but only when it ships the
     ``hook`` group, so a stale pre-hook binary on PATH is skipped rather than
-    baked into the config; else a uvx fallback pinned to the running release
-    floor so a cold cache still fetches a CLI that ships ``hook``. With nothing
-    resolvable we still write the ``basic-memory`` form as a best effort —
-    ``install`` warns about the missing uv the fallback would otherwise need.
+    baked into the config; else a uvx (or ``uv tool run``, for installs that ship
+    uv without the uvx shim) fallback pinned to the running release floor so a
+    cold cache still fetches a CLI that ships ``hook``. With nothing resolvable we
+    still write the ``basic-memory`` form as a best effort — ``install`` warns
+    about the missing uv the fallback would otherwise need.
     """
     for binary in ("basic-memory", "bm"):
         if shutil.which(binary) and _supports_hook(binary):
             return binary
+    # Strip any .dev / +local / build suffix so the constraint is a clean release
+    # floor (the shims pin the same way, bumped by update_versions).
+    floor = basic_memory.__version__.split(".dev")[0].split("+")[0]
     if shutil.which("uvx"):
-        # Strip any .dev / +local / build suffix so the constraint is a clean
-        # release floor (the shims pin the same way, bumped by update_versions).
-        floor = basic_memory.__version__.split(".dev")[0].split("+")[0]
         return f'uvx "basic-memory>={floor}"'
+    if shutil.which("uv"):
+        return f'uv tool run "basic-memory>={floor}"'
     return "basic-memory"
 
 

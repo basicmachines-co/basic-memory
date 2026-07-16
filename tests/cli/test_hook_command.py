@@ -1033,6 +1033,21 @@ def test_install_prefers_bm_when_basic_memory_absent(monkeypatch: pytest.MonkeyP
     assert command == "bm hook session-start --harness claude"
 
 
+def test_install_uses_uv_tool_run_when_only_uv(monkeypatch: pytest.MonkeyPatch) -> None:
+    # uv present without the uvx shim: install must still write a resolvable
+    # command via `uv tool run`, matching the shim fallback.
+    monkeypatch.setattr(
+        hook_module.shutil, "which", lambda name: "/opt/bin/uv" if name == "uv" else None
+    )
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command.startswith('uv tool run "basic-memory>=')
+    assert command.endswith("hook session-start --harness claude")
+
+
 def test_install_skips_stale_basic_memory_and_uses_uvx(monkeypatch: pytest.MonkeyPatch) -> None:
     # A stale pre-hook basic-memory is on PATH alongside uvx: install must not
     # bake the stale binary into the config (it would fail at hook time), and

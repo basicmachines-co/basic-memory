@@ -228,6 +228,28 @@ def test_shim_falls_back_to_uvx_with_released_floor(
 
 
 @pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+def test_shim_falls_back_to_uv_tool_run_when_no_uvx(
+    shim: ShimHarness, hooks_dir: str, harness: str
+) -> None:
+    # Some installs ship `uv` without the `uvx` shim on PATH; `uv tool run` is
+    # the same launcher and must be used rather than falling through to no-op.
+    shim.add_fake("uv")
+
+    result = shim.run(hooks_dir, "session-start.sh")
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("uv") == [
+        "tool",
+        "run",
+        f"basic-memory>={CURRENT_VERSION}",
+        "hook",
+        "session-start",
+        "--harness",
+        harness,
+    ]
+
+
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
 def test_shim_skips_stale_path_install_without_hook_support(
     shim: ShimHarness, hooks_dir: str, harness: str
 ) -> None:

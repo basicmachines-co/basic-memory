@@ -40,8 +40,11 @@ def test_codex_plugin_hooks_are_zero_logic_shims() -> None:
         assert "python3" not in text
         assert "uv run --script" not in text
         assert f"hook {verb} --harness codex" in text
-        # The uvx fallback must pin a released floor (bumped by update_versions).
-        assert re.search(r'BM=\(uvx "basic-memory>=\d', text)
+        # The uvx/uv fallback must pin a released floor (bumped by update_versions),
+        # declared once as BM_FLOOR so the updater's single-occurrence rule holds.
+        assert re.search(r'BM_FLOOR="basic-memory>=\d', text)
+        assert 'BM=(uvx "$BM_FLOOR")' in text
+        assert 'BM=(uv tool run "$BM_FLOOR")' in text
 
 
 def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:

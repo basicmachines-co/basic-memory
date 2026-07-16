@@ -7,13 +7,18 @@
 #
 # Resolution order: BM_BIN (explicit override) → basic-memory / bm on PATH
 # (preferred — keeps the hook's version consistent with the user's MCP server)
-# → uvx at a released floor (fetches from PyPI on first run; uv is the
-# documented prerequisite). Nothing resolvable → silent exit 0: the plugin
+# → uvx (or `uv tool run`) at a released floor (fetches from PyPI on first
+# run; uv is the documented prerequisite). Nothing resolvable → silent exit 0: the plugin
 # must stay invisible to non-Basic-Memory users (fail-open).
 set -u
 
-# A pre-hook basic-memory/bm left on PATH would otherwise shadow the uvx floor
-# and exec a CLI without the `hook` command — erroring instead of failing open.
+# The uvx/uv fallback pins a released floor so a cold cache resolves a CLI that
+# ships the `hook` verbs. scripts/update_versions.py bumps it and expects
+# exactly one occurrence, so both fallbacks reference this one variable.
+BM_FLOOR="basic-memory>=0.22.1"
+
+# A pre-hook basic-memory/bm left on PATH would otherwise shadow the floor and
+# exec a CLI without the `hook` command — erroring instead of failing open.
 # Probe `hook` support first; stdin is detached (</dev/null) so the probe never
 # consumes the hook JSON meant for the real invocation.
 supports_hook() { "$@" hook --help >/dev/null 2>&1 </dev/null; }
@@ -29,7 +34,11 @@ elif command -v basic-memory >/dev/null 2>&1 && supports_hook basic-memory; then
 elif command -v bm >/dev/null 2>&1 && supports_hook bm; then
     BM=(bm)
 elif command -v uvx >/dev/null 2>&1; then
-    BM=(uvx "basic-memory>=0.22.1")
+    BM=(uvx "$BM_FLOOR")
+elif command -v uv >/dev/null 2>&1; then
+    # Some installs ship `uv` without the `uvx` shim on PATH; `uv tool run` is
+    # the same launcher.
+    BM=(uv tool run "$BM_FLOOR")
 else
     exit 0
 fi
