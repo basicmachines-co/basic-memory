@@ -254,6 +254,35 @@ async def test_index_item(search_repository, search_entity):
 
 
 @pytest.mark.asyncio
+async def test_sqlite_text_search_matches_full_content_snippet(search_repository, search_entity):
+    """SQLite finds terms beyond the Postgres-sized content_stems prefix (#1065)."""
+    if is_postgres_backend(search_repository):
+        pytest.skip("The full content_snippet FTS column is SQLite-specific")
+
+    marker = "latecontentmarker"
+    search_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title=search_entity.title,
+        content_stems="prefix content only",
+        content_snippet=f"{'x' * 7000} {marker}",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(search_row)
+
+    results = await search_repository.search(search_text=marker)
+
+    assert [result.id for result in results] == [search_entity.id]
+    assert await search_repository.count(search_text=marker) == 1
+
+
+@pytest.mark.asyncio
 async def test_index_item_upsert_on_duplicate_permalink(search_repository, search_entity):
     """Test that indexing the same permalink twice uses upsert instead of failing.
 
