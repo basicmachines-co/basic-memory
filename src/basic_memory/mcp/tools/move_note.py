@@ -668,7 +668,11 @@ move_note("path/to/file.md", "{destination_path}/file.md")
         #      same way the sibling tools do.
         # Outcome: move_note resolves memory:// URLs identically to read/edit/delete.
         source_project, resolved_identifier, _ = await resolve_project_and_path(
-            client, identifier, active_project.name, context
+            client,
+            identifier,
+            active_project.name,
+            context,
+            strict_project_routing=True,
         )
 
         # Trigger: a memory:// identifier whose project prefix resolves to a DIFFERENT project
