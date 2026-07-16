@@ -121,7 +121,7 @@ async def make_api_request(
                 ):
                     message = detail_obj.get("message", "Active subscription required")
                     subscribe_url = detail_obj.get(
-                        "subscribe_url", "https://basicmemory.com/subscribe"
+                        "subscribe_url", "https://basicmemory.com/pricing"
                     )
                     raise SubscriptionRequiredError(
                         message=message, subscribe_url=subscribe_url

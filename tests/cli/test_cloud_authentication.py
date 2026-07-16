@@ -102,6 +102,31 @@ class TestAPIClientErrorHandling:
         assert err.subscribe_url == "https://basicmemory.com/subscribe"
 
     @pytest.mark.asyncio
+    async def test_subscription_required_error_defaults_to_pricing(self):
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                403,
+                json={
+                    "detail": {
+                        "error": "subscription_required",
+                        "message": "Active subscription required",
+                    }
+                },
+                request=request,
+            )
+
+        auth = _StubAuth()
+        with pytest.raises(SubscriptionRequiredError) as exc_info:
+            await make_api_request(
+                "GET",
+                "https://test.com/api/endpoint",
+                auth=_auth(auth),
+                http_client_factory=_make_http_client_factory(handler),
+            )
+
+        assert exc_info.value.subscribe_url == "https://basicmemory.com/pricing"
+
+    @pytest.mark.asyncio
     async def test_parse_generic_403_error(self):
         async def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
