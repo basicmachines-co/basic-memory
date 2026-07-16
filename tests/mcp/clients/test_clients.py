@@ -131,6 +131,33 @@ class TestKnowledgeClient:
         assert result == "entity-uuid-123"
 
     @pytest.mark.asyncio
+    async def test_resolve_entity_response_preserves_project_metadata(self, monkeypatch):
+        """Complete resolution responses retain the owning project external ID."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "external_id": "entity-uuid-123",
+            "entity_id": 42,
+            "project_external_id": "project-uuid-456",
+            "permalink": "other-project/notes/my-note",
+            "file_path": "notes/My Note.md",
+            "title": "My Note",
+            "resolution_method": "permalink",
+        }
+
+        async def mock_call_post(client, url, **kwargs):
+            assert "/v2/projects/proj-123/knowledge/resolve" in url
+            assert kwargs["json"] == {"identifier": "my-note", "strict": True}
+            return mock_response
+
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+
+        client = KnowledgeClient(MagicMock(), "proj-123")
+        result = await client.resolve_entity_response("my-note", strict=True)
+
+        assert result.external_id == "entity-uuid-123"
+        assert result.project_external_id == "project-uuid-456"
+
+    @pytest.mark.asyncio
     async def test_index_file(self, monkeypatch):
         """Test index_file posts the file path to the index-file endpoint."""
 

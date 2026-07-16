@@ -15,6 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from basic_memory.config import ConfigManager
 from basic_memory.ignore_utils import IGNORED_PATH_REJECTION_DETAIL
 from basic_memory.mcp.project_context import (
+    UnresolvedProjectRouteError,
     _workspace_identifier_discovery_available,
     detect_project_from_memory_url_prefix,
     get_project_client,
@@ -191,6 +192,38 @@ Retry with one of these explicit routes:
 - `edit_note(identifier="{note_identifier}", workspace="{workspace_hint}", project="{project_hint}", operation=..., content=...)`
 - `edit_note(identifier="memory://{normalized_identifier}", operation=..., content=...)`
 - `edit_note(identifier="{note_identifier}", project_id="<project external_id>", operation=..., content=...)`"""
+
+
+def _format_unresolved_project_route_response(
+    *,
+    error: UnresolvedProjectRouteError,
+    active_project: str,
+) -> str:
+    """Format a safe stop when a mutating memory URL cannot be routed."""
+    return f"""# Edit Failed - Unresolved Project Route
+
+The memory URL `{error.identifier}` starts with the project route `{error.project_prefix}`, but that project could not be resolved.
+
+No note was edited or created. Basic Memory did not fall back to the active project `{active_project}`.
+
+## How to retry
+1. Use `list_memory_projects()` to confirm the workspace, project, and project ID.
+2. Correct the `memory://` URL so its project route exists, or pass the note path with an explicit `project` or `project_id`.
+3. If `{error.project_prefix}` is a directory in `{active_project}`, remove the `memory://` prefix and retry with `project="{active_project}"`."""
+
+
+def _format_cross_project_entity_response(
+    *,
+    identifier: str,
+    active_project: str,
+    target_project_id: str,
+) -> str:
+    """Format a safe stop when resolution finds a note in another project."""
+    return f"""# Edit Failed - Note Not Found In This Project
+
+The identifier `{identifier}` resolved to a note outside the selected project `{active_project}`, so no changes were made.
+
+Retry with `project_id="{target_project_id}"`, or use `list_memory_projects()` to confirm the intended project before editing."""
 
 
 def _format_error_response(
@@ -554,12 +587,30 @@ async def edit_note(
 
                 # Use typed KnowledgeClient for API calls
                 knowledge_client = KnowledgeClient(client, active_project.external_id)
-                _, entity_identifier, _ = await resolve_project_and_path(
-                    client,
-                    identifier,
-                    active_project.name,
-                    context,
-                )
+                unresolved_project_route: UnresolvedProjectRouteError | None = None
+                try:
+                    _, entity_identifier, _ = await resolve_project_and_path(
+                        client,
+                        identifier,
+                        active_project.name,
+                        context,
+                        strict_project_routing=True,
+                    )
+                except UnresolvedProjectRouteError as route_error:
+                    # Trigger: a memory URL's first segment is not a project, which
+                    #   can also describe a valid active-project path such as
+                    #   memory://src/existing-note.
+                    # Why: existing indexed notes must remain editable, but a miss
+                    #   must never reach append/prepend auto-create.
+                    # Outcome: resolve once with the read-compatible fallback, then
+                    #   raise the saved route error if normal recovery still misses.
+                    unresolved_project_route = route_error
+                    _, entity_identifier, _ = await resolve_project_and_path(
+                        client,
+                        identifier,
+                        active_project.name,
+                        context,
+                    )
 
                 file_created = False
                 entity_id = ""
@@ -567,10 +618,33 @@ async def edit_note(
 
                 # Try to resolve the entity; for append/prepend, create it if not found
                 try:
-                    entity_id = await knowledge_client.resolve_entity(
+                    resolved_entity = await knowledge_client.resolve_entity_response(
                         entity_identifier,
                         strict=True,
                     )
+                    if resolved_entity.project_external_id != active_project.external_id:
+                        # Trigger: the link resolver found a note owned by another project.
+                        # Why: patching through the active project's endpoint would leak
+                        #   an internal entity ID in a misleading 404 and cannot succeed.
+                        # Outcome: stop before mutation and provide the owning project ID.
+                        if output_format == "json":
+                            return {
+                                "title": None,
+                                "permalink": None,
+                                "file_path": None,
+                                "checksum": None,
+                                "operation": operation,
+                                "fileCreated": False,
+                                "error": "CROSS_PROJECT_ENTITY",
+                                "project": active_project.name,
+                                "targetProjectId": resolved_entity.project_external_id,
+                            }
+                        return _format_cross_project_entity_response(
+                            identifier=identifier,
+                            active_project=active_project.name,
+                            target_project_id=resolved_entity.project_external_id,
+                        )
+                    entity_id = resolved_entity.external_id
                 except Exception as resolve_error:
                     error_msg = str(resolve_error).lower()
                     is_not_found = "entity not found" in error_msg or "not found" in error_msg
@@ -587,6 +661,8 @@ async def edit_note(
 
                     if recovered_entity_id is not None:
                         entity_id = recovered_entity_id
+                    elif is_not_found and unresolved_project_route is not None:
+                        raise unresolved_project_route
                     elif is_not_found and operation in ("append", "prepend"):
                         # Trigger: entity does not exist yet (on disk or in the index)
                         # Why: append/prepend can meaningfully create a new note from the
@@ -741,6 +817,23 @@ async def edit_note(
 
             except Exception as e:
                 logger.error(f"Error editing note: {e}")
+                if isinstance(e, UnresolvedProjectRouteError):
+                    if output_format == "json":
+                        return {
+                            "title": None,
+                            "permalink": None,
+                            "file_path": None,
+                            "checksum": None,
+                            "operation": operation,
+                            "fileCreated": False,
+                            "error": "UNRESOLVED_PROJECT_ROUTE",
+                            "project": active_project.name,
+                            "projectRoute": e.project_prefix,
+                        }
+                    return _format_unresolved_project_route_response(
+                        error=e,
+                        active_project=active_project.name,
+                    )
                 if output_format == "json":
                     return {
                         "title": None,

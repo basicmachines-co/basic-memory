@@ -77,6 +77,18 @@ class WorkspaceProjectLookupMiss(ValueError):
     """
 
 
+class UnresolvedProjectRouteError(ValueError):
+    """A mutating memory URL named a project prefix that could not be resolved."""
+
+    def __init__(self, identifier: str, project_prefix: str):
+        self.identifier = identifier
+        self.project_prefix = project_prefix
+        super().__init__(
+            f"Memory URL project route '{project_prefix}' could not be resolved; "
+            "refusing to treat the URL as a path in the active project."
+        )
+
+
 @dataclass(frozen=True)
 class WorkspaceProjectEntry:
     """A cloud project resolved together with the workspace that owns it."""
@@ -1278,11 +1290,22 @@ async def resolve_project_and_path(
     project: Optional[str] = None,
     context: Optional[Context] = None,
     headers: HeaderTypes | None = None,
+    *,
+    strict_project_routing: bool = False,
 ) -> tuple[ProjectItem, str, bool]:
     """Resolve project and normalized path for memory:// identifiers.
 
+    Args:
+        strict_project_routing: Reject a memory URL whose leading project-like
+            segment cannot be resolved. Mutating tools use this to prevent a
+            failed route from falling back to the active project.
+
     Returns:
         Tuple of (active_project, normalized_path, is_memory_url)
+
+    Raises:
+        UnresolvedProjectRouteError: If strict routing is enabled and the
+            memory URL's leading project segment does not resolve.
     """
     is_memory_url = identifier.strip().startswith("memory://")
     config = ConfigManager().config
@@ -1380,6 +1403,14 @@ async def resolve_project_and_path(
             except ToolError as exc:
                 if "project not found" not in str(exc).lower():
                     raise
+                if strict_project_routing:
+                    # Trigger: a mutating tool supplied a memory URL whose leading
+                    #   project-like segment did not resolve.
+                    # Why: falling back would reinterpret the full route as a path
+                    #   in the active project, allowing append/prepend to create a
+                    #   phantom note in the wrong project (#1066).
+                    # Outcome: stop before entity resolution or file creation.
+                    raise UnresolvedProjectRouteError(identifier, project_prefix) from exc
             else:
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
                 if resolved_project and generate_permalink(resolved_project) != generate_permalink(

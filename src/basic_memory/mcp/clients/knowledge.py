@@ -19,6 +19,7 @@ from basic_memory.schemas.response import (
     DirectoryDeleteResult,
 )
 from basic_memory.schemas.v2.graph import GraphNode, OrphanEntitiesResponse
+from basic_memory.schemas.v2.entity import EntityResolveResponse
 
 
 class KnowledgeClient:
@@ -348,19 +349,13 @@ class KnowledgeClient:
 
     # --- Resolution ---
 
-    async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
-        """Resolve a string identifier to an entity external_id.
-
-        Args:
-            identifier: The identifier to resolve (permalink, title, or path)
-            strict: If True, require exact matching (no fuzzy fallback)
-
-        Returns:
-            The resolved entity external_id (UUID)
-
-        Raises:
-            ToolError: If the identifier cannot be resolved
-        """
+    async def _resolve_entity_data(
+        self,
+        identifier: str,
+        *,
+        strict: bool = False,
+    ) -> dict[str, Any]:
+        """Request the complete entity-resolution payload."""
         from basic_memory.mcp.tools.utils import call_post
 
         with logfire.span(
@@ -376,5 +371,31 @@ class KnowledgeClient:
                 operation="resolve_entity",
                 path_template="/v2/projects/{project_id}/knowledge/resolve",
             )
-        data = response.json()
+        data: dict[str, Any] = response.json()
+        return data
+
+    async def resolve_entity_response(
+        self,
+        identifier: str,
+        *,
+        strict: bool = False,
+    ) -> EntityResolveResponse:
+        """Resolve an identifier while preserving owning-project metadata.
+
+        Args:
+            identifier: The identifier to resolve (permalink, title, or path)
+            strict: If True, require exact matching (no fuzzy fallback)
+
+        Returns:
+            The complete validated resolution response
+
+        Raises:
+            ToolError: If the identifier cannot be resolved
+        """
+        data = await self._resolve_entity_data(identifier, strict=strict)
+        return EntityResolveResponse.model_validate(data)
+
+    async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+        """Resolve a string identifier to an entity external_id."""
+        data = await self._resolve_entity_data(identifier, strict=strict)
         return data["external_id"]

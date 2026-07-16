@@ -11,6 +11,7 @@ from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools.edit_note import _resolve_after_disk_recovery, edit_note
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
+from basic_memory.schemas.v2.entity import EntityResolveResponse
 
 
 def test_edit_note_workspace_project_route_helper():
@@ -376,6 +377,96 @@ async def test_edit_note_append_creates_json_format(client, test_project):
     assert result["fileCreated"] is True
     assert result["title"] is not None
     assert result["operation"] == "append"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_memory_url_unresolved_project_never_autocreates(client, test_project):
+    """A failed memory URL route must not create a phantom note in the active project."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="memory://missing-project/notes/phantom-note",
+        operation="append",
+        content="# Phantom\n\nThis must not be created.",
+    )
+
+    assert isinstance(result, str)
+    assert "# Edit Failed - Unresolved Project Route" in result
+    assert "No note was edited or created" in result
+    assert f"active project `{test_project.name}`" in result
+    assert not (Path(test_project.path) / "missing-project" / "notes" / "phantom-note.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_memory_url_unresolved_project_json_error(client, test_project):
+    """JSON mode reports an unresolved route without creating a file."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="memory://missing-project/notes/phantom-json-note",
+        operation="prepend",
+        content="# Phantom JSON",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["error"] == "UNRESOLVED_PROJECT_ROUTE"
+    assert result["fileCreated"] is False
+    assert result["projectRoute"] == "missing-project"
+    assert not (
+        Path(test_project.path) / "missing-project" / "notes" / "phantom-json-note.md"
+    ).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["text", "json"])
+async def test_edit_note_cross_project_resolution_stops_before_patch(
+    monkeypatch,
+    client,
+    test_project,
+    output_format,
+):
+    """A sibling-project match should return a clean retry instead of leaking an entity ID."""
+    target_project_id = "22222222-2222-2222-2222-222222222222"
+    target_entity_id = "33333333-3333-3333-3333-333333333333"
+
+    async def resolve_in_sibling(self, identifier, *, strict=False):
+        assert strict is True
+        return EntityResolveResponse(
+            external_id=target_entity_id,
+            entity_id=42,
+            project_external_id=target_project_id,
+            permalink="sibling-project/notes/cross-project-note",
+            file_path="notes/Cross Project Note.md",
+            title="Cross Project Note",
+            resolution_method="search",
+        )
+
+    async def fail_patch(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("cross-project matches must stop before patching")
+
+    monkeypatch.setattr(KnowledgeClient, "resolve_entity_response", resolve_in_sibling)
+    monkeypatch.setattr(KnowledgeClient, "patch_entity", fail_patch)
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="sibling-project::Cross Project Note",
+        operation="append",
+        content="\nMust not be appended.",
+        output_format=output_format,
+    )
+
+    if output_format == "json":
+        assert isinstance(result, dict)
+        assert result["error"] == "CROSS_PROJECT_ENTITY"
+        assert result["fileCreated"] is False
+        assert result["project"] == test_project.name
+        assert result["targetProjectId"] == target_project_id
+        assert target_entity_id not in result.values()
+    else:
+        assert isinstance(result, str)
+        assert "# Edit Failed - Note Not Found In This Project" in result
+        assert f"selected project `{test_project.name}`" in result
+        assert f'project_id="{target_project_id}"' in result
+        assert target_entity_id not in result
 
 
 @pytest.mark.asyncio
