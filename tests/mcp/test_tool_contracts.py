@@ -50,7 +50,16 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
     ],
     "fetch": ["id"],
-    "list_directory": ["dir_name", "depth", "file_name_glob", "project", "project_id"],
+    "list_directory": [
+        "dir_name",
+        "depth",
+        "file_name_glob",
+        "page",
+        "page_size",
+        "output_format",
+        "project",
+        "project_id",
+    ],
     "list_memory_projects": ["output_format"],
     "list_workspaces": ["output_format"],
     "move_note": [
