@@ -1407,7 +1407,13 @@ async def resolve_project_and_path(
                 )
                 resolved = ProjectResolveResponse.model_validate(response.json())
             except ToolError as exc:
-                if "project not found" not in str(exc).lower():
+                error_message = str(exc).lower()
+                project_route_missing = "project not found" in error_message
+                project_route_hidden_by_scope = (
+                    "does not have access to this project" in error_message
+                    and not strict_project_routing
+                )
+                if not project_route_missing and not project_route_hidden_by_scope:
                     raise
                 if strict_project_routing:
                     # Trigger: a mutating tool supplied a memory URL whose leading
