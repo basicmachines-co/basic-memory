@@ -621,12 +621,16 @@ def _checkpoint_note(
     conversation: list[tuple[str, str]],
     primary: str,
     extra_redact_paths: list[str],
-) -> tuple[str, str]:
-    """Build the pre-compaction checkpoint note (title, content).
+) -> tuple[str, str, dict[str, str]]:
+    """Build the pre-compaction checkpoint note (title, body, frontmatter).
 
     Extractive cut: the opening request and most recent turns lifted straight
-    from the transcript — no LLM call. Frontmatter carries type/status/started
-    so structured recall (session-start) finds it with metadata filters.
+    from the transcript — no LLM call. Frontmatter carries status/started so
+    structured recall (session-start) finds it with metadata filters, and is
+    returned as a dict for write_note to serialize (``metadata=``): a value with
+    YAML-special characters — e.g. a cwd like ``/tmp/client: acme`` — would break
+    a hand-built frontmatter block and, via fail-open, silently drop the
+    checkpoint. ``type`` is supplied to write_note separately (``note_type``).
     """
     # Transcript text is lifted verbatim into the graph (title, summary, and
     # observations), so it must pass the same secret floor as inbox payloads
@@ -654,24 +658,24 @@ def _checkpoint_note(
     # across rapid compactions within the same minute.
     title = f"{profile.checkpoint_title_prefix} {now.strftime('%Y-%m-%d %H:%M:%S')} — {_clip(opening, 40)}"
 
-    frontmatter = [
-        "---",
-        f"type: {profile.session_note_type}",
-        "status: open",
-        f"started: {iso}",
-        f"ended: {iso}",
-        f"project: {primary}",
-        f"cwd: {safe_cwd}",
-    ]
+    # Frontmatter as a dict (write_note serializes + quotes it); `type` rides the
+    # note_type arg. Order preserved for stable, readable output.
+    metadata: dict[str, str] = {
+        "status": "open",
+        "started": iso,
+        "ended": iso,
+        "project": primary,
+        "cwd": safe_cwd,
+    }
     if event.session_id:
-        frontmatter.append(f"{profile.session_id_key}: {event.session_id}")
+        metadata[profile.session_id_key] = event.session_id
     if event.turn_id:
-        frontmatter.append(f"codex_turn_id: {event.turn_id}")
+        metadata["codex_turn_id"] = event.turn_id
     if event.trigger:
-        frontmatter.append(f"trigger: {event.trigger}")
+        metadata["trigger"] = event.trigger
     if event.model:
-        frontmatter.append(f"model: {event.model}")
-    frontmatter += ["capture: extractive", "---"]
+        metadata["model"] = event.model
+    metadata["capture"] = "extractive"
 
     body = [
         "",
@@ -706,7 +710,7 @@ def _checkpoint_note(
         f"- [context] Session opened with: {_clip(opening, 200)}",
         "- [next_step] Review this checkpoint and continue where the thread left off",
     ]
-    return title, "\n".join(frontmatter + body)
+    return title, "\n".join(body), metadata
 
 
 # --- Verb bodies ---
@@ -771,7 +775,7 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
     if not conversation or not any(role == "user" for role, _ in conversation):
         return
 
-    title, content = _checkpoint_note(
+    title, content, metadata = _checkpoint_note(
         profile, event, conversation, primary, _string_list(cfg.get("redactPaths"))
     )
 
@@ -789,6 +793,9 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
             project_id=project_id,
             tags=list(profile.checkpoint_tags),
             note_type=profile.session_note_type,
+            # Frontmatter as metadata: write_note serializes/quotes it, so a
+            # YAML-special value (e.g. a cwd with a colon) can't break parsing.
+            metadata=metadata,
             output_format="json",
         )
     )

@@ -66,18 +66,25 @@ def _normalize_path(path: str) -> str:
 _SENSITIVE_HOME_DIRS = ("~/.ssh/", "~/.aws/", "~/.gnupg/")
 
 
+def _expand_deny_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize deny-path prefixes into both matchable forms.
+
+    Both forms are denied for each prefix: the expanded absolute path (payload
+    values — hook cwd especially — usually carry it resolved) and the literal
+    ``~/`` prefix (prose, config, and transcript excerpts commonly write
+    ``~/.ssh/id_rsa`` unexpanded — the expanded pattern alone would let that
+    survive, and vice versa). dict.fromkeys dedupes while preserving order in
+    case expanduser is a no-op (HOME unset, or an already-absolute path).
+    """
+    expanded = (_normalize_path(os.path.expanduser(prefix)) for prefix in paths)
+    literal = (_normalize_path(prefix) for prefix in paths)
+    return tuple(dict.fromkeys((*expanded, *literal)))
+
+
 def _default_redact_paths() -> tuple[str, ...]:
     # Resolved per call, not at import: tests (and long-lived processes) may
     # repoint HOME, and a stale import-time expansion would silently miss.
-    #
-    # Both forms are denied: the expanded absolute path (payload values usually
-    # carry it resolved) and the literal ``~/`` prefix (prose and transcript
-    # excerpts commonly write ``~/.ssh/id_rsa`` unexpanded — the expanded pattern
-    # alone would let that survive). dict.fromkeys dedupes while preserving order
-    # in case expanduser is a no-op (HOME unset).
-    expanded = (_normalize_path(os.path.expanduser(prefix)) for prefix in _SENSITIVE_HOME_DIRS)
-    literal = (_normalize_path(prefix) for prefix in _SENSITIVE_HOME_DIRS)
-    return tuple(dict.fromkeys((*expanded, *literal)))
+    return _expand_deny_paths(_SENSITIVE_HOME_DIRS)
 
 
 def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
@@ -257,7 +264,9 @@ def redact_payload(
 
     deny_paths = _default_redact_paths()
     if extra_redact_paths:
-        deny_paths = deny_paths + tuple(_normalize_path(path) for path in extra_redact_paths)
+        # Expand user paths the same way as the built-in defaults: a configured
+        # `~/clients/secret` must match the absolute cwd `/home/alice/clients/...`.
+        deny_paths = deny_paths + _expand_deny_paths(tuple(extra_redact_paths))
     deny_path_res = _deny_path_patterns(deny_paths)
 
     # One settings context per payload: detect-secrets reads plugin/filter
@@ -278,6 +287,8 @@ def redact_text(value: str, extra_redact_paths: list[str] | None = None) -> str:
     """
     deny_paths = _default_redact_paths()
     if extra_redact_paths:
-        deny_paths = deny_paths + tuple(_normalize_path(path) for path in extra_redact_paths)
+        # Expand user paths the same way as the built-in defaults: a configured
+        # `~/clients/secret` must match the absolute cwd `/home/alice/clients/...`.
+        deny_paths = deny_paths + _expand_deny_paths(tuple(extra_redact_paths))
     with default_settings():
         return _redact_str(value, _deny_path_patterns(deny_paths), _entropy_plugins())

@@ -461,11 +461,12 @@ def test_pre_compact_writes_checkpoint_note(
     assert kwargs["directory"] == "sessions"
     assert kwargs["tags"] == ["session", "auto-capture"]
     assert "Fix the login bug" in kwargs["title"]
+    # Frontmatter travels as metadata (write_note serializes it); `type` as note_type.
+    assert kwargs["note_type"] == "session"
+    assert kwargs["metadata"]["status"] == "open"
+    assert kwargs["metadata"]["claude_session_id"] == "s-abc12345"
+    assert kwargs["metadata"]["trigger"] == "auto"
     content = kwargs["content"]
-    assert "type: session" in content
-    assert "status: open" in content
-    assert "claude_session_id: s-abc12345" in content
-    assert "trigger: auto" in content
     assert "- Opening request: Fix the login bug" in content
     assert "- Now add a regression test" in content
     assert "[next_step]" in content
@@ -526,9 +527,32 @@ def test_pre_compact_redacts_cwd_under_denied_path(
 
     assert result.exit_code == 0
     assert mock_write.await_args is not None
-    content = mock_write.await_args.kwargs["content"]
-    assert "/srv/clients/acme/repo" not in content
-    assert "cwd: [REDACTED_PATH]" in content
+    kwargs = mock_write.await_args.kwargs
+    assert "/srv/clients/acme/repo" not in kwargs["content"]  # body
+    assert kwargs["metadata"]["cwd"] == "[REDACTED_PATH]"  # frontmatter
+
+
+def test_pre_compact_checkpoint_handles_yaml_special_cwd(
+    bm_home: Path, claude_project: Path, tmp_path: Path
+) -> None:
+    # A cwd with YAML-special characters (a colon) must not break the checkpoint:
+    # it rides `metadata` (write_note serializes/quotes it), never a hand-built
+    # frontmatter block that PyYAML would choke on and fail-open would drop.
+    transcript = _transcript(tmp_path)
+    mock_write = AsyncMock(return_value={"action": "created"})
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--project-dir", str(claude_project)],
+            input=_payload("/tmp/client: acme", transcript_path=str(transcript), trigger="auto"),
+        )
+
+    assert result.exit_code == 0
+    assert mock_write.await_args is not None
+    kwargs = mock_write.await_args.kwargs
+    assert kwargs["metadata"]["cwd"] == "/tmp/client: acme"
+    # The content is body-only — no hand-built frontmatter fence to mis-parse.
+    assert not kwargs["content"].lstrip().startswith("---")
 
 
 def test_pre_compact_without_primary_project_is_silent(bm_home: Path, tmp_path: Path) -> None:
@@ -655,11 +679,11 @@ def test_pre_compact_codex_includes_workspace_sections(bm_home: Path, tmp_path: 
     assert kwargs["directory"] == "codex-sessions"
     assert kwargs["tags"] == ["codex", "auto-capture"]
     assert kwargs["title"].startswith("Codex session ")
+    assert kwargs["note_type"] == "codex_session"
+    assert kwargs["metadata"]["codex_session_id"] == "s-abc12345"
+    assert kwargs["metadata"]["codex_turn_id"] == "turn-42"
+    assert kwargs["metadata"]["model"] == "gpt-5.2-codex"
     content = kwargs["content"]
-    assert "type: codex_session" in content
-    assert "codex_session_id: s-abc12345" in content
-    assert "codex_turn_id: turn-42" in content
-    assert "model: gpt-5.2-codex" in content
     assert "## Recent assistant notes" in content
     assert "## Working tree" in content
     assert "- `M src/app.py`" in content

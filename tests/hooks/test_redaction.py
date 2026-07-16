@@ -246,6 +246,16 @@ def test_redact_text_ignores_bare_root_deny_path() -> None:
     assert redact_text("/opt/app/main.py", extra_redact_paths=["/"]) == "/opt/app/main.py"
 
 
+def test_redact_text_expands_user_tilde_deny_path() -> None:
+    # A user-configured redactPaths entry in ~/ form must match the absolute cwd
+    # the hook actually captures (expanded like the built-in defaults).
+    absolute = str(Path("~/clients/secret/repo").expanduser())
+    scrubbed = redact_text(f"working in {absolute}", extra_redact_paths=["~/clients/secret"])
+
+    assert absolute not in scrubbed
+    assert scrubbed == f"working in {REDACTED_PATH}"
+
+
 def test_redact_text_redacts_denied_root_before_punctuation() -> None:
     # Prose puts punctuation right after a path; the root must still redact.
     home_ssh = str(Path("~/.ssh").expanduser())
