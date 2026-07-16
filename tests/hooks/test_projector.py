@@ -177,6 +177,26 @@ async def test_flush_routes_on_project_hint_from_in_group_replay(bm_home: Path) 
     assert inbox.list_envelopes() == []
 
 
+async def test_flush_routes_new_event_via_processed_replay_hint(bm_home: Path) -> None:
+    # Sweep 1 retires a no-hint original AND its hinted same-key replay into
+    # processed/. A later distinct event for the same session must still route:
+    # _dedup_by_key keeps the earlier (hint-less) processed envelope for the
+    # rendered rows, so routing must scan the full processed history (which holds
+    # the replay's hint), or the new event stays pending forever.
+    mock_write = AsyncMock(return_value=WRITE_OK)
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:01+00:00", project_hint="")
+        _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:41+00:00", project_hint="demo")
+        first = await flush()
+        _capture(event=COMPACTION_IMMINENT, ts="2026-07-15T10:05:00+00:00", project_hint="")
+        second = await flush()
+
+    assert first.projected == 1
+    assert second.projected == 1  # routed via the processed replay's hint
+    assert second.pending == 0
+    assert inbox.list_envelopes() == []
+
+
 async def test_flush_dedups_retired_replay_history_on_rebuild(bm_home: Path) -> None:
     # A same-minute SessionStart replay is retired into processed/ alongside its
     # original (same key, distinct id). When a later event triggers a full

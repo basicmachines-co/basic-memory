@@ -411,17 +411,27 @@ def _readable(ref: str) -> str:
     return f"shared project {ref[:8]}…" if UUID_RE.match(ref) else ref
 
 
-def _fence(data_lines: list[str]) -> str:
-    """A code fence guaranteed longer than any backtick run in the fenced data.
+# Cap for backtick runs in fenced data. The fence grows to outlength the longest
+# run, but an absurd run (near MAX_BRIEF_CHARS) would make the fence itself too
+# long to fit under the cap — its closing half would be truncated, reopening the
+# boundary. Runs above this are collapsed; realistic nesting (3-4) is untouched.
+_MAX_FENCE_RUN = 32
 
-    The brief fences untrusted graph text as the prompt-injection boundary. A
-    fenced block is closed by a backtick run at least as long as the opening
-    fence, so a title/permalink containing ````` would otherwise close a fixed
-    fence and let that text escape the boundary. The fence is therefore one
-    backtick longer than the longest run in the data (floor of 5, the original).
+
+def _fence(data_lines: list[str]) -> tuple[str, list[str]]:
+    """Return (fence, sanitized data) for the untrusted graph-data block.
+
+    The brief fences graph text as the prompt-injection boundary. A fenced block
+    is closed by a backtick run at least as long as the opening fence, so a
+    title/permalink containing ````` would otherwise close a fixed fence and let
+    that text escape. The fence is one backtick longer than the longest run in
+    the data (floor of 5, the original) — but runs over ``_MAX_FENCE_RUN`` are
+    first collapsed so the fence stays bounded and always fits the brief budget.
     """
-    longest = max((len(run) for line in data_lines for run in re.findall(r"`+", line)), default=0)
-    return "`" * max(5, longest + 1)
+    cap = "`" * _MAX_FENCE_RUN
+    sanitized = [re.sub("`{%d,}" % (_MAX_FENCE_RUN + 1), cap, line) for line in data_lines]
+    longest = max((len(run) for line in sanitized for run in re.findall(r"`+", line)), default=0)
+    return "`" * max(5, longest + 1), sanitized
 
 
 def _build_brief(
@@ -501,8 +511,9 @@ def _build_brief(
     # --- Assemble: fence the untrusted data (the prompt-injection boundary),
     # keep guidance outside it. ---
     # Note titles/permalinks come from the knowledge graph and may contain text a
-    # third party wrote.
-    fence = _fence(data_lines)
+    # third party wrote. _fence also collapses absurd backtick runs so the fence
+    # stays bounded — draw the fenced data from the sanitized lines it returns.
+    fence, data_lines = _fence(data_lines)
     opening = (
         "# Basic Memory — session context\n\n"
         "The fenced block below is reference data from the Basic Memory knowledge "

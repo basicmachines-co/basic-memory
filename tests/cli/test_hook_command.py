@@ -313,6 +313,37 @@ def test_session_start_keeps_closing_fence_when_data_overflows(
     assert "[truncated]" in out
 
 
+def test_session_start_bounds_fence_for_absurd_backtick_run(
+    bm_home: Path, claude_project: Path
+) -> None:
+    # A title with an absurd backtick run must not make the fence itself so long
+    # it can't fit the budget (which would truncate the closing fence and reopen
+    # the boundary). The run is collapsed and the fence stays bounded.
+    _write_claude_settings(
+        claude_project, {"primaryProject": "demo", "secondaryProjects": ["team"]}
+    )
+    evil = "`" * 12_000
+
+    async def fake_search(**kwargs):
+        if kwargs.get("project") == "team":
+            return _search_result(evil)
+        return SEARCH_EMPTY
+
+    with patch("basic_memory.mcp.tools.search_notes", AsyncMock(side_effect=fake_search)):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+    out = result.stdout
+    assert len(out) <= hook_module.MAX_BRIEF_CHARS + 1
+    # The bounded fence (run cap + 1) opens and closes the block — boundary held.
+    fence = "`" * (hook_module._MAX_FENCE_RUN + 1)
+    assert out.count(fence) == 2
+
+
 def test_session_start_uses_payload_cwd_when_no_project_dir(
     bm_home: Path, claude_project: Path
 ) -> None:

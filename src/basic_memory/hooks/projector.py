@@ -321,21 +321,25 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         # that was retired into processed/ next to its original doesn't resurface
         # as a duplicate row here.
         prior = processed_by_session.get((source, session_id), [])
-        envelopes = _dedup_by_key(sorted(prior + fresh_envelopes, key=lambda envelope: envelope.id))
-        # Routing scans the COMPLETE group, replays included: a mapping can land
-        # on the later same-key capture (primaryProject set between two same-minute
-        # hooks) while the first is unmapped. Rendered rows dedup; routing must not,
-        # or a valid hint carried only by a replay would leave the group pending
-        # and eventually pruned.
         replay_envelopes = [envelope for _, envelope in group_replays]
+        # Routing scans the COMPLETE, UN-deduped history — prior processed
+        # envelopes, fresh, and in-group replays alike. A mapping can land on the
+        # later same-key capture (primaryProject set between two same-minute
+        # hooks) while the first is unmapped, and _dedup_by_key keeps the earlier
+        # (hint-less) one for the rendered rows — so scanning the deduped list
+        # would miss a hint that only the dropped replay carries, leaving the
+        # group pending forever (routable_sessions also spares it from pruning).
         project_hint = next(
             (
                 envelope.project_hint.strip()
-                for envelope in (*envelopes, *replay_envelopes)
+                for envelope in (*prior, *fresh_envelopes, *replay_envelopes)
                 if envelope.project_hint.strip()
             ),
             "",
         )
+        # Rendered rows still dedup by key so a retired replay in processed/
+        # doesn't resurface as a duplicate row.
+        envelopes = _dedup_by_key(sorted(prior + fresh_envelopes, key=lambda envelope: envelope.id))
         if not project_hint:
             # Trigger: no project mapping resolved for this session.
             # Why: writing to a default/guessed project would put trace in the
