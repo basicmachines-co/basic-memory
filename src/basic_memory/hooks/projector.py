@@ -93,6 +93,25 @@ def _session_label(session_id: str) -> str:
     return session_id or "unknown"
 
 
+def _dedup_by_key(envelopes: list[Envelope]) -> list[Envelope]:
+    """Keep one envelope per idempotency key, preserving input order.
+
+    A retired replay lives in ``processed/`` next to its original (same key,
+    distinct id), so a full rebuild that merges processed history would render
+    both as duplicate rows. Deduping the merged list — earliest first, since the
+    caller sorts by chronological uuid7 id — keeps the original and drops the
+    replay, honoring the idempotency contract.
+    """
+    seen: set[str] = set()
+    unique: list[Envelope] = []
+    for envelope in envelopes:
+        if envelope.idempotency_key in seen:
+            continue
+        seen.add(envelope.idempotency_key)
+        unique.append(envelope)
+    return unique
+
+
 def _capture_folder(envelopes: list[Envelope]) -> str:
     # Capture embeds the harness's configured folder into the payload so the
     # projector needs no settings access of its own.
@@ -260,9 +279,11 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         # Rebuild from the COMPLETE session: previously-projected envelopes (now
         # in processed/) merged with the fresh ones in capture order (uuid7 ids
         # sort chronologically). Overwriting from fresh alone would erase events
-        # projected on an earlier sweep.
+        # projected on an earlier sweep. Dedup by idempotency key so a replay
+        # that was retired into processed/ next to its original doesn't resurface
+        # as a duplicate row here.
         prior = processed_by_session.get((source, session_id), [])
-        envelopes = sorted(prior + fresh_envelopes, key=lambda envelope: envelope.id)
+        envelopes = _dedup_by_key(sorted(prior + fresh_envelopes, key=lambda envelope: envelope.id))
         project_hint = next(
             (
                 envelope.project_hint.strip()

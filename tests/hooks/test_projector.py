@@ -154,6 +154,33 @@ async def test_flush_leaves_group_pending_when_write_fails(bm_home: Path) -> Non
     assert inbox.list_envelopes() == [path]
 
 
+async def test_flush_dedups_retired_replay_history_on_rebuild(bm_home: Path) -> None:
+    # A same-minute SessionStart replay is retired into processed/ alongside its
+    # original (same key, distinct id). When a later event triggers a full
+    # rebuild, the replay must not resurface as a duplicate row.
+    _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:01+00:00")
+    _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:41+00:00")  # replay, same key
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        first = await flush()
+        _capture(event=COMPACTION_IMMINENT, ts="2026-07-15T10:05:00+00:00")
+        second = await flush()
+
+    assert first.projected == 1
+    assert first.duplicates == 1
+    assert second.projected == 1
+
+    session_writes = [
+        call for call in mock_write.await_args_list if call.kwargs["title"].startswith("Session ")
+    ]
+    rebuilt = session_writes[-1].kwargs["content"]
+    # Exactly one session_started event row (the "- <event> at" Events line),
+    # despite the retired replay sitting in processed/.
+    assert rebuilt.count("- session_started at") == 1
+    assert "- compaction_imminent at" in rebuilt
+
+
 async def test_flush_reprojects_after_write_failure_with_in_group_replay(bm_home: Path) -> None:
     # Two same-minute captures share one idempotency key: one fresh, one in-group
     # replay. If the write fails, retiring the replay early would let the next
