@@ -94,6 +94,45 @@ async def test_mutating_route_keeps_scope_rejection_fail_closed(
 
 
 @pytest.mark.asyncio
+async def test_existing_target_mutation_can_fallback_for_missing_project(
+    config_manager,
+    monkeypatch,
+) -> None:
+    """A missing project prefix may still identify a path for non-creating mutations."""
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    context = ContextState()
+    active_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="ci-acceptance",
+        path="/tmp/ci-acceptance",
+        is_default=False,
+    )
+    await context.set_state("active_project", active_project.model_dump())
+
+    async def reject_missing_project(*args: object, **kwargs: object) -> None:
+        raise ToolError("Project not found: 'src'")
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", reject_missing_project)
+
+    resolved_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://src/existing-note",
+        project="ci-acceptance",
+        context=cast(Any, context),
+        strict_project_routing=True,
+        allow_missing_project_fallback=True,
+    )
+
+    assert resolved_project == active_project
+    assert resolved_path == "ci-acceptance/src/existing-note"
+    assert is_memory_url is True
+
+
+@pytest.mark.asyncio
 async def test_read_route_requires_an_authorized_cached_project(
     config_manager,
     monkeypatch,

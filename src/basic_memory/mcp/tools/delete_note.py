@@ -303,6 +303,7 @@ async def delete_note(
             active_project.name,
             context,
             strict_project_routing=True,
+            allow_missing_project_fallback=True,
         )
 
         # Handle directory deletes

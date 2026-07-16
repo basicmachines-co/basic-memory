@@ -1298,6 +1298,7 @@ async def resolve_project_and_path(
     headers: HeaderTypes | None = None,
     *,
     strict_project_routing: bool = False,
+    allow_missing_project_fallback: bool = False,
 ) -> tuple[ProjectItem, str, bool]:
     """Resolve project and normalized path for memory:// identifiers.
 
@@ -1305,6 +1306,10 @@ async def resolve_project_and_path(
         strict_project_routing: Reject a memory URL whose leading project-like
             segment cannot be resolved. Mutating tools use this to prevent a
             failed route from falling back to the active project.
+        allow_missing_project_fallback: When strict routing is enabled, still
+            allow a genuinely missing project prefix to be treated as an active-
+            project path. This is safe only for mutations that require an existing
+            target and cannot create content.
 
     Returns:
         Tuple of (active_project, normalized_path, is_memory_url)
@@ -1417,13 +1422,13 @@ async def resolve_project_and_path(
                 )
                 if not project_route_missing and not project_route_hidden_by_scope:
                     raise
-                if strict_project_routing:
-                    # Trigger: a mutating tool supplied a memory URL whose leading
-                    #   project-like segment did not resolve.
-                    # Why: falling back would reinterpret the full route as a path
-                    #   in the active project, allowing append/prepend to create a
-                    #   phantom note in the wrong project (#1066).
-                    # Outcome: stop before entity resolution or file creation.
+                if strict_project_routing and not (
+                    project_route_missing and allow_missing_project_fallback
+                ):
+                    # Mutations that can create content must not reinterpret a
+                    # missing project route as an active-project path (#1066).
+                    # Existing-target mutations may opt into that legacy path
+                    # fallback, while scope-hidden routes always fail above.
                     raise UnresolvedProjectRouteError(identifier, project_prefix) from exc
             else:
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
