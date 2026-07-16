@@ -854,6 +854,14 @@ def test_flush_reports_projector_summary(bm_home: Path) -> None:
     assert "wrote: Session s-1 (claude-code)" in result.stdout
 
 
+def test_flush_rejects_negative_retention_window(bm_home: Path) -> None:
+    # A negative window would put the retention cutoff in the future and prune
+    # every processed + unmapped-pending envelope — Typer's min=0 rejects it.
+    result = runner.invoke(cli_app, ["hook", "flush", "--older-than-days", "-1"])
+
+    assert result.exit_code != 0
+
+
 # --- status ---
 
 

@@ -103,7 +103,14 @@ def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], .
     separator, whitespace, end, or punctuation to end the token. That last part
     matters for prose: a root followed by ``,`` or ``.`` (``read ~/.ssh, then``)
     must still redact. An optional ``[/\\]\\S*`` consumes a descendant when present.
+
+    On Windows the filesystem is case-insensitive, so the payload/transcript may
+    carry a different drive/user casing than ``os.path.expanduser`` produced
+    (``C:\\Users\\Alice\\.ssh`` vs ``c:\\users\\alice\\.ssh``); the patterns are
+    compiled case-insensitively there so the same directory still matches. POSIX
+    stays case-sensitive — ``/home/Alice`` and ``/home/alice`` are distinct.
     """
+    flags = re.IGNORECASE if os.name == "nt" else 0
     patterns: list[re.Pattern[str]] = []
     for prefix in deny_paths:
         root = prefix.rstrip("/")
@@ -111,7 +118,7 @@ def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], .
             # A bare "/" (or empty) deny path would redact everything; skip it.
             continue
         escaped = re.escape(root).replace("/", r"[/\\]")
-        patterns.append(re.compile(escaped + r"(?![A-Za-z0-9_-])(?:[/\\]\S*)?"))
+        patterns.append(re.compile(escaped + r"(?![A-Za-z0-9_-])(?:[/\\]\S*)?", flags))
     return tuple(patterns)
 
 

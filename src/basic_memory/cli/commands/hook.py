@@ -855,7 +855,12 @@ def pre_compact(
 @hook_app.command("flush")
 def flush(
     older_than_days: int = typer.Option(
-        30, "--older-than-days", help="Retention window for processed envelopes"
+        30,
+        "--older-than-days",
+        # min=0 rejects a negative window, which would otherwise put the retention
+        # cutoff in the future and prune every processed + unmapped-pending file.
+        min=0,
+        help="Retention window in days for processed and unresolved-pending envelopes",
     ),
 ) -> None:
     """Project pending inbox envelopes into knowledge-graph artifacts."""

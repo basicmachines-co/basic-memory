@@ -246,6 +246,22 @@ def test_redact_text_ignores_bare_root_deny_path() -> None:
     assert redact_text("/opt/app/main.py", extra_redact_paths=["/"]) == "/opt/app/main.py"
 
 
+def test_deny_paths_match_case_insensitively_on_windows(monkeypatch) -> None:
+    # Windows paths are case-insensitive: a different drive/user casing than the
+    # configured deny path is the same directory and must still redact.
+    monkeypatch.setattr("basic_memory.hooks.redaction.os.name", "nt")
+    result = redact_text(
+        "open C:/Users/ALICE/vault/key.txt", extra_redact_paths=["c:/users/alice/vault"]
+    )
+    assert result == f"open {REDACTED_PATH}"
+
+
+def test_deny_paths_stay_case_sensitive_on_posix() -> None:
+    # POSIX: different casing is a different directory, so it must NOT redact.
+    result = redact_text("open /home/ALICE/vault/key.txt", extra_redact_paths=["/home/alice/vault"])
+    assert REDACTED_PATH not in result
+
+
 def test_redact_text_expands_user_tilde_deny_path() -> None:
     # A user-configured redactPaths entry in ~/ form must match the absolute cwd
     # the hook actually captures (expanded like the built-in defaults).
