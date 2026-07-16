@@ -19,15 +19,16 @@ from basic_memory.repository.repository import Repository
 class AcceptedRelationWrite:
     """One outgoing relation parsed from accepted markdown, ready to persist.
 
-    Targets are carried by name only; the accepted-write path persists them
-    unresolved (``to_id=None``) and lets the forward-reference resolution job
-    link them later, matching cloud's one-file materialization semantics
-    (issue #1076).
+    Most targets are carried by name and left for forward-reference resolution.
+    Safe self-relations can carry ``target_id`` because the general resolver
+    deliberately skips them; persisting that ID in the accepted transaction
+    keeps DB-first writes consistent with the normal indexing path (issue #1076).
     """
 
     relation_type: str
     target_name: str
     context: str | None
+    target_id: int | None = None
 
 
 class RelationRepository(Repository[Relation]):
@@ -176,11 +177,11 @@ class RelationRepository(Repository[Relation]):
 
         Delete-then-insert mirrors ``EntityService.update_entity_relations``:
         the markdown file owns its outgoing links, so an accepted write replaces
-        the prior set. Targets are written unresolved (``to_id=None``,
-        ``to_name`` = the link text); the forward-reference resolution job fills
-        in ``to_id`` later, so the accepted transaction stays cheap and avoids
-        inline link resolution (issue #1076). Runs inside the caller's
-        transaction so the graph commits atomically with note_content/search.
+        the prior set. Ordinary targets are written unresolved and linked by the
+        forward-reference job. Safe self-relations already carry their resolved
+        ID because that job intentionally skips self targets. Runs inside the
+        caller's transaction so the graph commits atomically with
+        note_content/search (issue #1076).
         """
         await self.delete_outgoing_relations_from_entity(session, entity_id)
         if not relations:
@@ -189,7 +190,7 @@ class RelationRepository(Repository[Relation]):
             Relation(
                 project_id=self.project_id,
                 from_id=entity_id,
-                to_id=None,
+                to_id=rel.target_id,
                 to_name=rel.target_name,
                 relation_type=rel.relation_type,
                 context=rel.context,

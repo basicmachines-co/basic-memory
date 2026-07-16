@@ -618,6 +618,38 @@ async def test_replace_accepted_outgoing_relations_inserts_unresolved(
 
 
 @pytest.mark.asyncio
+async def test_replace_accepted_outgoing_relations_persists_resolved_target(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    session_maker,
+):
+    """Accepted self-links retain the safe target ID resolved by the runner."""
+    write = AcceptedRelationWrite(
+        relation_type="documents",
+        target_name=source_entity.title,
+        context=None,
+        target_id=source_entity.id,
+    )
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.replace_accepted_outgoing_relations(
+            session,
+            source_entity.id,
+            [write],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_by_entities(
+            session,
+            source_entity.id,
+            source_entity.id,
+        )
+
+    assert len(relations) == 1
+    assert relations[0].to_id == source_entity.id
+    assert relations[0].to_name == source_entity.title
+
+
+@pytest.mark.asyncio
 async def test_replace_accepted_outgoing_relations_replaces_existing_set(
     relation_repository: RelationRepository,
     source_entity: Entity,

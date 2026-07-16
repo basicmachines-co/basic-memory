@@ -16,6 +16,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     AcceptedNoteCreatePreparer,
     AcceptedNoteEditPreparer,
     AcceptedNoteMovePreparer,
+    AcceptedNoteSelfRelationResolver,
     AcceptedPreparedNoteWrite,
     AcceptedNoteReplacePreparer,
     AcceptedNoteWriteRepositories,
@@ -241,6 +242,7 @@ class AcceptedNoteMutationPreparer(
     AcceptedNoteReplacePreparer,
     AcceptedNoteEditPreparer,
     AcceptedNoteMovePreparer,
+    AcceptedNoteSelfRelationResolver,
     Protocol,
 ):
     """Combined Basic Memory prepare capability for accepted note mutations."""
@@ -502,6 +504,7 @@ async def _run_accepted_note_create(
         session,
         entity=entity,
         prepared=prepared,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(
@@ -651,6 +654,7 @@ async def _run_accepted_note_update(
         session,
         entity=entity,
         prepared=prepared,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(
@@ -720,6 +724,7 @@ async def _run_accepted_note_edit(
         session,
         entity=entity,
         prepared=prepared,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(

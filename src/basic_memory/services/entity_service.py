@@ -142,8 +142,8 @@ class PreparedEntityWrite:
     def relations(self) -> list[AcceptedRelationWrite]:
         """Accepted-write relations, mapped from the already-parsed markdown.
 
-        Targets stay unresolved here (the runner writes ``to_id=None``); the
-        forward-reference resolution job links them later.
+        Targets stay unresolved here. The accepted runner resolves only safe
+        self-links; the forward-reference job links all other targets later.
         """
         return [
             AcceptedRelationWrite(
@@ -1398,7 +1398,7 @@ class EntityService(BaseService[EntityModel]):
                         target_entity = resolved
 
                     if target_entity is None and not resolve_targets:
-                        target_entity = await self._resolve_deferred_self_relation(
+                        target_entity = await self.resolve_deferred_self_relation(
                             rel.target, entity, session=active_session
                         )
 
@@ -1431,7 +1431,7 @@ class EntityService(BaseService[EntityModel]):
             reloaded = await self.repository.find_by_ids(active_session, [entity_id])
             return reloaded[0]
 
-    async def _resolve_deferred_self_relation(
+    async def resolve_deferred_self_relation(
         self, target: str, entity: EntityModel, session: AsyncSession | None = None
     ) -> EntityModel | None:
         """Resolve only self-relations that are safe to identify in deferred mode."""

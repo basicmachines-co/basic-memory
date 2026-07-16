@@ -164,6 +164,21 @@ class _RelationRepository:
         self.calls.append((entity_id, relations))
 
 
+class _SelfRelationResolver:
+    def __init__(self, result: Entity | None = None) -> None:
+        self.result = result
+        self.calls: list[tuple[str, Entity, AsyncSession | None]] = []
+
+    async def resolve_deferred_self_relation(
+        self,
+        target: str,
+        entity: Entity,
+        session: AsyncSession | None = None,
+    ) -> Entity | None:
+        self.calls.append((target, entity, session))
+        return self.result
+
+
 def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
     """Accepted-note persistence should be a behavior capability, not Callable aliases."""
 
@@ -962,17 +977,73 @@ async def test_replace_accepted_note_graph_persists_observations_and_relations()
             )
         ],
     )
+    resolver = _SelfRelationResolver()
+    session = cast(AsyncSession, _FlushSession())
 
     await replace_accepted_note_graph(
-        cast(AsyncSession, _FlushSession()),
+        session,
         entity=_entity(),
         prepared=prepared,
+        self_relation_resolver=resolver,
         repositories=repositories,
     )
 
     # Both repos are scoped to the entity's project (7) and receive the parsed set.
     assert observation_repository.calls == [(42, prepared.observations)]
     assert relation_repository.calls == [(42, prepared.relations)]
+    assert [call[0] for call in resolver.calls] == ["XSYS Target"]
+
+
+@pytest.mark.asyncio
+async def test_replace_accepted_note_graph_resolves_safe_self_relation() -> None:
+    """A safe self-link carries its ID because deferred resolution skips self targets."""
+    relation_repository = _RelationRepository()
+    entity = _entity()
+    prepared = _PreparedWrite(
+        markdown_content="# Accepted\n",
+        search_content="Accepted",
+        entity_fields=_PreparedFields(
+            title="Accepted",
+            note_type="note",
+            entity_metadata=None,
+            content_type="text/markdown",
+            permalink="accepted",
+            file_path="notes/accepted.md",
+        ),
+        relations=[
+            AcceptedRelationWrite(
+                relation_type="documents",
+                target_name="notes/accepted",
+                context=None,
+            )
+        ],
+    )
+    resolver = _SelfRelationResolver(entity)
+
+    await replace_accepted_note_graph(
+        cast(AsyncSession, _FlushSession()),
+        entity=entity,
+        prepared=prepared,
+        self_relation_resolver=resolver,
+        repositories=_repository_provider(
+            observation_repository=_ObservationRepository(),
+            relation_repository=relation_repository,
+        ),
+    )
+
+    assert relation_repository.calls == [
+        (
+            entity.id,
+            [
+                AcceptedRelationWrite(
+                    relation_type="documents",
+                    target_name=entity.title,
+                    context=None,
+                    target_id=entity.id,
+                )
+            ],
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -990,8 +1061,9 @@ async def test_replace_accepted_note_graph_forwards_empty_sets() -> None:
         cast(AsyncSession, _FlushSession()),
         entity=_entity(),
         prepared=prepared,
+        self_relation_resolver=_SelfRelationResolver(),
         repositories=repositories,
     )
 
     assert observation_repository.calls == [(42, ())]
-    assert relation_repository.calls == [(42, ())]
+    assert relation_repository.calls == [(42, [])]

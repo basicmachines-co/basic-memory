@@ -119,6 +119,7 @@ class _CreatePreparer:
             tuple[Entity, str, str, str, str | None, str | None, int, bool, AsyncSession | None]
         ] = []
         self.move_calls: list[tuple[Entity, str, str, AsyncSession | None]] = []
+        self.self_relation_calls: list[tuple[str, Entity, AsyncSession | None]] = []
 
     async def prepare_create_entity_content(
         self,
@@ -189,6 +190,18 @@ class _CreatePreparer:
         if self.move_destination_error is not None:
             raise self.move_destination_error
         return None
+
+    async def resolve_deferred_self_relation(
+        self,
+        target: str,
+        entity: Entity,
+        session: AsyncSession | None = None,
+    ) -> Entity | None:
+        self.self_relation_calls.append((target, entity, session))
+        candidates = {entity.file_path, entity.permalink}
+        if entity.file_path.endswith(".md"):
+            candidates.add(entity.file_path[:-3])
+        return entity if target in candidates else None
 
 
 class _PreparerFactory:
@@ -1233,6 +1246,58 @@ async def test_run_accepted_note_create_persists_graph_rows() -> None:
     # The parsed graph is persisted against the new entity in the same transaction.
     assert observation_repository.calls == [(entity.id, observations)]
     assert relation_repository.calls == [(entity.id, relations)]
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_resolves_self_relation_in_transaction() -> None:
+    """Create resolves its own safe permalink before persisting the graph."""
+    session = cast(AsyncSession, object())
+    self_relation = AcceptedRelationWrite(
+        relation_type="documents",
+        target_name="accepted",
+        context=None,
+    )
+    prepared = _prepared_with_graph(observations=[], relations=[self_relation])
+    entity = _entity()
+    note_content = _note_content(entity)
+    preparer = _CreatePreparer(prepared)
+    relation_repository = _RelationRepository()
+
+    change = await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(),
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+            relation_repository=relation_repository,
+        ),
+    )
+
+    assert change.status_code == 201
+    assert [call[0] for call in preparer.self_relation_calls] == ["accepted"]
+    assert relation_repository.calls == [
+        (
+            entity.id,
+            [
+                AcceptedRelationWrite(
+                    relation_type="documents",
+                    target_name=entity.title,
+                    context=None,
+                    target_id=entity.id,
+                )
+            ],
+        )
+    ]
 
 
 @pytest.mark.asyncio

@@ -154,6 +154,17 @@ class AcceptedNoteEditPreparer(Protocol):
     ) -> AcceptedPreparedMarkdownWriteSource: ...
 
 
+class AcceptedNoteSelfRelationResolver(Protocol):
+    """Capability for resolving ambiguity-safe self-links during acceptance."""
+
+    async def resolve_deferred_self_relation(
+        self,
+        target: str,
+        entity: Entity,
+        session: AsyncSession | None = ...,
+    ) -> Entity | None: ...
+
+
 class AcceptedPreparedMoveSource(Protocol):
     """Prepared accepted markdown and permalink state for a note move."""
 
@@ -704,8 +715,9 @@ async def persist_accepted_note_write(
 async def replace_accepted_note_graph(
     session: AsyncSession,
     *,
-    entity: AcceptedNoteContentEntitySource,
+    entity: Entity,
     prepared: AcceptedPreparedMarkdownWriteSource,
+    self_relation_resolver: AcceptedNoteSelfRelationResolver,
     repositories: AcceptedNoteWriteRepositories,
 ) -> None:
     """Persist the accepted note's observations and relations in one transaction.
@@ -723,11 +735,38 @@ async def replace_accepted_note_graph(
         entity.id,
         prepared.observations,
     )
+
+    # General deferred resolution skips target_id == from_id to avoid binding an
+    # ambiguous title to the wrong note. Reuse the indexing path's narrow,
+    # ambiguity-safe self resolver here so filepath/permalink self-links do not
+    # remain unresolved forever after a DB-first write.
+    relations: list[AcceptedRelationWrite] = []
+    for relation in prepared.relations:
+        if relation.target_id is not None:
+            relations.append(relation)
+            continue
+        target_entity = await self_relation_resolver.resolve_deferred_self_relation(
+            relation.target_name,
+            entity,
+            session=session,
+        )
+        if target_entity is None:
+            relations.append(relation)
+            continue
+        relations.append(
+            AcceptedRelationWrite(
+                relation_type=relation.relation_type,
+                target_name=target_entity.title,
+                context=relation.context,
+                target_id=target_entity.id,
+            )
+        )
+
     relation_repository = repositories.relation_repository(entity.project_id)
     await relation_repository.replace_accepted_outgoing_relations(
         session,
         entity.id,
-        prepared.relations,
+        relations,
     )
 
 
