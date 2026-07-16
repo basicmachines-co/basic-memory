@@ -266,6 +266,47 @@ async def test_list_directory_text_pagination_includes_continuation(
 
 
 @pytest.mark.asyncio
+async def test_list_directory_continuation_preserves_project_id(
+    client,
+    test_graph,
+    test_project,
+):
+    result = await list_directory(
+        project_id=test_project.external_id,
+        dir_name="/test",
+        file_name_glob="*Entity*",
+        page=1,
+        page_size=2,
+    )
+
+    assert isinstance(result, str)
+    assert "file_name_glob='*Entity*'" in result
+    assert f"project_id={test_project.external_id!r}" in result
+    assert "project=" not in result
+
+
+@pytest.mark.asyncio
+async def test_list_directory_out_of_range_page_reports_pagination(
+    client,
+    test_graph,
+    test_project,
+):
+    result = await list_directory(
+        project=test_project.name,
+        dir_name="/test",
+        page=4,
+        page_size=2,
+    )
+
+    assert isinstance(result, str)
+    assert "Page 4 (page size 2, 5 total items)" in result
+    assert "No items on this page." in result
+    assert "Total: 0 items" in result
+    assert "the last available page is 3" in result
+    assert "No files found" not in result
+
+
+@pytest.mark.asyncio
 async def test_list_directory_json_pagination_preserves_glob_and_depth(
     client,
     test_graph,

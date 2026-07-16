@@ -139,7 +139,7 @@ async def list_directory(
 
         nodes = [node.model_dump(mode="json", exclude_none=True) for node in listing.nodes]
 
-        if not nodes:
+        if listing.total == 0:
             filter_desc = ""
             if file_name_glob:
                 filter_desc = f" matching '{file_name_glob}'"
@@ -161,6 +161,9 @@ async def list_directory(
         # Group by type and sort
         directories = [n for n in nodes if n["type"] == "directory"]
         files = [n for n in nodes if n["type"] == "file"]
+
+        if not nodes:
+            output_lines.append("No items on this page.")
 
         # Sort by name
         directories.sort(key=lambda x: x["name"])
@@ -222,7 +225,17 @@ async def list_directory(
         if files:
             summary_parts.append(f"{len(files)} file{'s' if len(files) != 1 else ''}")
 
-        output_lines.append(f"Total: {total_count} items ({', '.join(summary_parts)})")
+        if summary_parts:
+            output_lines.append(f"Total: {total_count} items ({', '.join(summary_parts)})")
+        else:
+            output_lines.append("Total: 0 items")
+
+        if not nodes:
+            last_page = (listing.total + listing.page_size - 1) // listing.page_size
+            output_lines.append(
+                f"Requested page {listing.page} is beyond the available results; "
+                f"the last available page is {last_page}."
+            )
 
         if listing.has_more:
             next_page = listing.page + 1
@@ -234,7 +247,9 @@ async def list_directory(
             ]
             if file_name_glob:
                 continuation_args.append(f"file_name_glob={file_name_glob!r}")
-            if project:
+            if project_id:
+                continuation_args.append(f"project_id={project_id!r}")
+            elif project:
                 continuation_args.append(f"project={project!r}")
             output_lines.extend(
                 [
