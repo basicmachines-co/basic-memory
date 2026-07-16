@@ -53,6 +53,8 @@ async def test_mutating_tools_require_strict_project_routing(
     async def reject_scope_hidden_route(*args: object, **kwargs: object) -> None:
         assert kwargs["strict_project_routing"] is True
         assert kwargs["allow_missing_project_fallback"] is True
+        if tool_name == "move_note":
+            assert kwargs["cache_resolved_project"] is False
         raise ToolError("This API key does not have access to this project")
 
     monkeypatch.setattr(

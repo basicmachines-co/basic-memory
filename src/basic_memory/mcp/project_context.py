@@ -1299,6 +1299,7 @@ async def resolve_project_and_path(
     *,
     strict_project_routing: bool = False,
     allow_missing_project_fallback: bool = False,
+    cache_resolved_project: bool = True,
 ) -> tuple[ProjectItem, str, bool]:
     """Resolve project and normalized path for memory:// identifiers.
 
@@ -1310,6 +1311,9 @@ async def resolve_project_and_path(
             allow a genuinely missing project prefix to be treated as an active-
             project path. This is safe only for mutations that require an existing
             target and cannot create content.
+        cache_resolved_project: Persist a project resolved from the memory URL in
+            MCP context. Set this to false for validation-only routing that may
+            reject a resolved cross-project source.
 
     Returns:
         Tuple of (active_project, normalized_path, is_memory_url)
@@ -1446,7 +1450,8 @@ async def resolve_project_and_path(
                     path=resolved.path,
                     is_default=resolved.is_default,
                 )
-                await _set_cached_active_project(context, active_project)
+                if cache_resolved_project:
+                    await _set_cached_active_project(context, active_project)
 
                 resolved_path = _canonical_memory_path_for_active_route(
                     active_project,

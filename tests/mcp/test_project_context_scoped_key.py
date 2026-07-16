@@ -133,6 +133,54 @@ async def test_existing_target_mutation_can_fallback_for_missing_project(
 
 
 @pytest.mark.asyncio
+async def test_validation_only_route_preserves_cached_active_project(
+    config_manager,
+    monkeypatch,
+) -> None:
+    """A rejected cross-project mutation must not change subsequent routing state."""
+    context = ContextState()
+    active_project = ProjectItem(
+        id=1,
+        external_id="11111111-1111-1111-1111-111111111111",
+        name="ci-acceptance",
+        path="/tmp/ci-acceptance",
+        is_default=False,
+    )
+    await context.set_state("active_project", active_project.model_dump())
+
+    class ResolvedProjectResponse:
+        def json(self) -> dict[str, object]:
+            return {
+                "external_id": "22222222-2222-2222-2222-222222222222",
+                "project_id": 2,
+                "name": "other-project",
+                "permalink": "other-project",
+                "path": "/tmp/other-project",
+                "is_active": True,
+                "is_default": False,
+                "resolution_method": "name",
+            }
+
+    async def resolve_other_project(*args: object, **kwargs: object) -> ResolvedProjectResponse:
+        return ResolvedProjectResponse()
+
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", resolve_other_project)
+
+    resolved_project, _, _ = await resolve_project_and_path(
+        client=cast(Any, None),
+        identifier="memory://other-project/source-directory",
+        project="ci-acceptance",
+        context=cast(Any, context),
+        strict_project_routing=True,
+        allow_missing_project_fallback=True,
+        cache_resolved_project=False,
+    )
+
+    assert resolved_project.name == "other-project"
+    assert context.state["active_project"] == active_project.model_dump()
+
+
+@pytest.mark.asyncio
 async def test_read_route_requires_an_authorized_cached_project(
     config_manager,
     monkeypatch,

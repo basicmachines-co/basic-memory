@@ -606,6 +606,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
             context,
             strict_project_routing=True,
             allow_missing_project_fallback=True,
+            cache_resolved_project=False,
         )
 
         # move_note only supports moves inside the active project.
