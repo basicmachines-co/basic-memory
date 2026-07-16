@@ -154,6 +154,24 @@ async def test_flush_leaves_group_pending_when_write_fails(bm_home: Path) -> Non
     assert inbox.list_envelopes() == [path]
 
 
+async def test_flush_routes_on_project_hint_from_in_group_replay(bm_home: Path) -> None:
+    # Same-minute same-event replay where the mapping was set only for the later
+    # capture: the first envelope has no project_hint, the replay carries "demo".
+    # Routing must use the replay's hint, not leave the group pending (and prune).
+    _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:01+00:00", project_hint="")
+    _capture(event=SESSION_STARTED, ts="2026-07-15T10:00:41+00:00", project_hint="demo")
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    assert result.projected == 1
+    assert result.pending == 0
+    assert result.duplicates == 1
+    assert mock_write.await_args_list[0].kwargs["project"] == "demo"
+    assert inbox.list_envelopes() == []
+
+
 async def test_flush_dedups_retired_replay_history_on_rebuild(bm_home: Path) -> None:
     # A same-minute SessionStart replay is retired into processed/ alongside its
     # original (same key, distinct id). When a later event triggers a full

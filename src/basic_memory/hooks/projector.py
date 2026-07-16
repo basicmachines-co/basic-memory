@@ -254,13 +254,13 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         # (safe only once that sibling's write succeeds).
         fresh: list[tuple[Path, Envelope]] = []
         processed_replays: list[Path] = []
-        group_replays: list[Path] = []
+        group_replays: list[tuple[Path, Envelope]] = []
         group_keys: set[str] = set()
         for path, envelope in group:
             if envelope.idempotency_key in seen_keys:
                 processed_replays.append(path)
             elif envelope.idempotency_key in group_keys:
-                group_replays.append(path)
+                group_replays.append((path, envelope))
             else:
                 group_keys.add(envelope.idempotency_key)
                 fresh.append((path, envelope))
@@ -284,10 +284,16 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         # as a duplicate row here.
         prior = processed_by_session.get((source, session_id), [])
         envelopes = _dedup_by_key(sorted(prior + fresh_envelopes, key=lambda envelope: envelope.id))
+        # Routing scans the COMPLETE group, replays included: a mapping can land
+        # on the later same-key capture (primaryProject set between two same-minute
+        # hooks) while the first is unmapped. Rendered rows dedup; routing must not,
+        # or a valid hint carried only by a replay would leave the group pending
+        # and eventually pruned.
+        replay_envelopes = [envelope for _, envelope in group_replays]
         project_hint = next(
             (
                 envelope.project_hint.strip()
-                for envelope in envelopes
+                for envelope in (*envelopes, *replay_envelopes)
                 if envelope.project_hint.strip()
             ),
             "",
@@ -325,7 +331,7 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         for path, _ in fresh:
             inbox.mark_processed(path)
             result.projected += 1
-        for path in group_replays:
+        for path, _ in group_replays:
             inbox.mark_processed(path)
             result.duplicates += 1
         result.notes += [session_title, ledger_title]
