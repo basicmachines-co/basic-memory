@@ -11,6 +11,7 @@ from basic_memory.mcp.clients import (
     ResourceClient,
     ProjectClient,
 )
+from basic_memory.schemas.search import SearchRetrievalMode
 
 
 class TestKnowledgeClient:
@@ -225,6 +226,65 @@ class TestSearchClient:
         result = await client.search({"text": "query"}, page=1, page_size=10)
         assert result.results == []
         assert result.current_page == 1
+        assert result.total_is_exact is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "retrieval_mode",
+        [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID],
+    )
+    async def test_search_infers_unknown_total_for_legacy_semantic_response(
+        self,
+        monkeypatch,
+        retrieval_mode,
+    ):
+        """Legacy semantic responses preserve their unknown total semantics."""
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [],
+            "current_page": 1,
+            "page_size": 10,
+            "total": 0,
+            "has_more": False,
+        }
+
+        async def mock_call_post(client, url, **kwargs):
+            return mock_response
+
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+
+        client = SearchClient(MagicMock(), "proj-123")
+        result = await client.search({"text": "query", "retrieval_mode": retrieval_mode})
+
+        assert result.total == 0
+        assert result.total_is_exact is False
+
+    @pytest.mark.asyncio
+    async def test_search_preserves_explicit_total_exactness(self, monkeypatch):
+        """Server-provided exactness remains authoritative."""
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [],
+            "current_page": 1,
+            "page_size": 10,
+            "total": 0,
+            "total_is_exact": True,
+            "has_more": False,
+        }
+
+        async def mock_call_post(client, url, **kwargs):
+            return mock_response
+
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+
+        client = SearchClient(MagicMock(), "proj-123")
+        result = await client.search(
+            {"text": "query", "retrieval_mode": SearchRetrievalMode.VECTOR}
+        )
+
+        assert result.total_is_exact is True
 
 
 class TestMemoryClient:
