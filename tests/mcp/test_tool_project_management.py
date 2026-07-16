@@ -145,6 +145,45 @@ async def test_create_and_delete_project_and_name_match_branch(
 
 
 @pytest.mark.asyncio
+async def test_create_memory_project_retry_indexes_partial_create(app, tmp_path_factory):
+    """Retrying after a post-create index failure repairs the existing project."""
+    from basic_memory.mcp.clients import ProjectClient
+
+    project_root = tmp_path_factory.mktemp("partial-create-project-home")
+    completed_index = {
+        "total_files": 0,
+        "enqueued_files": 0,
+        "enqueued_batches": 0,
+        "deleted_files": 0,
+    }
+
+    with patch.object(
+        ProjectClient,
+        "index",
+        new_callable=AsyncMock,
+        side_effect=[RuntimeError("index timeout"), completed_index],
+    ) as mock_index:
+        with pytest.raises(RuntimeError, match="index timeout"):
+            await create_memory_project(
+                project_name="Partial Create Project",
+                project_path=str(project_root),
+                output_format="json",
+            )
+
+        retry_result = await create_memory_project(
+            project_name="Partial Create Project",
+            project_path=str(project_root),
+            output_format="json",
+        )
+
+    assert isinstance(retry_result, dict)
+    assert retry_result["created"] is False
+    assert retry_result["already_exists"] is True
+    assert retry_result["indexing"]["state"] == "completed"
+    assert mock_index.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_delete_project_delete_notes_removes_local_files(app, tmp_path_factory):
     """delete_notes=True flows through to the API and removes the project files (#1034)."""
     project_root = tmp_path_factory.mktemp("delete-notes-project-home")

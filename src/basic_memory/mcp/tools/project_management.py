@@ -505,6 +505,39 @@ async def _resolve_workspace_routing(
     return resolved_workspace.tenant_id
 
 
+def _normalize_indexing_response(
+    index_response: dict[str, object],
+    *,
+    run_in_background: bool,
+) -> dict[str, object]:
+    """Add a stable lifecycle state to backend-specific indexing details."""
+    return {
+        **index_response,
+        "state": "accepted" if run_in_background else "completed",
+    }
+
+
+def _format_indexing_details(indexing: dict[str, object]) -> str:
+    """Format indexing state and the details returned by either backend."""
+    result = "Indexing:\n"
+    result += f"• State: {indexing['state']}\n"
+    if status := indexing.get("status"):
+        result += f"• Status: {status}\n"
+    if message := indexing.get("message"):
+        result += f"• Message: {message}\n"
+    if job_id := indexing.get("job_id"):
+        result += f"• Job ID: {job_id}\n"
+    for key, label in (
+        ("total_files", "Files discovered"),
+        ("enqueued_files", "Files enqueued"),
+        ("enqueued_batches", "Batches enqueued"),
+        ("deleted_files", "Orphans deleted"),
+    ):
+        if key in indexing:
+            result += f"• {label}: {indexing[key]}\n"
+    return result
+
+
 @mcp.tool(
     "create_memory_project",
     title="Create Memory Project",
@@ -597,9 +630,23 @@ async def create_memory_project(
             (p for p in existing.projects if p.name.casefold() == project_name.casefold()),
             None,
         )
+        index_in_background = _routes_to_cloud(workspace_id)
         if existing_match:
             is_default = bool(
                 existing_match.is_default or existing.default_project == existing_match.name
+            )
+            # Trigger: a previous create may have committed the project record
+            # before its indexing request failed or timed out.
+            # Why: create retries must repair that partial success instead of
+            # permanently short-circuiting on the existing project record.
+            # Outcome: idempotently request indexing again on the current backend.
+            index_response = await project_client.index(
+                existing_match.external_id,
+                run_in_background=index_in_background,
+            )
+            indexing = _normalize_indexing_response(
+                index_response,
+                run_in_background=index_in_background,
             )
             if output_format == "json":
                 return {
@@ -609,16 +656,28 @@ async def create_memory_project(
                     "is_default": is_default,
                     "created": False,
                     "already_exists": True,
+                    "indexing": indexing,
                 }
-            return (
+            result = (
                 f"✓ Project already exists: {existing_match.name}\n\n"
                 f"Project Details:\n"
                 f"• Name: {existing_match.name}\n"
                 f"• External ID: {existing_match.external_id}\n"
                 f"• Path: {existing_match.path}\n"
                 f"{'• Set as default project\n' if is_default else ''}"
-                "\nProject is already available for use in tool calls.\n"
+                "\n"
             )
+            result += _format_indexing_details(indexing)
+            if index_in_background:
+                result += (
+                    "\nProject already existed. Retained content will become readable and "
+                    "searchable when indexing completes.\n"
+                )
+            else:
+                result += (
+                    "\nProject is already available for use in tool calls; indexing completed.\n"
+                )
+            return result
 
         status_response = await project_client.create_project(project_request.model_dump())
         from basic_memory.mcp.project_context import invalidate_project_caches
@@ -632,15 +691,14 @@ async def create_memory_project(
         # Local indexing can finish inline, so retained files are immediately
         # available. Cloud must use its durable background workflow; that route
         # awaits the PGQueuer handoff before acknowledging the request (#1084).
-        index_in_background = _routes_to_cloud(workspace_id)
         index_response = await project_client.index(
             new_project.external_id,
             run_in_background=index_in_background,
         )
-        indexing = {
-            **index_response,
-            "state": "accepted" if index_in_background else "completed",
-        }
+        indexing = _normalize_indexing_response(
+            index_response,
+            run_in_background=index_in_background,
+        )
 
         if output_format == "json":
             return {
@@ -663,22 +721,8 @@ async def create_memory_project(
         if set_default:
             result += "• Set as default project\n"
 
-        result += "\nIndexing:\n"
-        result += f"• State: {indexing['state']}\n"
-        if status := indexing.get("status"):
-            result += f"• Status: {status}\n"
-        if message := indexing.get("message"):
-            result += f"• Message: {message}\n"
-        if job_id := indexing.get("job_id"):
-            result += f"• Job ID: {job_id}\n"
-        for key, label in (
-            ("total_files", "Files discovered"),
-            ("enqueued_files", "Files enqueued"),
-            ("enqueued_batches", "Batches enqueued"),
-            ("deleted_files", "Orphans deleted"),
-        ):
-            if key in indexing:
-                result += f"• {label}: {indexing[key]}\n"
+        result += "\n"
+        result += _format_indexing_details(indexing)
 
         if index_in_background:
             result += (
