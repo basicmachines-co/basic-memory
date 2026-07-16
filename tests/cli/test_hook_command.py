@@ -968,6 +968,25 @@ def test_install_fails_fast_on_non_list_event() -> None:
     assert "hooks.SessionStart is not a list" in result.stderr
 
 
+def test_hook_command_fails_open_on_broken_global_config(
+    bm_home: Path, claude_project: Path
+) -> None:
+    # The composition root (container/config load) runs in app_callback before
+    # the hook verb's fail-open guard. A broken global config must still exit 0
+    # for a hook — never surface a non-zero status to the harness.
+    with patch(
+        "basic_memory.cli.app.CliContainer.create",
+        side_effect=RuntimeError("malformed config.json"),
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+
+
 def test_hook_command_skips_global_initialization(bm_home: Path, claude_project: Path) -> None:
     # Hook verbs are fail-open (SPEC-55): global DB/config/migration init must not
     # run before the hook's own guard (it could return non-zero to the harness)

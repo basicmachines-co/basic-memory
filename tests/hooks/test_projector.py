@@ -403,6 +403,22 @@ async def test_flush_keeps_recent_unmapped_pending_envelopes(bm_home: Path) -> N
     assert fresh.exists()
 
 
+async def test_flush_keeps_write_failed_mapped_envelope_past_retention(bm_home: Path) -> None:
+    # An old pending envelope WITH a project hint is pending because a write
+    # failed (cloud/API outage), not because it's unmappable. Retention must not
+    # drop it — that would defeat the self-heal path; only unresolvable
+    # (hint-less) trace is pruned.
+    old = _plant_pending_with_age(days_old=45, project_hint="demo")
+    failing = AsyncMock(side_effect=RuntimeError("cloud down"))
+
+    with patch("basic_memory.mcp.tools.write_note", failing):
+        result = await flush()
+
+    assert old.exists()  # kept despite being past retention
+    assert result.pruned == 0
+    assert result.pending == 1
+
+
 async def test_flush_ignores_unreadable_processed_files_for_dedup(bm_home: Path) -> None:
     directory = inbox.processed_dir()
     directory.mkdir(parents=True, exist_ok=True)

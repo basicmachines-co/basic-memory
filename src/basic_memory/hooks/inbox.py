@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -81,15 +82,28 @@ def mark_processed(path: Path) -> Path:
     return destination
 
 
-def _parses_as_envelope(path: Path) -> bool:
+def _is_unresolvable_pending(path: Path) -> bool:
+    """A pending envelope that can *never* flush: it parses but carries no
+    project hint, so the projector has nowhere to route it.
+
+    A parse failure (corrupt or future-versioned — the trace ``bm hook status``
+    surfaces for a human) or a present hint (mapped: pending only because a write
+    failed, and must self-heal on a later sweep) is deliberately NOT unresolvable,
+    so retention leaves both in place.
+    """
     try:
-        envelope_from_json(path.read_text(encoding="utf-8"))
+        envelope = envelope_from_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):  # ValueError covers json.JSONDecodeError
         return False
-    return True
+    return not envelope.project_hint.strip()
 
 
-def _prune_dir(directory: Path, older_than_days: int, *, keep_unparseable: bool = False) -> int:
+def _prune_dir(
+    directory: Path,
+    older_than_days: int,
+    *,
+    should_prune: Callable[[Path], bool] | None = None,
+) -> int:
     """Delete ``*.json`` in ``directory`` older than the retention window.
 
     Age comes from the uuid7 timestamp embedded in the filename, not the file
@@ -98,10 +112,10 @@ def _prune_dir(directory: Path, older_than_days: int, *, keep_unparseable: bool 
     deleted: retention must not eat data it doesn't understand. The glob is
     non-recursive, so pruning the inbox never reaches into ``processed/``.
 
-    ``keep_unparseable`` additionally preserves files whose *contents* don't parse
-    as an envelope — a corrupt or future-versioned inbox entry is exactly the
-    trace ``bm hook status`` surfaces for a human, and retention must not delete
-    it out from under that signal.
+    ``should_prune`` (when given) is a final gate on an otherwise-expired file:
+    only files it returns True for are deleted. The inbox uses it to prune solely
+    the unresolvable trace, never a corrupt file or a mapped write-failure that
+    should self-heal.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
@@ -115,7 +129,7 @@ def _prune_dir(directory: Path, older_than_days: int, *, keep_unparseable: bool 
             continue
         if captured_ms >= cutoff_ms:
             continue
-        if keep_unparseable and not _parses_as_envelope(path):
+        if should_prune is not None and not should_prune(path):
             continue
         path.unlink()
         removed += 1
@@ -137,10 +151,13 @@ def prune_pending(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
     uses keeps that unresolvable trace from accumulating without limit, while
     still giving a mapping the full window to appear (a later same-session
     capture carrying a hint resolves the whole group via the projector's merge).
-    Invalid entries are preserved (``keep_unparseable``) so retention never eats
-    the corruption/version-mismatch trace ``bm hook status`` exists to surface.
+
+    Only *unresolvable* pending entries are pruned (``_is_unresolvable_pending``):
+    a corrupt file and a mapped write-failure — pending for reasons that can
+    still resolve — are both left in place, so retention never defeats self-heal
+    or eats the corruption trace ``bm hook status`` surfaces.
     """
-    return _prune_dir(inbox_dir(), older_than_days, keep_unparseable=True)
+    return _prune_dir(inbox_dir(), older_than_days, should_prune=_is_unresolvable_pending)
 
 
 # --- Flush bookkeeping (the `bm hook status` debuggability surface) ---
