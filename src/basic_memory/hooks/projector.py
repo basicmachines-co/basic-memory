@@ -52,7 +52,7 @@ class FlushResult:
     duplicates: int = 0  # idempotency-key replays retired without writing
     pending: int = 0  # left in the inbox (no project mapping, or write failed)
     invalid: int = 0  # unreadable envelope files left in place
-    pruned: int = 0  # processed envelopes removed by retention
+    pruned: int = 0  # envelopes removed by retention (processed + unresolved pending)
     notes: list[str] = field(default_factory=list)  # artifact titles written
 
 
@@ -229,22 +229,30 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
 
     for (source, session_id), group in groups.items():
         # --- Dedup: envelopes are hints, never double-write ---
+        # Two replay kinds, retired at different times: one duplicating an
+        # already-projected envelope (durable in processed/ — safe to retire now)
+        # and one duplicating an in-group sibling being projected this sweep
+        # (safe only once that sibling's write succeeds).
         fresh: list[tuple[Path, Envelope]] = []
-        replays: list[Path] = []
+        processed_replays: list[Path] = []
+        group_replays: list[Path] = []
         group_keys: set[str] = set()
         for path, envelope in group:
-            if envelope.idempotency_key in seen_keys or envelope.idempotency_key in group_keys:
-                replays.append(path)
+            if envelope.idempotency_key in seen_keys:
+                processed_replays.append(path)
+            elif envelope.idempotency_key in group_keys:
+                group_replays.append(path)
             else:
                 group_keys.add(envelope.idempotency_key)
                 fresh.append((path, envelope))
 
-        # Replays duplicate either an already-projected envelope or an in-group
-        # sibling that is being projected now — retire them without writing.
-        for path in replays:
+        # A replay of an already-projected envelope is safe to retire immediately.
+        for path in processed_replays:
             inbox.mark_processed(path)
             result.duplicates += 1
 
+        # No fresh work means no in-group siblings to project, so group_replays is
+        # empty here (a key's first occurrence is always the fresh one).
         if not fresh:
             continue
 
@@ -264,10 +272,13 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
             "",
         )
         if not project_hint:
-            # Trigger: no project mapping was configured at capture time.
+            # Trigger: no project mapping resolved for this session.
             # Why: writing to a default/guessed project would put trace in the
             #      wrong graph — the one unrecoverable failure mode.
-            # Outcome: envelopes stay pending until a mapping resolves.
+            # Outcome: envelopes stay pending — a later same-session capture may
+            #      carry a hint (resolving the whole group via the merge above),
+            #      and retention prunes them if none ever does. Retire nothing,
+            #      including group_replays: they must self-heal alongside fresh.
             result.pending += len(fresh)
             continue
 
@@ -280,16 +291,26 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         except Exception as exc:
             # Trigger: the write path failed (project missing, API error, ...).
             # Why: retiring unwritten envelopes would silently drop events.
-            # Outcome: group stays pending; the next sweep re-derives it.
+            # Outcome: group stays pending; the next sweep re-derives it. Leave
+            #      group_replays pending too — retiring them now would let the
+            #      next sweep read their key from processed/ and wrongly retire
+            #      the still-unwritten fresh envelope as a replay.
             logger.warning(f"flush left {source}/{session_id} pending: {exc}")
             result.pending += len(fresh)
             continue
 
+        # Write succeeded: retire the fresh envelopes and only now the in-group
+        # replays they duplicated.
         for path, _ in fresh:
             inbox.mark_processed(path)
             result.projected += 1
+        for path in group_replays:
+            inbox.mark_processed(path)
+            result.duplicates += 1
         result.notes += [session_title, ledger_title]
 
-    result.pruned = inbox.prune_processed(older_than_days)
+    # Retire both sides on the same window: processed audit copies, and pending
+    # trace that never resolved a mapping (so the inbox can't grow without limit).
+    result.pruned = inbox.prune_processed(older_than_days) + inbox.prune_pending(older_than_days)
     inbox.record_flush()
     return result

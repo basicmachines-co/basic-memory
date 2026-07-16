@@ -154,6 +154,35 @@ async def test_flush_leaves_group_pending_when_write_fails(bm_home: Path) -> Non
     assert inbox.list_envelopes() == [path]
 
 
+async def test_flush_reprojects_after_write_failure_with_in_group_replay(bm_home: Path) -> None:
+    # Two same-minute captures share one idempotency key: one fresh, one in-group
+    # replay. If the write fails, retiring the replay early would let the next
+    # sweep read its key from processed/ and wrongly retire the still-unprojected
+    # fresh envelope — the session would never land. Both must stay pending and
+    # project together on the healed sweep.
+    _capture(ts="2026-07-15T10:00:01+00:00")
+    _capture(ts="2026-07-15T10:00:41+00:00")  # same key (minute granularity)
+
+    failing = AsyncMock(side_effect=RuntimeError("api down"))
+    with patch("basic_memory.mcp.tools.write_note", failing):
+        first = await flush()
+
+    assert first.projected == 0
+    assert first.pending == 1
+    # Nothing retired — the in-group replay must not have moved to processed/.
+    assert list(inbox.processed_dir().glob("*.json")) == []
+    assert len(inbox.list_envelopes()) == 2
+
+    healthy = AsyncMock(return_value=WRITE_OK)
+    with patch("basic_memory.mcp.tools.write_note", healthy):
+        second = await flush()
+
+    assert second.projected == 1
+    assert second.duplicates == 1
+    assert healthy.await_count == 2  # one session + one ledger, no double-write
+    assert inbox.list_envelopes() == []
+
+
 async def test_flush_leaves_group_pending_on_error_result(bm_home: Path) -> None:
     path = _capture()
     mock_write = AsyncMock(return_value={"error": "NOTE_WRITE_BLOCKED"})
@@ -194,8 +223,8 @@ async def test_flush_groups_sessions_independently(bm_home: Path) -> None:
     assert mock_write.await_count == 4  # two artifacts per session group
 
 
-def _plant_processed_with_age(days_old: int) -> Path:
-    """Plant a processed envelope whose uuid7 filename encodes a capture age."""
+def _uuid7_aged(days_old: int):
+    """A uuid7 whose embedded timestamp is ``days_old`` days in the past."""
     import uuid
     from datetime import datetime, timedelta, timezone
 
@@ -204,11 +233,34 @@ def _plant_processed_with_age(days_old: int) -> Path:
     value = (captured_ms & 0xFFFF_FFFF_FFFF) << 80
     value |= 0x7 << 76
     value |= 0b10 << 62
-    file_id = uuid.UUID(int=value)
+    return uuid.UUID(int=value)
+
+
+def _plant_processed_with_age(days_old: int) -> Path:
+    """Plant a processed envelope whose uuid7 filename encodes a capture age."""
     directory = inbox.processed_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{file_id}.json"
+    path = directory / f"{_uuid7_aged(days_old)}.json"
     path.write_text("{}", encoding="utf-8")
+    return path
+
+
+def _plant_pending_with_age(days_old: int, project_hint: str = "") -> Path:
+    """Plant a pending inbox envelope with a valid body and an aged filename."""
+    from basic_memory.hooks.envelope import envelope_to_json
+
+    envelope = create_envelope(
+        source="claude-code",
+        event=SESSION_STARTED,
+        session_id="stale",
+        cwd="/tmp/workdir",
+        project_hint=project_hint,
+        ts="2026-07-15T10:00:00+00:00",
+    )
+    directory = inbox.inbox_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{_uuid7_aged(days_old)}.json"
+    path.write_text(envelope_to_json(envelope), encoding="utf-8")
     return path
 
 
@@ -220,6 +272,32 @@ async def test_flush_prunes_expired_processed_envelopes(bm_home: Path) -> None:
         result = await flush()
 
     assert result.pruned == 1
+
+
+async def test_flush_prunes_expired_unresolved_pending_envelopes(bm_home: Path) -> None:
+    # A fully-unmapped session (no project_hint ever) would otherwise sit pending
+    # forever; retention bounds the inbox the same way it bounds processed/.
+    stale = _plant_pending_with_age(days_old=45)
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    assert result.pruned == 1
+    assert not stale.exists()
+    mock_write.assert_not_awaited()
+
+
+async def test_flush_keeps_recent_unmapped_pending_envelopes(bm_home: Path) -> None:
+    # Within the window, unmapped trace is kept — a mapping may still resolve it.
+    fresh = _plant_pending_with_age(days_old=1)
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    assert result.pruned == 0
+    assert fresh.exists()
 
 
 async def test_flush_ignores_unreadable_processed_files_for_dedup(bm_home: Path) -> None:

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from basic_memory.config import resolve_data_dir
 from basic_memory.hooks._uuid7 import uuid7_unix_ms
-from basic_memory.hooks.envelope import Envelope, envelope_to_json
+from basic_memory.hooks.envelope import Envelope, envelope_from_json, envelope_to_json
 
 INBOX_DIR_NAME = "inbox"
 PROCESSED_DIR_NAME = "processed"
@@ -81,26 +81,66 @@ def mark_processed(path: Path) -> Path:
     return destination
 
 
-def prune_processed(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
-    """Delete processed envelopes older than the retention window.
+def _parses_as_envelope(path: Path) -> bool:
+    try:
+        envelope_from_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # ValueError covers json.JSONDecodeError
+        return False
+    return True
+
+
+def _prune_dir(directory: Path, older_than_days: int, *, keep_unparseable: bool = False) -> int:
+    """Delete ``*.json`` in ``directory`` older than the retention window.
 
     Age comes from the uuid7 timestamp embedded in the filename, not the file
     mtime — deterministic regardless of what filesystem operations touched the
-    file since capture. Files that don't parse as UUIDs are never deleted:
-    retention must not eat data it doesn't understand.
+    file since capture. Files whose name doesn't parse as a UUID are never
+    deleted: retention must not eat data it doesn't understand. The glob is
+    non-recursive, so pruning the inbox never reaches into ``processed/``.
+
+    ``keep_unparseable`` additionally preserves files whose *contents* don't parse
+    as an envelope — a corrupt or future-versioned inbox entry is exactly the
+    trace ``bm hook status`` surfaces for a human, and retention must not delete
+    it out from under that signal.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
     removed = 0
-    for path in processed_dir().glob("*.json"):
+    for path in directory.glob("*.json"):
+        if not path.is_file():
+            continue
         try:
             captured_ms = uuid7_unix_ms(uuid.UUID(path.stem))
         except ValueError:
             continue
-        if captured_ms < cutoff_ms:
-            path.unlink()
-            removed += 1
+        if captured_ms >= cutoff_ms:
+            continue
+        if keep_unparseable and not _parses_as_envelope(path):
+            continue
+        path.unlink()
+        removed += 1
     return removed
+
+
+def prune_processed(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
+    """Delete processed envelopes older than the retention window."""
+    return _prune_dir(processed_dir(), older_than_days)
+
+
+def prune_pending(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
+    """Delete pending envelopes older than the retention window.
+
+    A session that never resolves a project mapping (``primaryProject`` unset for
+    its whole lifetime) produces envelopes the projector can never route — it
+    holds them pending, waiting for a mapping that, for a fully-unmapped session,
+    never comes. Bounding the inbox by the same window the processed side already
+    uses keeps that unresolvable trace from accumulating without limit, while
+    still giving a mapping the full window to appear (a later same-session
+    capture carrying a hint resolves the whole group via the projector's merge).
+    Invalid entries are preserved (``keep_unparseable``) so retention never eats
+    the corruption/version-mismatch trace ``bm hook status`` exists to surface.
+    """
+    return _prune_dir(inbox_dir(), older_than_days, keep_unparseable=True)
 
 
 # --- Flush bookkeeping (the `bm hook status` debuggability surface) ---
