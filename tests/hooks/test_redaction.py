@@ -83,6 +83,16 @@ def test_deny_paths_apply_at_depth() -> None:
     assert len(entry["preview"]) < 600
 
 
+def test_deny_paths_redact_embedded_substring_in_value() -> None:
+    # A payload string value can embed a secret path mid-text; only the path
+    # token is replaced, the rest of the value is preserved.
+    home_ssh = str(Path("~/.ssh/id_rsa").expanduser())
+    redacted = redact_payload({"note": f"copied {home_ssh} to backup"})
+
+    assert home_ssh not in redacted["note"]
+    assert redacted["note"] == f"copied {REDACTED_PATH} to backup"
+
+
 def test_deny_paths_match_across_windows_separators() -> None:
     # Windows payload values carry backslashes while deny paths are usually
     # written with forward slashes; both sides normalize before comparison.
@@ -214,3 +224,23 @@ def test_redact_text_honors_extra_deny_paths() -> None:
     assert redact_text("/srv/secrets/prod.env", extra_redact_paths=["/srv/secrets/"]) == (
         REDACTED_PATH
     )
+
+
+def test_redact_text_redacts_denied_path_embedded_in_prose() -> None:
+    # A checkpoint excerpt may reference a secret path mid-sentence; the whole
+    # path token is replaced in place while the surrounding prose survives.
+    home_ssh = str(Path("~/.ssh/id_rsa").expanduser())
+    scrubbed = redact_text(f"please read {home_ssh} then continue")
+
+    assert home_ssh not in scrubbed
+    assert scrubbed == f"please read {REDACTED_PATH} then continue"
+
+
+def test_redact_text_redacts_multiple_embedded_paths() -> None:
+    ssh = str(Path("~/.ssh/id_rsa").expanduser())
+    aws = str(Path("~/.aws/credentials").expanduser())
+    scrubbed = redact_text(f"compare {ssh} and {aws} carefully")
+
+    assert ssh not in scrubbed
+    assert aws not in scrubbed
+    assert scrubbed == f"compare {REDACTED_PATH} and {REDACTED_PATH} carefully"

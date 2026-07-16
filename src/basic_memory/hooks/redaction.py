@@ -71,6 +71,21 @@ def _default_redact_paths() -> tuple[str, ...]:
     )
 
 
+def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    """Compile each normalized deny-path prefix into a substring matcher.
+
+    Deny paths are stored with forward slashes and a trailing separator. A
+    payload value may carry one whole (``~/.ssh/id_rsa``) or embed it mid-string
+    in free text (a checkpoint excerpt like ``please read ~/.ssh/id_rsa``), and
+    may use native separators. So each ``/`` in the prefix matches either
+    separator, and a trailing ``\\S*`` consumes the rest of the path token — the
+    whole path is redacted, not just its directory prefix, wherever it appears.
+    """
+    return tuple(
+        re.compile(re.escape(prefix).replace("/", r"[/\\]") + r"\S*") for prefix in deny_paths
+    )
+
+
 # --- detect-secrets scanning ---
 
 
@@ -144,13 +159,18 @@ def _truncate(value: str) -> str:
 
 def _redact_str(
     value: str,
-    deny_paths: tuple[str, ...],
+    deny_path_res: tuple[re.Pattern[str], ...],
     entropy_plugins: dict[str, HighEntropyStringsPlugin],
 ) -> str:
     if SECRET_VALUE_RE.match(value):
         return REDACTED
-    if any(_normalize_path(value).startswith(prefix) for prefix in deny_paths):
-        return REDACTED_PATH
+    # Replace denied-path substrings wherever they occur: a whole-value path
+    # collapses to the marker (regex spans the entire string), while a path
+    # embedded in prose (checkpoint excerpts, #997) is redacted in place without
+    # discarding the surrounding text. Secret/entropy scanning and truncation
+    # then run on the remainder.
+    for pattern in deny_path_res:
+        value = pattern.sub(REDACTED_PATH, value)
     return _truncate(_scrub_secrets(value, entropy_plugins))
 
 
@@ -160,7 +180,7 @@ def _redact_str(
 def _redact_value(
     value: Any,
     deny_key_patterns: list[re.Pattern[str]],
-    deny_paths: tuple[str, ...],
+    deny_path_res: tuple[re.Pattern[str], ...],
     entropy_plugins: dict[str, HighEntropyStringsPlugin],
 ) -> Any:
     """Redact a payload value of any JSON-compatible shape.
@@ -169,12 +189,12 @@ def _redact_value(
     secret one level down must be caught just like a top-level one.
     """
     if isinstance(value, str):
-        return _redact_str(value, deny_paths, entropy_plugins)
+        return _redact_str(value, deny_path_res, entropy_plugins)
     if isinstance(value, dict):
-        return _redact_dict(value, deny_key_patterns, deny_paths, entropy_plugins)
+        return _redact_dict(value, deny_key_patterns, deny_path_res, entropy_plugins)
     if isinstance(value, (list, tuple)):
         return [
-            _redact_value(item, deny_key_patterns, deny_paths, entropy_plugins) for item in value
+            _redact_value(item, deny_key_patterns, deny_path_res, entropy_plugins) for item in value
         ]
     return value
 
@@ -182,7 +202,7 @@ def _redact_value(
 def _redact_dict(
     payload: dict,
     deny_key_patterns: list[re.Pattern[str]],
-    deny_paths: tuple[str, ...],
+    deny_path_res: tuple[re.Pattern[str], ...],
     entropy_plugins: dict[str, HighEntropyStringsPlugin],
 ) -> dict:
     result: dict = {}
@@ -192,7 +212,7 @@ def _redact_dict(
         if any(pattern.search(str(key)) for pattern in deny_key_patterns):
             result[key] = REDACTED
             continue
-        result[key] = _redact_value(value, deny_key_patterns, deny_paths, entropy_plugins)
+        result[key] = _redact_value(value, deny_key_patterns, deny_path_res, entropy_plugins)
     return result
 
 
@@ -216,12 +236,13 @@ def redact_payload(
     deny_paths = _default_redact_paths()
     if extra_redact_paths:
         deny_paths = deny_paths + tuple(_normalize_path(path) for path in extra_redact_paths)
+    deny_path_res = _deny_path_patterns(deny_paths)
 
     # One settings context per payload: detect-secrets reads plugin/filter
     # configuration from process-global settings, and the context both pins the
     # default configuration and restores whatever was active before.
     with default_settings():
-        return _redact_dict(payload, deny_key_patterns, deny_paths, _entropy_plugins())
+        return _redact_dict(payload, deny_key_patterns, deny_path_res, _entropy_plugins())
 
 
 def redact_text(value: str, extra_redact_paths: list[str] | None = None) -> str:
@@ -237,4 +258,4 @@ def redact_text(value: str, extra_redact_paths: list[str] | None = None) -> str:
     if extra_redact_paths:
         deny_paths = deny_paths + tuple(_normalize_path(path) for path in extra_redact_paths)
     with default_settings():
-        return _redact_str(value, deny_paths, _entropy_plugins())
+        return _redact_str(value, _deny_path_patterns(deny_paths), _entropy_plugins())

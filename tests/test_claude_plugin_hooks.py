@@ -49,6 +49,17 @@ IFS= read -r -d '' stdin_data || true
 printf '%s' "$stdin_data" > "$BM_SHIM_LOG_DIR/{name}.stdin"
 """
 
+# A pre-hook CLI: it predates the `hook` command group, so the shim's
+# `hook --help` probe fails the way Click's "No such command" does (exit 2). Any
+# other invocation records argv like the normal fake. Used to prove the shim
+# falls back to the uvx floor instead of exec-ing a CLI that cannot serve hooks.
+STALE_FAKE_CLI = """if [ "$1" = "hook" ]; then
+    echo "Error: No such command 'hook'." >&2
+    exit 2
+fi
+{{ printf '%s\\n' "$@"; }} > "$BM_SHIM_LOG_DIR/{name}.argv"
+"""
+
 
 def _resolve_bash_executable(*, platform_name: str = os.name) -> str | None:
     """Prefer Git Bash over Windows' WSL launcher for hook execution."""
@@ -73,12 +84,14 @@ class ShimHarness:
     bin_dir: Path
     log_dir: Path
 
-    def add_fake(self, name: str, directory: Path | None = None) -> Path:
+    def add_fake(
+        self, name: str, directory: Path | None = None, *, template: str = FAKE_CLI
+    ) -> Path:
         """Install a fake recording CLI named `name` (default: on the fake PATH)."""
         target_dir = directory or self.bin_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         fake = target_dir / name
-        fake.write_text(FAKE_CLI.format(name=name), encoding="utf-8")
+        fake.write_text(template.format(name=name), encoding="utf-8")
         fake.chmod(0o755)
         return fake
 
@@ -212,6 +225,46 @@ def test_shim_falls_back_to_uvx_with_released_floor(
         "--harness",
         harness,
     ]
+
+
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+def test_shim_skips_stale_path_install_without_hook_support(
+    shim: ShimHarness, hooks_dir: str, harness: str
+) -> None:
+    # A pre-hook basic-memory left on PATH must not shadow the uvx floor:
+    # exec-ing it would error on `hook`, breaking fail-open. The shim probes for
+    # `hook` support and falls back to the released floor when it is missing.
+    shim.add_fake("basic-memory", template=STALE_FAKE_CLI)
+    shim.add_fake("uvx")
+
+    result = shim.run(hooks_dir, "session-start.sh")
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("uvx") == [
+        f"basic-memory>={CURRENT_VERSION}",
+        "hook",
+        "session-start",
+        "--harness",
+        harness,
+    ]
+    # The stale CLI is probed (hook --help exits 2) but never serves the hook.
+    assert shim.argv("basic-memory") is None
+
+
+@pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)
+def test_shim_exits_silently_when_only_stale_install_present(
+    shim: ShimHarness, hooks_dir: str, harness: str
+) -> None:
+    # Stale basic-memory, nothing else resolvable: better silent than exec a CLI
+    # that errors on `hook` — the probe failing must still fail open.
+    shim.add_fake("basic-memory", template=STALE_FAKE_CLI)
+
+    result = shim.run(hooks_dir, "session-start.sh")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert shim.argv("basic-memory") is None
 
 
 @pytest.mark.parametrize(("hooks_dir", "harness"), PLUGINS)

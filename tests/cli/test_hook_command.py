@@ -430,6 +430,7 @@ def test_pre_compact_redacts_secrets_in_checkpoint(
         )
 
     assert result.exit_code == 0
+    assert mock_write.await_args is not None
     kwargs = mock_write.await_args.kwargs
     assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["content"]
     assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["title"]
