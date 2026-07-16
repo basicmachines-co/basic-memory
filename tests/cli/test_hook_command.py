@@ -638,6 +638,36 @@ def test_pre_compact_codex_includes_workspace_sections(bm_home: Path, tmp_path: 
     assert "- `M src/app.py`" in content
 
 
+def test_pre_compact_codex_redacts_working_tree_rows(bm_home: Path, tmp_path: Path) -> None:
+    # Regression: git status rows carry filenames/paths and must pass the same
+    # redaction floor as the transcript and cwd (a secret in a filename leaks
+    # otherwise).
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"primaryProject": "demo"}), encoding="utf-8"
+    )
+    transcript = _transcript(tmp_path)
+    mock_write = AsyncMock(return_value={"action": "created"})
+    with (
+        patch("basic_memory.mcp.tools.write_note", mock_write),
+        patch.object(
+            hook_module, "_git_status", return_value=["?? config/AKIAIOSFODNN7EXAMPLE.env"]
+        ),
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(project, transcript_path=str(transcript), trigger="auto"),
+        )
+
+    assert result.exit_code == 0
+    assert mock_write.await_args is not None
+    content = mock_write.await_args.kwargs["content"]
+    assert "## Working tree" in content
+    assert "AKIAIOSFODNN7EXAMPLE" not in content
+
+
 # --- Fail-open contract ---
 
 

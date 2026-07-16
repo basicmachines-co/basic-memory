@@ -681,8 +681,11 @@ def _checkpoint_note(
             body += [f"- {_clip(message, 240)}" for message in recent_assistant]
         status_lines = _git_status(event.cwd)
         if status_lines:
+            # git status rows carry filenames/paths too — pass them through the
+            # same floor as the transcript text and cwd (a secret token in a
+            # filename, or a denied path, must not leak into the note).
             body += ["", "## Working tree"]
-            body += [f"- `{line}`" for line in status_lines]
+            body += [f"- `{redact_text(line, extra_redact_paths)}`" for line in status_lines]
     body += [
         "",
         "## Observations",
