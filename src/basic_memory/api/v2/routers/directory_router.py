@@ -9,12 +9,17 @@ Key improvements:
 - Better performance through indexed queries
 """
 
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Query, Path
 
 from basic_memory.deps import DirectoryServiceV2ExternalDep
-from basic_memory.schemas.directory import DirectoryNode
+from basic_memory.schemas.directory import (
+    DEFAULT_DIRECTORY_PAGE_SIZE,
+    MAX_DIRECTORY_PAGE_SIZE,
+    DirectoryListResponse,
+    DirectoryNode,
+)
 
 router = APIRouter(prefix="/directory", tags=["directory-v2"])
 
@@ -61,7 +66,11 @@ async def get_directory_structure(
     return structure
 
 
-@router.get("/list", response_model=List[DirectoryNode], response_model_exclude_none=True)
+@router.get(
+    "/list",
+    response_model=DirectoryListResponse,
+    response_model_exclude_none=True,
+)
 async def list_directory(
     directory_service: DirectoryServiceV2ExternalDep,
     project_id: str = Path(..., description="Project external UUID"),
@@ -69,6 +78,13 @@ async def list_directory(
     depth: int = Query(1, ge=1, le=10, description="Recursion depth (1-10)"),
     file_name_glob: Optional[str] = Query(
         None, description="Glob pattern for filtering file names"
+    ),
+    page: int = Query(1, ge=1, description="One-indexed result page"),
+    page_size: int = Query(
+        DEFAULT_DIRECTORY_PAGE_SIZE,
+        ge=1,
+        le=MAX_DIRECTORY_PAGE_SIZE,
+        description="Number of nodes per page",
     ),
 ):
     """List directory contents with filtering and depth control.
@@ -79,15 +95,17 @@ async def list_directory(
         dir_name: Directory path to list (default: root "/")
         depth: Recursion depth (1-10, default: 1 for immediate children only)
         file_name_glob: Optional glob pattern for filtering file names (e.g., "*.md", "*meeting*")
+        page: One-indexed result page
+        page_size: Number of nodes per page (1-200)
 
     Returns:
-        List of DirectoryNode objects matching the criteria
+        Bounded page of DirectoryNode objects matching the criteria
     """
     # Get directory listing with filtering
-    nodes = await directory_service.list_directory(
+    return await directory_service.list_directory(
         dir_name=dir_name,
         depth=depth,
         file_name_glob=file_name_glob,
+        page=page,
+        page_size=page_size,
     )
-
-    return nodes

@@ -4,7 +4,7 @@ import pytest
 from httpx import AsyncClient
 
 from basic_memory.models import Project
-from basic_memory.schemas.directory import DirectoryNode
+from basic_memory.schemas.directory import DirectoryListResponse, DirectoryNode
 
 
 @pytest.mark.asyncio
@@ -49,8 +49,9 @@ async def test_list_directory_default(
     response = await client.get(f"{v2_project_url}/directory/list")
 
     assert response.status_code == 200
-    nodes = response.json()
-    assert isinstance(nodes, list)
+    listing = DirectoryListResponse.model_validate(response.json())
+    assert listing.page == 1
+    assert listing.page_size == 10
 
 
 @pytest.mark.asyncio
@@ -63,8 +64,8 @@ async def test_list_directory_with_depth(
     response = await client.get(f"{v2_project_url}/directory/list?depth=2")
 
     assert response.status_code == 200
-    nodes = response.json()
-    assert isinstance(nodes, list)
+    listing = DirectoryListResponse.model_validate(response.json())
+    assert listing.page == 1
 
 
 @pytest.mark.asyncio
@@ -77,12 +78,11 @@ async def test_list_directory_with_glob(
     response = await client.get(f"{v2_project_url}/directory/list?file_name_glob=*.md")
 
     assert response.status_code == 200
-    nodes = response.json()
-    assert isinstance(nodes, list)
+    listing = DirectoryListResponse.model_validate(response.json())
     # All file nodes should have .md extension
-    for node in nodes:
-        if node.get("type") == "file":
-            assert node.get("path", "").endswith(".md")
+    for node in listing.nodes:
+        if node.type == "file":
+            assert (node.file_path or "").endswith(".md")
 
 
 @pytest.mark.asyncio
@@ -95,8 +95,36 @@ async def test_list_directory_with_custom_path(
     response = await client.get(f"{v2_project_url}/directory/list?dir_name=/")
 
     assert response.status_code == 200
-    nodes = response.json()
-    assert isinstance(nodes, list)
+    listing = DirectoryListResponse.model_validate(response.json())
+    assert listing.page == 1
+
+
+@pytest.mark.asyncio
+async def test_list_directory_with_pagination(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+):
+    """Directory list accepts bounded pagination and returns metadata."""
+    response = await client.get(f"{v2_project_url}/directory/list?page=2&page_size=3")
+
+    assert response.status_code == 200
+    listing = DirectoryListResponse.model_validate(response.json())
+    assert listing.page == 2
+    assert listing.page_size == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["page=0", "page_size=0", "page_size=201"])
+async def test_list_directory_rejects_invalid_pagination(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    query: str,
+):
+    response = await client.get(f"{v2_project_url}/directory/list?{query}")
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

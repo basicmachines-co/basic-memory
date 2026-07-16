@@ -423,19 +423,40 @@ class TestDirectoryClient:
         """Test list calls correct endpoint."""
 
         mock_response = MagicMock()
-        mock_response.json.return_value = [{"name": "folder", "type": "directory"}]
+        mock_response.json.return_value = {
+            "nodes": [
+                {
+                    "name": "folder",
+                    "directory_path": "/folder",
+                    "type": "directory",
+                }
+            ],
+            "page": 2,
+            "page_size": 4,
+            "total": 5,
+            "has_more": False,
+        }
 
         async def mock_call_get(client, url, **kwargs):
             assert "/v2/projects/proj-123/directory/list" in url
+            assert kwargs["params"] == {
+                "dir_name": "/",
+                "depth": 2,
+                "page": 2,
+                "page_size": 4,
+                "file_name_glob": "*.md",
+            }
             return mock_response
 
         monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = DirectoryClient(mock_http, "proj-123")
-        result = await client.list("/")
-        assert len(result) == 1
-        assert result[0]["name"] == "folder"
+        result = await client.list("/", depth=2, file_name_glob="*.md", page=2, page_size=4)
+        assert len(result.nodes) == 1
+        assert result.nodes[0].name == "folder"
+        assert result.page == 2
+        assert result.total == 5
 
 
 class TestResourceClient:

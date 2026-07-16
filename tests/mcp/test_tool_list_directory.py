@@ -241,3 +241,76 @@ async def test_list_directory_file_rows_include_external_id(client, test_graph, 
     assert file_lines, f"no file rows in: {result!r}"
     for line in file_lines:
         assert re.search(uuid_pattern, line), f"file row missing external_id: {line!r}"
+
+
+@pytest.mark.asyncio
+async def test_list_directory_text_pagination_includes_continuation(
+    client,
+    test_graph,
+    test_project,
+):
+    result = await list_directory(
+        project=test_project.name,
+        dir_name="/test",
+        page=1,
+        page_size=2,
+    )
+
+    assert isinstance(result, str)
+    assert "Page 1 (page size 2, 5 total items)" in result
+    assert "📄 Connected Entity 1.md" in result
+    assert "📄 Connected Entity 2.md" in result
+    assert "Deep Entity.md" not in result
+    assert "page=2" in result
+    assert "page_size=2" in result
+
+
+@pytest.mark.asyncio
+async def test_list_directory_json_pagination_preserves_glob_and_depth(
+    client,
+    test_graph,
+    test_project,
+):
+    result = await list_directory(
+        project=test_project.name,
+        dir_name="/test",
+        depth=2,
+        file_name_glob="*Entity*",
+        page=2,
+        page_size=2,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["page"] == 2
+    assert result["page_size"] == 2
+    assert result["total"] == 4
+    assert result["has_more"] is False
+    assert [node["name"] for node in result["nodes"]] == [
+        "Deep Entity.md",
+        "Deeper Entity.md",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page", "page_size", "message"),
+    [
+        (0, 10, "page must be >= 1"),
+        (1, 0, "page_size must be >= 1"),
+        (1, 201, "page_size must be <= 200"),
+    ],
+)
+async def test_list_directory_rejects_invalid_pagination(
+    client,
+    test_project,
+    page: int,
+    page_size: int,
+    message: str,
+):
+    with pytest.raises(ValueError, match=message):
+        await list_directory(
+            project=test_project.name,
+            page=page,
+            page_size=page_size,
+        )

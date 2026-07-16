@@ -3,9 +3,11 @@
 Encapsulates all /v2/projects/{project_id}/directory/* endpoints.
 """
 
-from typing import Optional, Any
+from typing import Optional
 
 from httpx import AsyncClient
+
+from basic_memory.schemas.directory import DEFAULT_DIRECTORY_PAGE_SIZE, DirectoryListResponse
 
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
@@ -43,16 +45,20 @@ class DirectoryClient:
         *,
         depth: int = 1,
         file_name_glob: Optional[str] = None,
-    ) -> list[dict[str, Any]]:
+        page: int = 1,
+        page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
+    ) -> DirectoryListResponse:
         """List directory contents.
 
         Args:
             dir_name: Directory path to list (default: root)
             depth: How deep to traverse (default: 1)
             file_name_glob: Optional glob pattern to filter files
+            page: One-indexed result page
+            page_size: Number of nodes per page
 
         Returns:
-            List of directory nodes with their contents
+            Bounded directory nodes with pagination metadata
 
         Raises:
             ToolError: If the request fails
@@ -62,6 +68,8 @@ class DirectoryClient:
         params: dict = {
             "dir_name": dir_name,
             "depth": depth,
+            "page": page,
+            "page_size": page_size,
         }
         if file_name_glob:
             params["file_name_glob"] = file_name_glob
@@ -71,4 +79,4 @@ class DirectoryClient:
             f"{self._base_path}/list",
             params=params,
         )
-        return response.json()
+        return DirectoryListResponse.model_validate(response.json())

@@ -4,6 +4,8 @@ Integration tests for list_directory MCP tool.
 Tests the complete list directory workflow: MCP client -> MCP server -> FastAPI -> database -> file system
 """
 
+import json
+
 import pytest
 from fastmcp import Client
 
@@ -70,6 +72,55 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
         assert "Total:" in list_text
         assert "directories" in list_text
         assert "file" in list_text
+
+
+@pytest.mark.asyncio
+async def test_list_directory_pagination_text_and_json(mcp_server, app, test_project):
+    """MCP pagination stays bounded and exposes continuation metadata in both formats."""
+    async with Client(mcp_server) as client:
+        for title in ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]:
+            await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": title,
+                    "directory": "paged",
+                    "content": f"# {title}\n\nPaged note.",
+                },
+            )
+
+        text_result = await client.call_tool(
+            "list_directory",
+            {
+                "project": test_project.name,
+                "dir_name": "/paged",
+                "page": 1,
+                "page_size": 2,
+            },
+        )
+        text_result_value = text_result.content[0].text
+        assert "Page 1 (page size 2, 5 total items)" in text_result_value
+        assert "Alpha.md" in text_result_value
+        assert "Bravo.md" in text_result_value
+        assert "Charlie.md" not in text_result_value
+        assert "page=2" in text_result_value
+
+        json_result = await client.call_tool(
+            "list_directory",
+            {
+                "project": test_project.name,
+                "dir_name": "/paged",
+                "page": 2,
+                "page_size": 2,
+                "output_format": "json",
+            },
+        )
+        payload = json.loads(json_result.content[0].text)
+        assert payload["page"] == 2
+        assert payload["page_size"] == 2
+        assert payload["total"] == 5
+        assert payload["has_more"] is True
+        assert [node["name"] for node in payload["nodes"]] == ["Charlie.md", "Delta.md"]
 
 
 @pytest.mark.asyncio

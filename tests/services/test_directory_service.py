@@ -64,7 +64,9 @@ async def test_directory_tree(directory_service: DirectoryService, test_graph):
 async def test_list_directory_empty(directory_service: DirectoryService):
     """Test listing directory with no entities."""
     result = await directory_service.list_directory()
-    assert result == []
+    assert result.nodes == []
+    assert result.total == 0
+    assert result.has_more is False
 
 
 @pytest.mark.asyncio
@@ -73,10 +75,10 @@ async def test_list_directory_root(directory_service: DirectoryService, test_gra
     result = await directory_service.list_directory(dir_name="/")
 
     # Should return immediate children of root (the "test" directory)
-    assert len(result) == 1
-    assert result[0].name == "test"
-    assert result[0].type == "directory"
-    assert result[0].directory_path == "/test"
+    assert len(result.nodes) == 1
+    assert result.nodes[0].name == "test"
+    assert result.nodes[0].type == "directory"
+    assert result.nodes[0].directory_path == "/test"
 
 
 @pytest.mark.asyncio
@@ -85,8 +87,8 @@ async def test_list_directory_specific_path(directory_service: DirectoryService,
     result = await directory_service.list_directory(dir_name="/test")
 
     # Should return the 5 files in the test directory
-    assert len(result) == 5
-    file_names = {node.name for node in result}
+    assert len(result.nodes) == 5
+    file_names = {node.name for node in result.nodes}
     expected_files = {
         "Connected Entity 1.md",
         "Connected Entity 2.md",
@@ -97,7 +99,7 @@ async def test_list_directory_specific_path(directory_service: DirectoryService,
     assert file_names == expected_files
 
     # All should be files
-    for node in result:
+    for node in result.nodes:
         assert node.type == "file"
 
 
@@ -105,7 +107,7 @@ async def test_list_directory_specific_path(directory_service: DirectoryService,
 async def test_list_directory_nonexistent_path(directory_service: DirectoryService, test_graph):
     """Test listing nonexistent directory."""
     result = await directory_service.list_directory(dir_name="/nonexistent")
-    assert result == []
+    assert result.nodes == []
 
 
 @pytest.mark.asyncio
@@ -114,8 +116,8 @@ async def test_list_directory_with_glob_filter(directory_service: DirectoryServi
     # Filter for files containing "Connected"
     result = await directory_service.list_directory(dir_name="/test", file_name_glob="*Connected*")
 
-    assert len(result) == 2
-    file_names = {node.name for node in result}
+    assert len(result.nodes) == 2
+    file_names = {node.name for node in result.nodes}
     assert file_names == {"Connected Entity 1.md", "Connected Entity 2.md"}
 
 
@@ -125,7 +127,7 @@ async def test_list_directory_with_markdown_filter(directory_service: DirectoryS
     result = await directory_service.list_directory(dir_name="/test", file_name_glob="*.md")
 
     # All files in test_graph are markdown files
-    assert len(result) == 5
+    assert len(result.nodes) == 5
 
 
 @pytest.mark.asyncio
@@ -135,8 +137,8 @@ async def test_list_directory_with_specific_file_filter(
     """Test listing directory with specific file pattern."""
     result = await directory_service.list_directory(dir_name="/test", file_name_glob="Root.*")
 
-    assert len(result) == 1
-    assert result[0].name == "Root.md"
+    assert len(result.nodes) == 1
+    assert result.nodes[0].name == "Root.md"
 
 
 @pytest.mark.asyncio
@@ -144,11 +146,11 @@ async def test_list_directory_depth_control(directory_service: DirectoryService,
     """Test listing directory with depth control."""
     # Depth 1 should only return immediate children
     result_depth_1 = await directory_service.list_directory(dir_name="/", depth=1)
-    assert len(result_depth_1) == 1  # Just the "test" directory
+    assert len(result_depth_1.nodes) == 1  # Just the "test" directory
 
     # Depth 2 should return directory + its contents
     result_depth_2 = await directory_service.list_directory(dir_name="/", depth=2)
-    assert len(result_depth_2) == 6  # "test" directory + 5 files in it
+    assert len(result_depth_2.nodes) == 6  # "test" directory + 5 files in it
 
 
 @pytest.mark.asyncio
@@ -161,10 +163,10 @@ async def test_list_directory_path_normalization(directory_service: DirectorySer
 
     for path in paths_to_test:
         result = await directory_service.list_directory(dir_name=path)
-        assert len(result) == len(base_result)
+        assert len(result.nodes) == len(base_result.nodes)
         # Compare by name since the objects might be different instances
-        result_names = {node.name for node in result}
-        base_names = {node.name for node in base_result}
+        result_names = {node.name for node in result.nodes}
+        base_names = {node.name for node in base_result.nodes}
         assert result_names == base_names
 
 
@@ -181,12 +183,12 @@ async def test_list_directory_dot_slash_prefix_normalization(
 
     for path in dot_paths_to_test:
         result = await directory_service.list_directory(dir_name=path)
-        assert len(result) == len(base_result), (
-            f"Path '{path}' returned {len(result)} results, expected {len(base_result)}"
+        assert len(result.nodes) == len(base_result.nodes), (
+            f"Path '{path}' returned {len(result.nodes)} results, expected {len(base_result.nodes)}"
         )
         # Compare by name since the objects might be different instances
-        result_names = {node.name for node in result}
-        base_names = {node.name for node in base_result}
+        result_names = {node.name for node in result.nodes}
+        base_names = {node.name for node in base_result.nodes}
         assert result_names == base_names, f"Path '{path}' returned different files than expected"
 
 
@@ -196,7 +198,7 @@ async def test_list_directory_glob_no_matches(directory_service: DirectoryServic
     result = await directory_service.list_directory(
         dir_name="/test", file_name_glob="*.nonexistent"
     )
-    assert result == []
+    assert result.nodes == []
 
 
 @pytest.mark.asyncio
@@ -205,9 +207,73 @@ async def test_list_directory_default_parameters(directory_service: DirectorySer
     # Should default to root directory, depth 1, no glob filter
     result = await directory_service.list_directory()
 
-    assert len(result) == 1
-    assert result[0].name == "test"
-    assert result[0].type == "directory"
+    assert len(result.nodes) == 1
+    assert result.nodes[0].name == "test"
+    assert result.nodes[0].type == "directory"
+
+
+@pytest.mark.asyncio
+async def test_list_directory_paginates_with_stable_order(
+    directory_service: DirectoryService,
+    test_graph,
+):
+    """Pages use one stable order and expose exact continuation metadata."""
+    first = await directory_service.list_directory(dir_name="/test", page=1, page_size=2)
+    second = await directory_service.list_directory(dir_name="/test", page=2, page_size=2)
+    third = await directory_service.list_directory(dir_name="/test", page=3, page_size=2)
+
+    assert [node.name for node in first.nodes] == [
+        "Connected Entity 1.md",
+        "Connected Entity 2.md",
+    ]
+    assert [node.name for node in second.nodes] == ["Deep Entity.md", "Deeper Entity.md"]
+    assert [node.name for node in third.nodes] == ["Root.md"]
+    assert first.model_dump(exclude={"nodes"}) == {
+        "page": 1,
+        "page_size": 2,
+        "total": 5,
+        "has_more": True,
+    }
+    assert second.has_more is True
+    assert third.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_directory_orders_directories_before_files_across_depth(
+    directory_service: DirectoryService,
+    test_graph,
+):
+    """Recursive pages keep directories before files regardless of repository row order."""
+    result = await directory_service.list_directory(dir_name="/", depth=2, page_size=10)
+
+    assert [node.type for node in result.nodes] == [
+        "directory",
+        "file",
+        "file",
+        "file",
+        "file",
+        "file",
+    ]
+    assert result.nodes[0].name == "test"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page", "page_size", "message"),
+    [
+        (0, 10, "page must be >= 1"),
+        (1, 0, "page_size must be >= 1"),
+        (1, 201, "page_size must be <= 200"),
+    ],
+)
+async def test_list_directory_rejects_invalid_pagination(
+    directory_service: DirectoryService,
+    page: int,
+    page_size: int,
+    message: str,
+):
+    with pytest.raises(ValueError, match=message):
+        await directory_service.list_directory(page=page, page_size=page_size)
 
 
 @pytest.mark.asyncio
