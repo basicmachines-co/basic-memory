@@ -410,6 +410,7 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
         old_project=target_project,
         deletion_status="pending",
         file_delete_status="pending" if delete_notes else "skipped",
+        job_id="28993",
     )
 
     with (
@@ -456,6 +457,8 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
     assert captured["workspace"] == "tenant-abc-123"
     mock_delete_project.assert_awaited_once_with("project-uuid", delete_notes=delete_notes)
     assert result.startswith("✓")
+    assert "Project deletion status: pending" in result
+    assert "Deletion job ID: 28993" in result
     # Cloud-routed delete: result text must not claim "files remain on disk" (#1034).
     if delete_notes:
         assert "Note-file deletion in cloud storage was queued and is pending" in result

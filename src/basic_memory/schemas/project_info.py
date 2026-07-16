@@ -249,3 +249,6 @@ class ProjectStatusResponse(BaseModel):
     file_delete_status: Optional[Literal["pending", "skipped", "complete", "failed"]] = Field(
         None, description="Background note-file deletion status when returned by the backend"
     )
+    job_id: Optional[str] = Field(
+        None, description="Background project deletion job identifier returned by the backend"
+    )

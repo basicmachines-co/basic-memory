@@ -796,6 +796,13 @@ async def delete_project(
             if hasattr(status_response.old_project, "path"):
                 result += f"• Path: {status_response.old_project.path}\n"
 
+        if status_response.deletion_status or status_response.job_id:
+            result += "\nDeletion tracking:\n"
+            if status_response.deletion_status:
+                result += f"• Project deletion status: {status_response.deletion_status}\n"
+            if status_response.job_id:
+                result += f"• Deletion job ID: {status_response.job_id}\n"
+
         cloud_routed = _delete_routes_to_cloud(workspace_id)
         files_location = "in cloud storage" if cloud_routed else "on disk"
         if delete_notes:
