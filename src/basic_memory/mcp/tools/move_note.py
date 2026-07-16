@@ -663,7 +663,8 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
                 if result.total_files == 0:
                     return f"""# Directory Move Failed - No Files Found
 
-No files matched source directory `{identifier}`.
+No files found for source directory `{identifier}`.
+Total files: 0.
 
 <!-- Project: {active_project.name} -->"""
 

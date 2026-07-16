@@ -346,7 +346,8 @@ async def delete_note(
                 if result.total_files == 0:
                     return f"""# Directory Delete Failed - No Files Found
 
-No files matched directory `{identifier}`.
+No files found for directory `{identifier}`.
+Total files: 0.
 
 <!-- Project: {active_project.name} -->"""
 
