@@ -86,13 +86,23 @@ def _deny_path_patterns(deny_paths: tuple[str, ...]) -> tuple[re.Pattern[str], .
     Deny paths are stored with forward slashes and a trailing separator. A
     payload value may carry one whole (``~/.ssh/id_rsa``) or embed it mid-string
     in free text (a checkpoint excerpt like ``please read ~/.ssh/id_rsa``), and
-    may use native separators. So each ``/`` in the prefix matches either
-    separator, and a trailing ``\\S*`` consumes the rest of the path token — the
-    whole path is redacted, not just its directory prefix, wherever it appears.
+    may use native separators, so each ``/`` matches either separator.
+
+    The pattern matches the denied directory **root itself** (``~/.ssh``) as well
+    as any descendant (``~/.ssh/id_rsa``): the trailing slash is stripped, then a
+    boundary lookahead requires a separator, whitespace, or end after the root so
+    a sibling like ``/srv/clientsbackup`` (for ``/srv/clients/``) can't match, and
+    an optional ``[/\\]\\S*`` consumes a descendant path token when present.
     """
-    return tuple(
-        re.compile(re.escape(prefix).replace("/", r"[/\\]") + r"\S*") for prefix in deny_paths
-    )
+    patterns: list[re.Pattern[str]] = []
+    for prefix in deny_paths:
+        root = prefix.rstrip("/")
+        if not root:
+            # A bare "/" (or empty) deny path would redact everything; skip it.
+            continue
+        escaped = re.escape(root).replace("/", r"[/\\]")
+        patterns.append(re.compile(escaped + r"(?=[/\\]|\s|$)(?:[/\\]\S*)?"))
+    return tuple(patterns)
 
 
 # --- detect-secrets scanning ---

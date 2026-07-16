@@ -1,5 +1,6 @@
 """Unit tests for the deterministic projector: dedup, replay-safety, mapping gate."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -62,6 +63,9 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
     assert session_call.kwargs["project"] == "demo"
     assert session_call.kwargs["overwrite"] is True
     assert session_call.kwargs["directory"] == "sessions"
+    # Explicit note_type is what persists (content frontmatter type is stripped);
+    # without it the artifact lands as `note` and session recall can't find it.
+    assert session_call.kwargs["note_type"] == "session"
     content = session_call.kwargs["content"]
     assert "created_by: bm-hook/claude-code" in content
     assert "caused_by_event:" in content
@@ -71,6 +75,7 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
 
     ledger_call = mock_write.await_args_list[1]
     ledger_content = ledger_call.kwargs["content"]
+    assert ledger_call.kwargs["note_type"] == "tool_ledger"
     assert "type: tool_ledger" in ledger_content
     assert "- [event] session_started at" in ledger_content
     assert "- [source] claude-code/s-1" in ledger_content
@@ -271,6 +276,25 @@ async def test_flush_counts_invalid_envelopes_and_leaves_them(bm_home: Path) -> 
     assert result.invalid == 1
     assert result.projected == 1
     assert broken.exists()  # never deleted, never guessed at
+
+
+async def test_flush_counts_type_corrupt_envelope_and_keeps_sweeping(bm_home: Path) -> None:
+    # Valid JSON, right keys, wrong scalar type (session id is a list). Must be
+    # counted invalid — not crash the sweep grouping on an unhashable id — so the
+    # valid envelope still projects.
+    valid = _capture()
+    corrupt = valid.parent / f"{'0' * 8}-0000-7000-8000-{'0' * 12}.json"
+    payload = json.loads(valid.read_text(encoding="utf-8"))
+    payload["source_session_id"] = []
+    corrupt.write_text(json.dumps(payload), encoding="utf-8")
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    assert result.invalid == 1
+    assert result.projected == 1
+    assert corrupt.exists()  # left in place for inspection
 
 
 async def test_flush_groups_sessions_independently(bm_home: Path) -> None:

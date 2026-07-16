@@ -40,6 +40,24 @@ PROMOTION_RAW = "raw"
 # or a named routine).
 ACTOR_RUNTIME = "runtime"
 
+# Fields the projector treats as strings (groups on, sorts by, calls .strip()).
+# A corrupt inbox file can carry the right keys with wrong scalar types, which
+# the dataclass won't reject — validate them before constructing so a bad file
+# is counted invalid, not allowed to crash the sweep.
+_STR_FIELDS = (
+    "id",
+    "source",
+    "event",
+    "source_session_id",
+    "ts",
+    "cwd",
+    "project_hint",
+    "idempotency_key",
+    "actor",
+    "promotion_status",
+)
+_OPTIONAL_STR_FIELDS = ("source_turn_id", "caused_by")
+
 
 @dataclass(frozen=True)
 class Envelope:
@@ -205,6 +223,19 @@ def envelope_from_json(text: str) -> Envelope:
         )
     if not isinstance(data.get("payload", {}), dict):
         raise ValueError("envelope payload must be an object")
+
+    # Scalar type checks: keys can be present with the wrong type (e.g.
+    # "source_session_id": [], "project_hint": 1). bool is excluded from the int
+    # check since it is an int subclass.
+    for name in _STR_FIELDS:
+        if name in data and not isinstance(data[name], str):
+            raise ValueError(f"envelope field {name!r} must be a string")
+    for name in _OPTIONAL_STR_FIELDS:
+        if data.get(name) is not None and not isinstance(data[name], str):
+            raise ValueError(f"envelope field {name!r} must be a string or null")
+    version = data.get("envelope_version")
+    if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+        raise ValueError("envelope field 'envelope_version' must be an int")
 
     envelope = Envelope(**data)
     if envelope.envelope_version != ENVELOPE_VERSION:

@@ -42,6 +42,12 @@ UUID_RE = re.compile(
 DEFAULT_CAPTURE_FOLDER = "sessions"
 CREATED_BY_PREFIX = "bm-hook"
 
+# Artifact note types. These are the explicit `note_type` write_note persists —
+# the `type:` in the rendered frontmatter is stripped and replaced by this arg,
+# so both must agree or recall (search by type) can't find projected notes.
+SESSION_NOTE_TYPE = "session"
+TOOL_LEDGER_NOTE_TYPE = "tool_ledger"
+
 
 @dataclass
 class FlushResult:
@@ -139,7 +145,7 @@ def _session_note(source: str, session_id: str, envelopes: list[Envelope]) -> tu
     """Derive the SessionNote skeleton (title, content) for one session group."""
     first = envelopes[0]
     title = f"Session {_session_label(session_id)} ({source})"
-    frontmatter = _artifact_frontmatter("session", first)
+    frontmatter = _artifact_frontmatter(SESSION_NOTE_TYPE, first)
     # status/open mirrors the checkpoint notes so structured recall finds both.
     frontmatter.insert(2, "status: open")
 
@@ -166,7 +172,7 @@ def _tool_ledger_note(source: str, session_id: str, envelopes: list[Envelope]) -
     """
     first = envelopes[0]
     title = f"Tool Ledger {_session_label(session_id)} ({source})"
-    frontmatter = _artifact_frontmatter("tool_ledger", first)
+    frontmatter = _artifact_frontmatter(TOOL_LEDGER_NOTE_TYPE, first)
 
     entries = [
         f"- [event] {envelope.event} at {envelope.ts} "
@@ -188,7 +194,9 @@ def _tool_ledger_note(source: str, session_id: str, envelopes: list[Envelope]) -
     return title, "\n".join(frontmatter + body)
 
 
-async def _write_artifact(title: str, content: str, folder: str, project_hint: str) -> None:
+async def _write_artifact(
+    title: str, content: str, folder: str, project_hint: str, note_type: str
+) -> None:
     # Deferred: importing basic_memory.mcp.tools loads the whole tool stack
     # (fastmcp, SQLAlchemy) and must not happen at CLI import time (#886).
     from basic_memory.mcp.tools import write_note
@@ -201,6 +209,10 @@ async def _write_artifact(title: str, content: str, folder: str, project_hint: s
         project=project,
         project_id=project_id,
         tags=["auto-capture"],
+        # Explicit note_type: write_note strips `type:` from the content
+        # frontmatter and persists this arg instead. Without it the artifact
+        # lands as the default `note`, invisible to session/ledger type recall.
+        note_type=note_type,
         overwrite=True,
         output_format="json",
     )
@@ -324,8 +336,12 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
         ledger_title, ledger_content = _tool_ledger_note(source, session_id, envelopes)
         folder = _capture_folder(envelopes)
         try:
-            await _write_artifact(session_title, session_content, folder, project_hint)
-            await _write_artifact(ledger_title, ledger_content, folder, project_hint)
+            await _write_artifact(
+                session_title, session_content, folder, project_hint, SESSION_NOTE_TYPE
+            )
+            await _write_artifact(
+                ledger_title, ledger_content, folder, project_hint, TOOL_LEDGER_NOTE_TYPE
+            )
         except Exception as exc:
             # Trigger: the write path failed (project missing, API error, ...).
             # Why: retiring unwritten envelopes would silently drop events.

@@ -201,3 +201,47 @@ def test_envelope_from_json_rejects_future_version() -> None:
 
     with pytest.raises(ValueError, match="unsupported envelope_version"):
         envelope_from_json(json.dumps(data))
+
+
+def test_envelope_from_json_rejects_non_string_session_id() -> None:
+    # A corrupt file can have every key present with the wrong scalar type; the
+    # dataclass wouldn't reject it and flush would crash grouping on a list.
+    data = json.loads(envelope_to_json(_envelope()))
+    data["source_session_id"] = []
+
+    with pytest.raises(ValueError, match="source_session_id.*must be a string"):
+        envelope_from_json(json.dumps(data))
+
+
+def test_envelope_from_json_rejects_non_string_project_hint() -> None:
+    data = json.loads(envelope_to_json(_envelope()))
+    data["project_hint"] = 1
+
+    with pytest.raises(ValueError, match="project_hint.*must be a string"):
+        envelope_from_json(json.dumps(data))
+
+
+def test_envelope_from_json_rejects_non_string_optional_field() -> None:
+    data = json.loads(envelope_to_json(_envelope()))
+    data["caused_by"] = 5
+
+    with pytest.raises(ValueError, match="caused_by.*must be a string or null"):
+        envelope_from_json(json.dumps(data))
+
+
+def test_envelope_from_json_rejects_non_int_version() -> None:
+    data = json.loads(envelope_to_json(_envelope()))
+    data["envelope_version"] = "1"
+
+    with pytest.raises(ValueError, match="envelope_version.*must be an int"):
+        envelope_from_json(json.dumps(data))
+
+
+def test_envelope_from_json_accepts_valid_optional_nulls() -> None:
+    # None for optional string fields stays valid (the common case).
+    data = json.loads(envelope_to_json(_envelope()))
+    data["caused_by"] = None
+    data["source_turn_id"] = None
+
+    envelope = envelope_from_json(json.dumps(data))
+    assert envelope.caused_by is None

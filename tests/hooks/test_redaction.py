@@ -226,6 +226,26 @@ def test_redact_text_honors_extra_deny_paths() -> None:
     )
 
 
+def test_redact_text_redacts_exact_denied_directory_root() -> None:
+    # The denied directory itself (no trailing separator, no child) must redact,
+    # not only its descendants.
+    assert redact_text("/srv/clients", extra_redact_paths=["/srv/clients/"]) == REDACTED_PATH
+    home_ssh = str(Path("~/.ssh").expanduser())
+    assert redact_text(home_ssh) == REDACTED_PATH
+
+
+def test_redact_text_leaves_sibling_of_denied_directory_intact() -> None:
+    # A sibling sharing the prefix chars must not match (bounded root).
+    assert redact_text("/srv/clientsbackup", extra_redact_paths=["/srv/clients/"]) == (
+        "/srv/clientsbackup"
+    )
+
+
+def test_redact_text_ignores_bare_root_deny_path() -> None:
+    # A "/" (or empty) deny path would otherwise redact every path; it's skipped.
+    assert redact_text("/opt/app/main.py", extra_redact_paths=["/"]) == "/opt/app/main.py"
+
+
 def test_redact_text_redacts_denied_path_embedded_in_prose() -> None:
     # A checkpoint excerpt may reference a secret path mid-sentence; the whole
     # path token is replaced in place while the surrounding prose survives.
