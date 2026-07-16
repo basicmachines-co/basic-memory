@@ -104,9 +104,11 @@ class _CreatePreparer:
         *,
         prepared_move: _PreparedMove | None = None,
         move_destination_error: EntityAlreadyExistsError | None = None,
+        filename_conflicts: list[str] | None = None,
     ) -> None:
         self.prepared = prepared
         self.move_destination_error = move_destination_error
+        self.filename_conflicts = filename_conflicts or []
         self.prepared_move = prepared_move or _PreparedMove(
             file_path=Path(prepared.entity_fields.file_path),
             markdown_content=prepared.markdown_content,
@@ -114,6 +116,8 @@ class _CreatePreparer:
             permalink=prepared.entity_fields.permalink,
         )
         self.calls: list[tuple[EntitySchema, bool, AsyncSession | None]] = []
+        self.skip_conflict_checks: list[bool] = []
+        self.conflict_calls: list[tuple[str, bool, AsyncSession | None]] = []
         self.replace_calls: list[tuple[Entity, EntitySchema, str, AsyncSession | None]] = []
         self.edit_calls: list[
             tuple[Entity, str, str, str, str | None, str | None, int, bool, AsyncSession | None]
@@ -126,10 +130,21 @@ class _CreatePreparer:
         schema: EntitySchema,
         *,
         check_storage_exists: bool = True,
+        skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> _PreparedWrite:
         self.calls.append((schema, check_storage_exists, session))
+        self.skip_conflict_checks.append(skip_conflict_check)
         return self.prepared
+
+    async def detect_file_path_conflicts(
+        self,
+        file_path: str,
+        skip_check: bool = False,
+        session: AsyncSession | None = None,
+    ) -> list[str]:
+        self.conflict_calls.append((file_path, skip_check, session))
+        return self.filename_conflicts
 
     async def prepare_update_entity_content(
         self,
@@ -593,7 +608,9 @@ async def test_run_accepted_note_create_persists_prepared_markdown() -> None:
     assert project_repository.calls == [(session, "project-123")]
     assert entity_lookup_repository.file_path_calls == [(session, "notes/Accepted.md", False)]
     assert preparer_factory.projects == [project]
+    assert preparer.conflict_calls == [("notes/Accepted.md", False, session)]
     assert preparer.calls == [(schema, False, session)]
+    assert preparer.skip_conflict_checks == [True]
     assert pending_entity_repository.calls[0][1].created_by == str(_ACTOR_ID)
     assert note_content_accept_repository.calls[0][1].markdown_content == "# Accepted\n"
     assert note_content_accept_repository.calls[0][1].db_version == 1
@@ -608,6 +625,80 @@ async def test_run_accepted_note_create_persists_prepared_markdown() -> None:
     assert change.materialization.actor_kind == "user"
     assert change.materialization.actor_name == "Ada"
     assert change.materialization.previous_file_path is None
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_rejects_equivalent_markdown_file_path() -> None:
+    session = cast(AsyncSession, object())
+    schema = _schema()
+    project = _project()
+    preparer = _CreatePreparer(
+        _prepared(),
+        filename_conflicts=["notes/accepted.md"],
+    )
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_create(
+            session,
+            request=AcceptedNoteCreateMutation(
+                project_external_id="project-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="api",
+            ),
+            dependencies=_dependencies(
+                project_repository=_ProjectRepository(project),
+                entity_lookup_repository=_EntityLookupRepository(),
+                note_content_lookup_repository=_NoteContentLookupRepository(),
+                preparer_factory=_PreparerFactory(preparer),
+                pending_entity_repository=_PendingEntityRepository(_entity()),
+                note_content_accept_repository=_NoteContentAcceptRepository(
+                    _note_content(_entity())
+                ),
+                search_repository=_SearchRepository(),
+            ),
+        )
+
+    assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.conflict
+    assert "notes/accepted.md" in str(exc_info.value.rejection.detail)
+    assert preparer.conflict_calls == [("notes/Accepted.md", False, session)]
+    assert preparer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_allows_equivalent_non_markdown_resource_path() -> None:
+    session = cast(AsyncSession, object())
+    schema = _schema()
+    project = _project()
+    prepared = _prepared()
+    entity = _entity()
+    preparer = _CreatePreparer(
+        prepared,
+        filename_conflicts=["notes/accepted.png"],
+    )
+
+    change = await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=_EntityLookupRepository(),
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(_note_content(entity)),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert change.status_code == 201
+    assert preparer.conflict_calls == [("notes/Accepted.md", False, session)]
+    assert preparer.skip_conflict_checks == [True]
 
 
 @pytest.mark.asyncio

@@ -227,15 +227,18 @@ class _CreatePreparer:
     def __init__(self, prepared: _PreparedWrite) -> None:
         self.prepared = prepared
         self.calls: list[tuple[EntitySchema, bool, AsyncSession | None]] = []
+        self.skip_conflict_checks: list[bool] = []
 
     async def prepare_create_entity_content(
         self,
         schema: EntitySchema,
         *,
         check_storage_exists: bool = True,
+        skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> _PreparedWrite:
         self.calls.append((schema, check_storage_exists, session))
+        self.skip_conflict_checks.append(skip_conflict_check)
         return self.prepared
 
 
@@ -467,6 +470,7 @@ async def test_prepare_accepted_note_create_hashes_prepared_markdown() -> None:
     assert result.prepared is prepared
     assert result.db_checksum == sha256(b"# Created\n").hexdigest()
     assert preparer.calls == [(schema, False, session)]
+    assert preparer.skip_conflict_checks == [False]
 
 
 @pytest.mark.asyncio

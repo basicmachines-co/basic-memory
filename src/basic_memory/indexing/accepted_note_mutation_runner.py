@@ -50,6 +50,7 @@ from basic_memory.runtime.storage import (
     RuntimeNoteActorName,
     RuntimeNoteChangeSource,
     runtime_content_type_is_markdown,
+    runtime_file_path_is_markdown_note,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
@@ -246,6 +247,13 @@ class AcceptedNoteMutationPreparer(
     Protocol,
 ):
     """Combined Basic Memory prepare capability for accepted note mutations."""
+
+    async def detect_file_path_conflicts(
+        self,
+        file_path: RuntimeFilePath,
+        skip_check: bool = ...,
+        session: AsyncSession | None = ...,
+    ) -> list[str]: ...
 
 
 class AcceptedNoteMutationPreparerFactory(Protocol):
@@ -463,20 +471,12 @@ async def _run_accepted_note_create(
     )
 
     preparer = dependencies.preparer_factory.create_note_preparer(project)
-    try:
-        prepared_write = await prepare_accepted_note_create(
-            preparer,
-            request.data,
-            check_storage_exists=dependencies.verify_storage_absent_on_create,
-            session=session,
-        )
-    except EntityAlreadyExistsError as error:
-        # An unindexed file already occupies this path (local source-of-truth
-        # runtimes only). Reject instead of committing DB state that the next
-        # watcher pass would overwrite with the stale file content.
-        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
-    except (ParseError, ValueError) as error:
-        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
+    prepared_write = await prepare_create_or_reject(
+        preparer,
+        request.data,
+        check_storage_exists=dependencies.verify_storage_absent_on_create,
+        session=session,
+    )
 
     prepared = prepared_write.prepared
     entity = await create_accepted_pending_entity(
@@ -953,7 +953,7 @@ async def reject_conflicting_accepted_note_file_path(
 
 
 async def prepare_create_or_reject(
-    preparer: AcceptedNoteCreatePreparer,
+    preparer: AcceptedNoteMutationPreparer,
     data: EntitySchema,
     *,
     check_storage_exists: bool,
@@ -961,10 +961,30 @@ async def prepare_create_or_reject(
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a new accepted note or raise a typed mutation rejection."""
     try:
+        conflicting_note_paths = [
+            path
+            for path in await preparer.detect_file_path_conflicts(
+                data.file_path,
+                session=session,
+            )
+            if runtime_file_path_is_markdown_note(path)
+        ]
+        if conflicting_note_paths:
+            joined_paths = ", ".join(sorted(conflicting_note_paths))
+            reject_accepted_note_mutation(
+                AcceptedNoteMutationRejectKind.conflict,
+                "A note with an equivalent filename already exists: "
+                f"{joined_paths}. Address the existing note explicitly to modify it.",
+            )
+
         return await prepare_accepted_note_create(
             preparer,
             data,
             check_storage_exists=check_storage_exists,
+            # The explicit check above rejects only Markdown note conflicts.
+            # EntityService's broader detector also reports similarly named
+            # binary resources, which are valid alongside Markdown notes.
+            skip_conflict_check=True,
             session=session,
         )
     except EntityAlreadyExistsError as error:

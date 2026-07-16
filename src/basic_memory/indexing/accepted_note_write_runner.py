@@ -119,6 +119,7 @@ class AcceptedNoteCreatePreparer(Protocol):
         schema: EntitySchema,
         *,
         check_storage_exists: bool = ...,
+        skip_conflict_check: bool = ...,
         session: AsyncSession | None = ...,
     ) -> AcceptedPreparedMarkdownWriteSource: ...
 
@@ -365,12 +366,14 @@ async def prepare_accepted_note_create(
     data: EntitySchema,
     *,
     check_storage_exists: bool,
+    skip_conflict_check: bool = False,
     session: AsyncSession | None = None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare one DB-first note create and checksum the accepted markdown."""
     prepared = await preparer.prepare_create_entity_content(
         data,
         check_storage_exists=check_storage_exists,
+        skip_conflict_check=skip_conflict_check,
         session=session,
     )
     return AcceptedPreparedNoteWrite(

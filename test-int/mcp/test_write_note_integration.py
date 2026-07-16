@@ -462,6 +462,54 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_p
 
 
 @pytest.mark.asyncio
+async def test_write_note_rejects_equivalent_legacy_markdown_filename(
+    mcp_server,
+    app,
+    test_project,
+    app_config,
+):
+    """A filename-mode change must not silently create a duplicate note (issue #1077)."""
+    app_config.kebab_filenames = True
+    app_config.permalinks_include_project = False
+    ConfigManager().save_config(app_config)
+
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Site Roadmap",
+                "directory": "filename-conflicts",
+                "content": "# Site Roadmap\n\nLegacy body.",
+            },
+        )
+        assert "# Created note" in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "file_path: filename-conflicts/site-roadmap.md" in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+
+        app_config.kebab_filenames = False
+        ConfigManager().save_config(app_config)
+
+        rejected = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Site Roadmap",
+                "directory": "filename-conflicts",
+                "content": "# Site Roadmap\n\nReplacement body.",
+            },
+        )
+        rejected_text = rejected.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Error: Note already exists" in rejected_text
+        assert "edit_note" in rejected_text
+
+    note_paths = sorted(
+        path.relative_to(test_project.path).as_posix()
+        for path in Path(test_project.path).rglob("*.md")
+    )
+    assert note_paths == ["filename-conflicts/site-roadmap.md"]
+
+
+@pytest.mark.asyncio
 async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, app_config):
     """Test that os.path.join logic in Entity.file_path works for various folder/title combinations."""
 
