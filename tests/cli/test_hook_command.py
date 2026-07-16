@@ -1003,6 +1003,28 @@ def test_hook_install_works_despite_broken_global_config(bm_home: Path) -> None:
     assert "SessionStart" in hooks and "PreCompact" in hooks
 
 
+def test_hook_command_installs_uvloop_for_async_work(bm_home: Path, claude_project: Path) -> None:
+    # Hook verbs run async search/write via run_with_cleanup, so uvloop must be
+    # installed (before any asyncio.run) even though the hook path is otherwise
+    # light — a Postgres backend would otherwise hit the asyncpg dispose race.
+    with (
+        patch("basic_memory.db.maybe_install_uvloop") as mock_uvloop,
+        patch(
+            "basic_memory.mcp.tools.search_notes",
+            new_callable=AsyncMock,
+            return_value=SEARCH_EMPTY,
+        ),
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+    mock_uvloop.assert_called_once()
+
+
 def test_hook_command_skips_global_initialization(bm_home: Path, claude_project: Path) -> None:
     # Hook verbs are fail-open (SPEC-55): global DB/config/migration init must not
     # run before the hook's own guard (it could return non-zero to the harness)

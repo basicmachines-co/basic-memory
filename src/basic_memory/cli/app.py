@@ -67,7 +67,15 @@ def app_callback(
     # verb's fail-open guard, or raised by an operator verb that needs it.
     if ctx.invoked_subcommand == "hook":
         try:
-            set_container(CliContainer.create())
+            container = CliContainer.create()
+            set_container(container)
+            # uvloop must own the event-loop policy before the hook verbs run
+            # async search/write/flush through run_with_cleanup's asyncio.run(),
+            # or a Postgres backend hits the asyncpg engine-dispose race
+            # (#831/#877). No-op for SQLite, so hook startup stays light.
+            from basic_memory.db import maybe_install_uvloop
+
+            maybe_install_uvloop(container.config)
         except Exception:
             pass
         return
