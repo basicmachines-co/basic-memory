@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from basic_memory.config import resolve_data_dir
+from basic_memory.config import CONFIG_DIR_MODE, CONFIG_FILE_MODE, resolve_data_dir
 from basic_memory.hooks._uuid7 import uuid7_unix_ms
 from basic_memory.hooks.envelope import Envelope, envelope_from_json, envelope_to_json
 
@@ -40,6 +40,29 @@ def processed_dir() -> Path:
     return inbox_dir() / PROCESSED_DIR_NAME
 
 
+# The WAL holds cwd, project names, session ids, and model metadata, so it must
+# be owner-only — matching the modes config dirs/files use. This matters most on
+# the hook path, which can create ~/.basic-memory ahead of normal config init
+# (which would otherwise set these), leaving mkdir/write at the default umask.
+def _secure_dir(path: Path) -> None:
+    if os.name != "nt":  # Windows has no comparable owner-only mode
+        path.chmod(CONFIG_DIR_MODE)
+
+
+def _secure_file(path: Path) -> None:
+    if os.name != "nt":
+        path.chmod(CONFIG_FILE_MODE)
+
+
+def _ensure_private_dir(path: Path) -> Path:
+    """Create ``path`` (and parents) and lock it — plus the state root, which the
+    hook may have created ahead of config init — down to owner-only (0700)."""
+    path.mkdir(parents=True, exist_ok=True)
+    _secure_dir(resolve_data_dir())
+    _secure_dir(path)
+    return path
+
+
 def write_envelope(envelope: Envelope) -> Path:
     """Append an envelope to the inbox atomically.
 
@@ -47,13 +70,15 @@ def write_envelope(envelope: Envelope) -> Path:
     ``*.json.tmp`` straggler that ``list_envelopes`` never picks up — the inbox
     can never contain a half-written envelope.
     """
-    directory = inbox_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = _ensure_private_dir(inbox_dir())
     target = directory / f"{envelope.id}.json"
     # The uuid7 id is unique per envelope, so the tmp name cannot collide even
     # with concurrent hooks writing simultaneously.
     tmp = directory / f"{envelope.id}.json.tmp"
     tmp.write_text(envelope_to_json(envelope), encoding="utf-8")
+    # Lock the tmp before the rename so the published file is owner-only from the
+    # moment it appears (os.replace preserves the source's mode).
+    _secure_file(tmp)
     os.replace(tmp, target)
     return target
 
@@ -70,10 +95,10 @@ def mark_processed(path: Path) -> Path:
     source with the destination already present means another sweep moved it
     first, so return that instead of aborting the current sweep midway.
     """
-    directory = processed_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = _ensure_private_dir(processed_dir())
     destination = directory / path.name
     try:
+        # os.replace preserves the source file's owner-only mode into processed/.
         os.replace(path, destination)
     except FileNotFoundError:
         if destination.exists():
@@ -186,10 +211,11 @@ def prune_pending(
 
 def record_flush(ts: str | None = None) -> None:
     """Stamp the last successful flush time for `bm hook status`."""
-    directory = inbox_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = _ensure_private_dir(inbox_dir())
     stamp = ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    (directory / LAST_FLUSH_FILE_NAME).write_text(stamp, encoding="utf-8")
+    marker = directory / LAST_FLUSH_FILE_NAME
+    marker.write_text(stamp, encoding="utf-8")
+    _secure_file(marker)
 
 
 def last_flush() -> str | None:

@@ -1,5 +1,7 @@
 """Unit tests for the inbox WAL: atomicity, ordering, retention."""
 
+import os
+import stat
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -28,6 +30,18 @@ def test_write_envelope_is_atomic_and_named_by_id(bm_home: Path) -> None:
 
     assert path == bm_home / "inbox" / f"{envelope.id}.json"
     assert path.is_file()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_write_envelope_uses_private_permissions(bm_home: Path) -> None:
+    # The WAL holds cwd/project/session/model trace, so the state dir, inbox, and
+    # envelope files must be owner-only — the hook may create ~/.basic-memory
+    # before config init would lock it down.
+    path = inbox.write_envelope(_envelope())
+
+    assert stat.S_IMODE(bm_home.stat().st_mode) == 0o700  # state root
+    assert stat.S_IMODE((bm_home / "inbox").stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
     # tmp + rename leaves no stragglers behind
     assert list(path.parent.glob("*.tmp")) == []
 
