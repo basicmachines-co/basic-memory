@@ -4,11 +4,13 @@ from dataclasses import dataclass
 
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteContentWritePlan,
+    RuntimeNoteMaterializationJobRequest,
     RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     next_runtime_note_content_version,
     plan_accepted_note_content_write,
     plan_accepted_note_materialization_change,
+    plan_note_materialization_job_request,
     plan_pending_note_materialization,
 )
 
@@ -40,6 +42,7 @@ def test_plan_pending_note_materialization_uses_fallback_source_when_missing() -
         fallback_source="api",
         actor_kind="mcp_client",
         actor_name="Claude Code",
+        previous_file_path="notes/old.md",
         cleanup_after_write=cleanup,
     )
 
@@ -51,6 +54,7 @@ def test_plan_pending_note_materialization_uses_fallback_source_when_missing() -
         actor_kind="mcp_client",
         actor_name="Claude Code",
         source="api",
+        previous_file_path="notes/old.md",
         cleanup_after_write=cleanup,
     )
 
@@ -85,6 +89,37 @@ def test_plan_pending_note_materialization_prefers_note_source() -> None:
     )
 
     assert materialization.source == "mcp"
+
+
+def test_plan_note_materialization_job_request_preserves_previous_move_path() -> None:
+    cleanup = RuntimePendingNoteFileDelete(
+        project_id=7,
+        entity_id=42,
+        file_path="notes/old.md",
+        file_checksum="old-checksum",
+    )
+    materialization = RuntimePendingNoteMaterialization(
+        project_id=7,
+        entity_id=42,
+        db_version=4,
+        db_checksum="db-checksum",
+        source="api",
+        previous_file_path="notes/old.md",
+        cleanup_after_write=cleanup,
+    )
+
+    assert plan_note_materialization_job_request(
+        materialization
+    ) == RuntimeNoteMaterializationJobRequest(
+        project_id=7,
+        entity_id=42,
+        db_version=4,
+        db_checksum="db-checksum",
+        source="api",
+        previous_file_path="notes/old.md",
+        cleanup_file_path="notes/old.md",
+        cleanup_file_checksum="old-checksum",
+    )
 
 
 def test_next_runtime_note_content_version_starts_new_rows_at_one() -> None:

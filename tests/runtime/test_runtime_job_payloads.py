@@ -66,6 +66,7 @@ def test_runtime_note_materialization_job_payload_round_trips_runtime_request() 
         actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
         actor_name="Claude Code",
         source="mcp",
+        previous_file_path="notes/previous.md",
         cleanup_file_path="notes/old.md",
         cleanup_file_checksum="old-file-sum",
     )

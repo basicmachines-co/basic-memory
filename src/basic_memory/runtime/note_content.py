@@ -708,6 +708,7 @@ class RuntimePendingNoteMaterialization:
     actor_kind: RuntimeNoteActorKind | None = None
     actor_name: RuntimeNoteActorName | None = None
     source: RuntimeNoteChangeSource | None = None
+    previous_file_path: RuntimeFilePath | None = None
     cleanup_after_write: RuntimePendingNoteFileDelete | None = None
 
 
@@ -720,6 +721,7 @@ def plan_pending_note_materialization(
     actor_user_profile_id: UUID | None = None,
     actor_kind: RuntimeNoteActorKind | None = None,
     actor_name: RuntimeNoteActorName | None = None,
+    previous_file_path: RuntimeFilePath | None = None,
     cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
 ) -> RuntimePendingNoteMaterialization:
     """Build the queued materialization marker from accepted note_content state."""
@@ -733,6 +735,7 @@ def plan_pending_note_materialization(
         actor_kind=actor_kind,
         actor_name=actor_name,
         source=str(source) if source else None,
+        previous_file_path=previous_file_path,
         cleanup_after_write=cleanup_after_write,
     )
 
@@ -749,6 +752,7 @@ class RuntimeNoteMaterializationJobRequest:
     actor_kind: RuntimeNoteActorKind | None = None
     actor_name: RuntimeNoteActorName | None = None
     source: RuntimeNoteChangeSource | None = None
+    previous_file_path: RuntimeFilePath | None = None
     cleanup_file_path: RuntimeFilePath | None = None
     cleanup_file_checksum: RuntimeFileChecksum | None = None
 
@@ -805,6 +809,7 @@ def plan_note_materialization_job_request(
         actor_kind=materialization.actor_kind,
         actor_name=materialization.actor_name,
         source=materialization.source,
+        previous_file_path=materialization.previous_file_path,
         cleanup_file_path=cleanup.file_path if cleanup is not None else None,
         cleanup_file_checksum=cleanup.file_checksum if cleanup is not None else None,
     )
@@ -864,6 +869,7 @@ def plan_accepted_note_materialization_change[PayloadT](
     actor_user_profile_id: UUID | None = None,
     actor_kind: RuntimeNoteActorKind | None = None,
     actor_name: RuntimeNoteActorName | None = None,
+    previous_file_path: RuntimeFilePath | None = None,
     cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
 ) -> RuntimeAcceptedNoteChange[PayloadT]:
     """Build an accepted-note response plus materialization follow-up marker."""
@@ -878,6 +884,7 @@ def plan_accepted_note_materialization_change[PayloadT](
             actor_user_profile_id=actor_user_profile_id,
             actor_kind=actor_kind,
             actor_name=actor_name,
+            previous_file_path=previous_file_path,
             cleanup_after_write=cleanup_after_write,
         ),
     )
@@ -956,6 +963,7 @@ def plan_accepted_note_write_change(
     actor_user_profile_id: UUID | None = None,
     actor_kind: RuntimeNoteActorKind | None = None,
     actor_name: RuntimeNoteActorName | None = None,
+    previous_file_path: RuntimeFilePath | None = None,
     cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
 ) -> RuntimeAcceptedNoteChange[RuntimeAcceptedNoteResponse]:
     """Build the accepted-note response plus the materialization follow-up marker."""
@@ -973,6 +981,7 @@ def plan_accepted_note_write_change(
         actor_user_profile_id=actor_user_profile_id,
         actor_kind=actor_kind,
         actor_name=actor_name,
+        previous_file_path=previous_file_path,
         cleanup_after_write=cleanup_after_write,
     )
 

@@ -76,6 +76,7 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
     actor_kind: str | None = None
     actor_name: str | None = None
     source: str | None = None
+    previous_file_path: str | None = None
     cleanup_file_path: str | None = None
     cleanup_file_checksum: str | None = None
 
@@ -125,6 +126,7 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
             actor_kind=request.actor_kind,
             actor_name=request.actor_name,
             source=request.source,
+            previous_file_path=request.previous_file_path,
             cleanup_file_path=request.cleanup_file_path,
             cleanup_file_checksum=request.cleanup_file_checksum,
         )
@@ -140,6 +142,7 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
             actor_kind=self.actor_kind,
             actor_name=self.actor_name,
             source=self.source,
+            previous_file_path=self.previous_file_path,
             cleanup_file_path=self.cleanup_file_path,
             cleanup_file_checksum=self.cleanup_file_checksum,
         )

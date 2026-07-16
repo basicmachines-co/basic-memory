@@ -791,6 +791,7 @@ async def _run_accepted_note_move(
         actor_user_profile_id=request.actor.user_profile_id,
         actor_kind=request.actor.kind,
         actor_name=request.actor.name,
+        previous_file_path=existing_file_path,
         cleanup_after_write=persisted.previous_file_delete,
         fallback_source=request.source,
     )

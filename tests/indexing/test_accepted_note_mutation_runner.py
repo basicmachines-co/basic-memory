@@ -545,6 +545,7 @@ async def test_run_accepted_note_create_persists_prepared_markdown() -> None:
     assert change.materialization.actor_user_profile_id == _ACTOR_ID
     assert change.materialization.actor_kind == "user"
     assert change.materialization.actor_name == "Ada"
+    assert change.materialization.previous_file_path is None
 
 
 @pytest.mark.asyncio
@@ -597,6 +598,7 @@ async def test_run_accepted_note_update_replaces_existing_note_content() -> None
     assert change.payload.title == "Replacement"
     assert change.materialization is not None
     assert change.materialization.db_version == 2
+    assert change.materialization.previous_file_path is None
 
 
 @pytest.mark.asyncio
@@ -964,13 +966,17 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content() -> None
 
 
 @pytest.mark.asyncio
-async def test_run_accepted_note_move_uses_policy_and_carries_cleanup() -> None:
+@pytest.mark.parametrize("file_checksum", ["file-checksum", None])
+async def test_run_accepted_note_move_carries_previous_path_and_materialized_cleanup(
+    file_checksum: str | None,
+) -> None:
     session = _MutationSession()
     project = _project()
     prepared = _prepared_replacement()
     prepared_move = _prepared_move()
     entity = _entity(file_path="notes/accepted.md")
     note_content = _note_content(entity)
+    note_content.file_checksum = file_checksum
     project_repository = _ProjectRepository(project)
     entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
     note_content_lookup_repository = _NoteContentLookupRepository(note_content)
@@ -1015,9 +1021,14 @@ async def test_run_accepted_note_move_uses_policy_and_carries_cleanup() -> None:
     assert entity.permalink == "archive/accepted"
     assert change.status_code == 200
     assert change.materialization is not None
-    assert change.materialization.cleanup_after_write is not None
-    assert change.materialization.cleanup_after_write.file_path == "notes/accepted.md"
-    assert change.materialization.cleanup_after_write.file_checksum == "file-checksum"
+    assert change.materialization.previous_file_path == "notes/accepted.md"
+    cleanup = change.materialization.cleanup_after_write
+    if file_checksum is None:
+        assert cleanup is None
+    else:
+        assert cleanup is not None
+        assert cleanup.file_path == "notes/accepted.md"
+        assert cleanup.file_checksum == "file-checksum"
 
 
 @pytest.mark.asyncio
