@@ -1,6 +1,7 @@
 """Utilities for converting between markdown and entity models."""
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -79,6 +80,32 @@ def entity_model_from_markdown(
     ]
 
     return model
+
+
+def apply_default_timestamps(
+    metadata: dict[str, Any],
+    *,
+    incoming_metadata: dict[str, Any],
+    fallback_created: datetime,
+    now: datetime,
+) -> None:
+    """Fill in missing `created`/`modified` frontmatter timestamps, in place.
+
+    `metadata` is the full frontmatter about to be written; it may already carry
+    a `created`/`modified` value inherited from a prior save. `incoming_metadata`
+    is the subset of that state contributed by *this* write request, used to
+    distinguish a fresh user-supplied value from one merely carried over from an
+    earlier write.
+
+    `created` is preserved once set (by BM or by the user) and only filled from
+    `fallback_created` the first time a note gets one. `modified` is bumped to
+    `now` on every write BM performs, unless this request explicitly supplied its
+    own `modified` value (a deliberate override, e.g. importing historical data).
+    """
+    if "created" not in metadata:
+        metadata["created"] = fallback_created.isoformat()
+    if "modified" not in incoming_metadata:
+        metadata["modified"] = now.isoformat()
 
 
 async def schema_to_markdown(schema: Any) -> Post:

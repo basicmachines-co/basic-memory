@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from datetime import datetime
 
 import pytest
 
@@ -10,7 +11,21 @@ from basic_memory.file_utils import ParseError, parse_frontmatter, remove_frontm
 from basic_memory.repository import AcceptedObservationWrite, AcceptedRelationWrite
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import EntityAlreadyExistsError
-from basic_memory.services.entity_service import PreparedEntityFields
+
+
+def _drop_timestamps(metadata: dict) -> dict:
+    """Strip created/modified before comparing metadata from two independent prepare calls.
+
+    Each call stamps its own write time (#238/#684), so two otherwise-identical prepare
+    invocations legitimately produce different created/modified values; the parity tests
+    below only care that everything else matches.
+    """
+    return {k: v for k, v in metadata.items() if k not in ("created", "modified")}
+
+
+def _frontmatter_and_body_ignoring_timestamps(content: str) -> tuple[dict, str]:
+    """Parse (metadata, body), dropping created/modified (see `_drop_timestamps`)."""
+    return _drop_timestamps(parse_frontmatter(content)), remove_frontmatter(content)
 
 
 @pytest.mark.asyncio
@@ -28,12 +43,16 @@ async def test_prepare_create_entity_content_matches_create_entity_with_content(
     result = await entity_service.create_entity_with_content(schema)
 
     assert prepared.file_path.as_posix() == result.entity.file_path
-    assert prepared.markdown_content == result.content
+    assert _frontmatter_and_body_ignoring_timestamps(
+        prepared.markdown_content
+    ) == _frontmatter_and_body_ignoring_timestamps(result.content)
     assert prepared.search_content == result.search_content
     assert prepared.entity_fields.title == result.entity.title
     assert prepared.entity_fields.note_type == result.entity.note_type
     assert prepared.entity_fields.permalink == result.entity.permalink
-    assert prepared.entity_fields.entity_metadata == result.entity.entity_metadata
+    assert _drop_timestamps(prepared.entity_fields.entity_metadata) == _drop_timestamps(
+        result.entity.entity_metadata
+    )
 
 
 @pytest.mark.asyncio
@@ -47,19 +66,26 @@ async def test_prepare_create_entity_content_returns_typed_entity_fields(entity_
         )
     )
 
-    assert prepared.entity_fields == PreparedEntityFields(
-        title="Typed Fields",
-        note_type="decision",
-        entity_metadata={
-            "title": "Typed Fields",
-            "type": "decision",
-            "status": "accepted",
-            "permalink": "test-project/notes/typed-fields",
-        },
-        content_type="text/markdown",
-        permalink="test-project/notes/typed-fields",
-        file_path="notes/Typed Fields.md",
+    # created/modified are auto-filled with the current write time (#238/#684); a fresh
+    # note stamps both the same, so compare everything else exactly and check those two
+    # separately rather than hardcoding a timestamp.
+    entity_metadata = prepared.entity_fields.entity_metadata
+    assert entity_metadata is not None
+    assert datetime.fromisoformat(entity_metadata["created"]) == datetime.fromisoformat(
+        entity_metadata["modified"]
     )
+    other_metadata = {k: v for k, v in entity_metadata.items() if k not in ("created", "modified")}
+    assert other_metadata == {
+        "title": "Typed Fields",
+        "type": "decision",
+        "status": "accepted",
+        "permalink": "test-project/notes/typed-fields",
+    }
+    assert prepared.entity_fields.title == "Typed Fields"
+    assert prepared.entity_fields.note_type == "decision"
+    assert prepared.entity_fields.content_type == "text/markdown"
+    assert prepared.entity_fields.permalink == "test-project/notes/typed-fields"
+    assert prepared.entity_fields.file_path == "notes/Typed Fields.md"
     with pytest.raises(FrozenInstanceError):
         setattr(prepared.entity_fields, "title", "Changed")
 
@@ -166,7 +192,9 @@ async def test_prepare_update_entity_content_matches_update_entity_with_content(
     result = await entity_service.update_entity_with_content(created, update_schema)
     prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
 
-    assert prepared.markdown_content == result.content
+    assert _frontmatter_and_body_ignoring_timestamps(
+        prepared.markdown_content
+    ) == _frontmatter_and_body_ignoring_timestamps(result.content)
     assert prepared.search_content == result.search_content
     assert prepared.entity_fields.title == result.entity.title
     assert prepared.entity_fields.note_type == result.entity.note_type
@@ -174,6 +202,8 @@ async def test_prepare_update_entity_content_matches_update_entity_with_content(
     assert prepared_frontmatter["owner"] == "alice"
     assert prepared_frontmatter["status"] == "published"
     assert prepared_frontmatter["reviewed_by"] == "bob"
+    # created is inherited from the existing note (not re-stamped); modified is bumped.
+    assert prepared_frontmatter["created"] == parse_frontmatter(existing_content)["created"]
 
 
 @pytest.mark.asyncio
@@ -208,7 +238,9 @@ async def test_prepare_update_entity_content_can_change_file_path(
 
     assert prepared.file_path.as_posix() == "journal/Renamed Note.md"
     assert result.entity.file_path == "journal/Renamed Note.md"
-    assert result.content == prepared.markdown_content
+    assert _frontmatter_and_body_ignoring_timestamps(
+        result.content
+    ) == _frontmatter_and_body_ignoring_timestamps(prepared.markdown_content)
     assert prepared.entity_fields.permalink != created.permalink
     assert prepared.entity_fields.permalink == result.entity.permalink
     assert not await file_service.exists("notes/Original Name.md")
@@ -358,7 +390,9 @@ async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
         find_text="Before edit",
     )
 
-    assert prepared.markdown_content == result.content
+    assert _frontmatter_and_body_ignoring_timestamps(
+        prepared.markdown_content
+    ) == _frontmatter_and_body_ignoring_timestamps(result.content)
     assert prepared.search_content == result.search_content
     assert prepared.entity_fields.title == result.entity.title
     assert prepared.entity_fields.note_type == result.entity.note_type
@@ -418,7 +452,14 @@ async def test_prepare_edit_entity_content_prepend_preserves_valid_frontmatter(
         content="Prepended line",
     )
 
-    assert parse_frontmatter(prepared.markdown_content) == {
+    # Prepending is a BM-initiated write: created (stamped at create time) is preserved,
+    # and modified is bumped to reflect this edit (#238/#684).
+    parsed_frontmatter = parse_frontmatter(prepared.markdown_content)
+    created_ts = parsed_frontmatter.pop("created")
+    modified_ts = parsed_frontmatter.pop("modified")
+    assert datetime.fromisoformat(created_ts) is not None
+    assert datetime.fromisoformat(modified_ts) is not None
+    assert parsed_frontmatter == {
         "title": "Prepared Prepend Frontmatter",
         "type": "note",
         "status": "draft",

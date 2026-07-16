@@ -26,6 +26,12 @@ from basic_memory.utils import parse_tags
 
 md = MarkdownIt().use(observation_plugin).use(relation_plugin)
 
+# Frontmatter keys accepted for the created/modified timestamps, canonical name first (#238).
+# `date` and the `_at` aliases are read-time conveniences for notes imported from other tools;
+# BM always writes the canonical `created`/`modified` keys (see parse_markdown_content below).
+_CREATED_KEYS = ("created", "created_at", "date")
+_MODIFIED_KEYS = ("modified", "updated_at")
+
 
 def normalize_frontmatter_value(value: Any) -> Any:
     """Normalize frontmatter values to safe types for processing.
@@ -184,6 +190,23 @@ class EntityParser:
                 return parsed
         return None
 
+    def _frontmatter_timestamp(
+        self, metadata: dict[str, Any], keys: tuple[str, ...]
+    ) -> Optional[datetime]:
+        """Resolve a created/modified timestamp from frontmatter, preferring the first alias.
+
+        A naive result (e.g. from a date-only value like ``2024-03-15``) is assumed to be in
+        the local timezone rather than UTC (#238).
+        """
+        for key in keys:
+            value = metadata.get(key)
+            if value is None:
+                continue
+            parsed = self.parse_date(value)
+            if parsed:
+                return parsed if parsed.tzinfo else parsed.astimezone()
+        return None
+
     async def parse_file(self, path: Path | str) -> EntityMarkdown:
         """Parse markdown file into EntityMarkdown."""
 
@@ -299,10 +322,17 @@ class EntityParser:
         entity_frontmatter = EntityFrontmatter(metadata=metadata)
         entity_content = parse(post.content)
 
-        # Use provided timestamps or current time as fallback
+        # A user- or BM-supplied timestamp in frontmatter always wins over file stat times,
+        # so imported/backdated notes (#238) and BM's own written timestamps (#684) survive
+        # re-parsing. Fall back to file stats, then current time, when frontmatter has neither.
         now = datetime.now().astimezone()
-        created = datetime.fromtimestamp(ctime).astimezone() if ctime else now
-        modified = datetime.fromtimestamp(mtime).astimezone() if mtime else now
+        created = self._frontmatter_timestamp(metadata, _CREATED_KEYS)
+        if created is None:
+            created = datetime.fromtimestamp(ctime).astimezone() if ctime else now
+
+        modified = self._frontmatter_timestamp(metadata, _MODIFIED_KEYS)
+        if modified is None:
+            modified = datetime.fromtimestamp(mtime).astimezone() if mtime else now
 
         return EntityMarkdown(
             frontmatter=entity_frontmatter,

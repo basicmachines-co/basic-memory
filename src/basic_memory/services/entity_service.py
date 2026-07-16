@@ -26,7 +26,11 @@ from basic_memory.markdown.entity_parser import (
     _coerce_to_string,
     normalize_frontmatter_metadata,
 )
-from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
+from basic_memory.markdown.utils import (
+    apply_default_timestamps,
+    entity_model_from_markdown,
+    schema_to_markdown,
+)
 from basic_memory.models import Entity as EntityModel
 from basic_memory.models import Observation, Relation
 from basic_memory.models.knowledge import Entity
@@ -709,6 +713,17 @@ class EntityService(BaseService[EntityModel]):
         # Build the final markdown once here. Local mode will write it immediately; cloud mode can
         # store it in note_content first and materialize later without re-deriving anything.
         post = await schema_to_markdown(schema)
+        # Trigger: a brand-new note has no prior frontmatter to inherit from.
+        # Why: #238/#684 want every note to carry visible created/modified timestamps, but a
+        #      user-supplied value (from schema.content's own frontmatter) must still win.
+        # Outcome: both fields default to "now" unless the caller already set them.
+        now = datetime.now().astimezone()
+        apply_default_timestamps(
+            post.metadata,
+            incoming_metadata=post.metadata,
+            fallback_created=now,
+            now=now,
+        )
         markdown_content = dump_frontmatter(post)
         entity_fields = self._build_entity_fields(
             file_path=file_path,
@@ -780,6 +795,20 @@ class EntityService(BaseService[EntityModel]):
         merged_metadata = deepcopy(existing_markdown.frontmatter.metadata)
         merged_metadata.update(post.metadata)
         merged_metadata["permalink"] = resolved_permalink
+
+        # Trigger: this write may be the first to add created/modified, or a later edit to a
+        #          note that already has them.
+        # Why: created must survive edits once set (#238); modified should reflect the latest
+        #      accepted write unless this request explicitly supplies its own value (#684).
+        # Outcome: created is filled once (from the entity's own created_at) and preserved
+        #          afterward; modified is bumped to "now" on every BM-initiated write.
+        now = datetime.now().astimezone()
+        apply_default_timestamps(
+            merged_metadata,
+            incoming_metadata=post.metadata,
+            fallback_created=entity.created_at or now,
+            now=now,
+        )
 
         merged_post = frontmatter.Post(post.content)
         merged_post.metadata.update(merged_metadata)
@@ -863,6 +892,28 @@ class EntityService(BaseService[EntityModel]):
                         skip_conflict_check=skip_conflict_check,
                         session=session,
                     )
+
+            # Trigger: edit operations (append/prepend/find_replace/replace_section) touch the
+            #          note body while carrying the pre-existing frontmatter block through
+            #          untouched.
+            # Why: an edit is still a BM-initiated write, so modified should reflect it (#684);
+            #      created must not move just because the body changed (#238). Using
+            #      frontmatter.Post(body) + metadata.update() (not frontmatter.loads()) avoids
+            #      the reserved-key constructor crash noted in EntityParser.parse_markdown_content.
+            # Outcome: the frontmatter block written to disk gets modified bumped to "now" (and
+            #          created filled in if this is the first write to carry one), instead of
+            #          silently keeping a stale modified value from before the edit.
+            edit_post = frontmatter.Post(remove_frontmatter(markdown_content))
+            edit_post.metadata.update(content_frontmatter)
+            now = datetime.now().astimezone()
+            apply_default_timestamps(
+                edit_post.metadata,
+                incoming_metadata={},
+                fallback_created=entity.created_at or now,
+                now=now,
+            )
+            markdown_content = dump_frontmatter(edit_post)
+            content_frontmatter = edit_post.metadata
 
             normalized_metadata = normalize_frontmatter_metadata(content_frontmatter or {})
             metadata = {k: v for k, v in normalized_metadata.items() if v is not None} or None

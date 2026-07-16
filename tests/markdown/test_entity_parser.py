@@ -207,6 +207,143 @@ def test_parse_date_formats(entity_parser):
     assert entity_parser.parse_date("25:00:00") is None  # Invalid time
 
 
+@pytest.mark.asyncio
+async def test_parse_frontmatter_created_modified_full_datetime(entity_parser, tmp_path):
+    """A full ISO 8601 datetime in frontmatter overrides file stat timestamps (#238)."""
+    content = dedent("""
+        ---
+        title: Historical Note
+        type: note
+        created: 2024-03-15T14:30:00
+        modified: 2024-03-16T09:00:00
+        ---
+
+        Some historical content.
+        """)
+
+    entity = await entity_parser.parse_markdown_content(
+        file_path=tmp_path / "historical.md",
+        content=content,
+        mtime=0,
+        ctime=0,
+    )
+
+    assert entity.created is not None
+    assert entity.modified is not None
+    assert (entity.created.year, entity.created.month, entity.created.day) == (2024, 3, 15)
+    assert (entity.created.hour, entity.created.minute) == (14, 30)
+    assert (entity.modified.year, entity.modified.month, entity.modified.day) == (2024, 3, 16)
+    assert (entity.modified.hour, entity.modified.minute) == (9, 0)
+    # Naive frontmatter values are assumed to be local time, not UTC.
+    assert entity.created.tzinfo is not None
+    assert entity.modified.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_parse_frontmatter_created_date_only(entity_parser, tmp_path):
+    """A date-only value (no time component) is accepted for created (#238)."""
+    content = dedent("""
+        ---
+        title: Date Only Note
+        type: note
+        created: 2024-03-15
+        ---
+
+        Content.
+        """)
+
+    entity = await entity_parser.parse_markdown_content(
+        file_path=tmp_path / "date_only.md",
+        content=content,
+        mtime=0,
+        ctime=0,
+    )
+
+    assert entity.created is not None
+    assert (entity.created.year, entity.created.month, entity.created.day) == (2024, 3, 15)
+    assert entity.created.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_parse_frontmatter_created_explicit_timezone_preserved(entity_parser, tmp_path):
+    """An explicit UTC offset in frontmatter is preserved, not reinterpreted as local (#238)."""
+    content = dedent("""
+        ---
+        title: Timezone Note
+        type: note
+        created: "2024-03-15T14:30:00+05:00"
+        ---
+
+        Content.
+        """)
+
+    entity = await entity_parser.parse_markdown_content(
+        file_path=tmp_path / "tz.md",
+        content=content,
+        mtime=0,
+        ctime=0,
+    )
+
+    assert entity.created is not None
+    assert entity.created.utcoffset().total_seconds() == 5 * 3600
+    assert (entity.created.hour, entity.created.minute) == (14, 30)
+
+
+@pytest.mark.asyncio
+async def test_parse_frontmatter_timestamp_aliases(entity_parser, tmp_path):
+    """The date/created_at/updated_at aliases are accepted as cheap read-time conveniences."""
+    content = dedent("""
+        ---
+        title: Imported Note
+        type: note
+        date: 2023-01-01
+        updated_at: 2023-06-15T10:00:00
+        ---
+
+        Content.
+        """)
+
+    entity = await entity_parser.parse_markdown_content(
+        file_path=tmp_path / "imported.md",
+        content=content,
+        mtime=0,
+        ctime=0,
+    )
+
+    assert (entity.created.year, entity.created.month, entity.created.day) == (2023, 1, 1)
+    assert (entity.modified.year, entity.modified.month, entity.modified.day) == (2023, 6, 15)
+
+
+@pytest.mark.asyncio
+async def test_parse_missing_frontmatter_timestamps_falls_back_to_file_stats(
+    entity_parser, tmp_path
+):
+    """Without frontmatter created/modified, file stat times are used (existing behavior)."""
+    content = dedent("""
+        ---
+        title: No Timestamps
+        type: note
+        ---
+
+        Content.
+        """)
+
+    mtime = datetime(2022, 5, 1, 12, 0, 0).timestamp()
+    ctime = datetime(2022, 1, 1, 8, 0, 0).timestamp()
+
+    entity = await entity_parser.parse_markdown_content(
+        file_path=tmp_path / "no_timestamps.md",
+        content=content,
+        mtime=mtime,
+        ctime=ctime,
+    )
+
+    assert entity.created.year == 2022
+    assert entity.created.month == 1
+    assert entity.modified.year == 2022
+    assert entity.modified.month == 5
+
+
 def test_parse_empty_content():
     """Test parsing empty or minimal content."""
     result = parse("")
