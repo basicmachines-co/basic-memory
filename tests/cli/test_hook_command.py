@@ -49,7 +49,7 @@ def _write_claude_settings(project: Path, block: dict) -> None:
     )
 
 
-def _payload(cwd: Path, **extra) -> str:
+def _payload(cwd: str | Path, **extra) -> str:
     return json.dumps({"session_id": "s-abc12345", "cwd": str(cwd), **extra})
 
 
@@ -434,6 +434,35 @@ def test_pre_compact_redacts_secrets_in_checkpoint(
     kwargs = mock_write.await_args.kwargs
     assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["content"]
     assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["title"]
+
+
+def test_pre_compact_redacts_cwd_under_denied_path(
+    bm_home: Path, claude_project: Path, tmp_path: Path
+) -> None:
+    """Regression: a session under a configured redactPaths dir must not leak the
+    raw cwd into the checkpoint frontmatter or body (#997)."""
+    _write_claude_settings(
+        claude_project,
+        {"primaryProject": "demo", "redactPaths": ["/srv/clients/"]},
+    )
+    transcript = _transcript(tmp_path)
+    mock_write = AsyncMock(return_value={"action": "created"})
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--project-dir", str(claude_project)],
+            input=_payload(
+                "/srv/clients/acme/repo",
+                transcript_path=str(transcript),
+                trigger="auto",
+            ),
+        )
+
+    assert result.exit_code == 0
+    assert mock_write.await_args is not None
+    content = mock_write.await_args.kwargs["content"]
+    assert "/srv/clients/acme/repo" not in content
+    assert "cwd: [REDACTED_PATH]" in content
 
 
 def test_pre_compact_without_primary_project_is_silent(bm_home: Path, tmp_path: Path) -> None:

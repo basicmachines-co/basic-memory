@@ -19,7 +19,7 @@ from dataclasses import MISSING, asdict, dataclass, field, fields
 from datetime import datetime, timezone
 
 from basic_memory.hooks._uuid7 import uuid7
-from basic_memory.hooks.redaction import redact_payload
+from basic_memory.hooks.redaction import redact_payload, redact_text
 
 ENVELOPE_VERSION = 1
 
@@ -101,9 +101,11 @@ def create_envelope(
     """Factory: build a producer envelope from normalized hook inputs.
 
     Keyword-only to prevent positional-order mistakes when callers construct
-    envelopes from heterogeneous payload shapes. The payload passes through the
-    Stage-1 redaction floor here, at the factory — no envelope built through
-    this path can carry unredacted payload values into the inbox.
+    envelopes from heterogeneous payload shapes. Both the payload and the ``cwd``
+    pass through the Stage-1 redaction floor here, at the factory — no envelope
+    built through this path can carry unredacted payload values or a denied
+    workspace path into the inbox. ``project_hint`` is a project name, not a
+    path, so it is left intact (the projector resolves against it).
     """
     if event not in V0_EVENTS:
         raise ValueError(f"Unknown event {event!r}; v0 supports: {sorted(V0_EVENTS)}")
@@ -114,6 +116,9 @@ def create_envelope(
         extra_redact_keys=extra_redact_keys,
         extra_redact_paths=extra_redact_paths,
     )
+    # cwd is a user path: a session under a configured redactPaths (or a default
+    # deny dir) must not persist the raw path in the inbox WAL.
+    safe_cwd = redact_text(cwd, extra_redact_paths=extra_redact_paths)
 
     return Envelope(
         id=str(uuid7()),
@@ -122,7 +127,7 @@ def create_envelope(
         source_session_id=session_id,
         source_turn_id=turn_id,
         ts=resolved_ts,
-        cwd=cwd,
+        cwd=safe_cwd,
         project_hint=project_hint,
         actor=actor,
         caused_by=caused_by,

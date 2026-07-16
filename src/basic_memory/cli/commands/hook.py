@@ -618,6 +618,10 @@ def _checkpoint_note(
     assistant_messages = [
         redact_text(text, extra_redact_paths) for role, text in conversation if role == "assistant"
     ]
+    # cwd is a user path too: a session under a configured redactPaths (or a
+    # default deny dir) must not leak the raw path into the note frontmatter or
+    # body. Redact once so both draw from the scrubbed string.
+    safe_cwd = redact_text(event.cwd, extra_redact_paths)
     opening = user_messages[0]
     recent_user = user_messages[-3:]
 
@@ -634,7 +638,7 @@ def _checkpoint_note(
         f"started: {iso}",
         f"ended: {iso}",
         f"project: {primary}",
-        f"cwd: {event.cwd}",
+        f"cwd: {safe_cwd}",
     ]
     if event.session_id:
         frontmatter.append(f"{profile.session_id_key}: {event.session_id}")
@@ -655,7 +659,7 @@ def _checkpoint_note(
         "resume._",
         "",
         "## Summary",
-        f"Working in `{event.cwd}`.",
+        f"Working in `{safe_cwd}`.",
         f"- Opening request: {_clip(opening, 300)}",
         "",
         "## Recent thread",

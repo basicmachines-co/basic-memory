@@ -76,6 +76,23 @@ def test_create_envelope_redacts_payload_recursively() -> None:
     assert envelope.payload["note"] == "safe"
 
 
+def test_create_envelope_redacts_cwd_under_denied_path() -> None:
+    # cwd is a user path; a session under a configured redactPaths dir must not
+    # persist the raw path into the inbox WAL.
+    envelope = _envelope(
+        cwd="/srv/clients/acme/repo",
+        extra_redact_paths=["/srv/clients/"],
+    )
+
+    assert envelope.cwd == "[REDACTED_PATH]"
+
+
+def test_create_envelope_keeps_ordinary_cwd() -> None:
+    envelope = _envelope(cwd="/home/dev/project")
+
+    assert envelope.cwd == "/home/dev/project"
+
+
 # --- Idempotency ---
 
 
