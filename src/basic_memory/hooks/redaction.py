@@ -104,7 +104,9 @@ def _deny_path_patterns(
     ``/srv/clientsbackup`` (for ``/srv/clients/``) can't match — while allowing a
     separator, whitespace, end, or punctuation to end the token. That last part
     matters for prose: a root followed by ``,`` or ``.`` (``read ~/.ssh, then``)
-    must still redact. An optional ``[/\\]\\S*`` consumes a descendant when present.
+    must still redact. The descendant tail then consumes any trailing path (see
+    the inline comment where it is compiled), tolerating spaces in intermediate
+    directory components while stopping the final component at whitespace.
 
     On Windows the filesystem is case-insensitive, so the payload/transcript may
     carry a different drive/user casing than ``os.path.expanduser`` produced
@@ -122,8 +124,23 @@ def _deny_path_patterns(
         escaped = re.escape(root).replace("/", r"[/\\]")
         # The normalized root is paired with its substring matcher: the root
         # drives the whole-value path-prefix check (which tolerates spaces the
-        # substring `\\S*` tail would truncate), the pattern the in-prose match.
-        matchers.append((root, re.compile(escaped + r"(?![A-Za-z0-9_-])(?:[/\\]\S*)?", flags)))
+        # substring tail would truncate), the pattern the in-prose match.
+        #
+        # Descendant tail: intermediate directory components may contain spaces
+        # (a client dir like `acme corp/`), so we greedily consume `[/\\]<seg>`
+        # runs where <seg> is non-separator text ending in a non-whitespace char
+        # that is *followed by another separator* — a proven directory. Requiring
+        # the non-whitespace char right before the slash is what separates a
+        # spaced dir name (`acme corp/` — `p` precedes the slash) from prose
+        # sitting between two paths (`id_rsa and /home/...` — a space precedes
+        # the slash), so `compare <p1> and <p2>` stays two matches, not one. The
+        # final component then falls back to `\\S*` (stops at whitespace) because
+        # once no separator follows, a trailing space is ambiguous between a
+        # spaced filename and prose, and over-consuming prose is the worse error.
+        # This redacts `/srv/clients/acme corp/secret.txt` whole while leaving
+        # `read <path> then continue` prose after a space-free path intact.
+        descendant = r"(?![A-Za-z0-9_-])(?:[/\\][^/\\\n]*[^\s/\\](?=[/\\]))*(?:[/\\]\S*)?"
+        matchers.append((root, re.compile(escaped + descendant, flags)))
     return tuple(matchers)
 
 

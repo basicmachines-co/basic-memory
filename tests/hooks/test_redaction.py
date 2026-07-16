@@ -110,6 +110,41 @@ def test_redact_text_redacts_whole_value_path_with_spaces() -> None:
     )
 
 
+def test_redact_text_redacts_embedded_path_with_spaced_directory() -> None:
+    # A denied path embedded mid-prose whose intermediate directory has a space
+    # (`acme corp/`) must redact through the whole descendant, not stop at the
+    # first space (\S* alone would leak ` corp/secret.txt`). The trailing prose
+    # after a space-free final component stays intact.
+    result = redact_text(
+        "please inspect /srv/clients/acme corp/secret.txt now",
+        extra_redact_paths=["/srv/clients/"],
+    )
+    assert "acme corp" not in result
+    assert "secret.txt" not in result
+    assert result == f"please inspect {REDACTED_PATH} now"
+
+
+def test_redact_text_preserves_prose_after_space_free_denied_path() -> None:
+    # The descendant tail must not over-consume: a space-free denied path
+    # followed by prose keeps the prose (the final component stops at whitespace).
+    result = redact_text(
+        "read /srv/clients/foo then continue",
+        extra_redact_paths=["/srv/clients/"],
+    )
+    assert result == f"read {REDACTED_PATH} then continue"
+
+
+def test_redact_text_keeps_two_embedded_paths_separate() -> None:
+    # The spaced-dir descendant must not bridge two paths: prose (` and `) with
+    # a trailing space before the next `/` is not an intermediate directory, so
+    # each path redacts independently rather than collapsing into one marker.
+    result = redact_text(
+        "compare /srv/clients/acme corp/a and /srv/clients/beta co/b now",
+        extra_redact_paths=["/srv/clients/"],
+    )
+    assert result == f"compare {REDACTED_PATH} and {REDACTED_PATH} now"
+
+
 def test_deny_paths_match_across_windows_separators() -> None:
     # Windows payload values carry backslashes while deny paths are usually
     # written with forward slashes; both sides normalize before comparison.
