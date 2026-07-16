@@ -282,6 +282,37 @@ def test_session_start_output_capped_at_10k(bm_home: Path, claude_project: Path)
     assert len(result.stdout) <= hook_module.MAX_BRIEF_CHARS + 1  # +1 for print's newline
 
 
+def test_session_start_keeps_closing_fence_when_data_overflows(
+    bm_home: Path, claude_project: Path
+) -> None:
+    # Graph data long enough to blow past MAX_BRIEF_CHARS must still leave the
+    # fence closed — an unclosed fence would swallow the next user prompt and
+    # break the prompt-injection boundary.
+    _write_claude_settings(
+        claude_project, {"primaryProject": "demo", "secondaryProjects": ["team"]}
+    )
+    huge_title = "T" * 15_000
+
+    async def fake_search(**kwargs):
+        if kwargs.get("project") == "team":
+            return _search_result(huge_title)
+        return SEARCH_EMPTY
+
+    with patch("basic_memory.mcp.tools.search_notes", AsyncMock(side_effect=fake_search)):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+    out = result.stdout
+    assert len(out) <= hook_module.MAX_BRIEF_CHARS + 1
+    # Both fences survive (open + close) and the overflow is marked.
+    assert out.count("`````") == 2
+    assert "[truncated]" in out
+
+
 def test_session_start_uses_payload_cwd_when_no_project_dir(
     bm_home: Path, claude_project: Path
 ) -> None:
