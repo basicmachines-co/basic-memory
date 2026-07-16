@@ -354,6 +354,25 @@ def test_bm_bin_multi_token_launcher_word_splits(shim: ShimHarness) -> None:
     assert shim.argv("uvx") == ["basic-memory", "hook", "session-start", "--harness", "claude"]
 
 
+def test_bm_bin_multi_token_launcher_strips_copied_quotes(shim: ShimHarness) -> None:
+    # A user copying the installed form `uvx "basic-memory>=X"` into BM_BIN: the
+    # quotes must be stripped, not passed literally into the package spec.
+    shim.add_fake("uvx")
+
+    result = shim.run(
+        "plugins/claude-code/hooks", "session-start.sh", bm_bin='uvx "basic-memory>=0.22.1"'
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert shim.argv("uvx") == [
+        "basic-memory>=0.22.1",
+        "hook",
+        "session-start",
+        "--harness",
+        "claude",
+    ]
+
+
 # --- Project-dir plumbing ---
 
 

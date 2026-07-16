@@ -28,7 +28,15 @@ if [[ -n "${BM_BIN:-}" ]]; then
     # multi-token launcher like "uvx basic-memory". Test existence, not the
     # executable bit: Git Bash reports extensionless files as non-executable, so
     # `-x` would word-split a real path on Windows.
-    if [[ -e "$BM_BIN" ]]; then BM=("$BM_BIN"); else read -r -a BM <<<"$BM_BIN"; fi
+    if [[ -e "$BM_BIN" ]]; then
+        BM=("$BM_BIN")
+    else
+        read -r -a BM <<<"$BM_BIN"
+        # A copied launcher may carry quotes (uvx "basic-memory>=X"); word-splitting
+        # leaves them literal in the token, so strip them — launcher tokens never
+        # contain a meaningful quote.
+        BM=("${BM[@]//[\"\']/}")
+    fi
 elif command -v basic-memory >/dev/null 2>&1 && supports_hook basic-memory; then
     BM=(basic-memory)
 elif command -v bm >/dev/null 2>&1 && supports_hook bm; then
