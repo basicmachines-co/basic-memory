@@ -132,6 +132,7 @@ def app_callback(
         "status",
         "sync",
         "project",
+        "config",
         "tool",
         "reset",
         "reindex",

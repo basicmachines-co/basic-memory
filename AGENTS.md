@@ -373,6 +373,12 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Tool access: `basic-memory tool` (provides CLI access to MCP tools)
     - Continue: `basic-memory tool continue-conversation --topic="search"`
 
+**Config Management:**
+- List all settings (effective values, env overrides marked): `basic-memory config list`
+- Get one setting: `basic-memory config get cli_output_style`
+- Set a setting (validated through the config model): `basic-memory config set cli_output_style plain`
+- Revert a setting to its default: `basic-memory config unset cli_output_style`
+
 **Project Management:**
 - List projects: `basic-memory project list`
 - Add project: `basic-memory project add "name" ~/path`

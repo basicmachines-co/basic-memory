@@ -510,6 +510,11 @@ basic-memory project add research ~/research
 basic-memory project set-cloud research   # route through cloud
 basic-memory project set-local research   # revert
 
+# Config
+basic-memory config list                        # all settings, effective values, env overrides
+basic-memory config set cli_output_style plain  # validated through the config model
+basic-memory config unset cli_output_style      # revert to default
+
 # Health & maintenance
 basic-memory status
 basic-memory doctor              # file <-> DB consistency check
