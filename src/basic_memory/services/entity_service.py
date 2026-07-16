@@ -34,6 +34,7 @@ from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
+from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
 from basic_memory.schemas.response import (
@@ -659,10 +660,14 @@ class EntityService(BaseService[EntityModel]):
             )
 
         if not skip_conflict_check:
-            conflicts = await self.detect_file_path_conflicts(
-                file_path.as_posix(),
-                session=session,
-            )
+            conflicts = [
+                conflict
+                for conflict in await self.detect_file_path_conflicts(
+                    file_path.as_posix(),
+                    session=session,
+                )
+                if runtime_file_path_is_markdown_note(conflict)
+            ]
             if conflicts:
                 raise EntityAlreadyExistsError(
                     f"file path conflicts with existing note(s): {', '.join(conflicts)}"

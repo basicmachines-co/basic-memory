@@ -6,6 +6,7 @@ tag handling, error conditions, and edge cases from bug reports.
 """
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -13,7 +14,9 @@ from typing import Any
 import pytest
 from fastmcp import Client
 
+from basic_memory import db
 from basic_memory.config import ConfigManager
+from basic_memory.models import Entity
 from basic_memory.schemas.project_info import ProjectItem
 
 
@@ -501,6 +504,46 @@ async def test_write_note_rejects_existing_note_with_legacy_filename(
         project_path = Path(test_project.path)
         assert (project_path / "site-roadmap.md").exists()
         assert not (project_path / "Site Roadmap.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_write_note_allows_note_beside_non_markdown_resource(
+    mcp_server, app, test_project, engine_factory
+):
+    """A resource permalink collision is not a note-path conflict."""
+    resource_path = Path(test_project.path) / "foo.png"
+    resource_path.write_bytes(b"not-a-real-png")
+    _, session_maker = engine_factory
+    now = datetime.now(tz=UTC)
+    async with db.scoped_session(session_maker) as session:
+        session.add(
+            Entity(
+                project_id=test_project.id,
+                title="foo.png",
+                note_type="resource",
+                permalink="foo",
+                file_path="foo.png",
+                content_type="image/png",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Foo",
+                "directory": "",
+                "content": "A valid note beside foo.png.",
+            },
+        )
+
+    response_text = created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+    assert "# Created note" in response_text
+    assert "file_path: Foo.md" in response_text
+    assert (Path(test_project.path) / "Foo.md").exists()
 
 
 @pytest.mark.asyncio
