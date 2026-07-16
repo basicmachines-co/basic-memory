@@ -9,9 +9,42 @@ from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
-from basic_memory.utils import validate_project_path
+from basic_memory.schemas.project_info import ProjectItem
+from basic_memory.utils import (
+    generate_permalink,
+    normalize_project_reference,
+    validate_project_path,
+)
+from basic_memory.workspace_context import current_workspace_permalink_context
+
+
+def _directory_path_for_move(
+    resolved_identifier: str,
+    active_project: ProjectItem,
+    *,
+    include_project_prefix: bool,
+) -> str:
+    """Return the project-relative source directory expected by the move API."""
+    directory = normalize_project_reference(resolved_identifier).strip("/")
+    project_permalink = active_project.permalink
+
+    route_prefixes: list[str] = []
+    workspace_context = current_workspace_permalink_context()
+    if workspace_context and workspace_context.should_prefix_permalinks:
+        route_prefixes.append(
+            f"{generate_permalink(workspace_context.workspace_slug)}/{project_permalink}"
+        )
+    if include_project_prefix:
+        route_prefixes.append(project_permalink)
+
+    for route_prefix in route_prefixes:
+        if directory.startswith(f"{route_prefix}/"):
+            return directory.removeprefix(f"{route_prefix}/")
+
+    return directory
 
 
 async def _detect_cross_project_move_attempt(
@@ -561,15 +594,52 @@ The destination path '{destination_path}' is not allowed - paths must stay withi
 move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
+        # Resolve every source before branching so file and directory mutations share
+        # the same fail-closed project boundary.
+        from basic_memory.mcp.clients import KnowledgeClient
+
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+        source_project, resolved_identifier, is_memory_url = await resolve_project_and_path(
+            client,
+            identifier,
+            active_project.name,
+            context,
+            strict_project_routing=True,
+        )
+
+        # move_note only supports moves inside the active project.
+        if source_project.external_id != active_project.external_id:
+            logger.info(
+                f"Move rejected: source '{identifier}' resolves to project "
+                f"'{source_project.name}', not the active project '{active_project.name}'"
+            )
+            if output_format == "json":
+                return {
+                    "moved": False,
+                    "title": None,
+                    "permalink": None,
+                    "file_path": None,
+                    "source": identifier,
+                    "destination": destination_path,
+                    "error": "CROSS_PROJECT_MOVE_NOT_SUPPORTED",
+                }
+            return _format_cross_project_error_response(
+                identifier, destination_path, active_project.name, source_project.name
+            )
+
         # Handle directory moves
         if is_directory:
-            # Import here to avoid circular import
-            from basic_memory.mcp.clients import KnowledgeClient
-
-            knowledge_client = KnowledgeClient(client, active_project.external_id)
-
             try:
-                result = await knowledge_client.move_directory(identifier, destination_path)
+                source_directory = (
+                    _directory_path_for_move(
+                        resolved_identifier,
+                        active_project,
+                        include_project_prefix=ConfigManager().config.permalinks_include_project,
+                    )
+                    if is_memory_url
+                    else resolved_identifier
+                )
+                result = await knowledge_client.move_directory(source_directory, destination_path)
                 if output_format == "json":
                     return {
                         "moved": result.failed_moves == 0,
@@ -652,55 +722,6 @@ list_directory("{identifier}")
 # Then move individual files
 move_note("path/to/file.md", "{destination_path}/file.md")
 ```"""
-
-        # Import here to avoid circular import
-        from basic_memory.mcp.clients import KnowledgeClient
-
-        # Use typed KnowledgeClient for API calls
-        knowledge_client = KnowledgeClient(client, active_project.external_id)
-
-        # --- Normalize the identifier for memory:// URLs ---
-        # Trigger: caller passed a "memory://..." URL (the docstring advertises this, and
-        #          read_note/edit_note/delete_note all accept it).
-        # Why: resolve_entity / the /resolve endpoint expect a bare permalink or title;
-        #      the literal "memory://" scheme prefix is not stripped by link resolution and
-        #      404s. resolve_project_and_path strips the prefix and normalizes the path the
-        #      same way the sibling tools do.
-        # Outcome: move_note resolves memory:// URLs identically to read/edit/delete.
-        source_project, resolved_identifier, _ = await resolve_project_and_path(
-            client,
-            identifier,
-            active_project.name,
-            context,
-            strict_project_routing=True,
-        )
-
-        # Trigger: a memory:// identifier whose project prefix resolves to a DIFFERENT project
-        #          than the one move_note is operating on (e.g. "memory://other-project/...").
-        # Why: get_project_client already bound knowledge_client to the active project, so the
-        #      resolve_entity below runs against the active project regardless of the URL's
-        #      project. Honoring the cross-project prefix would misroute (path normalized for
-        #      the other project, looked up in the active one); move_note cannot move across
-        #      projects.
-        # Outcome: reject up front with the cross-project guidance instead of misrouting.
-        if source_project.external_id != active_project.external_id:
-            logger.info(
-                f"Move rejected: source '{identifier}' resolves to project "
-                f"'{source_project.name}', not the active project '{active_project.name}'"
-            )
-            if output_format == "json":
-                return {
-                    "moved": False,
-                    "title": None,
-                    "permalink": None,
-                    "file_path": None,
-                    "source": identifier,
-                    "destination": destination_path,
-                    "error": "CROSS_PROJECT_MOVE_NOT_SUPPORTED",
-                }
-            return _format_cross_project_error_response(
-                identifier, destination_path, active_project.name, source_project.name
-            )
 
         # Resolve once and reuse the entity ID across extension validation and move.
         source_ext = "md"  # Default to .md if we can't determine source extension
