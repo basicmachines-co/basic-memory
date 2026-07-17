@@ -168,16 +168,15 @@ def _run_async_migrations_in_thread(connectable) -> None:
 
 
 def _run_async_engine_migrations(connectable) -> None:
-    """Run async-engine migrations with a running-loop fallback."""
+    """Run async migrations, adapting to whether an event loop is already running."""
     try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop -> safe to spin up our own via asyncio.run()
         _run_async_migrations_with_asyncio_run(connectable)
-    except RuntimeError as e:
-        if is_running_loop_error(e):
-            # We're in a running event loop (likely uvloop or Python 3.14+ tests).
-            # Switch to a dedicated thread so Alembic can finish without nesting loops.
-            _run_async_migrations_in_thread(connectable)
-        else:
-            raise
+    else:
+        # A loop is already running -> can't nest asyncio.run(), so offload to a thread
+        _run_async_migrations_in_thread(connectable)
 
 
 def run_migrations_online() -> None:
