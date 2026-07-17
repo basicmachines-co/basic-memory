@@ -13,13 +13,17 @@ from basic_memory.mcp.tools.write_note import _compose_workspace_project_route
 from basic_memory.repository.relation_repository import RelationRepository
 
 
-def _without_managed_timestamps(markdown: str) -> str:
+def _without_managed_timestamps(markdown: str | dict[str, Any]) -> str:
     """Drop BM's auto-managed created/modified frontmatter lines (#238/#684).
 
     Those timestamps are added to every note and are dynamic, so exact-content
     assertions strip them and match on the rest of the note. The timestamp
     behavior itself is covered by test_frontmatter_timestamps_integration.py.
+
+    Accepts read_note()'s ``str | dict`` return and narrows to the text form the
+    note assertions use, so callers don't each repeat the isinstance guard.
     """
+    assert isinstance(markdown, str)
     return re.sub(r"^(?:created|modified): .*\n", "", markdown, flags=re.MULTILINE)
 
 
