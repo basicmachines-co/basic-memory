@@ -1,5 +1,6 @@
 """Tests for EntityService."""
 
+import re
 import uuid
 from pathlib import Path
 from textwrap import dedent
@@ -26,6 +27,16 @@ def _permalink(entity: EntityModel | EntitySchema) -> str:
     permalink = entity.permalink
     assert permalink is not None
     return permalink
+
+
+def _without_managed_timestamps(markdown: str) -> str:
+    """Drop BM's auto-managed created/modified frontmatter lines (#238/#684).
+
+    Those timestamps are stamped into every note and are dynamic, so exact file
+    content assertions strip them and match on the rest of the note. The
+    timestamp behavior itself is covered by test_frontmatter_timestamps_integration.py.
+    """
+    return re.sub(r"^(?:created|modified): .*\n", "", markdown, flags=re.MULTILINE)
 
 
 @pytest.mark.parametrize(
@@ -206,7 +217,7 @@ async def test_create_entity_file_exists(
     file_content, _ = await file_service.read_file(file_path)
     assert (
         f"---\ntitle: Test Entity\ntype: test\npermalink: {generate_permalink(project_config.name)}/test-entity\n---\n\nfirst"
-        == file_content
+        == _without_managed_timestamps(file_content)
     )
 
     entity_data = EntitySchema(
@@ -659,7 +670,7 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
         See the [[Git Cheat Sheet]] for reference.
 
         """).strip()
-    assert expected == file_content
+    assert expected == _without_managed_timestamps(file_content)
 
 
 @pytest.mark.asyncio
@@ -704,7 +715,7 @@ async def test_update_with_content(
             # Git Workflow Guide
             """
         ).strip()
-        == file_content
+        == _without_managed_timestamps(file_content)
     )
 
     # now update the content
@@ -768,7 +779,7 @@ async def test_update_with_content(
     file_content, _ = await file_service.read_file(file_path)
 
     # assert content is in file
-    assert update_content.strip() == file_content
+    assert update_content.strip() == _without_managed_timestamps(file_content)
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+import re
 from textwrap import dedent
 from typing import Any
 
@@ -10,6 +11,16 @@ from basic_memory import config as config_module
 from basic_memory.mcp.tools import write_note, read_note, delete_note
 from basic_memory.mcp.tools.write_note import _compose_workspace_project_route
 from basic_memory.repository.relation_repository import RelationRepository
+
+
+def _without_managed_timestamps(markdown: str) -> str:
+    """Drop BM's auto-managed created/modified frontmatter lines (#238/#684).
+
+    Those timestamps are added to every note and are dynamic, so exact-content
+    assertions strip them and match on the rest of the note. The timestamp
+    behavior itself is covered by test_frontmatter_timestamps_integration.py.
+    """
+    return re.sub(r"^(?:created|modified): .*\n", "", markdown, flags=re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +171,10 @@ async def test_write_note(app, test_project):
         .format(permalink=f"{test_project.name}/test/test-note")
         .strip()
     )
-    assert expected in content
+    assert expected in _without_managed_timestamps(content)
+    # write_note now stamps created/modified into frontmatter (#684)
+    assert "created:" in content
+    assert "modified:" in content
 
 
 @pytest.mark.asyncio
@@ -191,7 +205,7 @@ async def test_write_note_no_tags(app, test_project):
         .format(permalink=f"{test_project.name}/test/simple-note")
         .strip()
     )
-    assert expected in content
+    assert expected in _without_managed_timestamps(content)
 
 
 @pytest.mark.asyncio
@@ -257,7 +271,7 @@ async def test_write_note_update_existing(app, test_project):
         )
         .format(permalink=f"{test_project.name}/test/test-note")
         .strip()
-        == content
+        == _without_managed_timestamps(content)
     )
 
 
@@ -572,7 +586,7 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
         )
         .format(permalink=f"{test_project.name}/test/test-note")
         .strip()
-        in content
+        in _without_managed_timestamps(content)
     )
 
 
@@ -723,7 +737,7 @@ async def test_write_note_with_custom_note_type(app, test_project):
         .format(permalink=f"{test_project.name}/guides/test-guide")
         .strip()
     )
-    assert expected in content
+    assert expected in _without_managed_timestamps(content)
 
 
 @pytest.mark.asyncio
