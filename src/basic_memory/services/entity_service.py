@@ -102,6 +102,18 @@ def apply_prepared_entity_fields(
     entity.last_updated_by = user_profile_value
 
 
+def file_bookkeeping_update(entity: EntityModel, **fields: object) -> dict[str, object]:
+    """Build a metadata-only entity update that preserves the note's semantic timestamps.
+
+    File bookkeeping (checksum, size, mtime) must never bump created_at/updated_at — the note's
+    timestamps are owned by its frontmatter/file, not the moment BM happened to touch the row
+    (file-as-source-of-truth, #238/#684). Because ``updated_at`` carries ``onupdate=now``, the
+    preserved values have to be written explicitly into the UPDATE; otherwise the flush would
+    silently re-stamp ``modified`` to the wall clock on every reindex/checksum write.
+    """
+    return {**fields, "created_at": entity.created_at, "updated_at": entity.updated_at}
+
+
 @dataclass(frozen=True)
 class PreparedEntityWrite:
     """Accepted note state before any persistence side effects happen.
@@ -1070,7 +1082,9 @@ class EntityService(BaseService[EntityModel]):
                 is_new=True,
                 session=session,
             )
-            updated = await self.repository.update(session, entity.id, {"checksum": checksum})
+            updated = await self.repository.update(
+                session, entity.id, file_bookkeeping_update(entity, checksum=checksum)
+            )
             if not updated:  # pragma: no cover
                 raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
             persisted_content, search_content = await self._read_persisted_write_content(
@@ -1140,7 +1154,9 @@ class EntityService(BaseService[EntityModel]):
                 # Outcome: remove the stale old file so local Basic Memory mirrors cloud's queued cleanup.
                 if not self._paths_share_storage_target(previous_file_path, prepared.file_path):
                     await self.file_service.delete_file(previous_file_path)
-            entity = await self.repository.update(session, entity.id, {"checksum": checksum})
+            entity = await self.repository.update(
+                session, entity.id, file_bookkeeping_update(entity, checksum=checksum)
+            )
             if not entity:  # pragma: no cover
                 raise ValueError(
                     f"Failed to update entity checksum after update: {prepared.file_path}"
@@ -1621,7 +1637,9 @@ class EntityService(BaseService[EntityModel]):
                 session=session,
             )
 
-            entity = await self.repository.update(session, entity.id, {"checksum": checksum})
+            entity = await self.repository.update(
+                session, entity.id, file_bookkeeping_update(entity, checksum=checksum)
+            )
             if not entity:  # pragma: no cover
                 raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
             persisted_content, search_content = await self._read_persisted_write_content(file_path)

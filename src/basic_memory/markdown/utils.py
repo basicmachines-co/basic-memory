@@ -105,9 +105,11 @@ def apply_default_timestamps(
     `now` on every write BM performs, unless this request explicitly supplied its
     own `modified` value (a deliberate override, e.g. importing historical data).
     """
-    if "created" not in metadata:
+    # Treat a null value the same as a missing key: `created:`/`modified:` with no value must
+    # still get the managed default rather than being written back to disk as YAML null.
+    if metadata.get("created") is None:
         metadata["created"] = fallback_created.isoformat()
-    if "modified" not in incoming_metadata:
+    if incoming_metadata.get("modified") is None:
         metadata["modified"] = now.isoformat()
 
     # Normalize to ISO strings so both timestamps round-trip identically and match how BM

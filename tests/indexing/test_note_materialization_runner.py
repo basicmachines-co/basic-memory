@@ -303,6 +303,10 @@ def materialization_entity(*, file_path: str = "notes/a.md") -> Entity:
         content_type="text/markdown",
         file_path=file_path,
         checksum="old-file-sum",
+        # Semantic timestamp set by the accepted write from the note's frontmatter; materialization
+        # must preserve it rather than overwrite it with the physical file-write time.
+        created_at=datetime(2019, 1, 1, 0, 0, tzinfo=UTC),
+        updated_at=datetime(2020, 1, 2, 9, 30, tzinfo=UTC),
     )
 
 
@@ -558,7 +562,9 @@ async def test_repository_note_materialization_publisher_updates_current_written
             },
         )
     ]
-    assert entity.updated_at == written.file_updated_at
+    # Semantic updated_at is preserved; the physical write time lands in mtime, not updated_at.
+    assert entity.updated_at == datetime(2020, 1, 2, 9, 30, tzinfo=UTC)
+    assert entity.mtime == written.file_updated_at.timestamp()
     assert entity.size == len(b"# A note\n")
     assert session.flush_count == 1
 

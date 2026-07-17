@@ -10,6 +10,7 @@ from typing import Protocol, Self
 from loguru import logger
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm.attributes import flag_modified
 
 from basic_memory import db
 from basic_memory.indexing.note_content_reconciler import (
@@ -502,9 +503,14 @@ class RepositoryNoteMaterializationPublisher:
                     file_path=written_file.file_path,
                     file_checksum=written_file.file_checksum,
                 )
-            entity.updated_at = written_file.file_updated_at
+            # The physical write time is bookkeeping (mtime), not the note's semantic modified —
+            # its frontmatter owns that, and the accepted write already set entity.updated_at from
+            # it (#238/#684, file-as-source-of-truth). flag_modified forces updated_at into this
+            # flush with its current (semantic) value so the column's onupdate=now default does not
+            # overwrite it during materialization.
             entity.mtime = written_file.file_updated_at.timestamp()
             entity.size = len(prepared_write.markdown_content.encode("utf-8"))
+            flag_modified(entity, "updated_at")
             await session.flush()
             return publish_plan.result
 

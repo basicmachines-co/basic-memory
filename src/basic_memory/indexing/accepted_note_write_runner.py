@@ -100,6 +100,7 @@ class AcceptedPreparedEntityTarget(Protocol):
     content_type: str
     permalink: str | None
     file_path: RuntimeFilePath
+    created_at: datetime
     updated_at: datetime
     last_updated_by: str | None
 
@@ -516,9 +517,12 @@ def _timestamp_from_metadata(
     if value is None:
         return fallback
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo else value.astimezone()
     if isinstance(value, str):
-        return datetime.fromisoformat(value)
+        # A naive date-only value (e.g. "2024-03-15") is assumed local, matching
+        # EntityParser._frontmatter_timestamp so the cloud and local paths agree.
+        parsed = datetime.fromisoformat(value)
+        return parsed if parsed.tzinfo else parsed.astimezone()
     return fallback
 
 
@@ -536,8 +540,13 @@ def apply_accepted_prepared_entity_fields(
     entity.content_type = entity_fields.content_type
     entity.permalink = entity_fields.permalink
     entity.file_path = entity_fields.file_path
-    # Honor the note's own modified time (file is source of truth); the request time is only a
-    # fallback. created_at is intentionally left untouched here — an update must not move it.
+    # Honor the note's own timestamps (file is source of truth); the request time is only a
+    # fallback for modified. created_at is reconciled from frontmatter too — if the file's
+    # created changed it should win — but defaults to the entity's existing value so a normal
+    # update never moves it.
+    entity.created_at = _timestamp_from_metadata(
+        entity_fields.entity_metadata, "created", fallback=entity.created_at
+    )
     entity.updated_at = _timestamp_from_metadata(
         entity_fields.entity_metadata, "modified", fallback=updated_at
     )

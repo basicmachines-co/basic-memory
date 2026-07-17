@@ -674,6 +674,34 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
 
 
 @pytest.mark.asyncio
+async def test_create_preserves_frontmatter_timestamps_through_checksum_update(
+    entity_service: EntityService,
+):
+    """The post-write checksum UPDATE must not clobber the note's created/modified.
+
+    Regression (#238/#684): entity_service records the file checksum with a second UPDATE, and
+    updated_at's onupdate=now default would re-stamp modified to the wall clock unless the
+    semantic timestamps are preserved explicitly — the file, not the write moment, owns them.
+    """
+    content = dedent(
+        """
+        ---
+        created: '2019-03-04T09:00:00+00:00'
+        modified: '2020-06-07T14:30:00+00:00'
+        ---
+        # Historical
+        """
+    ).strip()
+    entity, created = await entity_service.create_or_update_entity(
+        EntitySchema(title="Historical", directory="notes", note_type="note", content=content)
+    )
+
+    assert created is True
+    assert (entity.created_at.year, entity.created_at.month, entity.created_at.day) == (2019, 3, 4)
+    assert (entity.updated_at.year, entity.updated_at.month, entity.updated_at.day) == (2020, 6, 7)
+
+
+@pytest.mark.asyncio
 async def test_update_with_content(
     entity_service: EntityService,
     file_service: FileService,

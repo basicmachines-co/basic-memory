@@ -95,7 +95,11 @@ class Entity(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now().astimezone(),
-        onupdate=lambda: datetime.now().astimezone(),
+        # No onupdate=now: updated_at is the note's semantic "modified", owned by its markdown
+        # frontmatter / file mtime and set explicitly on every content write (parse + accepted
+        # write). Auto-stamping on every row UPDATE let incidental writes (checksum, reindex,
+        # cloud materialization) clobber a file-authored timestamp — file is source of truth
+        # (#238/#684).
     )
 
     # Who created this entity (cloud user_profile_id UUID, null for local/CLI usage)
