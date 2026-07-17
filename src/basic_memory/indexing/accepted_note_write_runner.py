@@ -501,6 +501,27 @@ async def prepare_accepted_note_move(
     return result
 
 
+def _timestamp_from_metadata(
+    entity_metadata: EntityMetadata, key: str, *, fallback: datetime
+) -> datetime:
+    """Read a created/modified timestamp from prepared frontmatter — file as source of truth.
+
+    BM's write path stamps created/modified into frontmatter as ISO strings (#238/#684), so a
+    cloud-accepted note's DB timestamp must come from that value rather than the request time;
+    otherwise the markdown shows one date while search/recent-activity show another. Falls back
+    to ``fallback`` only when the key is absent — a present-but-malformed value fails fast
+    (never silently substituted).
+    """
+    value = entity_metadata.get(key) if entity_metadata else None
+    if value is None:
+        return fallback
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return fallback
+
+
 def apply_accepted_prepared_entity_fields(
     entity: AcceptedPreparedEntityTarget,
     entity_fields: AcceptedPreparedEntityFields,
@@ -515,7 +536,11 @@ def apply_accepted_prepared_entity_fields(
     entity.content_type = entity_fields.content_type
     entity.permalink = entity_fields.permalink
     entity.file_path = entity_fields.file_path
-    entity.updated_at = updated_at
+    # Honor the note's own modified time (file is source of truth); the request time is only a
+    # fallback. created_at is intentionally left untouched here — an update must not move it.
+    entity.updated_at = _timestamp_from_metadata(
+        entity_fields.entity_metadata, "modified", fallback=updated_at
+    )
     entity.last_updated_by = user_profile_value
 
 
@@ -528,6 +553,9 @@ def accepted_pending_entity_write_from_prepared(
 ) -> AcceptedPendingEntityWrite:
     """Map prepared Basic Memory entity fields to the pending entity DB write."""
     fields = prepared.entity_fields
+    # File is the source of truth: seed created_at/updated_at from the note's own frontmatter
+    # timestamps (#238/#684) so a cloud-accepted note's DB row matches its markdown, with the
+    # request time only as a fallback when the frontmatter omits them.
     return AcceptedPendingEntityWrite(
         title=fields.title,
         note_type=fields.note_type,
@@ -535,8 +563,8 @@ def accepted_pending_entity_write_from_prepared(
         content_type=fields.content_type,
         permalink=fields.permalink,
         file_path=fields.file_path,
-        created_at=now,
-        updated_at=now,
+        created_at=_timestamp_from_metadata(fields.entity_metadata, "created", fallback=now),
+        updated_at=_timestamp_from_metadata(fields.entity_metadata, "modified", fallback=now),
         created_by=user_profile_value,
         last_updated_by=user_profile_value,
         external_id=external_id,

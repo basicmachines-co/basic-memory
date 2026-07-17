@@ -205,6 +205,14 @@ class EntityParser:
             parsed = self.parse_date(value)
             if parsed:
                 return parsed if parsed.tzinfo else parsed.astimezone()
+            # Trigger: a present timestamp value that parse_date cannot interpret.
+            # Why: silently falling back to file stats would leave the bad value on disk while
+            #      the DB shows a different time — a file/DB disagreement the fail-fast rule
+            #      forbids. But the canonical key (keys[0]: created/modified) is BM-written and
+            #      must be valid; the trailing aliases (date/created_at/updated_at) are lenient
+            #      read conveniences for imported notes, so a bad alias is skipped, not fatal.
+            if key == keys[0]:
+                raise ValueError(f"Invalid '{key}' timestamp in frontmatter: {value!r}")
         return None
 
     async def parse_file(self, path: Path | str) -> EntityMarkdown:

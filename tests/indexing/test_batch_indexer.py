@@ -203,6 +203,62 @@ async def test_batch_indexer_creates_entities_with_real_db_session(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_preserves_frontmatter_timestamps(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """Reindexing must keep a note's frontmatter created/modified, not file stat times.
+
+    Regression (#238/#684): _entity_metadata_updates overwrote created_at/updated_at with the
+    file's stat times, so a historical `created`/`modified` in frontmatter was lost whenever the
+    batch indexer (sync/reindex, cloud) touched the note. File is the source of truth.
+    """
+    path = "notes/historical.md"
+    await _create_file(
+        project_config.home / path,
+        dedent(
+            """
+            ---
+            title: Historical
+            type: note
+            created: '2019-03-04T09:00:00'
+            modified: '2020-06-07T14:30:00'
+            ---
+            # Historical
+            """
+        ).strip(),
+    )
+
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    result = await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+    assert result.errors == []
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+
+    assert entity is not None
+    # Frontmatter dates win over the file's (current-year) stat times.
+    assert (entity.created_at.year, entity.created_at.month, entity.created_at.day) == (2019, 3, 4)
+    assert (entity.updated_at.year, entity.updated_at.month, entity.updated_at.day) == (2020, 6, 7)
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_returns_original_markdown_content_when_no_frontmatter_rewrite(
     app_config,
     entity_service,

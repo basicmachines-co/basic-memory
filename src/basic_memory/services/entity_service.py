@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import (
+    _split_frontmatter,
     has_frontmatter,
     parse_frontmatter,
     remove_frontmatter,
@@ -894,26 +895,44 @@ class EntityService(BaseService[EntityModel]):
                     )
 
             # Trigger: edit operations (append/prepend/find_replace/replace_section) touch the
-            #          note body while carrying the pre-existing frontmatter block through
-            #          untouched.
-            # Why: an edit is still a BM-initiated write, so modified should reflect it (#684);
-            #      created must not move just because the body changed (#238). Using
-            #      frontmatter.Post(body) + metadata.update() (not frontmatter.loads()) avoids
-            #      the reserved-key constructor crash noted in EntityParser.parse_markdown_content.
-            # Outcome: the frontmatter block written to disk gets modified bumped to "now" (and
-            #          created filled in if this is the first write to carry one), instead of
-            #          silently keeping a stale modified value from before the edit.
-            edit_post = frontmatter.Post(remove_frontmatter(markdown_content))
-            edit_post.metadata.update(content_frontmatter)
+            #          note body while carrying the pre-existing frontmatter block through.
+            # Why: an edit is still a BM-initiated write, so modified should reflect it (#684),
+            #      while created must not move just because the body changed (#238). But the
+            #      body must survive verbatim — rebuilding it through remove_frontmatter()
+            #      (which returns body.strip()) silently dropped leading/trailing body
+            #      whitespace, e.g. a note opening with an indented code block. So we
+            #      re-serialize only the frontmatter block and splice the untouched body back.
+            # Outcome: created is filled once and preserved; modified is bumped to now unless
+            #      this edit explicitly changed a timestamp, in which case the edited value wins.
+            # has_frontmatter guard above (and the successful parse_frontmatter) guarantee a split.
+            edited_split = _split_frontmatter(markdown_content)
+            assert edited_split is not None
+            _, edited_body = edited_split
+            pre_edit_frontmatter = (
+                parse_frontmatter(current_content) if has_frontmatter(current_content) else {}
+            )
+            # An edit "explicitly supplies" a timestamp only when it changed the value the note
+            # already carried; a value merely carried through from the prior write does not count.
+            edit_supplied_timestamps = {
+                key: content_frontmatter[key]
+                for key in ("created", "modified")
+                if key in content_frontmatter
+                and content_frontmatter.get(key) != pre_edit_frontmatter.get(key)
+            }
             now = datetime.now().astimezone()
+            updated_frontmatter = dict(content_frontmatter)
             apply_default_timestamps(
-                edit_post.metadata,
-                incoming_metadata={},
+                updated_frontmatter,
+                incoming_metadata=edit_supplied_timestamps,
                 fallback_created=entity.created_at or now,
                 now=now,
             )
-            markdown_content = dump_frontmatter(edit_post)
-            content_frontmatter = edit_post.metadata
+            frontmatter_post = frontmatter.Post("")
+            frontmatter_post.metadata.update(updated_frontmatter)
+            # dump_frontmatter with empty content yields "---\n{yaml}---\n"; edited_body begins
+            # right after the closing fence, so this restores the exact frontmatter/body boundary.
+            markdown_content = dump_frontmatter(frontmatter_post) + edited_body
+            content_frontmatter = updated_frontmatter
 
             normalized_metadata = normalize_frontmatter_metadata(content_frontmatter or {})
             metadata = {k: v for k, v in normalized_metadata.items() if v is not None} or None

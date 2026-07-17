@@ -631,7 +631,16 @@ class BatchIndexer:
                 session=session,
             )
             prepared = await self._reconcile_persisted_permalink(prepared, entity)
-            metadata_updates = self._entity_metadata_updates(prepared.file, prepared.final_checksum)
+            # Markdown timestamps come from the parsed frontmatter via
+            # upsert_entity_from_markdown (file-stat fallback), not raw file stats (#238/#684).
+            metadata_updates = self._entity_metadata_updates(
+                prepared.file, prepared.final_checksum, include_semantic_timestamps=False
+            )
+            # Re-assert the parsed timestamps on this UPDATE. They must be set explicitly:
+            # updated_at's onupdate=now default would otherwise clobber the note's modified time
+            # on every reindex, since this UPDATE does not otherwise touch that column.
+            metadata_updates["created_at"] = entity.created_at
+            metadata_updates["updated_at"] = entity.updated_at
             updated = await self.entity_repository.update_fields(
                 session,
                 entity.id,
@@ -717,17 +726,29 @@ class BatchIndexer:
         checksum: str,
         *,
         include_created_at: bool = True,
+        include_semantic_timestamps: bool = True,
     ) -> dict[str, object]:
+        # Trigger: persisting index metadata for a file.
+        # Why: file_path/checksum/size/mtime are always file-derived change-detection state.
+        #   But a markdown note's semantic created_at/updated_at are owned by its parsed
+        #   frontmatter (the parser already falls back to file stat times when frontmatter
+        #   omits them, #238/#684), so re-deriving them from raw file stats here would clobber
+        #   file-authored timestamps on every reindex. The file stays the source of truth
+        #   either way — this only decides which file-derived value wins.
+        # Outcome: markdown callers pass include_semantic_timestamps=False so the timestamps
+        #   set by upsert_entity_from_markdown stand; non-markdown files (no frontmatter) keep
+        #   file stats as their created_at/updated_at.
         updates: dict[str, object] = {
             "file_path": file.path,
             "checksum": checksum,
             "size": file.size,
         }
-        if include_created_at and file.created_at is not None:
-            updates["created_at"] = file.created_at
         if file.last_modified is not None:
-            updates["updated_at"] = file.last_modified
             updates["mtime"] = file.last_modified.timestamp()
+            if include_semantic_timestamps:
+                updates["updated_at"] = file.last_modified
+        if include_created_at and include_semantic_timestamps and file.created_at is not None:
+            updates["created_at"] = file.created_at
         if file.content_type is not None:
             updates["content_type"] = file.content_type
         return updates

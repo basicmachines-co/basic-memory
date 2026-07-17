@@ -595,6 +595,62 @@ def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
     assert entity.last_updated_by == "user-3"
 
 
+def test_apply_accepted_prepared_entity_fields_honors_frontmatter_modified() -> None:
+    """File is source of truth: a note's own modified timestamp wins over the request time.
+
+    Regression for the cloud-accepted path hardcoding updated_at to now (#238/#684): the
+    prepared frontmatter already carries the note's modified time as an ISO string.
+    """
+    entity = _entity()
+    request_time = datetime(2026, 6, 19, 13, 0, tzinfo=UTC)
+    note_modified = datetime(2020, 1, 2, 9, 30, tzinfo=UTC)
+
+    apply_accepted_prepared_entity_fields(
+        entity,
+        _PreparedFields(
+            title="Applied",
+            note_type="note",
+            entity_metadata={"modified": note_modified.isoformat()},
+            content_type="text/markdown",
+            permalink="applied",
+            file_path="notes/applied.md",
+        ),
+        updated_at=request_time,
+        user_profile_value="user-3",
+    )
+
+    assert entity.updated_at == note_modified  # not request_time
+
+
+def test_accepted_pending_entity_write_uses_frontmatter_timestamps() -> None:
+    """The create accepted-write seeds created_at/updated_at from frontmatter, not now."""
+    now = datetime(2026, 6, 19, 13, 0, tzinfo=UTC)
+    created = datetime(2019, 5, 1, 8, 0, tzinfo=UTC)
+    modified = datetime(2021, 7, 2, 16, 45, tzinfo=UTC)
+
+    @dataclass
+    class _Source:
+        entity_fields: _PreparedFields
+
+    write = accepted_pending_entity_write_from_prepared(
+        _Source(
+            entity_fields=_PreparedFields(
+                title="Historical",
+                note_type="note",
+                entity_metadata={"created": created.isoformat(), "modified": modified.isoformat()},
+                content_type="text/markdown",
+                permalink="historical",
+                file_path="notes/historical.md",
+            )
+        ),
+        now=now,
+        user_profile_value="user-1",
+    )
+
+    assert write.created_at == created
+    assert write.updated_at == modified
+
+
 @pytest.mark.asyncio
 async def test_prepare_accepted_note_move_without_permalink_update_keeps_current_markdown() -> None:
     session = _FlushSession()
