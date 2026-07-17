@@ -657,7 +657,7 @@ def _checkpoint_note(
     # (#997: redact obvious secrets before writing artifacts). Redact once at
     # extraction — every downstream use draws from the redacted strings.
     # Deferred import: redaction pulls detect-secrets, too heavy for CLI start (#886).
-    from basic_memory.hooks.redaction import Redactor
+    from basic_memory.hooks.redaction import REDACTED_PATH, Redactor
 
     # One ruleset for the whole checkpoint: every turn, the cwd, and each git
     # status row share the same deny rules, so compile the patterns once here
@@ -720,11 +720,16 @@ def _checkpoint_note(
         if recent_assistant:
             body += ["", "## Recent assistant notes"]
             body += [f"- {_clip(message, 240)}" for message in recent_assistant]
-        status_lines = _git_status(event.cwd)
+        # Skip the working tree entirely when the workspace itself is denied
+        # (safe_cwd redacted to the marker means cwd matched a redactPaths entry).
+        # `git status --short` emits repo-relative filenames with no absolute
+        # prefix (`M customer-roadmap.md`), so per-row redaction can't match the
+        # deny path — the whole denied workspace's file list would leak.
+        status_lines = [] if safe_cwd == REDACTED_PATH else _git_status(event.cwd)
         if status_lines:
             # git status rows carry filenames/paths too — pass them through the
             # same floor as the transcript text and cwd (a secret token in a
-            # filename, or a denied path, must not leak into the note).
+            # filename, or a denied path elsewhere, must not leak into the note).
             body += ["", "## Working tree"]
             body += [f"- `{redactor.redact_text(line)}`" for line in status_lines]
     body += [

@@ -781,6 +781,42 @@ def test_pre_compact_codex_redacts_working_tree_rows(bm_home: Path, tmp_path: Pa
     assert "AKIAIOSFODNN7EXAMPLE" not in content
 
 
+def test_pre_compact_codex_skips_working_tree_when_workspace_denied(
+    bm_home: Path, tmp_path: Path
+) -> None:
+    # Regression (#997): `git status --short` emits repo-relative filenames with
+    # no absolute prefix, so per-row redaction can't match a redactPaths entry.
+    # When the whole workspace is denied (cwd redacted to the marker), the
+    # section is skipped entirely rather than leaking the denied file list.
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"primaryProject": "demo", "redactPaths": ["/srv/clients/"]}),
+        encoding="utf-8",
+    )
+    transcript = _transcript(tmp_path)
+    mock_write = AsyncMock(return_value={"action": "created"})
+    with (
+        patch("basic_memory.mcp.tools.write_note", mock_write),
+        patch.object(hook_module, "_git_status", return_value=["M customer-roadmap.md"]),
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(
+                "/srv/clients/acme/repo", transcript_path=str(transcript), trigger="auto"
+            ),
+        )
+
+    assert result.exit_code == 0
+    assert mock_write.await_args is not None
+    kwargs = mock_write.await_args.kwargs
+    assert "## Working tree" not in kwargs["content"]
+    assert "customer-roadmap.md" not in kwargs["content"]
+    # The cwd itself is still redacted in frontmatter (the denial took effect).
+    assert kwargs["metadata"]["cwd"] == "[REDACTED_PATH]"
+
+
 # --- Fail-open contract ---
 
 
