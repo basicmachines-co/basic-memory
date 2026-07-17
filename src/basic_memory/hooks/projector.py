@@ -60,6 +60,7 @@ class FlushResult:
     pending: int = 0  # left in the inbox (no project mapping, or write failed)
     invalid: int = 0  # unreadable envelope files left in place
     pruned: int = 0  # envelopes removed by retention (processed + unresolved pending)
+    skipped: bool = False  # another flush held the inbox lock; this run did nothing
     notes: list[str] = field(default_factory=list)  # artifact titles written
 
 
@@ -247,7 +248,21 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
     Envelopes without a resolvable project mapping stay pending — fail fast,
     never write to the wrong project. Groups whose write fails also stay
     pending and self-heal on the next sweep.
+
+    Held under an exclusive inbox lock: a flush that arrives while another is
+    running skips rather than racing it (a stale snapshot could overwrite an
+    artifact without a sibling's just-retired event). The running flush sweeps
+    everything, so the skipped run loses no work.
     """
+    with inbox.flush_lock() as acquired:
+        if not acquired:
+            logger.debug("flush skipped: another flush holds the inbox lock")
+            return FlushResult(skipped=True)
+        return await _flush_locked(older_than_days)
+
+
+async def _flush_locked(older_than_days: int) -> FlushResult:
+    """Project the inbox once, under the flush lock held by :func:`flush`."""
     result = FlushResult()
 
     # --- Load the inbox in capture order ---

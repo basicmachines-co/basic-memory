@@ -871,6 +871,9 @@ def flush(
     from basic_memory.hooks.projector import flush as run_flush
 
     result = run_with_cleanup(run_flush(older_than_days=older_than_days))
+    if result.skipped:
+        typer.echo("flush skipped: another flush is already running")
+        return
     typer.echo(
         f"swept {result.swept} envelope(s): {result.projected} projected, "
         f"{result.duplicates} duplicate(s), {result.pending} pending, "

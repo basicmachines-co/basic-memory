@@ -57,6 +57,11 @@ dependencies = [
     # crashes the Postgres backend cannot fire under it. Not available on Windows.
     "uvloop>=0.21.0; sys_platform != 'win32'",
     "detect-secrets>=1.5",
+    # Cross-platform advisory file lock (already resolved transitively via
+    # huggingface-hub; declared directly since the hook flush path imports it).
+    # Serializes concurrent `bm hook flush` runs so a stale sweep can't overwrite
+    # an artifact without a sibling flush's just-retired event.
+    "filelock>=3.12",
 ]
 
 [project.urls]

@@ -107,6 +107,25 @@ async def test_flush_passes_yaml_special_turn_id_through_metadata(bm_home: Path)
     assert "---" not in session_call.kwargs["content"]
 
 
+async def test_flush_skips_when_another_flush_holds_the_lock(bm_home: Path) -> None:
+    # Concurrent flushes race: a stale sweep can overwrite an artifact without a
+    # sibling's just-retired event. Holding the inbox lock, a second flush must
+    # skip entirely (write nothing, leave envelopes pending) rather than race.
+    _capture(event=SESSION_STARTED)
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with inbox.flush_lock() as acquired:
+        assert acquired is True
+        with patch("basic_memory.mcp.tools.write_note", mock_write):
+            result = await flush()
+
+    assert result.skipped is True
+    assert result.swept == 0
+    assert mock_write.await_count == 0
+    # The envelope is untouched — the next unlocked flush still projects it.
+    assert len(inbox.list_envelopes()) == 1
+
+
 async def test_flush_uses_capture_folder_from_payload(bm_home: Path) -> None:
     _capture(payload={"capture_folder": "codex-sessions"})
     mock_write = AsyncMock(return_value=WRITE_OK)

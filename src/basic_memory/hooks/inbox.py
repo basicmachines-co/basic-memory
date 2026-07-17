@@ -13,11 +13,14 @@ No structure is written at capture time — ever. Processed envelopes move to
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from filelock import FileLock, Timeout
 
 from basic_memory.config import CONFIG_DIR_MODE, CONFIG_FILE_MODE, resolve_data_dir
 from basic_memory.hooks._uuid7 import uuid7_unix_ms
@@ -31,6 +34,7 @@ from basic_memory.hooks.envelope import (
 INBOX_DIR_NAME = "inbox"
 PROCESSED_DIR_NAME = "processed"
 LAST_FLUSH_FILE_NAME = ".last-flush"
+FLUSH_LOCK_FILE_NAME = ".flush.lock"
 
 DEFAULT_RETENTION_DAYS = 30
 
@@ -229,3 +233,32 @@ def last_flush() -> str | None:
     if not marker.is_file():
         return None
     return marker.read_text(encoding="utf-8").strip()
+
+
+@contextlib.contextmanager
+def flush_lock() -> Iterator[bool]:
+    """Hold an exclusive advisory lock over the inbox for the duration of a flush.
+
+    Two overlapping ``bm hook flush`` runs can interleave their list → write →
+    retire steps so a stale sweep overwrites a SessionNote/ToolLedger without a
+    sibling's just-retired event, dropping that event's row until another event
+    arrives in the session. Serializing flushes closes the race.
+
+    Yields ``True`` to the holder and ``False`` to any flush that arrives while
+    the lock is held — that flush skips rather than blocks, because the holder
+    sweeps the whole inbox, so nothing is missed. The lock is an OS advisory lock
+    (``fcntl``/``msvcrt`` via filelock) released on process death, so a crashed
+    flush never strands it.
+    """
+    directory = _ensure_private_dir(inbox_dir())
+    # timeout=0: acquire immediately or raise, never block the caller.
+    lock = FileLock(str(directory / FLUSH_LOCK_FILE_NAME), timeout=0)
+    try:
+        lock.acquire()
+    except Timeout:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        lock.release()
