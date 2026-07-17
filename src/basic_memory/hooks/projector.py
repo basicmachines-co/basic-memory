@@ -129,26 +129,34 @@ def _capture_folder(envelopes: list[Envelope]) -> str:
     return DEFAULT_CAPTURE_FOLDER
 
 
-def _artifact_frontmatter(note_type: str, first: Envelope) -> list[str]:
-    """Common provenance frontmatter every projected artifact carries."""
-    lines = [
-        "---",
-        f"type: {note_type}",
-        f"created_by: {CREATED_BY_PREFIX}/{first.source}",
-        f"caused_by_event: {first.id}",
-    ]
-    lines += [f"{key}: {value}" for key, value in to_frontmatter_fields(first).items()]
-    lines.append("---")
-    return lines
+def _artifact_metadata(first: Envelope) -> dict[str, str]:
+    """Provenance frontmatter every projected artifact carries.
+
+    Returned as a dict for write_note to serialize (``metadata=``), never
+    hand-built into a ``---`` block: ``source_turn_id`` is opaque,
+    surface-defined text (via ``to_frontmatter_fields``), so a value with
+    YAML-special content — ``turn: 42``, a colon, a newline — would make a
+    hand-built block invalid and wedge the whole session pending on every flush
+    retry. The note ``type`` rides the ``note_type`` write_note arg, so it is not
+    repeated here.
+    """
+    metadata = {
+        "created_by": f"{CREATED_BY_PREFIX}/{first.source}",
+        "caused_by_event": first.id,
+    }
+    metadata.update(to_frontmatter_fields(first))
+    return metadata
 
 
-def _session_note(source: str, session_id: str, envelopes: list[Envelope]) -> tuple[str, str]:
-    """Derive the SessionNote skeleton (title, content) for one session group."""
+def _session_note(
+    source: str, session_id: str, envelopes: list[Envelope]
+) -> tuple[str, str, dict[str, str]]:
+    """Derive the SessionNote skeleton (title, body, metadata) for one group."""
     first = envelopes[0]
     title = f"Session {_session_label(session_id)} ({source})"
-    frontmatter = _artifact_frontmatter(SESSION_NOTE_TYPE, first)
+    metadata = _artifact_metadata(first)
     # status/open mirrors the checkpoint notes so structured recall finds both.
-    frontmatter.insert(2, "status: open")
+    metadata["status"] = "open"
 
     body = [
         "",
@@ -162,18 +170,20 @@ def _session_note(source: str, session_id: str, envelopes: list[Envelope]) -> tu
         "## Observations",
         *to_provenance_observations(first),
     ]
-    return title, "\n".join(frontmatter + body)
+    return title, "\n".join(body), metadata
 
 
-def _tool_ledger_note(source: str, session_id: str, envelopes: list[Envelope]) -> tuple[str, str]:
-    """Derive the ToolLedger (title, content) for one session group.
+def _tool_ledger_note(
+    source: str, session_id: str, envelopes: list[Envelope]
+) -> tuple[str, str, dict[str, str]]:
+    """Derive the ToolLedger (title, body, metadata) for one session group.
 
     V0 captures only lifecycle events, so the ledger records those; tool_called
     entries join when PostToolUse capture lands.
     """
     first = envelopes[0]
     title = f"Tool Ledger {_session_label(session_id)} ({source})"
-    frontmatter = _artifact_frontmatter(TOOL_LEDGER_NOTE_TYPE, first)
+    metadata = _artifact_metadata(first)
 
     entries = [
         f"- [event] {envelope.event} at {envelope.ts} "
@@ -192,11 +202,16 @@ def _tool_ledger_note(source: str, session_id: str, envelopes: list[Envelope]) -
         "## Observations",
         f"- [source] {source}/{session_id}",
     ]
-    return title, "\n".join(frontmatter + body)
+    return title, "\n".join(body), metadata
 
 
 async def _write_artifact(
-    title: str, content: str, folder: str, project_hint: str, note_type: str
+    title: str,
+    content: str,
+    folder: str,
+    project_hint: str,
+    note_type: str,
+    metadata: dict[str, str],
 ) -> None:
     # Deferred: importing basic_memory.mcp.tools loads the whole tool stack
     # (fastmcp, SQLAlchemy) and must not happen at CLI import time (#886).
@@ -214,6 +229,9 @@ async def _write_artifact(
         # frontmatter and persists this arg instead. Without it the artifact
         # lands as the default `note`, invisible to session/ledger type recall.
         note_type=note_type,
+        # Provenance goes through metadata= so write_note serializes YAML-special
+        # values safely (see _artifact_metadata) instead of a hand-built block.
+        metadata=metadata,
         overwrite=True,
         output_format="json",
     )
@@ -351,15 +369,29 @@ async def flush(older_than_days: int = inbox.DEFAULT_RETENTION_DAYS) -> FlushRes
             result.pending += len(fresh)
             continue
 
-        session_title, session_content = _session_note(source, session_id, envelopes)
-        ledger_title, ledger_content = _tool_ledger_note(source, session_id, envelopes)
+        session_title, session_content, session_metadata = _session_note(
+            source, session_id, envelopes
+        )
+        ledger_title, ledger_content, ledger_metadata = _tool_ledger_note(
+            source, session_id, envelopes
+        )
         folder = _capture_folder(envelopes)
         try:
             await _write_artifact(
-                session_title, session_content, folder, project_hint, SESSION_NOTE_TYPE
+                session_title,
+                session_content,
+                folder,
+                project_hint,
+                SESSION_NOTE_TYPE,
+                session_metadata,
             )
             await _write_artifact(
-                ledger_title, ledger_content, folder, project_hint, TOOL_LEDGER_NOTE_TYPE
+                ledger_title,
+                ledger_content,
+                folder,
+                project_hint,
+                TOOL_LEDGER_NOTE_TYPE,
+                ledger_metadata,
             )
         except Exception as exc:
             # Trigger: the write path failed (project missing, API error, ...).

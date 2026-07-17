@@ -22,6 +22,7 @@ def _capture(
     ts: str = "2026-07-15T10:00:00+00:00",
     source: str = "claude-code",
     payload: dict | None = None,
+    turn_id: str | None = None,
 ) -> Path:
     envelope = create_envelope(
         source=source,
@@ -30,6 +31,7 @@ def _capture(
         cwd="/tmp/workdir",
         project_hint=project_hint,
         ts=ts,
+        turn_id=turn_id,
         payload=payload or {},
     )
     return inbox.write_envelope(envelope)
@@ -66,9 +68,13 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
     # Explicit note_type is what persists (content frontmatter type is stripped);
     # without it the artifact lands as `note` and session recall can't find it.
     assert session_call.kwargs["note_type"] == "session"
+    # Provenance rides metadata= so write_note serializes it safely (never a
+    # hand-built frontmatter block that an opaque field could invalidate).
+    session_metadata = session_call.kwargs["metadata"]
+    assert session_metadata["created_by"] == "bm-hook/claude-code"
+    assert session_metadata["caused_by_event"]
+    assert session_metadata["status"] == "open"
     content = session_call.kwargs["content"]
-    assert "created_by: bm-hook/claude-code" in content
-    assert "caused_by_event:" in content
     assert "- [source] claude-code/s-1" in content
     assert "session_started at 2026-07-15T10:00:00+00:00" in content
     assert "compaction_imminent at 2026-07-15T10:05:00+00:00" in content
@@ -76,9 +82,29 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
     ledger_call = mock_write.await_args_list[1]
     ledger_content = ledger_call.kwargs["content"]
     assert ledger_call.kwargs["note_type"] == "tool_ledger"
-    assert "type: tool_ledger" in ledger_content
+    assert ledger_call.kwargs["metadata"]["created_by"] == "bm-hook/claude-code"
     assert "- [event] session_started at" in ledger_content
     assert "- [source] claude-code/s-1" in ledger_content
+
+
+async def test_flush_passes_yaml_special_turn_id_through_metadata(bm_home: Path) -> None:
+    # source_turn_id is opaque, surface-defined text. A value with YAML-special
+    # content must reach write_note as a structured metadata value (serialized
+    # safely there), never hand-built into a `---` block that it would break —
+    # which would wedge the session pending on every flush retry.
+    _capture(event=SESSION_STARTED, turn_id="turn: 42\ninjected: true")
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    # One envelope retired (projected counts envelopes); it wrote both artifacts.
+    assert result.projected == 1
+    assert result.pending == 0
+    session_call = mock_write.await_args_list[0]
+    assert session_call.kwargs["metadata"]["envelope_turn_id"] == "turn: 42\ninjected: true"
+    # The raw value is not spliced into a frontmatter block in the body.
+    assert "---" not in session_call.kwargs["content"]
 
 
 async def test_flush_uses_capture_folder_from_payload(bm_home: Path) -> None:
