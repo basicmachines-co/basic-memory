@@ -171,6 +171,13 @@ def prepare_work_directory(run_dir: Path, case: EvalCase, with_skill: bool) -> P
 
 
 def copy_run_outputs(work_dir: Path, outputs_dir: Path) -> None:
+    symlinks = tuple(
+        path.relative_to(work_dir) for path in work_dir.rglob("*") if path.is_symlink()
+    )
+    if symlinks:
+        paths = ", ".join(str(path) for path in symlinks)
+        raise ValueError(f"trial workspace contains unsupported symlink(s): {paths}")
+
     def ignore_runtime_files(_directory: str, names: list[str]) -> list[str]:
         return [name for name in names if name in IGNORED_OUTPUT_NAMES or name.endswith(".pyc")]
 
@@ -271,18 +278,24 @@ def run_codex_trial(
             )
         duration_ms = round((time.perf_counter() - started_at) * 1000)
 
-        copy_run_outputs(work_dir, run_dir / "outputs")
+        trial_exit_code = result.returncode
+        try:
+            copy_run_outputs(work_dir, run_dir / "outputs")
+        except ValueError as error:
+            with stderr_path.open("a") as stderr_file:
+                stderr_file.write(f"\nArtifact collection error: {error}\n")
+            trial_exit_code = trial_exit_code or 2
         timing = {
             "total_tokens": read_total_tokens(events_path),
             "duration_ms": duration_ms,
-            "exit_code": result.returncode,
+            "exit_code": trial_exit_code,
         }
         (run_dir / "timing.json").write_text(json.dumps(timing, indent=2) + "\n")
         artifacts = collect_trial_artifacts(run_dir)
 
-    if result.returncode != 0:
+    if trial_exit_code != 0:
         print(f"Eval {case.id} ({case.name}) [{mode}] failed", file=sys.stderr)
-    return TrialResult(exit_code=result.returncode, artifacts=artifacts)
+    return TrialResult(exit_code=trial_exit_code, artifacts=artifacts)
 
 
 def write_case_metadata(iteration_dir: Path, case: EvalCase) -> None:
