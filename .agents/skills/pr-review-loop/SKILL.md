@@ -54,18 +54,34 @@ Any code push after a prior Codex approval invalidates that approval. A material
 PR-body edit should restart the loop for the description, but it does not
 invalidate the code-head review unless it changes the scope being reviewed.
 
-Check the PR body reactions first, and verify the reacting actor:
+Check the PR body reactions first, and verify both the reacting actor and the
+reaction's freshness for the current head. The status rollup is scoped to the
+current head SHA, so its earliest start time provides a post-push lower bound:
 
 ```bash
+head_started_at="$(
+  gh pr view <number> --json headRefOid,statusCheckRollup \
+    --jq '[.statusCheckRollup[] | .startedAt // empty] | min // empty'
+)"
+if [ -z "$head_started_at" ]; then
+  echo "Cannot prove when current-head activity started; body reaction is not approval."
+  exit 1
+fi
+
 gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
   -H "Accept: application/vnd.github+json" \
-  | jq '[.[][] | select(.user.login == "chatgpt-codex-connector[bot]")
+  | jq --arg head_started_at "$head_started_at" \
+    '[.[][]
+    | select(.user.login == "chatgpt-codex-connector[bot]"
+      and .created_at >= $head_started_at)
     | {content, created_at, user: .user.login}]'
 ```
 
 `gh pr view --json reactionGroups` is useful for counts, but it does not show
 which user reacted. Use the REST reactions endpoint above to prove Codex left
-the thumbs-up on the PR body.
+the thumbs-up on the PR body after current-head activity began. If the current
+head has no timestamped status/check activity, require a Codex review or issue
+comment that names the current head instead of trusting a body reaction alone.
 
 Then check Codex issue comments and confirm the latest "Reviewed commit" matches
 the current head prefix:
