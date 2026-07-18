@@ -34,7 +34,8 @@ but it also does not replace the required thumbs-up.
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on the PR body/description: Codex approves/no suggestions. This is the common approval signal.
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on a Codex issue comment: also an approval signal, but this is not the only place to look.
 - Codex issue comment saying "Didn't find any major issues": approval-like context, but confirm the PR body/comment thumbs-up or get an explicit user override.
-- Codex top-level review with `CHANGES_REQUESTED` or a substantive review body: blocking feedback even when it has no inline thread.
+- Latest current-head Codex review per actor with `CHANGES_REQUESTED` or a
+  substantive review body: blocking feedback even when it has no inline thread.
 - Codex comment, review body, or review thread containing substantive feedback:
   blocking until addressed, replied to with a clear rationale, or explicitly
   overridden by the user.
@@ -186,14 +187,20 @@ gh api "repos/<owner>/<repo>/pulls/<number>/reviews" --paginate --slurp \
     '[.[][]
     | select((.user.login | test("chatgpt-codex-connector"))
       and .commit_id == $head_sha)
-    | {id, state, submitted_at, html_url, body}]'
+    | {id, user: .user.login, state, submitted_at, html_url, body}]
+    | sort_by(.user, .submitted_at, .id)
+    | group_by(.user)
+    | map(last)'
 ```
 
-A current-head `CHANGES_REQUESTED` review is blocking. Read every non-empty
+Evaluate only the latest current-head review returned for each Codex actor; a
+newer review supersedes that actor's earlier top-level state on the same head.
+A latest `CHANGES_REQUESTED` review is blocking. Read every latest non-empty
 review body and address any substantive finding even when the review has no
 inline thread. A boilerplate-only `COMMENTED` review that merely accompanies
 inline findings is not an additional blocker after those findings are resolved;
-it is also not an approval signal.
+it is also not an approval signal. Review-thread resolution remains a separate
+gate below and is never superseded by top-level review history alone.
 
 For a relevant Codex issue comment, verify any approval reaction by actor. The
 aggregate reaction counts on the comment do not identify who reacted:
