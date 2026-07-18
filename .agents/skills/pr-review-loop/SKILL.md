@@ -97,42 +97,51 @@ body_edited_at="$(
     | jq -r '.data.repository.pullRequest.lastEditedAt // empty'
 )"
 
-if [ -z "$head_started_at" ] || [ "$edit_head_sha" != "$head_sha" ]; then
-  echo "Cannot prove current-head freshness; reaction is not approval."
+if [ "$edit_head_sha" != "$head_sha" ]; then
+  echo "Head changed while checking review state; reaction is not approval."
   exit 1
 fi
 
-approval_not_before="$(
-  jq -nr \
-    --arg head_started_at "$head_started_at" \
-    --arg body_edited_at "$body_edited_at" \
-    '[$head_started_at, $body_edited_at]
-    | map(select(length > 0))
-    | max // empty'
-)"
+body_reactions_available=true
+if [ -z "$head_started_at" ]; then
+  body_reactions_available=false
+  approval_not_before="$body_edited_at"
+  echo "No timestamped current-head checks; skipping PR-body reactions."
+else
+  approval_not_before="$(
+    jq -nr \
+      --arg head_started_at "$head_started_at" \
+      --arg body_edited_at "$body_edited_at" \
+      '[$head_started_at, $body_edited_at]
+      | map(select(length > 0))
+      | max // empty'
+  )"
+fi
 
-reactions_json="$(
-  gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
-    -H "Accept: application/vnd.github+json"
-)"
+if [ "$body_reactions_available" = true ]; then
+  reactions_json="$(
+    gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
+      -H "Accept: application/vnd.github+json"
+  )"
 
-echo "Fresh Codex approvals:"
-printf '%s' "$reactions_json" \
-  | jq --arg approval_not_before "$approval_not_before" \
-    '[.[][]
-    | select(.user.login == "chatgpt-codex-connector[bot]"
-      and .content == "+1"
-      and .created_at >= $approval_not_before)
-    | {content, created_at, user: .user.login}]'
+  echo "Fresh Codex approvals:"
+  printf '%s' "$reactions_json" \
+    | jq --arg approval_not_before "$approval_not_before" \
+      '[.[][]
+      | select(.user.login == "chatgpt-codex-connector[bot]"
+        and .content == "+1"
+        and .created_at >= $approval_not_before)
+      | {content, created_at, user: .user.login}]'
 
-echo "Fresh Codex pending signals:"
-printf '%s' "$reactions_json" \
-  | jq --arg approval_not_before "$approval_not_before" \
-    '[.[][]
-    | select(.user.login == "chatgpt-codex-connector[bot]"
-      and .content == "eyes"
-      and .created_at >= $approval_not_before)
-    | {content, created_at, user: .user.login}]'
+  echo "Fresh Codex pending signals:"
+  printf '%s' "$reactions_json" \
+    | jq --arg approval_not_before "$approval_not_before" \
+      '[.[][]
+      | select(.user.login == "chatgpt-codex-connector[bot]"
+        and .content == "eyes"
+        and .created_at >= $approval_not_before)
+      | {content, created_at, user: .user.login}]'
+fi
 ```
 
 `gh pr view --json reactionGroups` is useful for counts, but it does not show
@@ -140,8 +149,8 @@ which user reacted. Use the REST reactions endpoint above to prove Codex left
 the thumbs-up after both current-head activity began and the PR object was last
 edited. Only a non-empty approval result satisfies the gate; a non-empty pending
 result means keep waiting. If the current head has no timestamped status/check
-activity, require a Codex review or issue comment that names the current head
-instead of trusting a body reaction alone.
+activity, skip PR-body reactions and continue to the review and issue-comment
+checks below instead of exiting the workflow.
 
 Then check Codex issue comments and confirm the latest "Reviewed commit" matches
 the current head prefix:
@@ -152,6 +161,11 @@ gh api "repos/<owner>/<repo>/issues/<number>/comments" --paginate \
   | jq '[.[][] | select(.user.login | test("chatgpt-codex-connector"))
     | {id, created_at, html_url, body: .body[0:240]}]'
 ```
+
+When PR-body reactions were skipped, only use an issue comment that names the
+exact current head and, when `body_edited_at` is non-empty, was created after
+that edit. Its thumbs-up must also pass the actor and `approval_not_before`
+check below.
 
 Top-level pull-request reviews are a separate API surface from issue comments
 and review threads. Fetch every page and inspect Codex reviews submitted for the

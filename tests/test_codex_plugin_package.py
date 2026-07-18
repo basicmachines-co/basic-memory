@@ -111,20 +111,22 @@ def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:
     assert "Chosen BM style category" in prompt_blueprint
 
 
-def test_pr_create_skill_documents_optional_infographic_theme_arg() -> None:
+def test_pr_create_skill_delegates_to_current_pr_workflow() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / ".agents/skills/pr-create/SKILL.md").read_text(encoding="utf-8")
     skill_flat = " ".join(skill.split())
 
-    assert "## How To Use" in skill
+    assert "## Compatibility" in skill
+    assert "## Workflow" in skill
     assert "$pr-create" in skill
-    assert "<theme>" in skill
-    assert '$pr-create "Italian movie poster"' in skill
-    assert '$pr-create "80\'s action movies"' in skill
-    assert "<!-- BM_INFOGRAPHIC_THEME:start -->" in skill
-    assert "<!-- BM_INFOGRAPHIC_THEME:end -->" in skill
-    assert "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->" in skill
-    assert "BM Bossbot Approval" in skill
-    assert "selected visual direction" in skill_flat
+    assert "`pull-request`" in skill
+    assert "`pr-description`" in skill
+    assert "`pr-review-loop`" in skill
+    assert "`fix-pr-issues`" in skill
+    assert "automatic PR-infographic workflow has been retired" in skill_flat
+    assert "Do not wait for the deleted `BM Bossbot Approval` status" in skill_flat
+    assert "<!-- BM_INFOGRAPHIC_THEME:start -->" not in skill
+    assert "<!-- BM_INFOGRAPHIC_PROVENANCE:start -->" not in skill
     assert "never merges" in skill
-    assert "non-gating" in skill
+    assert "Do not enable auto-merge" in skill
+    assert "current-head gate" in skill
