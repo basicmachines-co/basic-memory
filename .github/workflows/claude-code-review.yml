@@ -42,10 +42,15 @@ jobs:
             treat this advisory review as the required merge gate. BM Bossbot owns
             the required `BM Bossbot Approval` status.
 
+            If the PR changes Python, read
+            `.agents/skills/pythonic-code/SKILL.md` in full and apply its Review
+            mode to the changed Python code before reporting findings.
+
             Review the PR against our team checklist:
 
             ## Code Quality & Standards
             - [ ] Follows Basic Memory's coding conventions in CLAUDE.md
+            - [ ] Python changes follow the `pythonic-code` review guidance
             - [ ] Python 3.12+ type annotations and async patterns
             - [ ] SQLAlchemy 2.0 best practices
             - [ ] FastAPI and Typer conventions followed

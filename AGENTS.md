@@ -116,6 +116,11 @@ See [docs/ENGINEERING_STYLE.md](docs/ENGINEERING_STYLE.md) for the fuller house 
 [docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) for product language, ownership, identity, and
 source-of-truth rules. The short version for agents:
 
+For nontrivial Python writing, refactoring, or review, read and follow
+[`.agents/skills/pythonic-code/SKILL.md`](.agents/skills/pythonic-code/SKILL.md) in full. Use
+the skill's Write, Refactor, or Review mode that matches the task. GitHub coding and review
+agents must apply this skill before changing or evaluating Python code.
+
 - Prefer type-safe, explicit designs over object-heavy indirection. Use Python 3.12 `type`
   aliases, full annotations, and narrow `Protocol`s when a caller only needs a capability.
 - Prefer functions and typed values before classes, and concrete classes before abstract base
