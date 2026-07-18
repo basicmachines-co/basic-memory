@@ -41,7 +41,9 @@ Let local project rules override generic style advice.
   another object.
 - Use `functools.singledispatch` only when behavior genuinely varies by the first argument's
   runtime type and open registration is an intentional extension point.
-- Use a narrow `Protocol` when callers need a capability instead of a concrete implementation.
+- Use a narrow `Protocol` for genuine replaceable behavior. Do not use property-only protocols to
+  describe internal result data; return a concrete frozen dataclass unless callers truly require
+  structural interoperability.
 - Use a concrete class when identity, cohesive mutable state, lifecycle, or resource ownership
   requires one.
 - Use an abstract base class only when runtime-enforced subclassing or shared skeletal behavior

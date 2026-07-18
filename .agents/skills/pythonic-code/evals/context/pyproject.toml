@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["evals/files"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

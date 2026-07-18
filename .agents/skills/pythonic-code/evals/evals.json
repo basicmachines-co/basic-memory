@@ -1,0 +1,58 @@
+{
+  "skill_name": "pythonic-code",
+  "evals": [
+    {
+      "id": 1096,
+      "eval_name": "shared-runtime-ownership",
+      "source_issue": "https://github.com/basicmachines-co/basic-memory/issues/1096",
+      "prompt": "Review evals/files/shared_runtime_ownership.md. Describe the runtime-neutral target package ownership and dependency direction, then recommend the smallest first cleanup PR within an incremental rollout that does not change runtime behavior. Account for each misplaced portable facade, project-scoped repository bundle, and search persistence type or helper in the snapshot, even when deferring it from the first PR. Do not edit the fixture. Be concrete about moves or renames, compatibility during the paired cloud rollout, documentation, and validation.",
+      "expected_output": "A staged architecture recommendation that moves portable note behavior out of cloud-named ownership, gives project-scoped repositories a runtime-neutral name, lowers search DTO/SQL dependencies beneath repositories, uses temporary compatibility exports for the paired cloud revision, and records the dependency direction without proposing another manager or all-at-once package rewrite.",
+      "files": [
+        "evals/files/shared_runtime_ownership.md"
+      ],
+      "assertions": [
+        "The response identifies basic_memory.cloud as misleading ownership for portable core note behavior and proposes a neutral core destination.",
+        "The response gives LocalAcceptedNoteRepositories a runtime-neutral project-scoped name rather than preserving origin-based naming.",
+        "The response moves or re-homes AcceptedNoteSearchRow and vector-delete behavior so repository modules do not depend upward on indexing orchestration.",
+        "The rollout is incremental and includes temporary compatibility exports or an equivalent coordinated core/cloud migration strategy.",
+        "The response records the intended dependency direction and names concrete core plus cloud validation without introducing managers, registries, or an all-at-once package rewrite."
+      ]
+    },
+    {
+      "id": 1097,
+      "eval_name": "accepted-snapshot-persistence",
+      "source_issue": "https://github.com/basicmachines-co/basic-memory/issues/1097",
+      "prompt": "Refactor evals/files/accepted_snapshot.py and its tests. A previous mutation path returned success after persisting content and search but before observations and relations existed. Make that class of omission structurally difficult for future full-note mutations while preserving the intentionally narrower move behavior. Keep transaction ownership explicit and add the regression coverage needed to prove the change.",
+      "expected_output": "One direct accepted-snapshot persistence operation writes content, search, observations, and relations through the caller-owned session. Create and edit use it; move uses an explicitly narrower private or move-specific operation. Tests prove create and edit persist the full snapshot immediately while move does not replace unchanged graph state.",
+      "files": [
+        "evals/files/accepted_snapshot.py",
+        "evals/files/test_accepted_snapshot.py"
+      ],
+      "assertions": [
+        "One clearly named production operation persists content, search, observations, and relations for a full accepted snapshot.",
+        "Both create_note and edit_note use the complete snapshot operation rather than separately remembering a graph call.",
+        "The content/search-only operation is private, move-specific, or otherwise unavailable as the tempting default for full-note mutations.",
+        "The caller-owned session is passed through explicitly and the refactor does not create a hidden transaction or service hierarchy.",
+        "Focused tests prove complete create and edit persistence plus the intentionally narrower move behavior."
+      ]
+    },
+    {
+      "id": 1098,
+      "eval_name": "accepted-preparation-surface",
+      "source_issue": "https://github.com/basicmachines-co/basic-memory/issues/1098",
+      "prompt": "Refactor evals/files/accepted_preparation.py and its tests to make the accepted-note preparation path easier to trace and cheaper to compose. Preserve create preparation and full EntityService behavior, keep genuine replaceable capabilities typed, and avoid changing the observable Markdown, permalink, conflict, or parsing semantics.",
+      "expected_output": "Preparation becomes direct module-level behavior over frozen typed values and narrow behavioral capabilities. The accepted path no longer constructs the full EntityService merely to call prepare_create_entity_content, property-only source protocols disappear, and the existing service can delegate to the same function without a replacement manager or registry.",
+      "files": [
+        "evals/files/accepted_preparation.py",
+        "evals/files/test_accepted_preparation.py"
+      ],
+      "assertions": [
+        "Property-only prepared-data protocols are replaced by a small number of frozen typed values.",
+        "Behavioral protocols remain only for genuine replaceable capabilities such as storage existence, permalink resolution, or Markdown parsing.",
+        "The accepted-note composition path does not construct the full EntityService solely to prepare a create.",
+        "Preparation is expressed with direct module-level functions and ordinary arguments or partial binding, without a replacement Manager, strategy hierarchy, or registry.",
+        "Focused tests preserve create preparation and EntityService delegation semantics, including the existing-file conflict."
+      ]
+    }
+  ]
+}
