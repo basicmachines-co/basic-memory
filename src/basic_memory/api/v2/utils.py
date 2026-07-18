@@ -271,6 +271,10 @@ async def to_search_results(
                         permalink=result.permalink,
                         score=result.score if result.score is not None else 0.0,
                         entity=parent_entity.permalink if parent_entity else None,
+                        # Parent entity UUID, so hosted MCP can deep-link the note this hit
+                        # belongs to. Available for entity, observation, and relation results
+                        # because each row carries its owning entity's id (#1423).
+                        external_id=parent_entity.external_id if parent_entity else None,
                         content=result.content,
                         matched_chunk=result.matched_chunk_text,
                         file_path=_required_str(result.file_path, "file_path"),

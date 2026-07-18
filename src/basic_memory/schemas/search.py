@@ -121,6 +121,10 @@ class SearchResult(BaseModel):
     type: SearchItemType
     score: float
     entity: Optional[Permalink] = None
+    # External UUID of the note this result belongs to (the parent entity for observation and
+    # relation hits). Stable, API-friendly id the hosted MCP layer uses to build web-app
+    # deep-links to the matching note (#1423).
+    external_id: Optional[str] = None
     permalink: Optional[str]
     content: Optional[str] = None
     matched_chunk: Optional[str] = None
