@@ -18,8 +18,8 @@ Codex often leaves that thumbs-up as a reaction on the PR description/body itsel
 (the GitHub Issue/PR object), not on its "Codex Review" issue comment. Do not
 only inspect issue comments.
 
-If Codex shows an eyes reaction on the PR body or a comment, it is reviewing.
-Wait and keep checking.
+If Codex's newest fresh reaction on the PR body or a relevant comment is eyes,
+it is reviewing. Wait and keep checking.
 
 If Codex leaves a comment, review body, or inline thread containing substantive
 feedback, the PR is not approved. Use judgement: fix the code when the comment
@@ -29,7 +29,8 @@ but it also does not replace the required thumbs-up.
 
 ## Signals
 
-- Eyes reaction on the PR body or a comment: Codex is looking at the PR. This is pending, not approval.
+- Eyes reaction on the PR body or a comment: pending when it is newer than the
+  latest fresh thumbs-up on that same surface.
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on the PR body/description: Codex approves/no suggestions. This is the common approval signal.
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on a Codex issue comment: also an approval signal, but this is not the only place to look.
 - Codex issue comment saying "Didn't find any major issues": approval-like context, but confirm the PR body/comment thumbs-up or get an explicit user override.
@@ -124,33 +125,39 @@ if [ "$body_reactions_available" = true ]; then
       -H "Accept: application/vnd.github+json"
   )"
 
-  echo "Fresh Codex approvals:"
+  echo "Fresh Codex reaction state:"
   printf '%s' "$reactions_json" \
-    | jq --arg approval_not_before "$approval_not_before" \
-      '[.[][]
-      | select(.user.login == "chatgpt-codex-connector[bot]"
-        and .content == "+1"
-        and .created_at >= $approval_not_before)
-      | {content, created_at, user: .user.login}]'
+    | jq --arg approval_not_before "$approval_not_before" '
+      def latest_reaction($content):
+        [.[][]
+        | select(.user.login == "chatgpt-codex-connector[bot]"
+          and .content == $content
+          and .created_at >= $approval_not_before)
+        | {content, created_at, user: .user.login}]
+        | sort_by(.created_at)
+        | last // null;
 
-  echo "Fresh Codex pending signals:"
-  printf '%s' "$reactions_json" \
-    | jq --arg approval_not_before "$approval_not_before" \
-      '[.[][]
-      | select(.user.login == "chatgpt-codex-connector[bot]"
-        and .content == "eyes"
-        and .created_at >= $approval_not_before)
-      | {content, created_at, user: .user.login}]'
+      {approval: latest_reaction("+1"), pending: latest_reaction("eyes")}
+      | .state = (
+          if .approval != null
+            and (.pending == null
+              or .approval.created_at > .pending.created_at)
+          then "approved"
+          elif .pending != null then "pending"
+          else "none"
+          end
+        )'
 fi
 ```
 
 `gh pr view --json reactionGroups` is useful for counts, but it does not show
 which user reacted. Use the REST reactions endpoint above to prove Codex left
 the thumbs-up after both current-head activity began and the PR object was last
-edited. Only a non-empty approval result satisfies the gate; a non-empty pending
-result means keep waiting. If the current head has no timestamped status/check
-activity, skip PR-body reactions and continue to the review and issue-comment
-checks below instead of exiting the workflow.
+edited. A reaction state of `approved` satisfies the reaction portion of the
+gate. `pending` means the newest fresh signal is eyes, so keep waiting; a newer
+thumbs-up supersedes an older eyes reaction. If the current head has no
+timestamped status/check activity, skip PR-body reactions and continue to the
+review and issue-comment checks below instead of exiting the workflow.
 
 Then check Codex issue comments and confirm the latest "Reviewed commit" matches
 the current head prefix:
@@ -195,12 +202,26 @@ aggregate reaction counts on the comment do not identify who reacted:
 gh api "repos/<owner>/<repo>/issues/comments/<comment-id>/reactions" \
   --paginate --slurp \
   -H "Accept: application/vnd.github+json" \
-  | jq --arg approval_not_before "$approval_not_before" \
-    '[.[][]
-    | select(.user.login == "chatgpt-codex-connector[bot]"
-      and .content == "+1"
-      and .created_at >= $approval_not_before)
-    | {content, created_at, user: .user.login}]'
+  | jq --arg approval_not_before "$approval_not_before" '
+    def latest_reaction($content):
+      [.[][]
+      | select(.user.login == "chatgpt-codex-connector[bot]"
+        and .content == $content
+        and .created_at >= $approval_not_before)
+      | {content, created_at, user: .user.login}]
+      | sort_by(.created_at)
+      | last // null;
+
+    {approval: latest_reaction("+1"), pending: latest_reaction("eyes")}
+    | .state = (
+        if .approval != null
+          and (.pending == null
+            or .approval.created_at > .pending.created_at)
+        then "approved"
+        elif .pending != null then "pending"
+        else "none"
+        end
+      )'
 ```
 
 Finally, query GraphQL review threads. GitHub records comment placement SHAs in
@@ -243,7 +264,8 @@ An empty result across every page means there are no unresolved, non-outdated
 Codex threads. Keep outdated threads as review history, but do not treat their
 comment SHAs as the current resolution state.
 
-3. If Codex has eyes and no thumbs-up, keep monitoring. Do not infer approval from silence.
+3. If the latest fresh reaction state is `pending`, keep monitoring. Do not
+infer approval from silence.
 
 4. If Codex leaves feedback, start addressing it immediately. Do not wait for all tests to complete before reading and acting on comments; that wastes review-loop time. Tests can keep running in parallel while you inspect the feedback.
 
