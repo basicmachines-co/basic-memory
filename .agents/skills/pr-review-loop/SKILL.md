@@ -68,20 +68,37 @@ if [ -z "$head_started_at" ]; then
   exit 1
 fi
 
-gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
-  -H "Accept: application/vnd.github+json" \
+reactions_json="$(
+  gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
+    -H "Accept: application/vnd.github+json"
+)"
+
+echo "Fresh Codex approvals:"
+printf '%s' "$reactions_json" \
   | jq --arg head_started_at "$head_started_at" \
     '[.[][]
     | select(.user.login == "chatgpt-codex-connector[bot]"
+      and .content == "+1"
+      and .created_at >= $head_started_at)
+    | {content, created_at, user: .user.login}]'
+
+echo "Fresh Codex pending signals:"
+printf '%s' "$reactions_json" \
+  | jq --arg head_started_at "$head_started_at" \
+    '[.[][]
+    | select(.user.login == "chatgpt-codex-connector[bot]"
+      and .content == "eyes"
       and .created_at >= $head_started_at)
     | {content, created_at, user: .user.login}]'
 ```
 
 `gh pr view --json reactionGroups` is useful for counts, but it does not show
 which user reacted. Use the REST reactions endpoint above to prove Codex left
-the thumbs-up on the PR body after current-head activity began. If the current
-head has no timestamped status/check activity, require a Codex review or issue
-comment that names the current head instead of trusting a body reaction alone.
+the thumbs-up on the PR body after current-head activity began. Only a non-empty
+approval result satisfies the gate; a non-empty pending result means keep
+waiting. If the current head has no timestamped status/check activity, require
+a Codex review or issue comment that names the current head instead of trusting
+a body reaction alone.
 
 Then check Codex issue comments and confirm the latest "Reviewed commit" matches
 the current head prefix:
