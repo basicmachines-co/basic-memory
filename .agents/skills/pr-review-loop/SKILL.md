@@ -47,7 +47,8 @@ can leave state:
 - PR body/description reactions: the approval thumbs-up may be here.
 - PR issue comments: Codex posts "Codex Review" summaries here, including the reviewed commit.
 - PR reviews and inline review comments: Codex posts actionable findings here.
-- Review threads: unresolved current-head threads remain blocking even when older threads are outdated.
+- Review threads: unresolved, non-outdated Codex threads remain blocking across pushes. Do not
+  infer thread state from the placement commit recorded on individual comments.
 
 Any code push after a prior Codex approval invalidates that approval. A material
 PR-body edit should restart the loop for the description, but it does not
@@ -75,19 +76,39 @@ gh api "repos/<owner>/<repo>/issues/<number>/comments" --paginate \
     | {created_at, html_url, body: .body[0:240], reactions: .reactions}]'
 ```
 
-Finally, check inline review comments on the current head:
+Finally, query GraphQL review threads. GitHub records comment placement SHAs in
+the REST payload, but only the thread exposes whether feedback remains unresolved
+and non-outdated after a follow-up push:
 
 ```bash
-head_sha="$(gh pr view <number> --json headRefOid --jq .headRefOid)"
-gh api "repos/<owner>/<repo>/pulls/<number>/comments" --paginate \
-  | jq --arg head "$head_sha" '
-    [.[] | select((.user.login | test("chatgpt-codex-connector"))
-      and (.commit_id == $head or .original_commit_id == $head))
-      | {path, line, body, html_url}]'
+gh api graphql \
+  -F owner=<owner> \
+  -F name=<repo> \
+  -F number=<number> \
+  -f query='query($owner:String!,$name:String!,$number:Int!){
+    repository(owner:$owner,name:$name){
+      pullRequest(number:$number){
+        reviewThreads(first:100){
+          nodes{
+            id isResolved isOutdated path line
+            comments(first:100){
+              nodes{author{login} body url createdAt commit{oid}}
+            }
+          }
+        }
+      }
+    }
+  }' \
+  | jq '[.data.repository.pullRequest.reviewThreads.nodes[]
+    | select((.isResolved | not) and (.isOutdated | not))
+    | select(any(.comments.nodes[];
+        .author.login | test("chatgpt-codex-connector")))
+    | {id, path, line, comments: .comments.nodes}]'
 ```
 
-If REST inline comments look current but you have replies on them, use GraphQL
-review threads to distinguish unresolved blockers from addressed history.
+An empty result means there are no unresolved, non-outdated Codex threads. Keep
+outdated threads as review history, but do not treat their comment SHAs as the
+current resolution state.
 
 3. If Codex has eyes and no thumbs-up, keep monitoring. Do not infer approval from silence.
 
