@@ -1877,6 +1877,7 @@ def test_format_search_markdown_with_results():
                 type=SearchItemType.ENTITY,
                 score=0.85,
                 permalink="docs/my-note",
+                external_id="46adce12-adfc-42f5-a0f9-83aa65f22619",
                 file_path="docs/My Note.md",
                 matched_chunk="This is a matching snippet",
             ),
@@ -1898,9 +1899,13 @@ def test_format_search_markdown_with_results():
     assert "test-project" in text
     assert "### My Note" in text
     assert "permalink: docs/my-note" in text
+    # external_id is emitted for hits that carry one, so hosted MCP can deep-link them (#1423).
+    assert "external_id: 46adce12-adfc-42f5-a0f9-83aa65f22619" in text
     assert "0.8500" in text
     assert "match: This is a matching snippet" in text
     assert "### Other Note" in text
+    # A hit without an external_id must not render an empty external_id line.
+    assert text.count("external_id:") == 1
     assert "2 results" in text
     assert "page 1" in text
 

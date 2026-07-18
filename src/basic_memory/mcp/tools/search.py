@@ -332,6 +332,12 @@ def _format_search_markdown(result: SearchResponse, project: str, query: str | N
     for r in result.results:
         parts.append(f"### {r.title}")
         parts.append(f"- permalink: {r.permalink}")
+        # external_id is the note's stable identifier. Emitting it lets the hosted MCP layer
+        # deep-link each hit to the web app from the final (post-merge) result the caller sees,
+        # which matters for all-projects search where the displayed page is decided after the
+        # per-project API calls the gateway would otherwise record (#1423).
+        if r.external_id:
+            parts.append(f"- external_id: {r.external_id}")
         parts.append(f"- score: {r.score:.4f}")
         if r.matched_chunk:
             parts.append(f"- match: {r.matched_chunk[:200]}")
