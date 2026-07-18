@@ -356,7 +356,7 @@ Try a prompt:
   and Homebrew installs; `bm update` triggers a manual check.
 - **Semantic vector search.** Find notes by meaning, not just keywords.
   Hybrid full-text + vector ranking with FastEmbed embeddings, on SQLite or
-  Postgres.
+  Postgres, with optional Milvus vector storage.
 - **Schema system.** Infer, validate, and diff the structure of your
   knowledge base with `schema_infer`, `schema_validate`, `schema_diff`.
 - **Per-project cloud routing.** Route individual projects through the cloud

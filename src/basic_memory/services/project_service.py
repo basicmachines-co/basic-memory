@@ -26,6 +26,7 @@ from basic_memory.schemas import (
 )
 from basic_memory.config import (
     DatabaseBackend,
+    SemanticVectorBackend,
     WATCH_STATUS_JSON,
     ConfigManager,
     ProjectEntry,
@@ -1040,6 +1041,7 @@ class ProjectService:
         query_prefix_set = bool(config.semantic_embedding_query_prefix)
 
         is_postgres = config.database_backend == DatabaseBackend.POSTGRES
+        uses_milvus = config.semantic_vector_backend == SemanticVectorBackend.MILVUS
 
         # --- Check vector table existence ---
         # Both search_vector_chunks and search_vector_embeddings must exist
@@ -1127,7 +1129,7 @@ class ProjectService:
                 total_entities_with_chunks = entities_with_chunks_result.scalar() or 0
 
                 # Embeddings count — join pattern differs between SQLite and Postgres
-                if is_postgres:
+                if is_postgres or uses_milvus:
                     embeddings_sql = text(
                         "SELECT COUNT(*) FROM search_vector_chunks c "
                         "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
@@ -1143,10 +1145,10 @@ class ProjectService:
                 # The embeddings/orphan JOINs read search_vector_embeddings, a vec0
                 # virtual table. On SQLite that table is only visible on a connection
                 # that loaded sqlite-vec, so route these through scalar_vec_query which
-                # loads the extension first. Postgres has no per-connection extension
-                # and uses the bare pooled session.
+                # loads the extension first. Postgres and Milvus marker tables have no
+                # per-connection extension and use the bare pooled session.
                 async def _vec_scalar(vec_sql) -> int:
-                    if is_postgres:
+                    if is_postgres or uses_milvus:
                         result = await self.repository.execute_query(
                             session, vec_sql, {"project_id": project_id}
                         )
@@ -1167,7 +1169,7 @@ class ProjectService:
                 total_embeddings = await _vec_scalar(embeddings_sql)
 
                 # Orphaned chunks (chunks without embeddings — indicates interrupted indexing)
-                if is_postgres:
+                if is_postgres or uses_milvus:
                     orphan_sql = text(
                         "SELECT COUNT(*) FROM search_vector_chunks c "
                         "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
@@ -1186,7 +1188,7 @@ class ProjectService:
                 # Why: project info should degrade gracefully instead of crashing on stats queries.
                 # Outcome: report vector tables as unavailable and point the user to install the
                 # missing dependency before rebuilding embeddings.
-                if is_postgres or "no such module: vec0" not in str(exc).lower():
+                if is_postgres or uses_milvus or "no such module: vec0" not in str(exc).lower():
                     raise
 
                 return EmbeddingStatus(

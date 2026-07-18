@@ -27,6 +27,10 @@ CONFIG_FILE_NAME = "config.json"
 WATCH_STATUS_JSON = "watch-status.json"
 CONFIG_DIR_MODE = 0o700
 CONFIG_FILE_MODE = 0o600
+UNPREFIXED_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    "milvus_uri": ("MILVUS_URI",),
+    "milvus_token": ("MILVUS_TOKEN",),
+}
 
 Environment = Literal["test", "dev", "user"]
 
@@ -55,6 +59,13 @@ class DatabaseBackend(str, Enum):
 
     SQLITE = "sqlite"
     POSTGRES = "postgres"
+
+
+class SemanticVectorBackend(str, Enum):
+    """Supported semantic vector storage backends."""
+
+    DATABASE = "database"
+    MILVUS = "milvus"
 
 
 def _default_semantic_search_enabled() -> bool:
@@ -104,6 +115,13 @@ def default_fastembed_cache_dir() -> str:
     if env_override := os.getenv("FASTEMBED_CACHE_PATH"):
         return env_override
     return str(resolve_data_dir() / "fastembed_cache")
+
+
+def default_milvus_uri() -> str:
+    """Return the default Milvus Lite URI for the semantic Milvus backend."""
+    if env_override := os.getenv("MILVUS_URI"):
+        return env_override
+    return str(resolve_data_dir() / "milvus.db")
 
 
 @dataclass
@@ -374,6 +392,34 @@ class BasicMemoryConfig(BaseSettings):
         description="Default search type for search_notes when not specified per-query. "
         "Valid values: text, vector, hybrid. "
         "When unset, defaults to 'hybrid' if semantic search is enabled, otherwise 'text'.",
+    )
+    semantic_vector_backend: SemanticVectorBackend = Field(
+        default=SemanticVectorBackend.DATABASE,
+        description=(
+            "Semantic vector storage backend. 'database' uses sqlite-vec or pgvector "
+            "with the active database backend; 'milvus' stores vectors in Milvus while "
+            "keeping search metadata in the active database."
+        ),
+    )
+    milvus_uri: str = Field(
+        default_factory=default_milvus_uri,
+        description=(
+            "Milvus URI for semantic_vector_backend='milvus'. Defaults to a Milvus Lite "
+            "database under the Basic Memory config directory. Can also be set with "
+            "MILVUS_URI."
+        ),
+    )
+    milvus_token: str | None = Field(
+        default_factory=lambda: os.getenv("MILVUS_TOKEN"),
+        description=(
+            "Optional Milvus/Zilliz Cloud token for semantic_vector_backend='milvus'. "
+            "Can also be set with MILVUS_TOKEN."
+        ),
+    )
+    milvus_collection_name: str = Field(
+        default="basic_memory_vectors",
+        description="Milvus collection name for semantic vector chunks.",
+        min_length=1,
     )
 
     # Database connection pool configuration (Postgres only)
@@ -1070,8 +1116,11 @@ class ConfigManager:
 
                 merged_data = file_data.copy()
                 for field_name in BasicMemoryConfig.model_fields.keys():
-                    env_var_name = f"BASIC_MEMORY_{field_name.upper()}"
-                    if env_var_name in os.environ:
+                    env_var_names = (
+                        f"BASIC_MEMORY_{field_name.upper()}",
+                        *UNPREFIXED_ENV_ALIASES.get(field_name, ()),
+                    )
+                    if any(env_var_name in os.environ for env_var_name in env_var_names):
                         # Trigger: the file and environment both configure this field.
                         # Why: BaseSettings only gives environment values precedence when the
                         # field is absent from constructor data. Removing the file value lets

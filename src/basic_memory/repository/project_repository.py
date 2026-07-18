@@ -227,6 +227,26 @@ class ProjectRepository(Repository[Project]):
                 {"project_id": entity_id},
             )
 
+        from basic_memory.config import ConfigManager, SemanticVectorBackend
+
+        config = ConfigManager().config
+        uses_milvus = config.semantic_vector_backend == SemanticVectorBackend.MILVUS
+        if uses_milvus:
+            from basic_memory.repository.milvus_search_repository import (
+                delete_milvus_project_vectors,
+            )
+            from basic_memory.repository.semantic_errors import (
+                SemanticDependenciesMissingError,
+            )
+
+            try:
+                await delete_milvus_project_vectors(config, entity_id)
+            except SemanticDependenciesMissingError as exc:
+                logger.warning(
+                    "Skipping Milvus project vector purge because pymilvus is unavailable: {}",
+                    exc,
+                )
+
         # search_vector_chunks: no FK to project on either backend, so both
         # backends need this. SQLite must purge vec0 embeddings first
         # (rowid pseudocolumn — Postgres uses chunk_id and would 500 here);
@@ -234,19 +254,32 @@ class ProjectRepository(Repository[Project]):
         # we delete the chunk rows below.
         if "search_vector_chunks" in existing_tables:
             if is_sqlite and "search_vector_embeddings" in existing_tables:
-                # Extension loading is per-connection. We must load vec0 on
-                # *this* session before the DELETE; otherwise a different
-                # pooled connection might have written embeddings that we'd
-                # silently leave behind.
-                if await _load_sqlite_vec_on_session(session):
+                if uses_milvus:
+                    # Milvus stores SQLite marker rows in a regular SQL table,
+                    # not a sqlite-vec virtual table, so deleting them must not
+                    # depend on loading the sqlite-vec extension.
                     await session.execute(
                         text(
-                            "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                            "DELETE FROM search_vector_embeddings WHERE chunk_id IN ("
                             "SELECT id FROM search_vector_chunks "
                             "WHERE project_id = :project_id)"
                         ),
                         {"project_id": entity_id},
                     )
+                else:
+                    # Extension loading is per-connection. We must load vec0 on
+                    # *this* session before the DELETE; otherwise a different
+                    # pooled connection might have written embeddings that we'd
+                    # silently leave behind.
+                    if await _load_sqlite_vec_on_session(session):
+                        await session.execute(
+                            text(
+                                "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                                "SELECT id FROM search_vector_chunks "
+                                "WHERE project_id = :project_id)"
+                            ),
+                            {"project_id": entity_id},
+                        )
             await session.execute(
                 text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
                 {"project_id": entity_id},

@@ -111,6 +111,10 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_embedding_document_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_PREFIX` | Unset | Optional literal text prefix prepended to indexed document chunks before embedding. |
 | `semantic_embedding_query_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX` | Unset | Optional literal text prefix prepended to search queries before embedding. |
 | `semantic_vector_k` | `BASIC_MEMORY_SEMANTIC_VECTOR_K` | `100` | Candidate count for vector nearest-neighbour retrieval. Higher values improve recall at the cost of latency. |
+| `semantic_vector_backend` | `BASIC_MEMORY_SEMANTIC_VECTOR_BACKEND` | `"database"` | Vector storage backend. `"database"` uses sqlite-vec or pgvector; `"milvus"` stores vectors in Milvus while keeping metadata in SQLite/Postgres. |
+| `milvus_uri` | `BASIC_MEMORY_MILVUS_URI` or `MILVUS_URI` | `<config dir>/milvus.db` | Milvus URI when `semantic_vector_backend="milvus"`. Use a local `.db` path for Milvus Lite, `http://localhost:19530` for Milvus server, or a Zilliz Cloud endpoint. |
+| `milvus_token` | `BASIC_MEMORY_MILVUS_TOKEN` or `MILVUS_TOKEN` | unset | Optional Milvus/Zilliz Cloud token. |
+| `milvus_collection_name` | `BASIC_MEMORY_MILVUS_COLLECTION_NAME` | `"basic_memory_vectors"` | Milvus collection used for semantic chunks. |
 
 ## Embedding Providers
 
@@ -282,6 +286,47 @@ rebuild embeddings:
 bm reindex --embeddings
 ```
 
+## Milvus Vector Backend
+
+By default, Basic Memory stores vectors in the active database: sqlite-vec for
+SQLite and pgvector for Postgres. Advanced users can store semantic vectors in
+Milvus while keeping full-text search, entity data, and chunk metadata in the
+existing SQL backend.
+
+Install the optional Milvus extra:
+
+```bash
+pip install "basic-memory[milvus]"
+```
+
+Enable the backend:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_SEMANTIC_VECTOR_BACKEND=milvus
+```
+
+The default `milvus_uri` points to a Milvus Lite database under Basic Memory's
+config directory, so no server is required. To target another Milvus deployment:
+
+```bash
+# Milvus server
+export MILVUS_URI=http://localhost:19530
+
+# Zilliz Cloud
+export MILVUS_URI=https://<cluster-endpoint>
+export MILVUS_TOKEN=<api-key>
+```
+
+Milvus uses the same embedding provider settings as the database-backed vector
+stores. After changing `semantic_vector_backend`, `milvus_uri`,
+`milvus_collection_name`, model, dimensions, or provider-specific embedding
+settings, rebuild embeddings:
+
+```bash
+bm reindex --embeddings --full
+```
+
 ## Search Modes
 
 ### `text` (default)
@@ -412,3 +457,21 @@ The sqlite-vec extension is loaded per-connection. Vector tables are created laz
 - **Index**: HNSW index on the embedding column for fast approximate nearest-neighbour queries
 
 The Alembic migration creates the dimension-independent chunks table. The embeddings table and HNSW index are deferred to runtime because they depend on the configured vector dimensions.
+
+### Milvus (optional)
+
+- **Vector storage**: Milvus via `pymilvus.MilvusClient`, using `AUTOINDEX` and
+  COSINE scoring
+- **Default local mode**: Milvus Lite at `<Basic Memory config dir>/milvus.db`
+- **Server/cloud mode**: set `MILVUS_URI` and optionally `MILVUS_TOKEN`
+- **SQL metadata**: `search_vector_chunks` stores chunk text and invalidation
+  metadata; `search_vector_embeddings` is a lightweight marker table used for
+  embedding coverage and incremental reindex checks
+- **Collection schema**: Basic Memory creates a collection with `id`,
+  `project_id`, `chunk_id`, `entity_id`, `chunk_key`, `chunk_text`, and
+  `embedding` fields
+
+If an existing Milvus collection has a different embedding dimension or is
+missing required fields, Basic Memory fails fast. Use a new
+`milvus_collection_name` or recreate the collection, then run
+`bm reindex --embeddings --full`.

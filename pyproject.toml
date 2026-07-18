@@ -67,6 +67,11 @@ Documentation = "https://github.com/basicmachines-co/basic-memory#readme"
 basic-memory = "basic_memory.cli.main:app"
 bm = "basic_memory.cli.main:app"
 
+[project.optional-dependencies]
+milvus = [
+    "pymilvus[milvus-lite]>=3.0.0,<4.0.0",
+]
+
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"

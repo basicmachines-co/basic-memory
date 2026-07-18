@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.config import SemanticVectorBackend
 from basic_memory.schemas.project_info import EmbeddingStatus
 from basic_memory.services.project_service import ProjectService
 
@@ -298,6 +299,78 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
 
 
 @pytest.mark.asyncio
+async def test_embedding_status_milvus_sqlite_uses_plain_marker_table(
+    project_service: ProjectService, test_graph, test_project
+):
+    """Milvus marker tables are regular SQL tables, not sqlite-vec virtual tables."""
+    if _is_postgres():
+        pytest.skip("This regression covers the SQLite marker-table branch.")
+
+    await _execute(project_service, text("DELETE FROM search_vector_chunks"), {})
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
+    await _execute(
+        project_service,
+        text(
+            "CREATE TABLE search_vector_embeddings ("
+            "chunk_id INTEGER PRIMARY KEY, project_id INTEGER, embedding_dims INTEGER)"
+        ),
+        {},
+    )
+
+    entity_result = await _execute(
+        project_service,
+        text("SELECT DISTINCT entity_id FROM search_index WHERE project_id = :project_id LIMIT 1"),
+        {"project_id": test_project.id},
+    )
+    entity_id = entity_result.scalar_one()
+    await _execute(
+        project_service,
+        text(
+            "INSERT INTO search_vector_chunks "
+            "(id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+            "entity_fingerprint, embedding_model) "
+            "VALUES (1, :entity_id, :project_id, 'chunk-1', 'text', 'hash', "
+            "'fp-hash', 'stub')"
+        ),
+        {"entity_id": entity_id, "project_id": test_project.id},
+    )
+    await _execute(
+        project_service,
+        text(
+            "INSERT INTO search_vector_embeddings "
+            "(chunk_id, project_id, embedding_dims) VALUES (1, :project_id, 4)"
+        ),
+        {"project_id": test_project.id},
+    )
+
+    async def fail_if_sqlite_vec_path_is_used(query, params=None):
+        raise AssertionError("Milvus marker tables should use regular SQL execution")
+
+    with patch.object(
+        type(project_service),
+        "config_manager",
+        new_callable=lambda: property(
+            lambda self: _config_manager_with(
+                semantic_search_enabled=True,
+                semantic_vector_backend=SemanticVectorBackend.MILVUS,
+            )
+        ),
+    ):
+        with patch.object(
+            project_service.repository,
+            "scalar_vec_query",
+            side_effect=fail_if_sqlite_vec_path_is_used,
+        ):
+            status = await project_service.get_embedding_status(test_project.id)
+
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
+
+    assert status.vector_tables_exist is True
+    assert status.total_embeddings == 1
+    assert status.orphaned_chunks == 0
+
+
+@pytest.mark.asyncio
 async def test_embedding_status_excludes_stale_entity_ids(
     project_service: ProjectService, test_graph, test_project
 ):
@@ -364,11 +437,15 @@ async def test_get_project_info_includes_embedding_status(
 # --- Helper ---
 
 
-def _config_manager_with(semantic_search_enabled: bool):
+def _config_manager_with(
+    semantic_search_enabled: bool,
+    semantic_vector_backend: SemanticVectorBackend = SemanticVectorBackend.DATABASE,
+):
     """Create a ConfigManager whose config has the given semantic_search_enabled value."""
     from basic_memory.config import ConfigManager
 
     cm = ConfigManager()
     # Patch the config object in-place
     cm.config.semantic_search_enabled = semantic_search_enabled
+    cm.config.semantic_vector_backend = semantic_vector_backend
     return cm
