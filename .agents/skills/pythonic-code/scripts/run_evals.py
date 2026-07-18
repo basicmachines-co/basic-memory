@@ -46,6 +46,12 @@ class EvalCase:
     assertions: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class TrialResult:
+    exit_code: int
+    artifacts: tuple[tuple[Path, bytes], ...]
+
+
 def load_eval_cases() -> tuple[EvalCase, ...]:
     payload: object = json.loads(EVALS_PATH.read_text())
     if not isinstance(payload, dict):
@@ -196,62 +202,87 @@ def read_total_tokens(events_path: Path) -> int | None:
     return total_tokens
 
 
+def collect_trial_artifacts(run_dir: Path) -> tuple[tuple[Path, bytes], ...]:
+    artifacts: list[tuple[Path, bytes]] = []
+    for path in sorted(run_dir.rglob("*")):
+        relative_path = path.relative_to(run_dir)
+        if path.is_file() and relative_path.parts[0] != "work":
+            artifacts.append((relative_path, path.read_bytes()))
+    return tuple(artifacts)
+
+
+def write_trial_artifacts(
+    iteration_dir: Path,
+    case: EvalCase,
+    mode: str,
+    trial: TrialResult,
+) -> None:
+    destination = iteration_dir / f"eval-{case.id}-{case.name}" / mode
+    destination.mkdir(parents=True, exist_ok=False)
+    for relative_path, content in trial.artifacts:
+        artifact_path = destination / relative_path
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_bytes(content)
+
+
 def run_codex_trial(
     codex_path: str,
-    iteration_dir: Path,
     case: EvalCase,
     *,
     with_skill: bool,
     model: str | None,
-) -> int:
+) -> TrialResult:
     mode = "with_skill" if with_skill else "without_skill"
-    run_dir = iteration_dir / f"eval-{case.id}-{case.name}" / mode
-    work_dir = prepare_work_directory(run_dir, case, with_skill)
-    events_path = run_dir / "events.jsonl"
-    stderr_path = run_dir / "stderr.txt"
-    final_path = run_dir / "final.txt"
+    with tempfile.TemporaryDirectory(prefix="pythonic-code-eval-trial-") as trial_directory:
+        run_dir = Path(trial_directory)
+        work_dir = prepare_work_directory(run_dir, case, with_skill)
+        events_path = run_dir / "events.jsonl"
+        stderr_path = run_dir / "stderr.txt"
+        final_path = run_dir / "final.txt"
 
-    prompt = f"Use $pythonic-code. {case.prompt}" if with_skill else case.prompt
-    command = [
-        codex_path,
-        "exec",
-        "--ephemeral",
-        "--ignore-user-config",
-        "--skip-git-repo-check",
-        "--sandbox",
-        "workspace-write",
-        "--json",
-        "-C",
-        str(work_dir),
-        "-o",
-        str(final_path),
-    ]
-    if model:
-        command.extend(["--model", model])
-    command.append(prompt)
+        prompt = f"Use $pythonic-code. {case.prompt}" if with_skill else case.prompt
+        command = [
+            codex_path,
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "workspace-write",
+            "--json",
+            "-C",
+            str(work_dir),
+            "-o",
+            str(final_path),
+        ]
+        if model:
+            command.extend(["--model", model])
+        command.append(prompt)
 
-    print(f"Running eval {case.id} ({case.name}) [{mode}]", flush=True)
-    started_at = time.perf_counter()
-    with events_path.open("w") as events_file, stderr_path.open("w") as stderr_file:
-        result = subprocess.run(
-            command,
-            stdout=events_file,
-            stderr=stderr_file,
-            text=True,
-            check=False,
-        )
-    duration_ms = round((time.perf_counter() - started_at) * 1000)
+        print(f"Running eval {case.id} ({case.name}) [{mode}]", flush=True)
+        started_at = time.perf_counter()
+        with events_path.open("w") as events_file, stderr_path.open("w") as stderr_file:
+            result = subprocess.run(
+                command,
+                stdout=events_file,
+                stderr=stderr_file,
+                text=True,
+                check=False,
+            )
+        duration_ms = round((time.perf_counter() - started_at) * 1000)
 
-    copy_run_outputs(work_dir, run_dir / "outputs")
-    timing = {
-        "total_tokens": read_total_tokens(events_path),
-        "duration_ms": duration_ms,
-        "exit_code": result.returncode,
-    }
-    (run_dir / "timing.json").write_text(json.dumps(timing, indent=2) + "\n")
+        copy_run_outputs(work_dir, run_dir / "outputs")
+        timing = {
+            "total_tokens": read_total_tokens(events_path),
+            "duration_ms": duration_ms,
+            "exit_code": result.returncode,
+        }
+        (run_dir / "timing.json").write_text(json.dumps(timing, indent=2) + "\n")
+        artifacts = collect_trial_artifacts(run_dir)
+
     if result.returncode != 0:
-        print(f"Trial failed; see {stderr_path}", file=sys.stderr)
-    return result.returncode
+        print(f"Eval {case.id} ({case.name}) [{mode}] failed", file=sys.stderr)
+    return TrialResult(exit_code=result.returncode, artifacts=artifacts)
 
 
 def write_case_metadata(iteration_dir: Path, case: EvalCase) -> None:
@@ -321,27 +352,23 @@ def main() -> int:
     failures = 0
     print(f"Eval workspace: {iteration_dir}", flush=True)
     for case in selected_cases:
+        with_skill_result = run_codex_trial(
+            codex_path,
+            case,
+            with_skill=True,
+            model=args.model,
+        )
+        without_skill_result = run_codex_trial(
+            codex_path,
+            case,
+            with_skill=False,
+            model=args.model,
+        )
+        write_trial_artifacts(iteration_dir, case, "with_skill", with_skill_result)
+        write_trial_artifacts(iteration_dir, case, "without_skill", without_skill_result)
         write_case_metadata(iteration_dir, case)
-        failures += (
-            run_codex_trial(
-                codex_path,
-                iteration_dir,
-                case,
-                with_skill=True,
-                model=args.model,
-            )
-            != 0
-        )
-        failures += (
-            run_codex_trial(
-                codex_path,
-                iteration_dir,
-                case,
-                with_skill=False,
-                model=args.model,
-            )
-            != 0
-        )
+        failures += with_skill_result.exit_code != 0
+        failures += without_skill_result.exit_code != 0
 
     if failures:
         print(f"Completed with {failures} failed trial(s): {iteration_dir}", file=sys.stderr)
