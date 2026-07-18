@@ -112,11 +112,14 @@ Before opening or updating a PR, run the checks that mirror the common required 
 
 ### Programming Style
 
-See [docs/ENGINEERING_STYLE.md](docs/ENGINEERING_STYLE.md) for the fuller house style. The
-short version for agents:
+See [docs/ENGINEERING_STYLE.md](docs/ENGINEERING_STYLE.md) for the fuller house style and
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) for product language, ownership, identity, and
+source-of-truth rules. The short version for agents:
 
 - Prefer type-safe, explicit designs over object-heavy indirection. Use Python 3.12 `type`
   aliases, full annotations, and narrow `Protocol`s when a caller only needs a capability.
+- Prefer functions and typed values before classes, and concrete classes before abstract base
+  classes. Treat private-helper sprawl as a prompt to simplify the data flow.
 - Use dataclasses for internal value objects and operation results; use Pydantic v2 at API,
   CLI, MCP, and persistence boundaries where validation and serialization matter.
 - Keep async boundaries obvious. Resource-owning code should use context managers, propagate
@@ -190,7 +193,9 @@ counter += 1  # track retries for backoff calculation
 
 ### Codebase Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for code layers and dependency direction. See
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) for the meaning and invariants of the concepts those
+layers implement.
 
 **Directory Structure:**
 - `/alembic` - Alembic db migrations
@@ -338,9 +343,11 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 
 ### Knowledge Structure
 
-- Entity: Any concept, document, or idea represented as a markdown file
+- Project: The knowledge and isolation boundary for entities, graph state, and search
+- Note: A user-facing Markdown document and the canonical representation of its knowledge
+- Entity: The project-scoped indexed representation of a file or resource
 - Observation: A categorized fact about an entity (`- [category] content`)
-- Relation: A directional link between entities (`- relation_type [[Target]]`)
+- Relation: A directed semantic link owned by its source entity (`- relation_type [[Target]]`)
 - Frontmatter: YAML metadata at the top of markdown files
 - Knowledge representation follows precise markdown format:
     - Observations with [category] prefixes

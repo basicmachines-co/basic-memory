@@ -1,19 +1,37 @@
 # Basic Memory Engineering Style
 
-Style is how we make code easier to verify. Prefer explicit, typed, local-first code that
-preserves the file system as the source of truth while keeping the database, API, and MCP
-surfaces in sync.
+Style is how we make code easier to verify. Prefer explicit, typed, local-first code that keeps
+Markdown as the canonical product representation while the file materialization, database, API,
+and MCP surfaces stay in sync.
 
 ## Design Center
 
-- Basic Memory is local-first. Markdown files are the durable source; SQLite/Postgres indexes
-  are derived state that should be rebuilt or reconciled from files when needed.
+- Basic Memory is local-first. In local flows, Markdown files are the durable source and
+  SQLite/Postgres indexes are derived state. DB-first and cloud-style writes may record the exact
+  accepted Markdown in `NoteContent` before materializing the file. Follow
+  [DOMAIN_MODEL.md](DOMAIN_MODEL.md) for the authority and projection rules in each phase.
 - Keep the existing boundary order: CLI/MCP/API entrypoints compose dependencies, services own
   business behavior, repositories own database access, and file services own filesystem writes.
 - MCP tools should remain atomic and composable. They should call API routers through typed MCP
   clients, not reach around into services.
 - Prefer small, explicit abstractions that match a real domain boundary. Avoid object
   hierarchies when a function, dataclass, type alias, or protocol describes the concept better.
+
+## Functions Before Hierarchies
+
+- Start with an ordinary, fully typed function. Pair functions with a dataclass when related
+  state, inputs, or results need a name.
+- Use callbacks, closures, or `functools.partial` when binding behavior produces a clearer call
+  site than another object. Use `functools.singledispatch` only when behavior genuinely varies by
+  the first argument's runtime type and open registration is an intentional extension point.
+- Use a narrow `Protocol` for a capability contract. Prefer structural typing over requiring
+  implementations to inherit from a shared base.
+- Use a concrete class when identity, cohesive mutable state, lifecycle, or resource ownership
+  requires one. Keep orchestration in the class and move independent computation into functions.
+- Reserve abstract base classes for runtime-enforced extension frameworks or shared skeletal
+  behavior that exists now. Do not introduce inheritance for hypothetical implementations.
+- Do not replace class hierarchies with dense functional machinery. Prefer the design with the
+  fewest concepts, hidden rules, and call hops.
 
 ## Types And Data
 
@@ -40,6 +58,27 @@ surfaces in sync.
   start background work without a clear owner, cancellation story, and verification path.
 - Keep file mutations centralized through the existing file utilities/services so checksum,
   atomic write, and index synchronization behavior stays coherent.
+
+## Local Reasoning And Abstraction Budget
+
+- Keep a straightforward workflow together when reading it top-to-bottom is clearer than
+  navigating helpers. Do not split code merely to reduce function length.
+- Extract a helper when its name captures a domain operation, it isolates a side effect or
+  constraint, it removes meaningful duplication, or it forms a cohesive testable computation.
+- Treat a class dominated by private methods as a signal that its behavior may belong in
+  module-level functions operating on typed values.
+- Treat long chains of `_prepare_*`, `_resolve_*`, `_apply_*`, and `_build_*` helpers as a prompt
+  to simplify the data flow or introduce one meaningful phase value. Private helpers are useful;
+  private-helper sprawl is not.
+- Avoid manager, factory, base, adapter, strategy, and registry abstractions with only one real
+  implementation. Add extension points when a second behavior or active integration requires
+  them, not in anticipation of one.
+- Avoid dynamic registration, metaprogramming, and decorator-driven control flow unless the
+  product requires that mechanism and the lifecycle remains explicit.
+- Make behavior traceable from an entrypoint to its domain decision and side effects without
+  reconstructing implicit state across many files. Optimize for human and AI readers alike.
+- Every abstraction should reduce the number of concepts or call paths a reader must hold. If a
+  helper makes the reader navigate more but understand no less, keep the logic local.
 
 ## Testing And Verification
 

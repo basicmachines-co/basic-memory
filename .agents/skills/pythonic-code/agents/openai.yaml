@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pythonic Code"
+  short_description: "Write clear, direct, maintainable Python"
+  default_prompt: "Use $pythonic-code to write or refactor this Python code for clarity, directness, and maintainability."
