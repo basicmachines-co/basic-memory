@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,7 +22,15 @@ async def test_prepare_create_entity_content_matches_create_entity_with_content(
         title="Prepared Create",
         directory="notes",
         note_type="note",
-        content="---\nstatus: draft\npermalink: prepared/create\n---\nCreate body",
+        content=(
+            "---\n"
+            "status: draft\n"
+            "permalink: prepared/create\n"
+            "created: 2024-01-15T10:30:00Z\n"
+            "modified: 2024-01-16T11:45:00Z\n"
+            "---\n"
+            "Create body"
+        ),
     )
 
     prepared = await entity_service.prepare_create_entity_content(schema)
@@ -34,6 +43,8 @@ async def test_prepare_create_entity_content_matches_create_entity_with_content(
     assert prepared.entity_fields.note_type == result.entity.note_type
     assert prepared.entity_fields.permalink == result.entity.permalink
     assert prepared.entity_fields.entity_metadata == result.entity.entity_metadata
+    assert prepared.entity_fields.created_at == result.entity.created_at
+    assert prepared.entity_fields.updated_at == result.entity.updated_at
 
 
 @pytest.mark.asyncio
@@ -43,7 +54,14 @@ async def test_prepare_create_entity_content_returns_typed_entity_fields(entity_
             title="Typed Fields",
             directory="notes",
             note_type="decision",
-            content="---\nstatus: accepted\n---\nBody",
+            content=(
+                "---\n"
+                "status: accepted\n"
+                "created: 2024-01-15T10:30:00Z\n"
+                "modified: 2024-01-16T11:45:00+05:30\n"
+                "---\n"
+                "Body"
+            ),
         )
     )
 
@@ -54,11 +72,15 @@ async def test_prepare_create_entity_content_returns_typed_entity_fields(entity_
             "title": "Typed Fields",
             "type": "decision",
             "status": "accepted",
+            "created": "2024-01-15T10:30:00+00:00",
+            "modified": "2024-01-16T11:45:00+05:30",
             "permalink": "test-project/notes/typed-fields",
         },
         content_type="text/markdown",
         permalink="test-project/notes/typed-fields",
         file_path="notes/Typed Fields.md",
+        created_at=datetime(2024, 1, 15, 10, 30, tzinfo=UTC),
+        updated_at=datetime.fromisoformat("2024-01-16T11:45:00+05:30"),
     )
     with pytest.raises(FrozenInstanceError):
         setattr(prepared.entity_fields, "title", "Changed")
@@ -163,6 +185,7 @@ async def test_prepare_update_entity_content_matches_update_entity_with_content(
         update_schema,
         existing_content,
     )
+    original_created_at = created.created_at
     result = await entity_service.update_entity_with_content(created, update_schema)
     prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
 
@@ -171,6 +194,8 @@ async def test_prepare_update_entity_content_matches_update_entity_with_content(
     assert prepared.entity_fields.title == result.entity.title
     assert prepared.entity_fields.note_type == result.entity.note_type
     assert prepared.entity_fields.permalink == result.entity.permalink
+    assert prepared.entity_fields.created_at == original_created_at
+    assert result.entity.created_at == original_created_at
     assert prepared_frontmatter["owner"] == "alice"
     assert prepared_frontmatter["status"] == "published"
     assert prepared_frontmatter["reviewed_by"] == "bob"
@@ -213,6 +238,85 @@ async def test_prepare_update_entity_content_can_change_file_path(
     assert prepared.entity_fields.permalink == result.entity.permalink
     assert not await file_service.exists("notes/Original Name.md")
     assert await file_service.exists("journal/Renamed Note.md")
+
+
+@pytest.mark.asyncio
+async def test_prepare_update_entity_content_can_repair_invalid_canonical_timestamps(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Repair Timestamps",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+    invalid_content = (
+        "---\ncreated: yesterday\nmodified: last week\nowner: alice\n---\nOriginal body"
+    )
+    await file_service.write_file(created.file_path, invalid_content)
+    update_schema = EntitySchema(
+        title="Repair Timestamps",
+        directory="notes",
+        note_type="note",
+        content=(
+            "---\ncreated: 2024-01-15T10:30:00Z\nmodified: 2024-01-16T11:45:00Z\n---\nRepaired body"
+        ),
+    )
+
+    prepared = await entity_service.prepare_update_entity_content(
+        created,
+        update_schema,
+        invalid_content,
+    )
+    result = await entity_service.update_entity_with_content(created, update_schema)
+
+    assert prepared.entity_fields.created_at == datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+    assert prepared.entity_fields.updated_at == datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
+    assert result.entity.created_at == prepared.entity_fields.created_at
+    assert result.entity.updated_at == prepared.entity_fields.updated_at
+    assert parse_frontmatter(result.content)["owner"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_prepare_update_entity_content_can_repair_malformed_frontmatter(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Repair Malformed Frontmatter",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+    malformed_content = "---\nstatus: [draft\n---\nOriginal body"
+    await file_service.write_file(created.file_path, malformed_content)
+    update_schema = EntitySchema(
+        title="Repair Malformed Frontmatter",
+        directory="notes",
+        note_type="note",
+        content=(
+            "---\ncreated: 2024-01-15T10:30:00Z\nmodified: 2024-01-16T11:45:00Z\n"
+            "status: repaired\n---\nRepaired body"
+        ),
+    )
+
+    prepared = await entity_service.prepare_update_entity_content(
+        created,
+        update_schema,
+        malformed_content,
+    )
+    result = await entity_service.update_entity_with_content(created, update_schema)
+
+    assert prepared.entity_fields.created_at == datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+    assert prepared.entity_fields.updated_at == datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
+    assert result.content == prepared.markdown_content
+    assert parse_frontmatter(result.content)["status"] == "repaired"
+    assert remove_frontmatter(result.content) == "Repaired body"
 
 
 @pytest.mark.asyncio
@@ -351,6 +455,7 @@ async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
         content="After edit",
         find_text="Before edit",
     )
+    original_created_at = created.created_at
     result = await entity_service.edit_entity_with_content(
         identifier=created.permalink,
         operation="find_replace",
@@ -363,6 +468,8 @@ async def test_prepare_edit_entity_content_matches_edit_entity_with_content(
     assert prepared.entity_fields.title == result.entity.title
     assert prepared.entity_fields.note_type == result.entity.note_type
     assert prepared.entity_fields.permalink == result.entity.permalink
+    assert prepared.entity_fields.created_at == original_created_at
+    assert result.entity.created_at == original_created_at
 
 
 @pytest.mark.asyncio

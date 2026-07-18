@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import (
+    ParseError,
     has_frontmatter,
     parse_frontmatter,
     remove_frontmatter,
@@ -78,24 +79,8 @@ class PreparedEntityFields:
     content_type: str
     permalink: str | None
     file_path: str
-
-
-def apply_prepared_entity_fields(
-    entity: EntityModel,
-    entity_fields: PreparedEntityFields,
-    *,
-    updated_at: datetime,
-    user_profile_value: str | None,
-) -> None:
-    """Copy prepared accepted markdown fields onto an entity row."""
-    entity.title = entity_fields.title
-    entity.note_type = entity_fields.note_type
-    entity.entity_metadata = entity_fields.entity_metadata
-    entity.content_type = entity_fields.content_type
-    entity.permalink = entity_fields.permalink
-    entity.file_path = entity_fields.file_path
-    entity.updated_at = updated_at
-    entity.last_updated_by = user_profile_value
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -601,22 +586,27 @@ class EntityService(BaseService[EntityModel]):
         self,
         *,
         file_path: Path,
-        title: str,
-        note_type: str,
         content_type: str,
-        metadata: dict[str, Any] | None,
         permalink: str | None,
+        entity_markdown: EntityMarkdown,
     ) -> PreparedEntityFields:
         """Build the entity row data that mirrors accepted markdown state."""
-        normalized_metadata = normalize_frontmatter_metadata(metadata or {})
+        if entity_markdown.created is None or entity_markdown.modified is None:  # pragma: no cover
+            raise ValueError("Prepared markdown requires created and modified timestamps")
+
+        normalized_metadata = normalize_frontmatter_metadata(
+            entity_markdown.frontmatter.metadata or {}
+        )
         entity_metadata = {k: v for k, v in normalized_metadata.items() if v is not None}
         return PreparedEntityFields(
-            title=title,
-            note_type=note_type,
+            title=entity_markdown.frontmatter.title,
+            note_type=entity_markdown.frontmatter.type,
             file_path=file_path.as_posix(),
             content_type=content_type,
             entity_metadata=entity_metadata or None,
             permalink=permalink,
+            created_at=entity_markdown.created,
+            updated_at=entity_markdown.modified,
         )
 
     async def _build_prepared_write(
@@ -624,7 +614,9 @@ class EntityService(BaseService[EntityModel]):
         *,
         file_path: Path,
         markdown_content: str,
-        entity_fields: PreparedEntityFields,
+        content_type: str,
+        permalink: str | None,
+        preserved_created_at: datetime | None = None,
     ) -> PreparedEntityWrite:
         """Parse accepted markdown once so all persistence paths share the same state."""
         # Trigger: both local and cloud-style callers need the exact same accepted markdown.
@@ -634,6 +626,15 @@ class EntityService(BaseService[EntityModel]):
         entity_markdown = await self.entity_parser.parse_markdown_content(
             file_path=file_path,
             content=markdown_content,
+            # DB-first updates have no file ctime. Reuse the existing semantic creation
+            # time as that field's fallback so editing a legacy note cannot make it "new".
+            ctime=(preserved_created_at.timestamp() if preserved_created_at is not None else None),
+        )
+        entity_fields = self._build_entity_fields(
+            file_path=file_path,
+            content_type=content_type,
+            permalink=permalink,
+            entity_markdown=entity_markdown,
         )
         return PreparedEntityWrite(
             file_path=file_path,
@@ -710,18 +711,11 @@ class EntityService(BaseService[EntityModel]):
         # store it in note_content first and materialize later without re-deriving anything.
         post = await schema_to_markdown(schema)
         markdown_content = dump_frontmatter(post)
-        entity_fields = self._build_entity_fields(
-            file_path=file_path,
-            title=schema.title,
-            note_type=schema.note_type,
-            content_type=schema.content_type,
-            metadata=post.metadata,
-            permalink=permalink,
-        )
         return await self._build_prepared_write(
             file_path=file_path,
             markdown_content=markdown_content,
-            entity_fields=entity_fields,
+            content_type=schema.content_type,
+            permalink=permalink,
         )
 
     async def prepare_update_entity_content(
@@ -743,10 +737,17 @@ class EntityService(BaseService[EntityModel]):
         schema = schema.model_copy(deep=True)
         file_path = Path(schema.file_path)
         current_file_path = Path(entity.file_path)
-        existing_markdown = await self.entity_parser.parse_markdown_content(
-            file_path=current_file_path,
-            content=existing_content,
-        )
+        existing_metadata: dict[str, Any] = {}
+        if has_frontmatter(existing_content):
+            try:
+                existing_metadata = parse_frontmatter(existing_content)
+            except ParseError:
+                # Trigger: the old note has frontmatter fences but malformed YAML.
+                # Why: a full replacement must be able to repair that note, and malformed
+                #      metadata cannot be merged safely into the replacement.
+                # Outcome: discard only the invalid merge input; the final accepted markdown
+                #          is still parsed and validated below.
+                pass
 
         content_markdown = self._apply_schema_frontmatter_overrides(schema)
         # Trigger: a full replacement may also rename the note by changing title or directory.
@@ -777,7 +778,9 @@ class EntityService(BaseService[EntityModel]):
         # Full updates preserve unrecognized frontmatter keys from the existing note.
         # That keeps Basic Memory's write semantics stable for hand-authored metadata while still
         # letting the incoming schema replace the fields it explicitly owns.
-        merged_metadata = deepcopy(existing_markdown.frontmatter.metadata)
+        # Existing frontmatter is a merge input, not accepted state. Semantic validation happens
+        # after the incoming metadata has had a chance to repair invalid canonical values.
+        merged_metadata = deepcopy(existing_metadata)
         merged_metadata.update(post.metadata)
         merged_metadata["permalink"] = resolved_permalink
 
@@ -785,18 +788,12 @@ class EntityService(BaseService[EntityModel]):
         merged_post.metadata.update(merged_metadata)
 
         markdown_content = dump_frontmatter(merged_post)
-        entity_fields = self._build_entity_fields(
-            file_path=file_path,
-            title=schema.title,
-            note_type=schema.note_type,
-            content_type=schema.content_type,
-            metadata=merged_post.metadata,
-            permalink=resolved_permalink,
-        )
         return await self._build_prepared_write(
             file_path=file_path,
             markdown_content=markdown_content,
-            entity_fields=entity_fields,
+            content_type=schema.content_type,
+            permalink=resolved_permalink,
+            preserved_created_at=entity.created_at,
         )
 
     async def prepare_edit_entity_content(
@@ -875,21 +872,13 @@ class EntityService(BaseService[EntityModel]):
             metadata=metadata,
         )
         markdown_content = title_reconciliation.markdown_content
-        title = title_reconciliation.title
-        metadata = title_reconciliation.metadata
 
-        entity_fields = self._build_entity_fields(
-            file_path=file_path,
-            title=title,
-            note_type=note_type,
-            content_type=entity.content_type,
-            metadata=metadata,
-            permalink=permalink,
-        )
         return await self._build_prepared_write(
             file_path=file_path,
             markdown_content=markdown_content,
-            entity_fields=entity_fields,
+            content_type=entity.content_type,
+            permalink=permalink,
+            preserved_created_at=entity.created_at,
         )
 
     async def prepare_move_entity_content(

@@ -46,6 +46,8 @@ from basic_memory.services.exceptions import EntityAlreadyExistsError
 
 
 _NOW = datetime(2026, 6, 20, 14, 30, tzinfo=UTC)
+_PREPARED_CREATED_AT = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+_PREPARED_UPDATED_AT = datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
 _ACTOR_ID = UUID("11111111-1111-4111-8111-111111111111")
 
 
@@ -57,6 +59,8 @@ class _PreparedFields:
     content_type: str
     permalink: str | None
     file_path: str
+    created_at: datetime = _PREPARED_CREATED_AT
+    updated_at: datetime = _PREPARED_UPDATED_AT
 
 
 @dataclass(frozen=True, slots=True)
@@ -612,6 +616,8 @@ async def test_run_accepted_note_create_persists_prepared_markdown() -> None:
     assert preparer.calls == [(schema, False, session)]
     assert preparer.skip_conflict_checks == [True]
     assert pending_entity_repository.calls[0][1].created_by == str(_ACTOR_ID)
+    assert entity.created_at == _PREPARED_CREATED_AT
+    assert entity.updated_at == _PREPARED_UPDATED_AT
     assert note_content_accept_repository.calls[0][1].markdown_content == "# Accepted\n"
     assert note_content_accept_repository.calls[0][1].db_version == 1
     assert search_repository.calls[0][1].content_snippet == "Accepted"
@@ -746,6 +752,8 @@ async def test_run_accepted_note_update_replaces_existing_note_content() -> None
     assert session.flush_count == 1
     assert note_content_accept_repository.calls[0][1].db_version == 2
     assert note_content_accept_repository.calls[0][1].markdown_content == "# Replacement\n"
+    assert entity.created_at == _PREPARED_CREATED_AT
+    assert entity.updated_at == _PREPARED_UPDATED_AT
     assert change.status_code == 200
     assert isinstance(change.payload, RuntimeAcceptedNoteResponse)
     assert change.payload.title == "Replacement"
@@ -1113,6 +1121,8 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content() -> None
         )
     ]
     assert note_content_accept_repository.calls[0][1].last_source == "mcp"
+    assert entity.created_at == _PREPARED_CREATED_AT
+    assert entity.updated_at == _PREPARED_UPDATED_AT
     assert change.status_code == 200
     assert change.materialization is not None
     assert change.materialization.source == "mcp"
@@ -1172,6 +1182,8 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     ]
     assert entity.file_path == "archive/accepted.md"
     assert entity.permalink == "archive/accepted"
+    assert entity.created_at == _NOW
+    assert entity.updated_at == _NOW
     assert change.status_code == 200
     assert change.materialization is not None
     assert change.materialization.previous_file_path == "notes/accepted.md"

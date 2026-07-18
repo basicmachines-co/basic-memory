@@ -7,6 +7,7 @@ from typing import Optional
 from pathlib import Path
 
 from basic_memory.schemas.search import SearchItemType
+from basic_memory.utils import ensure_timezone_aware
 
 
 @dataclass
@@ -43,6 +44,15 @@ class SearchIndexRow:
     matched_chunk_text: Optional[str] = None
 
     CONTENT_DISPLAY_LIMIT = 4000
+
+    def __post_init__(self) -> None:
+        """Restore typed, timezone-aware datetimes from raw search query results."""
+        if isinstance(self.created_at, str):
+            self.created_at = datetime.fromisoformat(self.created_at)
+        if isinstance(self.updated_at, str):
+            self.updated_at = datetime.fromisoformat(self.updated_at)
+        self.created_at = ensure_timezone_aware(self.created_at)
+        self.updated_at = ensure_timezone_aware(self.updated_at)
 
     @property
     def content(self):

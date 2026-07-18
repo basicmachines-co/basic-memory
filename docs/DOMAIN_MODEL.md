@@ -53,8 +53,14 @@ which graph and search projections attach.
   project-scoped, may be absent when permalinks are disabled or inapplicable, and changes only
   according to the configured move and permalink policies.
 - `title` is mutable display metadata, not identity.
-- `checksum`, timestamps, size, parsed metadata, and indexed text describe synchronized state;
-  they are not independent knowledge sources.
+- For Markdown notes, `created_at` and `updated_at` project the canonical `created` and `modified`
+  frontmatter values. Missing values fall back independently to file ctime and mtime for legacy
+  notes; invalid canonical values fail indexing.
+- `checksum`, `mtime`, size, and path describe the physical file used for synchronization. They
+  are bookkeeping, not note semantics, and moves or materialization must not overwrite semantic
+  timestamps.
+- Parsed metadata and indexed text describe synchronized state; they are not independent
+  knowledge sources.
 
 ### Observation
 
@@ -142,7 +148,7 @@ or leaf helpers guess which registry wins.
 2. Derive final frontmatter, permalink behavior, path, and Markdown bytes without mutating the
    caller's input.
 3. Parse the accepted Markdown once into its entity, observations, and relations.
-4. Persist through the runtime's file-first or DB-first path.
+4. Persist the same parsed semantic timestamps through the runtime's file-first or DB-first path.
 5. Reconcile the entity and its owned graph projections.
 6. Update search projections from the same accepted or materialized content.
 7. Resolve pending relation targets after the target entities exist.

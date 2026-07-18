@@ -337,7 +337,7 @@ async def test_local_project_index_uses_file_mtime_for_new_markdown_entities(
     assert abs(entity.mtime - expected_mtime) < 2
 
 
-async def test_local_project_index_updates_entity_mtime_on_file_modification(
+async def test_local_project_index_preserves_semantic_timestamp_on_file_modification(
     test_project: Project,
     project_config,
     entity_repository,
@@ -345,12 +345,22 @@ async def test_local_project_index_updates_entity_mtime_on_file_modification(
     config_manager,
     monkeypatch,
 ) -> None:
-    """Modified markdown entities use the current file modification timestamp."""
+    """Reindex updates physical bookkeeping without changing note semantics."""
     del config_manager
 
     note_path = project_config.home / "notes" / "timestamp-update.md"
     note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text("# Timestamp Update\n\nInitial content.\n", encoding="utf-8")
+    note_path.write_text(
+        """---
+created: 2023-12-01T08:00:00Z
+modified: 2023-12-02T09:30:00Z
+---
+# Timestamp Update
+
+Initial content.
+""",
+        encoding="utf-8",
+    )
     initial_mtime = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
     os.utime(note_path, (initial_mtime, initial_mtime))
 
@@ -361,7 +371,17 @@ async def test_local_project_index_updates_entity_mtime_on_file_modification(
     assert first.enqueued_files == 1
 
     note_path.write_text(
-        "# Timestamp Update\n\nModified content.\n\n## Observations\n- [test] Timestamp moved.\n",
+        """---
+created: 2023-12-01T08:00:00Z
+modified: 2023-12-02T09:30:00Z
+---
+# Timestamp Update
+
+Modified content.
+
+## Observations
+- [test] Timestamp moved.
+""",
         encoding="utf-8",
     )
     modified_mtime = datetime(2024, 1, 2, 4, 5, 6, tzinfo=timezone.utc).timestamp()
@@ -378,8 +398,8 @@ async def test_local_project_index_updates_entity_mtime_on_file_modification(
         entity = await entity_repository.get_by_file_path(session, "notes/timestamp-update.md")
 
     assert entity is not None
-    assert entity.updated_at.timestamp() != initial_mtime
-    assert abs(entity.updated_at.timestamp() - modified_mtime) < 2
+    assert entity.created_at == datetime(2023, 12, 1, 8, 0, tzinfo=timezone.utc)
+    assert entity.updated_at == datetime(2023, 12, 2, 9, 30, tzinfo=timezone.utc)
     assert entity.mtime is not None
     assert abs(entity.mtime - modified_mtime) < 2
     assert len(entity.observations) == 1

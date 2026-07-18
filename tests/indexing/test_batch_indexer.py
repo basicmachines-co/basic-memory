@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
+import os
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import AsyncMock
@@ -16,6 +18,7 @@ from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas import Entity as EntitySchema
+from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services.exceptions import SyncFatalError
 
 
@@ -200,6 +203,88 @@ async def test_batch_indexer_creates_entities_with_real_db_session(
     assert alpha.title == "Alpha"
     assert beta is not None
     assert beta.title == "Beta"
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_preserves_markdown_semantic_timestamps_on_reindex(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    path = "notes/canonical-timestamps.md"
+    absolute_path = project_config.home / path
+    canonical_created = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+    canonical_modified = datetime.fromisoformat("2024-01-16T11:45:00+05:30")
+    frontmatter = dedent(
+        """
+        ---
+        title: Canonical Timestamps
+        type: note
+        created: 2024-01-15T10:30:00Z
+        modified: 2024-01-16T11:45:00+05:30
+        ---
+        """
+    ).lstrip()
+    await _create_file(absolute_path, f"{frontmatter}First body\n")
+    os.utime(absolute_path, (1_730_000_000, 1_730_000_000))
+
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    first_input = await _load_input(file_service, path)
+    first_result = await batch_indexer.index_files({path: first_input}, max_concurrent=1)
+
+    assert first_result.errors == []
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+
+    assert entity is not None
+    assert first_input.last_modified is not None
+    assert entity.created_at == canonical_created
+    assert entity.updated_at == canonical_modified
+    assert entity.mtime == first_input.last_modified.timestamp()
+
+    await _create_file(absolute_path, f"{frontmatter}Second body\n")
+    os.utime(absolute_path, (1_740_000_000, 1_740_000_000))
+    second_input = await _load_input(file_service, path)
+    second_result = await batch_indexer.index_files({path: second_input}, max_concurrent=1)
+
+    assert second_result.errors == []
+    async with db.scoped_session(search_service.session_maker) as session:
+        reindexed = await entity_repository.get_by_file_path(session, path)
+
+    assert reindexed is not None
+    assert second_input.last_modified is not None
+    assert reindexed.created_at == canonical_created
+    assert reindexed.updated_at == canonical_modified
+    assert reindexed.mtime == second_input.last_modified.timestamp()
+    assert reindexed.mtime != entity.mtime
+
+    included = await search_service.search(
+        SearchQuery(
+            after_date="2024-01-16T06:00:00Z",
+            entity_types=[SearchItemType.ENTITY],
+        )
+    )
+    excluded = await search_service.search(
+        SearchQuery(
+            after_date="2024-01-16T06:30:00Z",
+            entity_types=[SearchItemType.ENTITY],
+        )
+    )
+
+    assert [row.file_path for row in included] == [path]
+    assert included[0].updated_at == canonical_modified
+    assert excluded == []
 
 
 @pytest.mark.asyncio

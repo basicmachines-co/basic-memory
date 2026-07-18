@@ -303,6 +303,8 @@ def materialization_entity(*, file_path: str = "notes/a.md") -> Entity:
         content_type="text/markdown",
         file_path=file_path,
         checksum="old-file-sum",
+        created_at=datetime(2024, 1, 15, 10, 30, tzinfo=UTC),
+        updated_at=datetime(2024, 1, 16, 11, 45, tzinfo=UTC),
     )
 
 
@@ -515,6 +517,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
     prepared = prepared_write(request)
     written = written_file()
     entity = materialization_entity()
+    semantic_updated_at = entity.updated_at
     note_content = materialization_note_content()
     session = FakeRepositorySession(entity=entity, note_content=note_content)
     session_lock = FakeSessionLock()
@@ -558,7 +561,8 @@ async def test_repository_note_materialization_publisher_updates_current_written
             },
         )
     ]
-    assert entity.updated_at == written.file_updated_at
+    assert entity.updated_at == semantic_updated_at
+    assert entity.mtime == written.file_updated_at.timestamp()
     assert entity.size == len(b"# A note\n")
     assert session.flush_count == 1
 

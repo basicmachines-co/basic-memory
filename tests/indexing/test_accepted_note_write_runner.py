@@ -42,6 +42,10 @@ from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.schemas.base import Entity as EntitySchema
 
 
+_PREPARED_CREATED_AT = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+_PREPARED_UPDATED_AT = datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
+
+
 @dataclass(frozen=True, slots=True)
 class _PreparedFields:
     title: str
@@ -50,6 +54,8 @@ class _PreparedFields:
     content_type: str
     permalink: str | None
     file_path: str
+    created_at: datetime = _PREPARED_CREATED_AT
+    updated_at: datetime = _PREPARED_UPDATED_AT
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,7 +484,6 @@ async def test_prepare_accepted_note_replace_applies_entity_fields() -> None:
     session = _FlushSession()
     entity = _entity()
     schema = _schema()
-    now = datetime(2026, 6, 19, 12, 30, tzinfo=UTC)
     fields = _PreparedFields(
         title="Replacement",
         note_type="decision",
@@ -496,7 +501,6 @@ async def test_prepare_accepted_note_replace_applies_entity_fields() -> None:
         entity=entity,
         data=schema,
         current_note_content=_note_content(),
-        now=now,
         user_profile_value="user-2",
     )
 
@@ -509,7 +513,8 @@ async def test_prepare_accepted_note_replace_applies_entity_fields() -> None:
     assert entity.note_type == "decision"
     assert entity.entity_metadata == {"status": "accepted"}
     assert entity.file_path == "notes/replacement.md"
-    assert entity.updated_at == now
+    assert entity.created_at == _PREPARED_CREATED_AT
+    assert entity.updated_at == _PREPARED_UPDATED_AT
     assert entity.last_updated_by == "user-2"
     assert session.flush_count == 1
 
@@ -518,7 +523,6 @@ async def test_prepare_accepted_note_replace_applies_entity_fields() -> None:
 async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
     session = _FlushSession()
     entity = _entity()
-    now = datetime(2026, 6, 19, 12, 45, tzinfo=UTC)
     fields = _PreparedFields(
         title="Edited",
         note_type="note",
@@ -541,7 +545,6 @@ async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
         find_text="# Accepted",
         expected_replacements=1,
         replace_subsections=True,
-        now=now,
         user_profile_value=None,
     )
 
@@ -563,13 +566,14 @@ async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
     assert entity.title == "Edited"
     assert entity.permalink == "edited"
     assert entity.file_path == "notes/edited.md"
+    assert entity.created_at == _PREPARED_CREATED_AT
+    assert entity.updated_at == _PREPARED_UPDATED_AT
     assert entity.last_updated_by is None
     assert session.flush_count == 1
 
 
 def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
     entity = _entity()
-    now = datetime(2026, 6, 19, 13, 0, tzinfo=UTC)
 
     apply_accepted_prepared_entity_fields(
         entity,
@@ -581,7 +585,6 @@ def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
             permalink="applied",
             file_path="schemas/applied.md",
         ),
-        updated_at=now,
         user_profile_value="user-3",
     )
 
@@ -591,7 +594,8 @@ def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
     assert entity.content_type == "text/markdown"
     assert entity.permalink == "applied"
     assert entity.file_path == "schemas/applied.md"
-    assert entity.updated_at == now
+    assert entity.created_at == _PREPARED_CREATED_AT
+    assert entity.updated_at == _PREPARED_UPDATED_AT
     assert entity.last_updated_by == "user-3"
 
 
@@ -599,7 +603,8 @@ def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
 async def test_prepare_accepted_note_move_without_permalink_update_keeps_current_markdown() -> None:
     session = _FlushSession()
     entity = _entity()
-    now = datetime(2026, 6, 19, 13, 15, tzinfo=UTC)
+    original_created_at = entity.created_at
+    original_updated_at = entity.updated_at
     current = _note_content()
     current.markdown_content = "---\ntitle: legacy\n\n# Body still matters\n"
 
@@ -610,7 +615,6 @@ async def test_prepare_accepted_note_move_without_permalink_update_keeps_current
         current_note_content=current,
         accepted_file_path="archive/accepted.md",
         should_update_permalink=False,
-        now=now,
         user_profile_value="user-4",
     )
 
@@ -621,7 +625,8 @@ async def test_prepare_accepted_note_move_without_permalink_update_keeps_current
     assert result.db_checksum == sha256(str(current.markdown_content).encode()).hexdigest()
     assert entity.file_path == "archive/accepted.md"
     assert entity.permalink == "accepted"
-    assert entity.updated_at == now
+    assert entity.created_at == original_created_at
+    assert entity.updated_at == original_updated_at
     assert entity.last_updated_by == "user-4"
     assert session.flush_count == 1
 
@@ -630,7 +635,8 @@ async def test_prepare_accepted_note_move_without_permalink_update_keeps_current
 async def test_prepare_accepted_note_move_with_permalink_update_uses_preparer() -> None:
     session = _FlushSession()
     entity = _entity()
-    now = datetime(2026, 6, 19, 13, 30, tzinfo=UTC)
+    original_created_at = entity.created_at
+    original_updated_at = entity.updated_at
     prepared = _PreparedMove(
         file_path=Path("archive/prepared.md"),
         markdown_content="# Prepared\n",
@@ -646,7 +652,6 @@ async def test_prepare_accepted_note_move_with_permalink_update_uses_preparer() 
         current_note_content=_note_content(),
         accepted_file_path="archive/accepted.md",
         should_update_permalink=True,
-        now=now,
         user_profile_value=None,
     )
 
@@ -660,17 +665,15 @@ async def test_prepare_accepted_note_move_with_permalink_update_uses_preparer() 
     assert result.db_checksum == sha256(b"# Prepared\n").hexdigest()
     assert entity.file_path == "archive/prepared.md"
     assert entity.permalink == "archive/prepared"
-    assert entity.updated_at == now
+    assert entity.created_at == original_created_at
+    assert entity.updated_at == original_updated_at
     assert entity.last_updated_by is None
     assert session.flush_count == 1
 
 
 def test_accepted_pending_entity_write_from_prepared_maps_core_fields() -> None:
-    now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
-
     write = accepted_pending_entity_write_from_prepared(
         _prepared(),
-        now=now,
         user_profile_value="user-1",
         external_id="note-1",
     )
@@ -682,8 +685,8 @@ def test_accepted_pending_entity_write_from_prepared_maps_core_fields() -> None:
         content_type="text/markdown",
         permalink="accepted",
         file_path="notes/accepted.md",
-        created_at=now,
-        updated_at=now,
+        created_at=_PREPARED_CREATED_AT,
+        updated_at=_PREPARED_UPDATED_AT,
         created_by="user-1",
         last_updated_by="user-1",
         external_id="note-1",
@@ -695,13 +698,10 @@ async def test_create_accepted_pending_entity_uses_repository_protocol() -> None
     session = cast(AsyncSession, object())
     entity = _entity()
     repository = _PendingEntityRepository(entity)
-    now = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
-
     result = await create_accepted_pending_entity(
         session,
         prepared=_prepared(),
         project_id=7,
-        now=now,
         user_profile_value=None,
         repositories=_repository_provider(pending_entity_repository=repository),
     )

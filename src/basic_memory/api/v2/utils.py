@@ -274,6 +274,7 @@ async def to_search_results(
                         content=result.content,
                         matched_chunk=result.matched_chunk_text,
                         file_path=_required_str(result.file_path, "file_path"),
+                        updated_at=result.updated_at,
                         metadata=result.metadata,
                         entity_id=entity_id,
                         observation_id=observation_id,

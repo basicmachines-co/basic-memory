@@ -125,6 +125,7 @@ class SearchResult(BaseModel):
     content: Optional[str] = None
     matched_chunk: Optional[str] = None
     file_path: str
+    updated_at: Optional[datetime] = None
 
     metadata: Optional[dict] = None
 

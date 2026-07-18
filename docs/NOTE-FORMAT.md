@@ -39,6 +39,8 @@ YAML metadata between `---` fences at the top of the file.
 | `type` | No | `note` | Entity type. Used for schema resolution and filtering. |
 | `tags` | No | `[]` | List or comma-separated string. Used for organization and search. |
 | `permalink` | No | generated from title | Stable identifier. Persists even if the file moves. |
+| `created` | No | file ctime | Canonical semantic creation timestamp. Accepts ISO 8601 dates or datetimes. |
+| `modified` | No | file mtime | Canonical semantic modification timestamp. Accepts ISO 8601 dates or datetimes. |
 | `schema` | No | none | Schema attachment — dict (inline), string (reference), or omitted (implicit). |
 
 Custom fields are allowed. Any key not in the standard set is stored as `entity_metadata` and indexed for search and filtering.
@@ -66,6 +68,25 @@ YAML automatically converts some values to native types. Basic Memory normalizes
 - Lists and dicts → preserved, items normalized recursively
 
 This prevents errors when downstream code expects string values.
+
+### Canonical Note Timestamps
+
+`created` and `modified` describe the note, not the current file object. Basic Memory parses these
+canonical fields once when it accepts or indexes Markdown and carries the resulting typed values
+through entity, search, and directory projections.
+
+- Date-only values use midnight in the machine's local timezone.
+- Datetimes without an offset use the machine's local timezone.
+- Explicit UTC or numeric offsets remain unchanged.
+- A missing or null field falls back independently to the file's ctime or mtime. When file stats
+  are unavailable, both missing values use one timestamp from the current operation.
+- An invalid canonical value is an indexing error for that field; Basic Memory does not silently
+  replace it with a file timestamp.
+
+Filesystem mtime, checksum, size, and path remain physical synchronization bookkeeping. A move,
+materialization, or incidental bookkeeping update does not change a note's semantic timestamps.
+Passive indexing does not add or rewrite `created` or `modified`; notes without them remain
+compatible through the filesystem fallback. Timestamp aliases are not canonical fields.
 
 ## Observations
 

@@ -483,7 +483,6 @@ async def _run_accepted_note_create(
         session,
         prepared=prepared,
         project_id=project.id,
-        now=now,
         user_profile_value=user_profile_value,
         repositories=dependencies.write_repositories,
     )
@@ -573,7 +572,6 @@ async def _run_accepted_note_update(
             session,
             prepared=prepared_write.prepared,
             project_id=project.id,
-            now=now,
             user_profile_value=user_profile_value,
             external_id=request.entity_external_id,
             repositories=dependencies.write_repositories,
@@ -627,7 +625,6 @@ async def _run_accepted_note_update(
                 entity=entity,
                 data=request.data,
                 current_note_content=current_note_content,
-                now=now,
                 user_profile_value=user_profile_value,
             )
         except (ParseError, ValueError) as error:
@@ -698,7 +695,6 @@ async def _run_accepted_note_edit(
             find_text=request.data.find_text,
             expected_replacements=request.data.expected_replacements,
             replace_subsections=request.data.replace_subsections,
-            now=now,
             user_profile_value=user_profile_value,
         )
     except (ParseError, ValueError) as error:
@@ -798,7 +794,6 @@ async def _run_accepted_note_move(
             current_note_content=current_note_content,
             accepted_file_path=accepted_file_path,
             should_update_permalink=should_update_permalink,
-            now=now,
             user_profile_value=user_profile_value,
         )
     except (ParseError, ValueError) as error:

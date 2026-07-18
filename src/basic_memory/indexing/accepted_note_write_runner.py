@@ -67,6 +67,12 @@ class AcceptedPreparedEntityFields(Protocol):
     @property
     def file_path(self) -> RuntimeFilePath: ...
 
+    @property
+    def created_at(self) -> datetime: ...
+
+    @property
+    def updated_at(self) -> datetime: ...
+
 
 class AcceptedPreparedEntityWriteSource(Protocol):
     """Prepared markdown/entity state produced by Basic Memory note semantics."""
@@ -100,6 +106,7 @@ class AcceptedPreparedEntityTarget(Protocol):
     content_type: str
     permalink: str | None
     file_path: RuntimeFilePath
+    created_at: datetime
     updated_at: datetime
     last_updated_by: str | None
 
@@ -389,7 +396,6 @@ async def prepare_accepted_note_replace(
     entity: Entity,
     data: EntitySchema,
     current_note_content: AcceptedNoteContentSource,
-    now: datetime,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a full accepted replacement and apply its entity fields."""
@@ -406,7 +412,6 @@ async def prepare_accepted_note_replace(
     apply_accepted_prepared_entity_fields(
         entity,
         prepared.entity_fields,
-        updated_at=now,
         user_profile_value=user_profile_value,
     )
     await session.flush()
@@ -425,7 +430,6 @@ async def prepare_accepted_note_edit(
     find_text: str | None,
     expected_replacements: int,
     replace_subsections: bool,
-    now: datetime,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a partial accepted edit and apply its entity fields."""
@@ -447,7 +451,6 @@ async def prepare_accepted_note_edit(
     apply_accepted_prepared_entity_fields(
         entity,
         prepared.entity_fields,
-        updated_at=now,
         user_profile_value=user_profile_value,
     )
     await session.flush()
@@ -462,7 +465,6 @@ async def prepare_accepted_note_move(
     current_note_content: AcceptedNoteContentSource,
     accepted_file_path: RuntimeFilePath,
     should_update_permalink: bool,
-    now: datetime,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteMove:
     """Prepare a DB-first move and apply the accepted path/permalink fields."""
@@ -495,7 +497,6 @@ async def prepare_accepted_note_move(
     )
     entity.file_path = result.file_path
     entity.permalink = result.permalink
-    entity.updated_at = now
     entity.last_updated_by = user_profile_value
     await session.flush()
     return result
@@ -505,7 +506,6 @@ def apply_accepted_prepared_entity_fields(
     entity: AcceptedPreparedEntityTarget,
     entity_fields: AcceptedPreparedEntityFields,
     *,
-    updated_at: datetime,
     user_profile_value: str | None,
 ) -> None:
     """Copy prepared accepted markdown fields onto an entity row."""
@@ -515,14 +515,14 @@ def apply_accepted_prepared_entity_fields(
     entity.content_type = entity_fields.content_type
     entity.permalink = entity_fields.permalink
     entity.file_path = entity_fields.file_path
-    entity.updated_at = updated_at
+    entity.created_at = entity_fields.created_at
+    entity.updated_at = entity_fields.updated_at
     entity.last_updated_by = user_profile_value
 
 
 def accepted_pending_entity_write_from_prepared(
     prepared: AcceptedPreparedEntityWriteSource,
     *,
-    now: datetime,
     user_profile_value: str | None,
     external_id: str | None = None,
 ) -> AcceptedPendingEntityWrite:
@@ -535,8 +535,8 @@ def accepted_pending_entity_write_from_prepared(
         content_type=fields.content_type,
         permalink=fields.permalink,
         file_path=fields.file_path,
-        created_at=now,
-        updated_at=now,
+        created_at=fields.created_at,
+        updated_at=fields.updated_at,
         created_by=user_profile_value,
         last_updated_by=user_profile_value,
         external_id=external_id,
@@ -548,7 +548,6 @@ async def create_accepted_pending_entity(
     *,
     prepared: AcceptedPreparedEntityWriteSource,
     project_id: ProjectId,
-    now: datetime,
     user_profile_value: str | None,
     external_id: str | None = None,
     repositories: AcceptedNoteWriteRepositories,
@@ -559,7 +558,6 @@ async def create_accepted_pending_entity(
         session,
         accepted_pending_entity_write_from_prepared(
             prepared,
-            now=now,
             user_profile_value=user_profile_value,
             external_id=external_id,
         ),
