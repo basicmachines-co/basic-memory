@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-import basic_memory.cloud.note_content_materialization as note_content_materialization
+import basic_memory.index.note_content_materialization as note_content_materialization
 import basic_memory.mcp.server as server_module
 from basic_memory import db
 from basic_memory.mcp.server import lifespan, mcp

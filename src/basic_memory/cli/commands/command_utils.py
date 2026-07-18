@@ -32,7 +32,7 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     # Deferred: basic_memory.db pulls SQLAlchemy + Alembic, which must not load
     # at CLI import time — only when a command actually runs (#886).
     from basic_memory import db
-    from basic_memory.cloud.note_content_materialization import drain_pending_materializations
+    from basic_memory.index.note_content_materialization import drain_pending_materializations
     from basic_memory.index.local_schedulers import drain_background_tasks
 
     async def _with_cleanup() -> T:

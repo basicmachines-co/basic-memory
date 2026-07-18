@@ -36,14 +36,14 @@ from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import basic_memory.cloud.note_content_reads as note_content_reads
-import basic_memory.cloud.note_content_writes as note_content_writes
-from basic_memory.cloud.directory_deletes import (
+import basic_memory.services.note_content_reads as note_content_reads
+import basic_memory.services.note_content_writes as note_content_writes
+from basic_memory.services.directory_deletes import (
     DirectoryDeleteService,
     DirectoryDeleteServiceError,
 )
-from basic_memory.cloud.note_content_reads import NoteContentQueryService
-from basic_memory.cloud.note_content_writes import (
+from basic_memory.services.note_content_reads import NoteContentQueryService
+from basic_memory.services.note_content_writes import (
     NoteContentMutationActorContext,
     NoteContentMutationService,
     NoteContentMutationServiceError,

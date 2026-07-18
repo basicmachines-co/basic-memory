@@ -22,12 +22,12 @@ from basic_memory.indexing.accepted_note_write_runner import (
     AcceptedNoteWriteRepositories,
     create_accepted_pending_entity,
     delete_accepted_note,
-    persist_accepted_note_write,
+    persist_accepted_note_move,
+    persist_accepted_note_snapshot,
     prepare_accepted_note_create,
     prepare_accepted_note_edit,
     prepare_accepted_note_move,
     prepare_accepted_note_replace,
-    replace_accepted_note_graph,
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import NoteContentVersionConflict
@@ -486,24 +486,14 @@ async def _run_accepted_note_create(
         user_profile_value=user_profile_value,
         repositories=dependencies.write_repositories,
     )
-    persisted = await persist_accepted_note_write(
-        session,
-        entity=entity,
-        markdown_content=prepared.markdown_content,
-        db_checksum=prepared_write.db_checksum,
-        search_content=prepared.search_content,
-        last_source=request.source,
-        updated_at=now,
-        repositories=dependencies.write_repositories,
-    )
-    # Persist observations/relations in the same transaction as the entity and
-    # note_content. Skipping this left the graph tables empty until a later
-    # index_file pass reparsed the materialized file (issue #1076).
-    await replace_accepted_note_graph(
+    persisted = await persist_accepted_note_snapshot(
         session,
         entity=entity,
         prepared=prepared,
+        db_checksum=prepared_write.db_checksum,
         self_relation_resolver=preparer,
+        last_source=request.source,
+        updated_at=now,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(
@@ -631,27 +621,17 @@ async def _run_accepted_note_update(
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
     prepared = prepared_write.prepared
-    persisted = await persist_accepted_note_write(
+    persisted = await persist_accepted_note_snapshot(
         session,
         entity=entity,
-        markdown_content=prepared.markdown_content,
+        prepared=prepared,
         db_checksum=prepared_write.db_checksum,
-        search_content=prepared.search_content,
+        self_relation_resolver=preparer,
         last_source=request.source,
         updated_at=now,
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         accepted_file_path=entity.file_path,
-        repositories=dependencies.write_repositories,
-    )
-    # Replace the graph atomically: a PUT create-or-replace owns the note's full
-    # observation/relation set, so stale rows from a prior write are dropped and
-    # the accepted markdown's rows land in the same transaction (issue #1076).
-    await replace_accepted_note_graph(
-        session,
-        entity=entity,
-        prepared=prepared,
-        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(
@@ -701,26 +681,16 @@ async def _run_accepted_note_edit(
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
     prepared = prepared_write.prepared
-    persisted = await persist_accepted_note_write(
+    persisted = await persist_accepted_note_snapshot(
         session,
         entity=entity,
-        markdown_content=prepared.markdown_content,
+        prepared=prepared,
         db_checksum=prepared_write.db_checksum,
-        search_content=prepared.search_content,
+        self_relation_resolver=preparer,
         last_source=request.source,
         updated_at=now,
         current_note_content=current_note_content,
         accepted_file_path=entity.file_path,
-        repositories=dependencies.write_repositories,
-    )
-    # An edit reparses the whole note, so its graph is authoritative: replace the
-    # observation/relation set so rows an edit removed are dropped and rows it
-    # added appear immediately, not after a later reindex (issue #1076).
-    await replace_accepted_note_graph(
-        session,
-        entity=entity,
-        prepared=prepared,
-        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(
@@ -799,17 +769,14 @@ async def _run_accepted_note_move(
     except (ParseError, ValueError) as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
-    persisted = await persist_accepted_note_write(
+    persisted = await persist_accepted_note_move(
         session,
         entity=entity,
-        markdown_content=prepared_move.markdown_content,
-        db_checksum=prepared_move.db_checksum,
-        search_content=prepared_move.search_content,
+        prepared=prepared_move,
         last_source=request.source,
         updated_at=now,
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
-        accepted_file_path=prepared_move.file_path,
         repositories=dependencies.write_repositories,
     )
     return plan_accepted_note_write_change(

@@ -23,16 +23,22 @@ from basic_memory.indexing.accepted_note_write_runner import (
     create_accepted_pending_entity,
     delete_accepted_note,
     delete_accepted_note_entity,
-    persist_accepted_note_write,
+    persist_accepted_note_move,
+    persist_accepted_note_snapshot,
     prepare_accepted_note_create,
     prepare_accepted_note_edit,
     prepare_accepted_note_move,
     prepare_accepted_note_replace,
     refresh_accepted_note_search_index,
-    replace_accepted_note_graph,
     delete_accepted_note_search_index,
 )
 from basic_memory.models import Entity, NoteContent
+from basic_memory.markdown.schemas import (
+    EntityFrontmatter,
+    EntityMarkdown,
+    Observation as MarkdownObservation,
+    Relation as MarkdownRelation,
+)
 from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
@@ -40,39 +46,19 @@ from basic_memory.repository import (
 )
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.schemas.base import Entity as EntitySchema
+from basic_memory.services.note_preparation import (
+    PreparedEntityFields,
+    PreparedEntityMove,
+    PreparedEntityWrite,
+)
 
+
+_PreparedFields = PreparedEntityFields
+_PreparedWrite = PreparedEntityWrite
+_PreparedMove = PreparedEntityMove
 
 _PREPARED_CREATED_AT = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
 _PREPARED_UPDATED_AT = datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedFields:
-    title: str
-    note_type: str
-    entity_metadata: dict[str, object] | None
-    content_type: str
-    permalink: str | None
-    file_path: str
-    created_at: datetime = _PREPARED_CREATED_AT
-    updated_at: datetime = _PREPARED_UPDATED_AT
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedWrite:
-    markdown_content: str
-    search_content: str
-    entity_fields: _PreparedFields
-    observations: Sequence[AcceptedObservationWrite] = ()
-    relations: Sequence[AcceptedRelationWrite] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedMove:
-    file_path: Path
-    markdown_content: str
-    search_content: str
-    permalink: str | None
 
 
 class _FlushSession:
@@ -230,7 +216,7 @@ class _DeleteSession:
 
 
 class _CreatePreparer:
-    def __init__(self, prepared: _PreparedWrite) -> None:
+    def __init__(self, prepared: PreparedEntityWrite) -> None:
         self.prepared = prepared
         self.calls: list[tuple[EntitySchema, bool, AsyncSession | None]] = []
         self.skip_conflict_checks: list[bool] = []
@@ -242,14 +228,14 @@ class _CreatePreparer:
         check_storage_exists: bool = True,
         skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
-    ) -> _PreparedWrite:
+    ) -> PreparedEntityWrite:
         self.calls.append((schema, check_storage_exists, session))
         self.skip_conflict_checks.append(skip_conflict_check)
         return self.prepared
 
 
 class _ReplacePreparer:
-    def __init__(self, prepared: _PreparedWrite) -> None:
+    def __init__(self, prepared: PreparedEntityWrite) -> None:
         self.prepared = prepared
         self.calls: list[tuple[Entity, EntitySchema, str, AsyncSession | None]] = []
 
@@ -260,13 +246,13 @@ class _ReplacePreparer:
         existing_content: str,
         *,
         session: AsyncSession | None = None,
-    ) -> _PreparedWrite:
+    ) -> PreparedEntityWrite:
         self.calls.append((entity, schema, existing_content, session))
         return self.prepared
 
 
 class _EditPreparer:
-    def __init__(self, prepared: _PreparedWrite) -> None:
+    def __init__(self, prepared: PreparedEntityWrite) -> None:
         self.prepared = prepared
         self.calls: list[
             tuple[Entity, str, str, str, str | None, str | None, int, bool, AsyncSession | None]
@@ -284,7 +270,7 @@ class _EditPreparer:
         expected_replacements: int = 1,
         replace_subsections: bool = True,
         session: AsyncSession | None = None,
-    ) -> _PreparedWrite:
+    ) -> PreparedEntityWrite:
         self.calls.append(
             (
                 entity,
@@ -302,7 +288,7 @@ class _EditPreparer:
 
 
 class _MovePreparer:
-    def __init__(self, prepared: _PreparedMove) -> None:
+    def __init__(self, prepared: PreparedEntityMove) -> None:
         self.prepared = prepared
         self.calls: list[tuple[Entity, str, str, AsyncSession | None]] = []
 
@@ -313,7 +299,7 @@ class _MovePreparer:
         destination_path: str,
         *,
         session: AsyncSession | None = None,
-    ) -> _PreparedMove:
+    ) -> PreparedEntityMove:
         self.calls.append((entity, current_content, destination_path, session))
         return self.prepared
 
@@ -402,19 +388,51 @@ def _prepared(
     *,
     markdown_content: str = "# Accepted\n",
     search_content: str = "Accepted",
-    fields: _PreparedFields | None = None,
-) -> _PreparedWrite:
-    return _PreparedWrite(
+    fields: PreparedEntityFields | None = None,
+    observations: Sequence[AcceptedObservationWrite] = (),
+    relations: Sequence[AcceptedRelationWrite] = (),
+) -> PreparedEntityWrite:
+    prepared_fields = fields or PreparedEntityFields(
+        title="Accepted",
+        note_type="note",
+        entity_metadata={"status": "draft"},
+        content_type="text/markdown",
+        permalink="accepted",
+        file_path="notes/accepted.md",
+        created_at=_PREPARED_CREATED_AT,
+        updated_at=_PREPARED_UPDATED_AT,
+    )
+    return PreparedEntityWrite(
+        file_path=Path(prepared_fields.file_path),
         markdown_content=markdown_content,
         search_content=search_content,
-        entity_fields=fields
-        or _PreparedFields(
-            title="Accepted",
-            note_type="note",
-            entity_metadata={"status": "draft"},
-            content_type="text/markdown",
-            permalink="accepted",
-            file_path="notes/accepted.md",
+        entity_fields=prepared_fields,
+        entity_markdown=EntityMarkdown(
+            frontmatter=EntityFrontmatter(
+                metadata={
+                    "title": prepared_fields.title,
+                    "type": prepared_fields.note_type,
+                    "permalink": prepared_fields.permalink,
+                }
+            ),
+            content=search_content,
+            observations=[
+                MarkdownObservation(
+                    content=observation.content,
+                    category=observation.category,
+                    context=observation.context,
+                    tags=observation.tags,
+                )
+                for observation in observations
+            ],
+            relations=[
+                MarkdownRelation(
+                    type=relation.relation_type,
+                    target=relation.target_name,
+                    context=relation.context,
+                )
+                for relation in relations
+            ],
         ),
     )
 
@@ -461,7 +479,7 @@ def _note_content() -> NoteContent:
 
 @pytest.mark.asyncio
 async def test_prepare_accepted_note_create_hashes_prepared_markdown() -> None:
-    session = cast(AsyncSession, object())
+    session = cast(AsyncSession, _FlushSession())
     schema = _schema()
     prepared = _prepared(markdown_content="# Created\n")
     preparer = _CreatePreparer(prepared)
@@ -491,6 +509,8 @@ async def test_prepare_accepted_note_replace_applies_entity_fields() -> None:
         content_type="text/markdown",
         permalink="replacement",
         file_path="notes/replacement.md",
+        created_at=_PREPARED_CREATED_AT,
+        updated_at=_PREPARED_UPDATED_AT,
     )
     prepared = _prepared(markdown_content="# Replacement\n", fields=fields)
     preparer = _ReplacePreparer(prepared)
@@ -530,6 +550,8 @@ async def test_prepare_accepted_note_edit_applies_entity_fields() -> None:
         content_type="text/markdown",
         permalink="edited",
         file_path="notes/edited.md",
+        created_at=_PREPARED_CREATED_AT,
+        updated_at=_PREPARED_UPDATED_AT,
     )
     prepared = _prepared(markdown_content="# Edited\n", fields=fields)
     preparer = _EditPreparer(prepared)
@@ -584,6 +606,8 @@ def test_apply_accepted_prepared_entity_fields_updates_mutable_entity() -> None:
             content_type="text/markdown",
             permalink="applied",
             file_path="schemas/applied.md",
+            created_at=_PREPARED_CREATED_AT,
+            updated_at=_PREPARED_UPDATED_AT,
         ),
         user_profile_value="user-3",
     )
@@ -698,6 +722,7 @@ async def test_create_accepted_pending_entity_uses_repository_protocol() -> None
     session = cast(AsyncSession, object())
     entity = _entity()
     repository = _PendingEntityRepository(entity)
+
     result = await create_accepted_pending_entity(
         session,
         prepared=_prepared(),
@@ -819,7 +844,7 @@ async def test_delete_accepted_note_search_index_uses_repository_protocol() -> N
 
 
 @pytest.mark.asyncio
-async def test_persist_accepted_note_write_plans_content_and_refreshes_search() -> None:
+async def test_persist_accepted_note_snapshot_persists_content_search_and_graph() -> None:
     session = cast(AsyncSession, object())
     entity = _entity()
     entity.file_path = "notes/new.md"
@@ -832,13 +857,32 @@ async def test_persist_accepted_note_write_plans_content_and_refreshes_search() 
     persisted_note_content = _note_content()
     content_repository = _NoteContentRepository(persisted_note_content)
     search_repository = _SearchRepository()
-
-    result = await persist_accepted_note_write(
-        session,
-        entity=entity,
+    observation_repository = _ObservationRepository()
+    relation_repository = _RelationRepository()
+    observation = AcceptedObservationWrite(
+        content="Snapshot is complete",
+        category="status",
+        context=None,
+        tags=None,
+    )
+    relation = AcceptedRelationWrite(
+        relation_type="documents",
+        target_name="Another Note",
+        context=None,
+    )
+    prepared = _prepared(
         markdown_content="# New\n",
         search_content="New body",
+        observations=(observation,),
+        relations=(relation,),
+    )
+
+    result = await persist_accepted_note_snapshot(
+        session,
+        entity=entity,
+        prepared=prepared,
         db_checksum="new-db-checksum",
+        self_relation_resolver=_SelfRelationResolver(),
         last_source="api",
         updated_at=updated_at,
         current_note_content=current_note_content,
@@ -847,6 +891,8 @@ async def test_persist_accepted_note_write_plans_content_and_refreshes_search() 
         repositories=_repository_provider(
             note_content_repository=content_repository,
             search_repository=search_repository,
+            observation_repository=observation_repository,
+            relation_repository=relation_repository,
         ),
     )
 
@@ -872,6 +918,45 @@ async def test_persist_accepted_note_write_plans_content_and_refreshes_search() 
     assert len(search_repository.calls) == 1
     assert search_repository.calls[0].entity_id == entity.id
     assert search_repository.calls[0].content_snippet == "New body"
+    assert observation_repository.calls == [(entity.id, prepared.observations)]
+    assert relation_repository.calls == [(entity.id, prepared.relations)]
+
+
+@pytest.mark.asyncio
+async def test_persist_accepted_note_move_is_explicitly_content_and_search_only() -> None:
+    session = cast(AsyncSession, _FlushSession())
+    entity = _entity()
+    entity.file_path = "notes/new.md"
+    current_note_content = _note_content()
+    current_note_content.file_path = "notes/old.md"
+    content_repository = _NoteContentRepository(_note_content())
+    search_repository = _SearchRepository()
+    prepared = await prepare_accepted_note_move(
+        None,
+        session,
+        entity=entity,
+        current_note_content=current_note_content,
+        accepted_file_path="notes/new.md",
+        should_update_permalink=False,
+        user_profile_value=None,
+    )
+
+    await persist_accepted_note_move(
+        session,
+        entity=entity,
+        prepared=prepared,
+        last_source="api",
+        updated_at=datetime(2026, 6, 19, 14, 0, tzinfo=UTC),
+        current_note_content=current_note_content,
+        existing_file_path="notes/old.md",
+        repositories=_repository_provider(
+            note_content_repository=content_repository,
+            search_repository=search_repository,
+        ),
+    )
+
+    assert len(content_repository.calls) == 1
+    assert len(search_repository.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -946,73 +1031,22 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_replace_accepted_note_graph_persists_observations_and_relations() -> None:
-    """The graph handoff forwards the prepared observation/relation set to the repos."""
-    observation_repository = _ObservationRepository()
-    relation_repository = _RelationRepository()
-    repositories = _repository_provider(
-        observation_repository=observation_repository,
-        relation_repository=relation_repository,
-    )
-    prepared = _PreparedWrite(
-        markdown_content="# Accepted\n",
-        search_content="Accepted",
-        entity_fields=_PreparedFields(
-            title="Accepted",
-            note_type="note",
-            entity_metadata=None,
-            content_type="text/markdown",
-            permalink="accepted",
-            file_path="notes/accepted.md",
-        ),
-        observations=[
-            AcceptedObservationWrite(
-                content="Ada Acceptance",
-                category="name",
-                context=None,
-                tags=None,
-            )
-        ],
-        relations=[
-            AcceptedRelationWrite(
-                relation_type="works_at",
-                target_name="XSYS Target",
-                context=None,
-            )
-        ],
-    )
-    resolver = _SelfRelationResolver()
-    session = cast(AsyncSession, _FlushSession())
-
-    await replace_accepted_note_graph(
-        session,
-        entity=_entity(),
-        prepared=prepared,
-        self_relation_resolver=resolver,
-        repositories=repositories,
-    )
-
-    # Both repos are scoped to the entity's project (7) and receive the parsed set.
-    assert observation_repository.calls == [(42, prepared.observations)]
-    assert relation_repository.calls == [(42, prepared.relations)]
-    assert [call[0] for call in resolver.calls] == ["XSYS Target"]
-
-
-@pytest.mark.asyncio
-async def test_replace_accepted_note_graph_resolves_safe_self_relation() -> None:
+async def test_persist_accepted_note_snapshot_resolves_safe_self_relation() -> None:
     """A safe self-link carries its ID because deferred resolution skips self targets."""
     relation_repository = _RelationRepository()
     entity = _entity()
-    prepared = _PreparedWrite(
+    prepared = _prepared(
         markdown_content="# Accepted\n",
         search_content="Accepted",
-        entity_fields=_PreparedFields(
+        fields=_PreparedFields(
             title="Accepted",
             note_type="note",
             entity_metadata=None,
             content_type="text/markdown",
             permalink="accepted",
             file_path="notes/accepted.md",
+            created_at=_PREPARED_CREATED_AT,
+            updated_at=_PREPARED_UPDATED_AT,
         ),
         relations=[
             AcceptedRelationWrite(
@@ -1024,12 +1058,17 @@ async def test_replace_accepted_note_graph_resolves_safe_self_relation() -> None
     )
     resolver = _SelfRelationResolver(entity)
 
-    await replace_accepted_note_graph(
-        cast(AsyncSession, _FlushSession()),
+    await persist_accepted_note_snapshot(
+        cast(AsyncSession, object()),
         entity=entity,
         prepared=prepared,
+        db_checksum="snapshot-checksum",
         self_relation_resolver=resolver,
+        last_source="api",
+        updated_at=entity.updated_at,
         repositories=_repository_provider(
+            note_content_repository=_NoteContentRepository(_note_content()),
+            search_repository=_SearchRepository(),
             observation_repository=_ObservationRepository(),
             relation_repository=relation_repository,
         ),
@@ -1051,23 +1090,29 @@ async def test_replace_accepted_note_graph_resolves_safe_self_relation() -> None
 
 
 @pytest.mark.asyncio
-async def test_replace_accepted_note_graph_forwards_empty_sets() -> None:
+async def test_persist_accepted_note_snapshot_forwards_empty_graph_sets() -> None:
     """A note with no observations/relations still clears the graph (empty replace)."""
     observation_repository = _ObservationRepository()
     relation_repository = _RelationRepository()
     repositories = _repository_provider(
+        note_content_repository=_NoteContentRepository(_note_content()),
+        search_repository=_SearchRepository(),
         observation_repository=observation_repository,
         relation_repository=relation_repository,
     )
     prepared = _prepared()
 
-    await replace_accepted_note_graph(
-        cast(AsyncSession, _FlushSession()),
-        entity=_entity(),
+    entity = _entity()
+    await persist_accepted_note_snapshot(
+        cast(AsyncSession, object()),
+        entity=entity,
         prepared=prepared,
+        db_checksum="snapshot-checksum",
         self_relation_resolver=_SelfRelationResolver(),
+        last_source="api",
+        updated_at=entity.updated_at,
         repositories=repositories,
     )
 
-    assert observation_repository.calls == [(42, ())]
+    assert observation_repository.calls == [(42, [])]
     assert relation_repository.calls == [(42, [])]

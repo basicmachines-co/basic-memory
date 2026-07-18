@@ -23,21 +23,17 @@ from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
-from basic_memory.repository import NoteContentRepository, ObservationRepository, RelationRepository
-from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
+from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.runtime.cleanup import RuntimeFileDeleteResult, RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.storage import (
-    ProjectId,
     RuntimeFileChecksum,
     RuntimeFilePath,
     runtime_content_type_is_markdown,
 )
-from basic_memory.services import EntityService
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.file_service import FileService
-from basic_memory.services.link_resolver import LinkResolver
+from basic_memory.services.note_preparation import NotePreparation, NotePreparationDependencies
 from basic_memory.services.search_service import SearchService
 
 # --- Accepted-Note Mutations ---
@@ -59,61 +55,18 @@ class LocalAcceptedNotePreparerFactory:
             app_config=self.app_config,
         )
         entity_repository = EntityRepository(project_id=project.id)
-        search_repository = create_search_repository(
-            self.session_maker,
-            project_id=project.id,
-            app_config=self.app_config,
-        )
-        search_service = SearchService(
-            search_repository,
-            entity_repository,
-            file_service,
-            self.session_maker,
-        )
-        link_resolver = LinkResolver(
-            entity_repository=entity_repository,
-            search_service=search_service,
-            session_maker=self.session_maker,
-        )
-        return EntityService(
-            entity_repository=entity_repository,
-            observation_repository=ObservationRepository(project_id=project.id),
-            relation_repository=RelationRepository(project_id=project.id),
-            entity_parser=entity_parser,
-            file_service=file_service,
-            link_resolver=link_resolver,
-            session_maker=self.session_maker,
-            search_service=search_service,
-            app_config=self.app_config,
+        return NotePreparation(
+            NotePreparationDependencies(
+                entity_parser=entity_parser,
+                entity_repository=entity_repository,
+                file_service=file_service,
+                session_maker=self.session_maker,
+                app_config=self.app_config,
+            )
         )
 
 
-@dataclass(frozen=True, slots=True)
-class LocalAcceptedNoteRepositories:
-    """Project-scoped core repositories for accepted-note mutations.
-
-    One concrete bundle satisfies both the lookup and write repository
-    capabilities the accepted-note mutation runner consumes; cloud composes its
-    own tenant-scoped equivalent behind the same protocols.
-    """
-
-    def entity_repository(self, project_id: ProjectId) -> EntityRepository:
-        return EntityRepository(project_id=project_id)
-
-    def pending_entity_repository(self, project_id: ProjectId) -> EntityRepository:
-        return EntityRepository(project_id=project_id)
-
-    def note_content_repository(self, project_id: ProjectId) -> NoteContentRepository:
-        return NoteContentRepository(project_id=project_id)
-
-    def search_repository(self, project_id: ProjectId) -> AcceptedNoteSearchRepository:
-        return AcceptedNoteSearchRepository(project_id=project_id)
-
-    def observation_repository(self, project_id: ProjectId) -> ObservationRepository:
-        return ObservationRepository(project_id=project_id)
-
-    def relation_repository(self, project_id: ProjectId) -> RelationRepository:
-        return RelationRepository(project_id=project_id)
+LocalAcceptedNoteRepositories = AcceptedNoteRepositories
 
 
 # --- Current-Note Content Freshening ---

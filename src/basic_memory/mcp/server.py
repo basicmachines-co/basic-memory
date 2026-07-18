@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from basic_memory import db
 from basic_memory.cli.auth import CLIAuth
-from basic_memory.cloud.note_content_materialization import drain_pending_materializations
+from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.db import scoped_session
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware

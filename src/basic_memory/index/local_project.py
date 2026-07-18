@@ -24,6 +24,12 @@ from basic_memory.index.local_dependencies import (
 )
 from basic_memory.index.local_moves import LocalProjectIndexMoveContentUpdater
 from basic_memory.index.local_runtime import LocalStorageFileMetadataSource
+from basic_memory.index.project_indexing import (
+    ProjectIndexObservation,
+    ProjectIndexRouteRequest,
+    ProjectIndexRunner,
+    ProjectIndexScheduler,
+)
 from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
 from basic_memory.indexing.file_batch_runner import (
@@ -449,15 +455,7 @@ class LocalProjectIndexRuntime:
     coordinator_job_id: RuntimeJobId | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class LocalProjectIndexObservation:
-    """Current local project files observed through the project-index adapter."""
-
-    observed_files: tuple[RuntimeObservedIndexFile, ...]
-
-    @property
-    def total_files(self) -> int:
-        return len(self.observed_files)
+LocalProjectIndexObservation = ProjectIndexObservation
 
 
 class LocalProjectIndexRuntimeProvider(Protocol):
@@ -707,51 +705,6 @@ class LocalProjectIndexRunner:
             runtime_factory=self.runtime_factory,
             force_full=force_full,
         )
-
-
-# --- Project-Index Route Commands ---
-
-
-class ProjectIndexRunner(Protocol):
-    """Run project-wide indexing in the current process."""
-
-    async def index_project(
-        self,
-        project_id: int,
-        *,
-        force_full: bool = False,
-    ) -> ProjectIndexCoordinatorResult: ...
-
-
-class ProjectIndexObserver(Protocol):
-    """Observe project files visible to the active runtime."""
-
-    async def observe_project(self, project_id: int) -> LocalProjectIndexObservation: ...
-
-
-class ProjectIndexScheduler(Protocol):
-    """Schedule background project indexing."""
-
-    def schedule_project_index(self, *, project_id: int, force_full: bool = False) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class ProjectIndexRouteRequest:
-    """Route-level project-index command input."""
-
-    project_id: int
-    project_name: str
-    force_full: bool
-    run_in_background: bool
-
-
-class ProjectIndexCommand(Protocol):
-    """Handle a project-index route request."""
-
-    async def index_project(
-        self,
-        request: ProjectIndexRouteRequest,
-    ) -> ProjectIndexResponse: ...
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,31 +4,13 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from basic_memory.file_utils import ParseError, remove_frontmatter
+from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 
 MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE = 6000
-
-
-@dataclass(frozen=True, slots=True)
-class AcceptedNoteSearchRow:
-    """Entity-level search row for an accepted DB-first note snapshot."""
-
-    id: int
-    title: str
-    content_stems: str
-    content_snippet: str
-    permalink: str | None
-    file_path: str
-    item_type: str
-    note_type: str | None
-    entity_id: int
-    created_at: datetime
-    updated_at: datetime
-    project_id: int
 
 
 def strip_search_text(value: str | None) -> str:
