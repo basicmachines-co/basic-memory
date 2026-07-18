@@ -21,7 +21,11 @@ only inspect issue comments.
 If Codex shows an eyes reaction on the PR body or a comment, it is reviewing.
 Wait and keep checking.
 
-If Codex leaves a comment, review comment, or inline thread, the PR is not approved. Use judgement: fix the code when the comment is right; reply with evidence when the comment is wrong or intentionally not worth changing.
+If Codex leaves a comment, review body, or inline thread containing substantive
+feedback, the PR is not approved. Use judgement: fix the code when the comment
+is right; reply with evidence when it is wrong or intentionally not worth
+changing. A no-issue summary or boilerplate-only review body is not a blocker,
+but it also does not replace the required thumbs-up.
 
 ## Signals
 
@@ -30,7 +34,9 @@ If Codex leaves a comment, review comment, or inline thread, the PR is not appro
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on a Codex issue comment: also an approval signal, but this is not the only place to look.
 - Codex issue comment saying "Didn't find any major issues": approval-like context, but confirm the PR body/comment thumbs-up or get an explicit user override.
 - Codex top-level review with `CHANGES_REQUESTED` or a substantive review body: blocking feedback even when it has no inline thread.
-- Codex comment or review thread: Codex found feedback. Treat it as blocking until addressed, replied to with a clear rationale, or explicitly overridden by the user.
+- Codex comment, review body, or review thread containing substantive feedback:
+  blocking until addressed, replied to with a clear rationale, or explicitly
+  overridden by the user.
 - Outdated Codex comments: useful history, but not approval.
 - Empty `reviewDecision`, `mergeable: MERGEABLE`, `mergeStateStatus: CLEAN`, and green checks: necessary context, but not Codex approval.
 
