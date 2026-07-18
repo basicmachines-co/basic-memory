@@ -10,44 +10,19 @@ behind the same protocols.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Coroutine, Protocol
+from typing import Any, Coroutine
 
 from loguru import logger
 
-from basic_memory.index.local_project import ProjectIndexRunner
+from basic_memory.index.project_indexing import ProjectIndexRunner
+from basic_memory.index.schedulers import (
+    EntityVectorSyncSearchService,
+    SearchReindexService,
+)
 from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
 )
-
-# --- Scheduler Capabilities ---
-
-
-class EntityVectorSyncScheduler(Protocol):
-    """Schedule out-of-band semantic vector refreshes for note mutations."""
-
-    def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None: ...
-
-
-class SearchReindexScheduler(Protocol):
-    """Schedule a search-index rebuild for the active project."""
-
-    def schedule_search_reindex(self, *, project_id: int) -> None: ...
-
-
-class RelationResolutionScheduler(Protocol):
-    """Schedule background forward-reference resolution after note mutations."""
-
-    def schedule_relation_resolution(self, *, project_id: int) -> None: ...
-
-
-class EntityVectorSyncSearchService(Protocol):
-    async def sync_entity_vectors(self, entity_id: int) -> object: ...
-
-
-class SearchReindexService(Protocol):
-    async def reindex_all(self) -> object: ...
-
 
 # --- Background Task Machinery ---
 

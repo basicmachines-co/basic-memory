@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import basic_memory.indexing.project_index_maintenance as project_index_maintenance_module
+import basic_memory.repository.accepted_note_vector_cleanup as accepted_note_vector_cleanup_module
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -1255,7 +1256,7 @@ async def test_repository_project_index_maintenance_store_deletes_vector_embeddi
         return True
 
     monkeypatch.setattr(
-        project_index_maintenance_module,
+        accepted_note_vector_cleanup_module,
         "_load_sqlite_vec_on_session",
         fake_load_sqlite_vec_on_session,
     )

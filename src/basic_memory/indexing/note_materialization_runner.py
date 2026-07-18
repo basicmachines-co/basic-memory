@@ -502,7 +502,6 @@ class RepositoryNoteMaterializationPublisher:
                     file_path=written_file.file_path,
                     file_checksum=written_file.file_checksum,
                 )
-            entity.updated_at = written_file.file_updated_at
             entity.mtime = written_file.file_updated_at.timestamp()
             entity.size = len(prepared_write.markdown_content.encode("utf-8"))
             await session.flush()

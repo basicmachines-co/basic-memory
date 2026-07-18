@@ -58,17 +58,6 @@ def _strip_nul(value: str) -> str:
     return value.replace("\x00", "")
 
 
-def _mtime_to_datetime(entity: Entity) -> datetime:
-    """Convert entity mtime (file modification time) to datetime.
-
-    Returns the file's actual modification time, falling back to updated_at
-    if mtime is not available.
-    """
-    if entity.mtime:
-        return datetime.fromtimestamp(entity.mtime).astimezone()
-    return entity.updated_at
-
-
 class SearchService:
     """Service for search operations.
 
@@ -716,7 +705,7 @@ class SearchService:
                     "note_type": entity.note_type,
                 },
                 created_at=entity.created_at,
-                updated_at=_mtime_to_datetime(entity),
+                updated_at=entity.updated_at,
                 project_id=entity.project_id,
             )
         )
@@ -798,7 +787,7 @@ class SearchService:
                         "note_type": entity.note_type,
                     },
                     created_at=entity.created_at,
-                    updated_at=_mtime_to_datetime(entity),
+                    updated_at=entity.updated_at,
                     project_id=entity.project_id,
                 )
             )
@@ -833,7 +822,7 @@ class SearchService:
                             "tags": obs.tags,
                         },
                         created_at=entity.created_at,
-                        updated_at=_mtime_to_datetime(entity),
+                        updated_at=entity.updated_at,
                         project_id=entity.project_id,
                     )
                 )
@@ -861,7 +850,7 @@ class SearchService:
                         to_id=rel.to_id,
                         relation_type=rel.relation_type,
                         created_at=entity.created_at,
-                        updated_at=_mtime_to_datetime(entity),
+                        updated_at=entity.updated_at,
                         project_id=entity.project_id,
                     )
                 )

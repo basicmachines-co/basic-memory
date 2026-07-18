@@ -19,8 +19,12 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 # --- Helpers ---
 
 
-def _make_entity(id: int, permalink: str) -> SimpleNamespace:
-    return SimpleNamespace(id=id, permalink=permalink)
+def _make_entity(id: int, permalink: str, external_id: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=id,
+        permalink=permalink,
+        external_id=external_id if external_id is not None else f"ext-{id}",
+    )
 
 
 def _make_row(*, type: str, id: int, **kwargs: Any) -> SearchIndexRow:
@@ -248,6 +252,48 @@ async def test_mixed_result_types_single_fetch():
     # Relation result
     assert search_results[2].from_entity == "notes/entity-one"
     assert search_results[2].to_entity == "notes/entity-three"
+
+
+# --- Owning-entity external_id (hosted MCP deep-links, #1423) ---
+
+
+@pytest.mark.asyncio
+async def test_external_id_populated_for_all_result_types():
+    """Every result type carries its owning entity's external_id for note deep-links.
+
+    Entity hits map to their own UUID; observation and relation hits map to their parent
+    entity's UUID so the hosted MCP layer can link back to the note the hit belongs to.
+    """
+    service = SpyEntityService(
+        {
+            1: _make_entity(1, "notes/parent", external_id="uuid-parent"),
+            2: _make_entity(2, "notes/source", external_id="uuid-source"),
+            3: _make_entity(3, "notes/target", external_id="uuid-target"),
+        }
+    )
+    results = [
+        _make_row(type="entity", id=1, entity_id=1),
+        _make_row(type="observation", id=10, entity_id=1, category="fact"),
+        _make_row(type="relation", id=20, entity_id=1, from_id=2, to_id=3, relation_type="links"),
+    ]
+
+    search_results = await to_search_results(service, results)
+
+    # Entity hit → its own UUID; observation/relation hits → the parent entity's UUID.
+    assert search_results[0].external_id == "uuid-parent"
+    assert search_results[1].external_id == "uuid-parent"
+    assert search_results[2].external_id == "uuid-parent"
+
+
+@pytest.mark.asyncio
+async def test_external_id_none_when_owning_entity_missing():
+    """A hit whose owning entity isn't found leaves external_id None rather than failing."""
+    service = SpyEntityService({})
+    results = [_make_row(type="entity", id=1)]  # no entity_id → no owning entity resolved
+
+    search_results = await to_search_results(service, results)
+
+    assert search_results[0].external_id is None
 
 
 # --- Graceful handling of missing entities ---

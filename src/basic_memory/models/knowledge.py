@@ -20,7 +20,7 @@ from sqlalchemy import (
     Float,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from basic_memory.models.base import Base
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
@@ -95,7 +95,6 @@ class Entity(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now().astimezone(),
-        onupdate=lambda: datetime.now().astimezone(),
     )
 
     # Who created this entity (cloud user_profile_id UUID, null for local/CLI usage)
@@ -126,6 +125,12 @@ class Entity(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+
+    @validates("created_at", "updated_at")
+    def _normalize_semantic_timestamp(self, attribute_name: str, value: datetime) -> datetime:
+        """Keep SQLite's timezone-naive storage faithful to the represented instant."""
+        del attribute_name
+        return ensure_timezone_aware(value).astimezone()
 
     @property
     def relations(self):

@@ -40,23 +40,23 @@ from basic_memory.deps.repositories import (
     SearchRepositoryV2ExternalDep,
 )
 from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
-from basic_memory.cloud import (
-    DirectoryDeleteService,
-    LocalNoteContentMaterializationProvider,
-    NoteContentMutationService,
-    NoteContentQueryService,
-)
+from basic_memory.index.note_content_materialization import LocalNoteContentMaterializationProvider
+from basic_memory.services.directory_deletes import DirectoryDeleteService
+from basic_memory.services.note_content_reads import NoteContentQueryService
+from basic_memory.services.note_content_writes import NoteContentMutationService
 from basic_memory.index.local_dependencies import build_local_markdown_file_indexer
 from basic_memory.index.local_notes import (
     LocalAcceptedNotePreparerFactory,
-    LocalAcceptedNoteRepositories,
     LocalCurrentNoteContentFreshener,
     LocalDirectoryDeleteRelationCleanupRefresher,
     LocalDirectoryFileDeleteEnqueuer,
 )
+from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
 from basic_memory.index.local_project import (
     LocalProjectIndexCommand,
     LocalProjectIndexRunner,
+)
+from basic_memory.index.project_indexing import (
     ProjectIndexCommand,
     ProjectIndexObserver,
     ProjectIndexRunner,
@@ -64,11 +64,13 @@ from basic_memory.index.local_project import (
 )
 
 from basic_memory.index.local_schedulers import (
-    EntityVectorSyncScheduler,
     LocalEntityVectorSyncScheduler,
     LocalProjectIndexScheduler,
     LocalRelationResolutionScheduler,
     LocalSearchReindexScheduler,
+)
+from basic_memory.index.schedulers import (
+    EntityVectorSyncScheduler,
     RelationResolutionScheduler,
     SearchReindexScheduler,
 )
@@ -532,7 +534,7 @@ async def get_note_content_mutation_service(
     app_config: AppConfigDep,
 ) -> NoteContentMutationService:
     """Create the local accepted-note mutation facade for API routes."""
-    accepted_note_repositories = LocalAcceptedNoteRepositories()
+    accepted_note_repositories = AcceptedNoteRepositories()
     return NoteContentMutationService(
         session_maker=session_maker,
         mutation_dependencies=AcceptedNoteMutationDependencies(

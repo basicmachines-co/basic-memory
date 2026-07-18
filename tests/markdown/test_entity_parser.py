@@ -1,6 +1,6 @@
 """Tests for entity markdown parsing."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
 
@@ -58,6 +58,8 @@ async def test_parse_complete_file(project_config, entity_parser, valid_entity_c
     assert entity.frontmatter.type == "component"
     assert entity.frontmatter.permalink == "auth_service"
     assert set(entity.frontmatter.tags) == {"authentication", "security", "core"}
+    assert entity.created == datetime(2024, 12, 21, 14, 0, tzinfo=UTC)
+    assert entity.modified == datetime(2024, 12, 21, 14, 0, tzinfo=UTC)
 
     # Check content
     assert "Core authentication service that handles user authentication." in entity.content
@@ -249,6 +251,85 @@ async def test_parse_file_with_absolute_path(project_config, entity_parser):
     assert "Absolute Path Test" in entity.content
     assert entity.created is not None
     assert entity.modified is not None
+
+
+@pytest.mark.asyncio
+async def test_parse_canonical_timestamp_formats(entity_parser):
+    date_only = await entity_parser.parse_markdown_content(
+        Path("date-only.md"),
+        "---\ncreated: 2024-01-15\nmodified: 2024-01-16\n---\nBody",
+    )
+    naive = await entity_parser.parse_markdown_content(
+        Path("naive.md"),
+        "---\ncreated: 2024-01-15T10:30:00\nmodified: 2024-01-16T11:45:00\n---\nBody",
+    )
+    offset = await entity_parser.parse_markdown_content(
+        Path("offset.md"),
+        "---\ncreated: 2024-01-15T10:30:00+05:30\nmodified: 2024-01-16T11:45:00Z\n---\nBody",
+    )
+
+    assert date_only.created == datetime(2024, 1, 15).astimezone()
+    assert date_only.modified == datetime(2024, 1, 16).astimezone()
+    assert naive.created == datetime(2024, 1, 15, 10, 30).astimezone()
+    assert naive.modified == datetime(2024, 1, 16, 11, 45).astimezone()
+    assert offset.created == datetime.fromisoformat("2024-01-15T10:30:00+05:30")
+    assert offset.modified == datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_parse_missing_and_null_timestamps_fall_back_individually(entity_parser):
+    entity = await entity_parser.parse_markdown_content(
+        Path("fallback.md"),
+        "---\ncreated: null\nmodified: 2024-01-16T11:45:00Z\n---\nBody",
+        ctime=0,
+        mtime=1,
+    )
+
+    assert entity.created == datetime(1970, 1, 1, tzinfo=UTC).astimezone()
+    assert entity.modified == datetime(2024, 1, 16, 11, 45, tzinfo=UTC)
+
+    missing_modified = await entity_parser.parse_markdown_content(
+        Path("missing-modified.md"),
+        "---\ncreated: 2024-01-15T10:30:00Z\n---\nBody",
+        ctime=0,
+        mtime=1,
+    )
+
+    assert missing_modified.created == datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+    assert missing_modified.modified == datetime(1970, 1, 1, 0, 0, 1, tzinfo=UTC).astimezone()
+
+
+@pytest.mark.asyncio
+async def test_parse_without_file_stats_uses_one_operation_timestamp(entity_parser):
+    before = datetime.now().astimezone()
+    entity = await entity_parser.parse_markdown_content(Path("unstored.md"), "Body")
+    after = datetime.now().astimezone()
+
+    assert before <= entity.created <= after
+    assert entity.modified == entity.created
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("created", "not-a-timestamp"),
+        ("modified", "Jan 15, 2024"),
+        ("created", "[2024-01-15]"),
+    ],
+)
+async def test_parse_invalid_canonical_timestamp_fails_for_field(
+    entity_parser,
+    field_name: str,
+    value: str,
+):
+    with pytest.raises(ValueError, match=rf"frontmatter field '{field_name}'"):
+        await entity_parser.parse_markdown_content(
+            Path("invalid.md"),
+            f"---\n{field_name}: {value}\n---\nBody",
+            ctime=0,
+            mtime=1,
+        )
 
 
 # @pytest.mark.asyncio

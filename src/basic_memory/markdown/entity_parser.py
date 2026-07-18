@@ -4,7 +4,7 @@ Uses markdown-it with plugins to parse structured data from markdown content.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -117,6 +117,33 @@ def normalize_frontmatter_metadata(metadata: dict) -> dict:
         A new dictionary with all values normalized
     """
     return {key: normalize_frontmatter_value(value) for key, value in metadata.items()}
+
+
+def _parse_frontmatter_timestamp(
+    metadata: dict[str, Any],
+    field_name: str,
+    *,
+    fallback: datetime,
+) -> datetime:
+    """Parse one canonical semantic timestamp after YAML value normalization."""
+    value = metadata.get(field_name)
+    if value is None:
+        return fallback
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid ISO 8601 value for frontmatter field '{field_name}': {value!r}")
+
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid ISO 8601 value for frontmatter field '{field_name}': {value!r}"
+        ) from exc
+
+    # ISO date-only and naive datetime values describe local wall-clock time.
+    # Explicit offsets are already unambiguous and must remain unchanged.
+    if timestamp.utcoffset() is None:
+        return timestamp.astimezone()
+    return timestamp
 
 
 @dataclass
@@ -299,10 +326,25 @@ class EntityParser:
         entity_frontmatter = EntityFrontmatter(metadata=metadata)
         entity_content = parse(post.content)
 
-        # Use provided timestamps or current time as fallback
+        # Canonical frontmatter timestamps describe note semantics. File times are
+        # only compatibility fallbacks for notes that do not declare them.
         now = datetime.now().astimezone()
-        created = datetime.fromtimestamp(ctime).astimezone() if ctime else now
-        modified = datetime.fromtimestamp(mtime).astimezone() if mtime else now
+        created_fallback = (
+            datetime.fromtimestamp(ctime, tz=UTC).astimezone() if ctime is not None else now
+        )
+        modified_fallback = (
+            datetime.fromtimestamp(mtime, tz=UTC).astimezone() if mtime is not None else now
+        )
+        created = _parse_frontmatter_timestamp(
+            metadata,
+            "created",
+            fallback=created_fallback,
+        )
+        modified = _parse_frontmatter_timestamp(
+            metadata,
+            "modified",
+            fallback=modified_fallback,
+        )
 
         return EntityMarkdown(
             frontmatter=entity_frontmatter,

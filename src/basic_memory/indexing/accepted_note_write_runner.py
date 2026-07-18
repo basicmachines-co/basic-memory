@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import file_utils
 from basic_memory.indexing.accepted_note_search import (
-    AcceptedNoteSearchRow,
     accepted_search_content_from_markdown,
     build_accepted_note_search_row,
 )
@@ -22,10 +20,8 @@ from basic_memory.repository import (
     AcceptedObservationWrite,
     AcceptedRelationWrite,
 )
-from basic_memory.repository.entity_repository import (
-    AcceptedPendingEntityWrite,
-    EntityMetadata,
-)
+from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
+from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteContentWriteSource,
@@ -44,71 +40,12 @@ from basic_memory.runtime.storage import (
     RuntimeNoteContentVersion,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
-
-
-class AcceptedPreparedEntityFields(Protocol):
-    """Prepared Basic Memory entity fields accepted before file materialization."""
-
-    @property
-    def title(self) -> str: ...
-
-    @property
-    def note_type(self) -> str: ...
-
-    @property
-    def entity_metadata(self) -> EntityMetadata: ...
-
-    @property
-    def content_type(self) -> str: ...
-
-    @property
-    def permalink(self) -> str | None: ...
-
-    @property
-    def file_path(self) -> RuntimeFilePath: ...
-
-
-class AcceptedPreparedEntityWriteSource(Protocol):
-    """Prepared markdown/entity state produced by Basic Memory note semantics."""
-
-    @property
-    def entity_fields(self) -> AcceptedPreparedEntityFields: ...
-
-
-class AcceptedPreparedMarkdownWriteSource(AcceptedPreparedEntityWriteSource, Protocol):
-    """Prepared accepted markdown produced before DB or storage persistence."""
-
-    @property
-    def markdown_content(self) -> str: ...
-
-    @property
-    def search_content(self) -> str: ...
-
-    @property
-    def observations(self) -> Sequence[AcceptedObservationWrite]: ...
-
-    @property
-    def relations(self) -> Sequence[AcceptedRelationWrite]: ...
-
-
-class AcceptedPreparedEntityTarget(Protocol):
-    """Mutable entity fields mirrored from one prepared accepted note."""
-
-    title: str
-    note_type: str
-    entity_metadata: EntityMetadata
-    content_type: str
-    permalink: str | None
-    file_path: RuntimeFilePath
-    updated_at: datetime
-    last_updated_by: str | None
-
-
-class AcceptedNoteContentSource(Protocol):
-    """Current accepted markdown source used as a replacement or edit base."""
-
-    @property
-    def markdown_content(self) -> str: ...
+from basic_memory.services.note_preparation import (
+    PreparedEntityFields,
+    PreparedEntityMove,
+    PreparedEntityWrite,
+    apply_prepared_entity_fields,
+)
 
 
 class AcceptedNoteCreatePreparer(Protocol):
@@ -121,7 +58,7 @@ class AcceptedNoteCreatePreparer(Protocol):
         check_storage_exists: bool = ...,
         skip_conflict_check: bool = ...,
         session: AsyncSession | None = ...,
-    ) -> AcceptedPreparedMarkdownWriteSource: ...
+    ) -> PreparedEntityWrite: ...
 
 
 class AcceptedNoteReplacePreparer(Protocol):
@@ -134,7 +71,7 @@ class AcceptedNoteReplacePreparer(Protocol):
         existing_content: str,
         *,
         session: AsyncSession | None = ...,
-    ) -> AcceptedPreparedMarkdownWriteSource: ...
+    ) -> PreparedEntityWrite: ...
 
 
 class AcceptedNoteEditPreparer(Protocol):
@@ -152,7 +89,7 @@ class AcceptedNoteEditPreparer(Protocol):
         expected_replacements: int = ...,
         replace_subsections: bool = ...,
         session: AsyncSession | None = ...,
-    ) -> AcceptedPreparedMarkdownWriteSource: ...
+    ) -> PreparedEntityWrite: ...
 
 
 class AcceptedNoteSelfRelationResolver(Protocol):
@@ -166,22 +103,6 @@ class AcceptedNoteSelfRelationResolver(Protocol):
     ) -> Entity | None: ...
 
 
-class AcceptedPreparedMoveSource(Protocol):
-    """Prepared accepted markdown and permalink state for a note move."""
-
-    @property
-    def file_path(self) -> Path: ...
-
-    @property
-    def markdown_content(self) -> str: ...
-
-    @property
-    def search_content(self) -> str: ...
-
-    @property
-    def permalink(self) -> str | None: ...
-
-
 class AcceptedNoteMovePreparer(Protocol):
     """Capability that derives accepted markdown for a note move."""
 
@@ -192,7 +113,7 @@ class AcceptedNoteMovePreparer(Protocol):
         destination_path: str,
         *,
         session: AsyncSession | None = ...,
-    ) -> AcceptedPreparedMoveSource: ...
+    ) -> PreparedEntityMove: ...
 
     async def verify_move_destination_absent(
         self,
@@ -200,41 +121,6 @@ class AcceptedNoteMovePreparer(Protocol):
         source_file_path: str,
         destination_file_path: str,
     ) -> None: ...
-
-
-class AcceptedNoteContentEntitySource(Protocol):
-    """Entity identity required to accept one note_content snapshot."""
-
-    @property
-    def id(self) -> RuntimeEntityId: ...
-
-    @property
-    def project_id(self) -> ProjectId: ...
-
-
-class AcceptedNoteSearchEntitySource(AcceptedNoteContentEntitySource, Protocol):
-    """Entity fields required to refresh the hot accepted-note search row."""
-
-    @property
-    def title(self) -> str | None: ...
-
-    @property
-    def note_type(self) -> str | None: ...
-
-    @property
-    def entity_metadata(self) -> Mapping[str, object] | None: ...
-
-    @property
-    def permalink(self) -> str | None: ...
-
-    @property
-    def file_path(self) -> RuntimeFilePath: ...
-
-    @property
-    def created_at(self) -> datetime: ...
-
-    @property
-    def updated_at(self) -> datetime: ...
 
 
 class AcceptedNoteDeleteEntitySource(RuntimeDeletedNoteFileDeleteEntitySource, Protocol):
@@ -338,7 +224,7 @@ class AcceptedNoteWriteRepositories(Protocol):
 class AcceptedPreparedNoteWrite:
     """Prepared accepted markdown plus the checksum of that exact markdown."""
 
-    prepared: AcceptedPreparedMarkdownWriteSource
+    prepared: PreparedEntityWrite
     db_checksum: RuntimeNoteContentChecksum
 
 
@@ -388,8 +274,7 @@ async def prepare_accepted_note_replace(
     *,
     entity: Entity,
     data: EntitySchema,
-    current_note_content: AcceptedNoteContentSource,
-    now: datetime,
+    current_note_content: NoteContent,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a full accepted replacement and apply its entity fields."""
@@ -406,7 +291,6 @@ async def prepare_accepted_note_replace(
     apply_accepted_prepared_entity_fields(
         entity,
         prepared.entity_fields,
-        updated_at=now,
         user_profile_value=user_profile_value,
     )
     await session.flush()
@@ -418,14 +302,13 @@ async def prepare_accepted_note_edit(
     session: AsyncSession,
     *,
     entity: Entity,
-    current_note_content: AcceptedNoteContentSource,
+    current_note_content: NoteContent,
     operation: str,
     content: str,
     section: str | None,
     find_text: str | None,
     expected_replacements: int,
     replace_subsections: bool,
-    now: datetime,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a partial accepted edit and apply its entity fields."""
@@ -447,7 +330,6 @@ async def prepare_accepted_note_edit(
     apply_accepted_prepared_entity_fields(
         entity,
         prepared.entity_fields,
-        updated_at=now,
         user_profile_value=user_profile_value,
     )
     await session.flush()
@@ -459,10 +341,9 @@ async def prepare_accepted_note_move(
     session: AsyncSession,
     *,
     entity: Entity,
-    current_note_content: AcceptedNoteContentSource,
+    current_note_content: NoteContent,
     accepted_file_path: RuntimeFilePath,
     should_update_permalink: bool,
-    now: datetime,
     user_profile_value: str | None,
 ) -> AcceptedPreparedNoteMove:
     """Prepare a DB-first move and apply the accepted path/permalink fields."""
@@ -495,34 +376,28 @@ async def prepare_accepted_note_move(
     )
     entity.file_path = result.file_path
     entity.permalink = result.permalink
-    entity.updated_at = now
     entity.last_updated_by = user_profile_value
     await session.flush()
     return result
 
 
 def apply_accepted_prepared_entity_fields(
-    entity: AcceptedPreparedEntityTarget,
-    entity_fields: AcceptedPreparedEntityFields,
+    entity: Entity,
+    entity_fields: PreparedEntityFields,
     *,
-    updated_at: datetime,
     user_profile_value: str | None,
 ) -> None:
     """Copy prepared accepted markdown fields onto an entity row."""
-    entity.title = entity_fields.title
-    entity.note_type = entity_fields.note_type
-    entity.entity_metadata = entity_fields.entity_metadata
-    entity.content_type = entity_fields.content_type
-    entity.permalink = entity_fields.permalink
-    entity.file_path = entity_fields.file_path
-    entity.updated_at = updated_at
-    entity.last_updated_by = user_profile_value
+    apply_prepared_entity_fields(
+        entity,
+        entity_fields,
+        user_profile_value=user_profile_value,
+    )
 
 
 def accepted_pending_entity_write_from_prepared(
-    prepared: AcceptedPreparedEntityWriteSource,
+    prepared: PreparedEntityWrite,
     *,
-    now: datetime,
     user_profile_value: str | None,
     external_id: str | None = None,
 ) -> AcceptedPendingEntityWrite:
@@ -535,8 +410,8 @@ def accepted_pending_entity_write_from_prepared(
         content_type=fields.content_type,
         permalink=fields.permalink,
         file_path=fields.file_path,
-        created_at=now,
-        updated_at=now,
+        created_at=fields.created_at,
+        updated_at=fields.updated_at,
         created_by=user_profile_value,
         last_updated_by=user_profile_value,
         external_id=external_id,
@@ -546,9 +421,8 @@ def accepted_pending_entity_write_from_prepared(
 async def create_accepted_pending_entity(
     session: AsyncSession,
     *,
-    prepared: AcceptedPreparedEntityWriteSource,
+    prepared: PreparedEntityWrite,
     project_id: ProjectId,
-    now: datetime,
     user_profile_value: str | None,
     external_id: str | None = None,
     repositories: AcceptedNoteWriteRepositories,
@@ -559,7 +433,6 @@ async def create_accepted_pending_entity(
         session,
         accepted_pending_entity_write_from_prepared(
             prepared,
-            now=now,
             user_profile_value=user_profile_value,
             external_id=external_id,
         ),
@@ -589,7 +462,7 @@ def accepted_note_content_write_from_markdown(
 async def accept_note_content_write(
     session: AsyncSession,
     *,
-    entity: AcceptedNoteContentEntitySource,
+    entity: Entity,
     markdown_content: str,
     db_version: RuntimeNoteContentVersion,
     db_checksum: RuntimeNoteContentChecksum,
@@ -613,7 +486,7 @@ async def accept_note_content_write(
 
 
 def accepted_note_search_row_from_entity(
-    entity: AcceptedNoteSearchEntitySource,
+    entity: Entity,
     *,
     search_content: str,
 ) -> AcceptedNoteSearchRow:
@@ -635,7 +508,7 @@ def accepted_note_search_row_from_entity(
 async def refresh_accepted_note_search_index(
     session: AsyncSession,
     *,
-    entity: AcceptedNoteSearchEntitySource,
+    entity: Entity,
     search_content: str,
     repositories: AcceptedNoteWriteRepositories,
 ) -> None:
@@ -671,10 +544,10 @@ async def delete_accepted_note_vectors(
     await repository.delete_entity_vectors(session, entity_id)
 
 
-async def persist_accepted_note_write(
+async def _persist_accepted_note_content_and_search(
     session: AsyncSession,
     *,
-    entity: AcceptedNoteSearchEntitySource,
+    entity: Entity,
     markdown_content: str,
     search_content: str,
     db_checksum: RuntimeNoteContentChecksum,
@@ -685,7 +558,7 @@ async def persist_accepted_note_write(
     accepted_file_path: RuntimeFilePath | None = None,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
-    """Accept markdown into note_content and refresh search inside one transaction."""
+    """Internal content/search phase shared by complete snapshots and moves."""
     content_write = plan_accepted_note_content_write(
         project_id=entity.project_id,
         entity_id=entity.id,
@@ -715,11 +588,11 @@ async def persist_accepted_note_write(
     )
 
 
-async def replace_accepted_note_graph(
+async def _replace_accepted_note_graph(
     session: AsyncSession,
     *,
     entity: Entity,
-    prepared: AcceptedPreparedMarkdownWriteSource,
+    prepared: PreparedEntityWrite,
     self_relation_resolver: AcceptedNoteSelfRelationResolver,
     repositories: AcceptedNoteWriteRepositories,
 ) -> None:
@@ -770,6 +643,71 @@ async def replace_accepted_note_graph(
         session,
         entity.id,
         relations,
+    )
+
+
+async def persist_accepted_note_snapshot(
+    session: AsyncSession,
+    *,
+    entity: Entity,
+    prepared: PreparedEntityWrite,
+    db_checksum: RuntimeNoteContentChecksum,
+    self_relation_resolver: AcceptedNoteSelfRelationResolver,
+    last_source: RuntimeNoteChangeSource | None,
+    updated_at: datetime,
+    current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
+    existing_file_path: RuntimeFilePath | None = None,
+    accepted_file_path: RuntimeFilePath | None = None,
+    repositories: AcceptedNoteWriteRepositories,
+) -> AcceptedPersistedNoteWrite:
+    """Persist one complete accepted Markdown snapshot in the caller's transaction."""
+    persisted = await _persist_accepted_note_content_and_search(
+        session,
+        entity=entity,
+        markdown_content=prepared.markdown_content,
+        search_content=prepared.search_content,
+        db_checksum=db_checksum,
+        last_source=last_source,
+        updated_at=updated_at,
+        current_note_content=current_note_content,
+        existing_file_path=existing_file_path,
+        accepted_file_path=accepted_file_path,
+        repositories=repositories,
+    )
+    await _replace_accepted_note_graph(
+        session,
+        entity=entity,
+        prepared=prepared,
+        self_relation_resolver=self_relation_resolver,
+        repositories=repositories,
+    )
+    return persisted
+
+
+async def persist_accepted_note_move(
+    session: AsyncSession,
+    *,
+    entity: Entity,
+    prepared: AcceptedPreparedNoteMove,
+    last_source: RuntimeNoteChangeSource | None,
+    updated_at: datetime,
+    current_note_content: RuntimeAcceptedNoteContentWriteSource,
+    existing_file_path: RuntimeFilePath,
+    repositories: AcceptedNoteWriteRepositories,
+) -> AcceptedPersistedNoteWrite:
+    """Persist the explicitly narrower content/search state for an accepted move."""
+    return await _persist_accepted_note_content_and_search(
+        session,
+        entity=entity,
+        markdown_content=prepared.markdown_content,
+        search_content=prepared.search_content,
+        db_checksum=prepared.db_checksum,
+        last_source=last_source,
+        updated_at=updated_at,
+        current_note_content=current_note_content,
+        existing_file_path=existing_file_path,
+        accepted_file_path=prepared.file_path,
+        repositories=repositories,
     )
 
 

@@ -153,6 +153,38 @@ from basic_memory.deps import *
 
 New code should import from specific submodules (`basic_memory.deps.services`) for clarity.
 
+## Runtime Package Boundaries
+
+Accepted-note orchestration is shared by local and hosted runtimes. Its dependencies flow in one
+direction:
+
+```
+schemas and runtime values
+    ↓
+repositories
+    ↓
+portable services and indexing workflows
+    ↓
+local or hosted composition roots and adapters
+```
+
+- `repository/` owns explicit-session persistence operations and persisted row values, including
+  accepted-note search rows and vector cleanup. It must not import `indexing/` workflows.
+- `services/` owns runtime-neutral note preparation, note-content reads and writes, and delete
+  operations. These modules receive storage and repository capabilities explicitly.
+- `indexing/` owns portable mutation, reconciliation, materialization, and project-index workflows.
+- `index/` contains the local runtime's concrete adapters and composition helpers. Shared contracts
+  such as project-index requests and scheduler capabilities live in neutral modules within this
+  package; hosted code must not depend on `Local*` implementations.
+- `cloud/` contains compatibility exports for downstream releases. Core production modules must
+  not import from it; new downstream code imports the neutral owner directly.
+
+Accepted Markdown create, replace, and edit operations cross one public persistence boundary:
+`persist_accepted_note_snapshot`. That operation writes the entity snapshot, `NoteContent`, graph
+rows, and entity search row inside the caller's transaction. Move intentionally uses the narrower
+`persist_accepted_note_move` operation because changing a path must not replace observations or
+relations.
+
 ## MCP Tools Architecture
 
 ### Typed API Clients

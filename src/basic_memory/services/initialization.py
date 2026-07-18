@@ -68,7 +68,7 @@ async def recover_project_materializations(
     picked up by the initial project index. Non-fatal: a recovery failure must not
     block startup, so it is logged and startup continues.
     """
-    from basic_memory.cloud.note_content_materialization import recover_stuck_materializations
+    from basic_memory.index.note_content_materialization import recover_stuck_materializations
     from basic_memory.services.file_service import FileService
 
     try:

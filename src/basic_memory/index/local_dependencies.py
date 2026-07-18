@@ -517,8 +517,6 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 refreshed_entities[0].id,
                 {
                     "checksum": indexed.checksum,
-                    "created_at": file_metadata.created_at,
-                    "updated_at": file_metadata.modified_at,
                     "mtime": file_metadata.modified_at.timestamp(),
                     "size": file_metadata.size,
                 },

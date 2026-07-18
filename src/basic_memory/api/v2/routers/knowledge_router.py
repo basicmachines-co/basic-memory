@@ -21,7 +21,8 @@ from loguru import logger
 
 import logfire
 from basic_memory import db
-from basic_memory.cloud import DirectoryDeleteServiceError, NoteContentMutationServiceError
+from basic_memory.services.directory_deletes import DirectoryDeleteServiceError
+from basic_memory.services.note_content_writes import NoteContentMutationServiceError
 from basic_memory.ignore_utils import (
     IGNORED_PATH_REJECTION_DETAIL,
     load_gitignore_patterns,

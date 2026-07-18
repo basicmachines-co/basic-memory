@@ -1,6 +1,6 @@
 """Tests for CLI command utilities."""
 
-import basic_memory.cloud.note_content_materialization as note_content_materialization
+import basic_memory.index.note_content_materialization as note_content_materialization
 import basic_memory.db as db
 import basic_memory.index.local_schedulers as local_schedulers
 from basic_memory.cli.commands.command_utils import run_with_cleanup

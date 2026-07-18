@@ -11,8 +11,8 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import basic_memory.cloud.note_content_materialization as note_content_materialization
-from basic_memory.cloud.note_content_materialization import (
+import basic_memory.index.note_content_materialization as note_content_materialization
+from basic_memory.index.note_content_materialization import (
     InlineNoteFileDeleteEnqueuer,
     LocalNoteContentMaterializationProvider,
     LocalNoteContentStorage,

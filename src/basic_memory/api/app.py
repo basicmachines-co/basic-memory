@@ -27,7 +27,7 @@ from basic_memory.api.v2.routers.project_router import (
     synchronize_projects,
 )
 import logfire
-from basic_memory.cloud.note_content_materialization import drain_pending_materializations
+from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.config import init_api_logging
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.services.exceptions import EntityAlreadyExistsError

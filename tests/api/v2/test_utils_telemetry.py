@@ -34,8 +34,8 @@ async def test_to_search_results_emits_hydration_spans(monkeypatch) -> None:
     class FakeEntityService:
         async def get_entities_by_id(self, ids):
             return [
-                SimpleNamespace(id=1, permalink="notes/root"),
-                SimpleNamespace(id=2, permalink="notes/child"),
+                SimpleNamespace(id=1, permalink="notes/root", external_id="uuid-root"),
+                SimpleNamespace(id=2, permalink="notes/child", external_id="uuid-child"),
             ]
 
     now = datetime.now(timezone.utc)

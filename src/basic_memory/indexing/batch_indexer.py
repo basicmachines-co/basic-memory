@@ -485,7 +485,11 @@ class BatchIndexer:
             updated = await self.entity_repository.update(
                 session,
                 entity_id,
-                self._entity_metadata_updates(file, checksum, include_created_at=is_new_entity),
+                self._resource_metadata_updates(
+                    file,
+                    checksum,
+                    include_created_at=is_new_entity,
+                ),
             )
         if updated is None:
             raise ValueError(f"Failed to update file entity metadata for {file.path}")
@@ -631,7 +635,10 @@ class BatchIndexer:
                 session=session,
             )
             prepared = await self._reconcile_persisted_permalink(prepared, entity)
-            metadata_updates = self._entity_metadata_updates(prepared.file, prepared.final_checksum)
+            metadata_updates = self._file_bookkeeping_updates(
+                prepared.file,
+                prepared.final_checksum,
+            )
             updated = await self.entity_repository.update_fields(
                 session,
                 entity.id,
@@ -711,25 +718,35 @@ class BatchIndexer:
             raise ValueError(f"Missing checksum and content for file: {file.path}")
         return await compute_checksum(file.content)
 
-    def _entity_metadata_updates(
+    def _file_bookkeeping_updates(
+        self,
+        file: IndexInputFile,
+        checksum: str,
+    ) -> dict[str, object]:
+        """Return physical file state without changing note semantics."""
+        updates: dict[str, object] = {
+            "file_path": file.path,
+            "checksum": checksum,
+            "size": file.size,
+        }
+        if file.last_modified is not None:
+            updates["mtime"] = file.last_modified.timestamp()
+        if file.content_type is not None:
+            updates["content_type"] = file.content_type
+        return updates
+
+    def _resource_metadata_updates(
         self,
         file: IndexInputFile,
         checksum: str,
         *,
         include_created_at: bool = True,
     ) -> dict[str, object]:
-        updates: dict[str, object] = {
-            "file_path": file.path,
-            "checksum": checksum,
-            "size": file.size,
-        }
+        updates = self._file_bookkeeping_updates(file, checksum)
         if include_created_at and file.created_at is not None:
             updates["created_at"] = file.created_at
         if file.last_modified is not None:
             updates["updated_at"] = file.last_modified
-            updates["mtime"] = file.last_modified.timestamp()
-        if file.content_type is not None:
-            updates["content_type"] = file.content_type
         return updates
 
     def _apply_entity_metadata_updates(self, entity: Entity, updates: dict[str, object]) -> None:
