@@ -15,24 +15,9 @@ from basic_memory.models import Entity, NoteContent, Observation, Project, Relat
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeNoteContentResponsePayload,
+    runtime_note_content_payload_as_dict,
 )
 from basic_memory.schemas.v2 import EntityResponseV2
-
-
-@dataclass(slots=True)
-class PausedNoteContentMaterializer:
-    """Record accepted changes without writing their files."""
-
-    accepted_changes: list[RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]] = field(
-        default_factory=list
-    )
-
-    async def materialize_write_change(
-        self,
-        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
-    ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
-        self.accepted_changes.append(accepted)
-        return accepted
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,8 +86,38 @@ async def _load_persisted_snapshot(
     )
 
 
+@dataclass(slots=True)
+class InspectingNoteContentMaterializer:
+    """Capture committed DB state at the materialization boundary without writing a file."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    project_id: int
+    accepted_changes: list[RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]] = field(
+        default_factory=list
+    )
+    persisted_snapshots: list[PersistedAcceptedSnapshot] = field(default_factory=list)
+
+    async def materialize_write_change(
+        self,
+        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
+    ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
+        payload = runtime_note_content_payload_as_dict(accepted.payload)
+        entity_id = payload.get("id")
+        assert isinstance(entity_id, int)
+
+        self.persisted_snapshots.append(
+            await _load_persisted_snapshot(
+                self.session_maker,
+                project_id=self.project_id,
+                entity_id=entity_id,
+            )
+        )
+        self.accepted_changes.append(accepted)
+        return accepted
+
+
 @pytest.mark.asyncio
-async def test_create_and_update_persist_complete_snapshot_before_materialization(
+async def test_create_and_update_persist_complete_snapshot_at_materialization_boundary(
     app: FastAPI,
     client: AsyncClient,
     db_backend: str,
@@ -110,11 +125,14 @@ async def test_create_and_update_persist_complete_snapshot_before_materializatio
     test_project: Project,
     v2_project_url: str,
 ) -> None:
-    """Create and replace commit content, graph, and search before the file write."""
+    """Create and replace expose complete committed state before the file write starts."""
     if db_backend != "sqlite":
         pytest.skip("This regression intentionally inspects the SQLite FTS row")
 
-    materializer = PausedNoteContentMaterializer()
+    materializer = InspectingNoteContentMaterializer(
+        session_maker=session_maker,
+        project_id=test_project.id,
+    )
     app.dependency_overrides[get_note_content_materialization_provider] = lambda: materializer
 
     create_response = await client.post(
@@ -139,11 +157,9 @@ async def test_create_and_update_persist_complete_snapshot_before_materializatio
     note_path = Path(test_project.path) / created.file_path
     assert not note_path.exists()
 
-    created_snapshot = await _load_persisted_snapshot(
-        session_maker,
-        project_id=test_project.id,
-        entity_id=created.id,
-    )
+    assert len(materializer.persisted_snapshots) == 1
+    created_snapshot = materializer.persisted_snapshots[0]
+    assert created_snapshot.entity.id == created.id
     assert created_snapshot.entity.title == "Atomic Snapshot"
     assert created_snapshot.note_content.markdown_content == created.content
     assert created_snapshot.note_content.db_version == 1
@@ -177,11 +193,9 @@ async def test_create_and_update_persist_complete_snapshot_before_materializatio
     assert updated.file_write_status == "pending"
     assert not note_path.exists()
 
-    updated_snapshot = await _load_persisted_snapshot(
-        session_maker,
-        project_id=test_project.id,
-        entity_id=updated.id,
-    )
+    assert len(materializer.persisted_snapshots) == 2
+    updated_snapshot = materializer.persisted_snapshots[1]
+    assert updated_snapshot.entity.id == updated.id
     assert updated_snapshot.note_content.markdown_content == updated.content
     assert updated_snapshot.note_content.db_version == 2
     assert updated_snapshot.note_content.file_write_status == "pending"
