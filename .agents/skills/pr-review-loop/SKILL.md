@@ -29,6 +29,7 @@ If Codex leaves a comment, review comment, or inline thread, the PR is not appro
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on the PR body/description: Codex approves/no suggestions. This is the common approval signal.
 - Thumbs-up reaction by `chatgpt-codex-connector[bot]` on a Codex issue comment: also an approval signal, but this is not the only place to look.
 - Codex issue comment saying "Didn't find any major issues": approval-like context, but confirm the PR body/comment thumbs-up or get an explicit user override.
+- Codex top-level review with `CHANGES_REQUESTED` or a substantive review body: blocking feedback even when it has no inline thread.
 - Codex comment or review thread: Codex found feedback. Treat it as blocking until addressed, replied to with a clear rationale, or explicitly overridden by the user.
 - Outdated Codex comments: useful history, but not approval.
 - Empty `reviewDecision`, `mergeable: MERGEABLE`, `mergeStateStatus: CLEAN`, and green checks: necessary context, but not Codex approval.
@@ -110,6 +111,27 @@ gh api "repos/<owner>/<repo>/issues/<number>/comments" --paginate \
     | {id, created_at, html_url, body: .body[0:240]}]'
 ```
 
+Top-level pull-request reviews are a separate API surface from issue comments
+and review threads. Fetch every page and inspect Codex reviews submitted for the
+exact current head:
+
+```bash
+head_sha="$(gh pr view <number> --json headRefOid --jq '.headRefOid')"
+
+gh api "repos/<owner>/<repo>/pulls/<number>/reviews" --paginate --slurp \
+  | jq --arg head_sha "$head_sha" \
+    '[.[][]
+    | select((.user.login | test("chatgpt-codex-connector"))
+      and .commit_id == $head_sha)
+    | {id, state, submitted_at, html_url, body}]'
+```
+
+A current-head `CHANGES_REQUESTED` review is blocking. Read every non-empty
+review body and address any substantive finding even when the review has no
+inline thread. A boilerplate-only `COMMENTED` review that merely accompanies
+inline findings is not an additional blocker after those findings are resolved;
+it is also not an approval signal.
+
 For a relevant Codex issue comment, verify any approval reaction by actor. The
 aggregate reaction counts on the comment do not identify who reacted:
 
@@ -178,7 +200,8 @@ comment SHAs as the current resolution state.
 7. The loop is complete only when all of these are true on the same latest head:
 
 - Required tests/checks are passing.
-- Codex has no unaddressed current-head comments.
+- Codex has no unaddressed current-head comments, top-level review findings, or
+  unresolved non-outdated review threads.
 - Codex has left the thumbs-up approval signal, or the user explicitly overrode the gate.
 
 8. Report the gate before merging:
