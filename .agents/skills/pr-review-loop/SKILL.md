@@ -57,9 +57,9 @@ invalidate the code-head review unless it changes the scope being reviewed.
 Check the PR body reactions first, and verify the reacting actor:
 
 ```bash
-gh api "repos/<owner>/<repo>/issues/<number>/reactions" \
+gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
   -H "Accept: application/vnd.github+json" \
-  | jq '[.[] | select(.user.login == "chatgpt-codex-connector[bot]")
+  | jq '[.[][] | select(.user.login == "chatgpt-codex-connector[bot]")
     | {content, created_at, user: .user.login}]'
 ```
 
@@ -72,8 +72,22 @@ the current head prefix:
 
 ```bash
 gh api "repos/<owner>/<repo>/issues/<number>/comments" --paginate \
-  | jq '[.[] | select(.user.login | test("chatgpt-codex-connector"))
-    | {created_at, html_url, body: .body[0:240], reactions: .reactions}]'
+  --slurp \
+  | jq '[.[][] | select(.user.login | test("chatgpt-codex-connector"))
+    | {id, created_at, html_url, body: .body[0:240]}]'
+```
+
+For a relevant Codex issue comment, verify any approval reaction by actor. The
+aggregate reaction counts on the comment do not identify who reacted:
+
+```bash
+gh api "repos/<owner>/<repo>/issues/comments/<comment-id>/reactions" \
+  --paginate --slurp \
+  -H "Accept: application/vnd.github+json" \
+  | jq '[.[][]
+    | select(.user.login == "chatgpt-codex-connector[bot]"
+      and .content == "+1")
+    | {content, created_at, user: .user.login}]'
 ```
 
 Finally, query GraphQL review threads. GitHub records comment placement SHAs in
