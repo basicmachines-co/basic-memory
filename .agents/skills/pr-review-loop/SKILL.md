@@ -81,34 +81,40 @@ the REST payload, but only the thread exposes whether feedback remains unresolve
 and non-outdated after a follow-up push:
 
 ```bash
-gh api graphql \
+gh api graphql --paginate --slurp \
   -F owner=<owner> \
   -F name=<repo> \
   -F number=<number> \
-  -f query='query($owner:String!,$name:String!,$number:Int!){
+  -f query='query(
+    $owner:String!
+    $name:String!
+    $number:Int!
+    $endCursor:String
+  ){
     repository(owner:$owner,name:$name){
       pullRequest(number:$number){
-        reviewThreads(first:100){
+        reviewThreads(first:100,after:$endCursor){
           nodes{
             id isResolved isOutdated path line
             comments(first:100){
               nodes{author{login} body url createdAt commit{oid}}
             }
           }
+          pageInfo{hasNextPage endCursor}
         }
       }
     }
   }' \
-  | jq '[.data.repository.pullRequest.reviewThreads.nodes[]
+  | jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]
     | select((.isResolved | not) and (.isOutdated | not))
     | select(any(.comments.nodes[];
         .author.login | test("chatgpt-codex-connector")))
     | {id, path, line, comments: .comments.nodes}]'
 ```
 
-An empty result means there are no unresolved, non-outdated Codex threads. Keep
-outdated threads as review history, but do not treat their comment SHAs as the
-current resolution state.
+An empty result across every page means there are no unresolved, non-outdated
+Codex threads. Keep outdated threads as review history, but do not treat their
+comment SHAs as the current resolution state.
 
 3. If Codex has eyes and no thumbs-up, keep monitoring. Do not infer approval from silence.
 
