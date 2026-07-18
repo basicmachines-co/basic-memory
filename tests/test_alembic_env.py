@@ -79,14 +79,21 @@ def test_asyncio_run_failure_closes_migration_coroutine(monkeypatch, tmp_path):
     assert fake_coro.closed is True
 
 
-def test_running_loop_error_uses_thread_fallback(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "message",
+    [
+        "asyncio.run() cannot be called from a running event loop",
+        "this event loop is already running",
+    ],
+)
+def test_running_loop_error_uses_thread_fallback(monkeypatch, tmp_path, message):
     """Async-engine helper should switch to the thread fallback for running-loop errors."""
     env_module = load_alembic_env_module(monkeypatch, tmp_path)
     connectable = object()
     fallback_calls: list[object] = []
 
     def raising_run(connectable):
-        raise RuntimeError("asyncio.run() cannot be called from a running event loop")
+        raise RuntimeError(message)
 
     def record_fallback(target):
         fallback_calls.append(target)

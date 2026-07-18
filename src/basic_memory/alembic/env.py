@@ -29,7 +29,9 @@ if sys.version_info < (3, 14) and not running_on_uvloop():
         # running loop (ValueError).
         # Outcome: log at DEBUG (observable, not noisy) and fall through to the
         # thread-based migration fallback.
-        logger.debug(f"nest_asyncio not applied ({exc!r}); using thread-based migration fallback")
+        logger.debug(
+            f"nest_asyncio not applied ({exc!r}); using thread-based migration fallback"
+        )
 
 # Trigger: only set test env when actually running under pytest
 # Why: alembic/env.py is imported during normal operations (MCP server startup, migrations)
@@ -167,15 +169,29 @@ def _run_async_migrations_in_thread(connectable) -> None:
         future.result()  # Wait for completion and re-raise any exceptions
 
 
-def _run_async_engine_migrations(connectable) -> None:
-    """Run async migrations, adapting to whether an event loop is already running."""
+def _loop_is_running() -> bool:
+    """Check if an event loop is currently running."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        # No running loop -> safe to spin up our own via asyncio.run()
+        return False
+    return True
+
+
+def _run_async_engine_migrations(connectable) -> None:
+    """Run async migrations, adapting to whether an event loop is already running."""
+    if _loop_is_running():
+        # Can't nest asyncio.run() inside a running loop -> offload to a thread.
+        _run_async_migrations_in_thread(connectable)
+        return
+
+    # No running loop -> use asyncio.run(), falling back to a thread if it still
+    # reports a loop (covers races / odd environments).
+    try:
         _run_async_migrations_with_asyncio_run(connectable)
-    else:
-        # A loop is already running -> can't nest asyncio.run(), so offload to a thread
+    except RuntimeError as exc:
+        if not is_running_loop_error(exc):
+            raise
         _run_async_migrations_in_thread(connectable)
 
 
