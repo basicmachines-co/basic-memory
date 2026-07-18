@@ -1,0 +1,29 @@
+# Pythonic Code skill evaluations
+
+skill_dir := justfile_directory()
+
+# Show the available evaluation cases.
+list:
+    uv run python {{skill_dir}}/scripts/run_evals.py --list
+
+# Validate the eval specification, fixtures, and runner formatting.
+validate:
+    uv run python {{skill_dir}}/scripts/run_evals.py --validate
+    uv run ruff check {{skill_dir}}/scripts/run_evals.py {{skill_dir}}/evals/files
+    uv run ruff format --check {{skill_dir}}/scripts/run_evals.py {{skill_dir}}/evals/files
+
+# Run paired with-skill and baseline trials for every case or one case id/name.
+eval case="all":
+    uv run python {{skill_dir}}/scripts/run_evals.py --case "{{case}}"
+
+# Preview the selected trials without invoking Codex.
+eval-dry-run case="all":
+    uv run python {{skill_dir}}/scripts/run_evals.py --case "{{case}}" --dry-run
+
+# Run trials and keep their iteration under a chosen workspace directory.
+eval-to workspace case="all":
+    uv run python {{skill_dir}}/scripts/run_evals.py --case "{{case}}" --workspace "{{workspace}}"
+
+# Show available recipes.
+default:
+    @just --list
