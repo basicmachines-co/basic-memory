@@ -56,18 +56,54 @@ PR-body edit should restart the loop for the description, but it does not
 invalidate the code-head review unless it changes the scope being reviewed.
 
 Check the PR body reactions first, and verify both the reacting actor and the
-reaction's freshness for the current head. The status rollup is scoped to the
-current head SHA, so its earliest start time provides a post-push lower bound:
+reaction's freshness for the current head and current PR description. The
+status rollup is scoped to the current head SHA, while GraphQL `lastEditedAt`
+captures later edits to the PR object. Use the later timestamp as the approval
+lower bound:
 
 ```bash
+head_state_json="$(
+  gh pr view <number> --json headRefOid,statusCheckRollup
+)" || exit 1
+head_sha="$(printf '%s' "$head_state_json" | jq -r '.headRefOid')"
 head_started_at="$(
-  gh pr view <number> --json headRefOid,statusCheckRollup \
-    --jq '[.statusCheckRollup[] | .startedAt // empty] | min // empty'
+  printf '%s' "$head_state_json" \
+    | jq -r '[.statusCheckRollup[] | .startedAt // empty] | min // empty'
 )"
-if [ -z "$head_started_at" ]; then
-  echo "Cannot prove when current-head activity started; body reaction is not approval."
+
+edit_state_json="$(
+  gh api graphql \
+    -F owner=<owner> \
+    -F name=<repo> \
+    -F number=<number> \
+    -f query='query($owner:String!,$name:String!,$number:Int!){
+      repository(owner:$owner,name:$name){
+        pullRequest(number:$number){headRefOid lastEditedAt}
+      }
+    }'
+)" || exit 1
+edit_head_sha="$(
+  printf '%s' "$edit_state_json" \
+    | jq -r '.data.repository.pullRequest.headRefOid'
+)"
+body_edited_at="$(
+  printf '%s' "$edit_state_json" \
+    | jq -r '.data.repository.pullRequest.lastEditedAt // empty'
+)"
+
+if [ -z "$head_started_at" ] || [ "$edit_head_sha" != "$head_sha" ]; then
+  echo "Cannot prove current-head freshness; reaction is not approval."
   exit 1
 fi
+
+approval_not_before="$(
+  jq -nr \
+    --arg head_started_at "$head_started_at" \
+    --arg body_edited_at "$body_edited_at" \
+    '[$head_started_at, $body_edited_at]
+    | map(select(length > 0))
+    | max // empty'
+)"
 
 reactions_json="$(
   gh api "repos/<owner>/<repo>/issues/<number>/reactions" --paginate --slurp \
@@ -76,30 +112,30 @@ reactions_json="$(
 
 echo "Fresh Codex approvals:"
 printf '%s' "$reactions_json" \
-  | jq --arg head_started_at "$head_started_at" \
+  | jq --arg approval_not_before "$approval_not_before" \
     '[.[][]
     | select(.user.login == "chatgpt-codex-connector[bot]"
       and .content == "+1"
-      and .created_at >= $head_started_at)
+      and .created_at >= $approval_not_before)
     | {content, created_at, user: .user.login}]'
 
 echo "Fresh Codex pending signals:"
 printf '%s' "$reactions_json" \
-  | jq --arg head_started_at "$head_started_at" \
+  | jq --arg approval_not_before "$approval_not_before" \
     '[.[][]
     | select(.user.login == "chatgpt-codex-connector[bot]"
       and .content == "eyes"
-      and .created_at >= $head_started_at)
+      and .created_at >= $approval_not_before)
     | {content, created_at, user: .user.login}]'
 ```
 
 `gh pr view --json reactionGroups` is useful for counts, but it does not show
 which user reacted. Use the REST reactions endpoint above to prove Codex left
-the thumbs-up on the PR body after current-head activity began. Only a non-empty
-approval result satisfies the gate; a non-empty pending result means keep
-waiting. If the current head has no timestamped status/check activity, require
-a Codex review or issue comment that names the current head instead of trusting
-a body reaction alone.
+the thumbs-up after both current-head activity began and the PR object was last
+edited. Only a non-empty approval result satisfies the gate; a non-empty pending
+result means keep waiting. If the current head has no timestamped status/check
+activity, require a Codex review or issue comment that names the current head
+instead of trusting a body reaction alone.
 
 Then check Codex issue comments and confirm the latest "Reviewed commit" matches
 the current head prefix:
@@ -139,9 +175,11 @@ aggregate reaction counts on the comment do not identify who reacted:
 gh api "repos/<owner>/<repo>/issues/comments/<comment-id>/reactions" \
   --paginate --slurp \
   -H "Accept: application/vnd.github+json" \
-  | jq '[.[][]
+  | jq --arg approval_not_before "$approval_not_before" \
+    '[.[][]
     | select(.user.login == "chatgpt-codex-connector[bot]"
-      and .content == "+1")
+      and .content == "+1"
+      and .created_at >= $approval_not_before)
     | {content, created_at, user: .user.login}]'
 ```
 
