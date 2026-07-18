@@ -14,32 +14,22 @@ import pytest
 from basic_memory import migration_loop
 
 
-def test_is_running_loop_error_matches_stdlib_message():
-    err = RuntimeError("asyncio.run() cannot be called from a running event loop")
-    assert migration_loop.is_running_loop_error(err) is True
-
-
-def test_is_running_loop_error_matches_nest_asyncio_uvloop_message():
-    # nest_asyncio mis-patched a uvloop loop -> different wording, same meaning.
-    err = RuntimeError("this event loop is already running")
-    assert migration_loop.is_running_loop_error(err) is True
-
-
-def test_is_running_loop_error_rejects_unrelated_runtime_error():
-    err = RuntimeError("migration failed: column already exists")
-    assert migration_loop.is_running_loop_error(err) is False
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="uvloop is not available on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="uvloop is not available on Windows"
+)
 def test_running_on_uvloop_true_when_policy_is_uvloop(monkeypatch):
     import uvloop
 
-    monkeypatch.setattr(asyncio, "get_event_loop_policy", lambda: uvloop.EventLoopPolicy())
+    monkeypatch.setattr(
+        asyncio, "get_event_loop_policy", lambda: uvloop.EventLoopPolicy()
+    )
     assert migration_loop.running_on_uvloop() is True
 
 
 def test_running_on_uvloop_false_for_default_policy(monkeypatch):
-    monkeypatch.setattr(asyncio, "get_event_loop_policy", lambda: asyncio.DefaultEventLoopPolicy())
+    monkeypatch.setattr(
+        asyncio, "get_event_loop_policy", lambda: asyncio.DefaultEventLoopPolicy()
+    )
     assert migration_loop.running_on_uvloop() is False
 
 

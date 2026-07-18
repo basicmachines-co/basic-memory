@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from alembic import context
 
 from basic_memory.config import ConfigManager
-from basic_memory.migration_loop import is_running_loop_error, running_on_uvloop
+from basic_memory.migration_loop import running_on_uvloop
 
 # Allow nested event loops (needed for pytest-asyncio and other async contexts).
 # nest_asyncio cannot patch a uvloop loop or Python 3.14+; in those cases we skip
@@ -174,25 +174,25 @@ def _loop_is_running() -> bool:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        # Trigger: no running loop (get_running_loop raises RuntimeError)
+        # Outcome: return False to indicate no loop is running
         return False
     return True
 
 
 def _run_async_engine_migrations(connectable) -> None:
     """Run async migrations, adapting to whether an event loop is already running."""
+
+    # Trigger: caller may be inside a running event loop (e.g. pytest-asyncio, uvicorn).
+    # Why: asyncio.run() raises RuntimeError when nested inside a running loop, so we
+    # detect the condition up front via _loop_is_running() instead of catching the error.
+    # Outcome: running-loop context -> thread fallback; no loop -> asyncio.run() directly.
     if _loop_is_running():
         # Can't nest asyncio.run() inside a running loop -> offload to a thread.
         _run_async_migrations_in_thread(connectable)
-        return
-
-    # No running loop -> use asyncio.run(), falling back to a thread if it still
-    # reports a loop (covers races / odd environments).
-    try:
+    else:
+        # No running loop: asyncio.run() is safe; let any unexpected errors propagate.
         _run_async_migrations_with_asyncio_run(connectable)
-    except RuntimeError as exc:
-        if not is_running_loop_error(exc):
-            raise
-        _run_async_migrations_in_thread(connectable)
 
 
 def run_migrations_online() -> None:

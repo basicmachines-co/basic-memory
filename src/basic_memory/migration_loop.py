@@ -28,18 +28,3 @@ def running_on_uvloop() -> bool:
     except ImportError:
         return False
     return isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)
-
-
-def is_running_loop_error(exc: BaseException) -> bool:
-    """Whether an error means ``asyncio.run`` hit an already-running event loop.
-
-    Two spellings reach the migration fallback: the stdlib "cannot be called
-    from a running event loop", and "this event loop is already running" when
-    nest_asyncio mis-patched a uvloop loop. Both mean the same thing — retry the
-    migration in a dedicated thread rather than re-raising.
-    """
-    msg = str(exc)
-    return (
-        "cannot be called from a running event loop" in msg
-        or "this event loop is already running" in msg
-    )
