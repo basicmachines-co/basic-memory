@@ -63,8 +63,8 @@ plugins/claude-code/
 │   ├── plugin.json
 │   └── marketplace.json
 ├── hooks/
-│   ├── session-start.sh        # ambient: brief Claude on what's relevant
-│   └── pre-compact.sh          # ambient: checkpoint before amnesia
+│   ├── session_start.py        # ambient: brief Claude on what's relevant
+│   └── pre_compact.py          # ambient: checkpoint before amnesia
 ├── output-styles/
 │   └── basic-memory.md         # reflexes: search first, capture decisions
 │                               # NOTE: rules/ deferred — path-scoped rules don't load yet (Q5)
@@ -476,10 +476,10 @@ eventual default is `"summarized"` — the LLM pass is the first enrich step.
   (`status?(enum, desc): [a,b]`), not after the `[...]` value — the latter is invalid
   YAML. (Same latent bug exists in the canonical `memory-tasks` schema → flagged as a
   separate task.)
-- [x] Write `hooks/session-start.sh` — plain-stdout brief, single `type: task` /
+- [x] Write `hooks/session_start.py` — plain-stdout brief, single `type: task` /
   `status: active` query, recall prompt; works against the default project (pin via
   `primaryProject`); silent if BM absent. Tested end-to-end.
-- [x] Write `hooks/pre-compact.sh` — **extractive** checkpoint conforming to the
+- [x] Write `hooks/pre_compact.py` — **extractive** checkpoint conforming to the
   `session` schema; only writes when `primaryProject` is set; silent/no-op otherwise.
   Tested end-to-end (note written + queryable by `--type session`).
 - [x] Write `output-styles/basic-memory.md` — reflexes; `keep-coding-instructions: true`

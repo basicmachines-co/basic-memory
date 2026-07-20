@@ -24,27 +24,26 @@ def test_codex_plugin_mcp_config_is_tracked_and_not_ignored() -> None:
     assert tracked.returncode == 0, tracked.stderr
 
 
-def test_codex_plugin_hooks_are_zero_logic_shims() -> None:
-    # The plugin ships configuration plus shims only: the Python hook bodies
-    # moved into the basic-memory package behind `bm hook` (SPEC-55).
+def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
+    # The plugin ships configuration plus launchers only: the hook bodies live
+    # in the basic-memory package behind `bm hook` (SPEC-55); each launcher is
+    # a self-contained PEP 723 uv script with no resolver logic of its own.
     repo_root = Path(__file__).resolve().parents[1]
     hooks_dir = repo_root / "plugins/codex/hooks"
 
-    assert not (hooks_dir / "session-start.py").exists()
-    assert not (hooks_dir / "pre-compact.py").exists()
+    assert not (hooks_dir / "session-start.sh").exists()
+    assert not (hooks_dir / "pre-compact.sh").exists()
     for script, verb in (
-        ("session-start.sh", "session-start"),
-        ("pre-compact.sh", "pre-compact"),
+        ("session_start.py", "session-start"),
+        ("pre_compact.py", "pre-compact"),
     ):
         text = (hooks_dir / script).read_text(encoding="utf-8")
-        assert "python3" not in text
-        assert "uv run --script" not in text
-        assert f"hook {verb} --harness codex" in text
-        # The uvx/uv fallback must pin a released floor (bumped by update_versions),
-        # declared once as BM_FLOOR so the updater's single-occurrence rule holds.
-        assert re.search(r'BM_FLOOR="basic-memory>=\d', text)
-        assert 'BM=(uvx "$BM_FLOOR")' in text
-        assert 'BM=(uv tool run "$BM_FLOOR")' in text
+        assert "# /// script" in text
+        # The PEP 723 floor must pin a released version, declared exactly once
+        # on the anchored line update_versions bumps.
+        assert re.search(r'^# dependencies = \["basic-memory>=\d[^"]*"\]$', text, re.MULTILINE)
+        assert f'VERB = "{verb}"' in text
+        assert 'HARNESS = "codex"' in text
 
 
 def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:

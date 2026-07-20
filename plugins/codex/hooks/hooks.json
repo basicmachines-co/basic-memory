@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PLUGIN_ROOT}/hooks/session-start.sh",
+            "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/session_start.py\"",
             "statusMessage": "Loading Basic Memory context",
             "timeout": 30
           }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PLUGIN_ROOT}/hooks/pre-compact.sh",
+            "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/pre_compact.py\"",
             "statusMessage": "Checkpointing Codex work to Basic Memory",
             "timeout": 60
           }

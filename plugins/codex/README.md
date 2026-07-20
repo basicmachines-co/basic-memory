@@ -29,18 +29,20 @@ verification, decision capture, and resumable checkpoints.
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
 | `hooks/hooks.json` | SessionStart and PreCompact hook registration |
-| `hooks/session-start.sh` | Shim: execs `basic-memory hook session-start --harness codex` |
-| `hooks/pre-compact.sh` | Shim: execs `basic-memory hook pre-compact --harness codex` |
+| `hooks/session_start.py` | uv script: runs `basic-memory hook session-start --harness codex` |
+| `hooks/pre_compact.py` | uv script: runs `basic-memory hook pre-compact --harness codex` |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
-The hook shims carry no logic: the brief, the checkpoint, and opt-in event
-capture all live in the released `basic-memory` package behind `bm hook`.
+The hook scripts carry no logic: the brief, the checkpoint, and opt-in event
+capture all live in the released `basic-memory` package behind `bm hook`. Each
+is a self-contained PEP 723 script whose inline metadata pins the released
+dependency floor uv resolves.
 
 ## Requirements
 
-- **[uv](https://docs.astral.sh/uv/)** — the documented prerequisite for the hooks'
-  fallback path. Install per platform:
+- **[uv](https://docs.astral.sh/uv/)** — required: the hooks are PEP 723
+  scripts executed via `uv run --script`. Install per platform:
   - macOS: `brew install uv` (or the curl installer below)
   - Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
@@ -48,10 +50,11 @@ capture all live in the released `basic-memory` package behind `bm hook`.
   install basic-memory` is recommended (a `basic-memory` binary on PATH keeps the
   hook version consistent with your MCP server).
 
-Disclosure: the shims resolve the CLI as `BM_BIN` → `basic-memory` / `bm` on
-PATH → `uvx "basic-memory>=<floor>"`. The uvx fallback fetches the package from
-PyPI on first run (pinned minimum version, bumped by release tooling); later
-runs use uv's cache. If nothing is resolvable the shims exit silently.
+Disclosure: uv resolves `basic-memory>=<floor>` from each script's inline
+metadata, fetching from PyPI on first run (pinned minimum version, bumped by
+release tooling); later runs use uv's cache. `BM_BIN` (a binary path or a
+quoted launcher string) overrides the uv-managed environment for development.
+Every failure path exits 0 — the hooks never disrupt a session.
 
 ## Install
 

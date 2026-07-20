@@ -42,12 +42,12 @@ Memory's durable graph**, rather than a memory layer of its own. See
   plugin-namespaced commands (`/basic-memory:<name>`).
 
 
-- **SessionStart hook** (`hooks/session-start.sh`) — briefs Claude at session
+- **SessionStart hook** (`hooks/session_start.py`) — briefs Claude at session
   start with active tasks from the graph (one structured `type: task` query) plus
   an always-on recall prompt. Works against the default project with zero config;
   pin a project via `basicMemory.primaryProject`. Plain-stdout output, capped well
   under the 10k limit, and silent if Basic Memory isn't installed.
-- **PreCompact hook** (`hooks/pre-compact.sh`) — writes a `type: session`
+- **PreCompact hook** (`hooks/pre_compact.py`) — writes a `type: session`
   checkpoint to the graph before context compaction (extractive in this phase;
   LLM-summarized capture is the next step). Only writes when a `primaryProject` is
   configured, so it never touches a graph the user hasn't opted in.
@@ -62,14 +62,16 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Changed
 
-- **Hooks are now zero-logic shims** (SPEC-55, #997). `session-start.sh` and
-  `pre-compact.sh` resolve the Basic Memory CLI (`BM_BIN` → `basic-memory`/`bm`
-  on PATH → `uvx "basic-memory>=<floor>"`, floor bumped by release tooling) and
-  exec `basic-memory hook <event> --harness claude` with the hook JSON on
-  stdin. The brief/checkpoint logic lives in the released package; opt-in
+- **Hooks are now zero-logic uv scripts** (SPEC-55, #997). `session_start.py`
+  and `pre_compact.py` are self-contained PEP 723 scripts run via
+  `uv run --quiet --script`: uv resolves `basic-memory>=<floor>` (floor bumped
+  by release tooling) and the script invokes
+  `basic-memory hook <event> --harness claude` in-process with the hook JSON
+  on stdin. `BM_BIN` overrides the uv-managed environment for development.
+  The brief/checkpoint logic lives in the released package; opt-in
   `captureEvents: true` additionally records redacted event envelopes to a
-  local inbox. uv is the documented prerequisite; the uvx fallback fetches from
-  PyPI on first run.
+  local inbox. uv is the required prerequisite; the first run fetches from
+  PyPI, later runs use uv's cache.
 - **SessionStart hook now nudges toward `/basic-memory:bm-setup` on first run** — when
   no `basicMemory` config block is present in either settings file. The nudge
   survives a failed/empty task query (so a brand-new user with no project yet still

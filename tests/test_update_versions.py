@@ -31,6 +31,22 @@ def test_parse_version_preserves_python_prerelease_for_non_npm_manifests() -> No
     assert update_versions.parse_version("v0.21.3b1") == "0.21.3b1"
 
 
+_SCRIPT_SEED = (
+    "#!/usr/bin/env -S uv run --quiet --script\n"
+    "# /// script\n"
+    '# requires-python = ">=3.12"\n'
+    '# dependencies = ["basic-memory>=0.0.0"]\n'
+    "# ///\n"
+    # Mirrors the real scripts: the docstring mentions a launcher spelling
+    # without a version spec, which the anchored updater pattern must skip.
+    '"""Launcher seed; BM_BIN may be a launcher like uvx "basic-memory"."""\n'
+)
+
+
+def _bumped_script(version: str) -> str:
+    return _SCRIPT_SEED.replace("basic-memory>=0.0.0", f"basic-memory>={version}")
+
+
 def test_update_versions_writes_npm_semver_prerelease(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -68,8 +84,8 @@ def test_update_versions_writes_npm_semver_prerelease(
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
     write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
-    for shim in update_versions.HOOK_SHIMS:
-        write(shim, 'BM=(uvx "basic-memory>=0.0.0")\n')
+    for script in update_versions.HOOK_SCRIPTS:
+        write(script, _SCRIPT_SEED)
 
     update_versions.update_versions("v0.21.3b1", dry_run=False)
 
@@ -81,9 +97,9 @@ def test_update_versions_writes_npm_semver_prerelease(
     assert openclaw_package["version"] == "0.21.3-beta.1"
     codex_plugin = json.loads((tmp_path / "plugins/codex/.codex-plugin/plugin.json").read_text())
     assert codex_plugin["version"] == "0.21.3-beta.1"
-    # The shim floor is a pip requirement spec: Python prerelease form, not npm.
-    for shim in update_versions.HOOK_SHIMS:
-        assert 'BM=(uvx "basic-memory>=0.21.3b1")' in (tmp_path / shim).read_text()
+    # The script floor is a pip requirement spec: Python prerelease form, not npm.
+    for script in update_versions.HOOK_SCRIPTS:
+        assert (tmp_path / script).read_text() == _bumped_script("0.21.3b1")
 
 
 def _seed_repo(tmp_path: Path) -> None:
@@ -117,8 +133,8 @@ def _seed_repo(tmp_path: Path) -> None:
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
     write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
-    for shim in update_versions.HOOK_SHIMS:
-        write(shim, 'BM=(uvx "basic-memory>=0.0.0")\n')
+    for script in update_versions.HOOK_SCRIPTS:
+        write(script, _SCRIPT_SEED)
 
 
 def _plugin_version(tmp_path: Path) -> str:
@@ -146,18 +162,20 @@ def test_scope_packages_leaves_core_untouched(
     assert _codex_plugin_version(tmp_path) == "0.21.6"
 
 
-def test_scope_packages_bumps_uvx_floor_in_every_hook_shim(
+def test_scope_packages_bumps_dependency_floor_in_every_hook_script(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Regression: the shims' uvx fallback must track the release, or a cold
-    # machine resolves a basic-memory too old to ship the `bm hook` verbs.
+    # Regression: the scripts' PEP 723 floor must track the release, or a cold
+    # `uv run --script` resolves a basic-memory too old to ship `bm hook`.
+    # Seeding the full realistic shape also pins the anchored pattern against
+    # the docstring's version-less launcher mention.
     monkeypatch.setattr(update_versions, "ROOT", tmp_path)
     _seed_repo(tmp_path)
 
     update_versions.update_versions("v0.21.6", scope="packages", dry_run=False)
 
-    for shim in update_versions.HOOK_SHIMS:
-        assert (tmp_path / shim).read_text() == 'BM=(uvx "basic-memory>=0.21.6")\n'
+    for script in update_versions.HOOK_SCRIPTS:
+        assert (tmp_path / script).read_text() == _bumped_script("0.21.6")
 
 
 def test_scope_core_leaves_packages_untouched(
@@ -171,8 +189,8 @@ def test_scope_core_leaves_packages_untouched(
     assert (tmp_path / "src/basic_memory/__init__.py").read_text() == '__version__ = "0.21.6"\n'
     assert _plugin_version(tmp_path) == "0.0.0"
     assert _codex_plugin_version(tmp_path) == "0.0.0"
-    for shim in update_versions.HOOK_SHIMS:
-        assert (tmp_path / shim).read_text() == 'BM=(uvx "basic-memory>=0.0.0")\n'
+    for script in update_versions.HOOK_SCRIPTS:
+        assert (tmp_path / script).read_text() == _SCRIPT_SEED
 
 
 def test_invalid_scope_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

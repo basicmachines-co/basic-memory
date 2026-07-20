@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 from validate_skills import parse_frontmatter
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Hook events the bridge plugin must register, and the scripts that back them.
 REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
-REQUIRED_HOOK_SCRIPTS = ("hooks/session-start.sh", "hooks/pre-compact.sh")
+REQUIRED_HOOK_SCRIPTS = ("hooks/session_start.py", "hooks/pre_compact.py")
 # Seed schemas the plugin ships for its note types (copied into the user's
 # project at bootstrap). Each must be a parseable schema note.
 REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
@@ -67,8 +68,10 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
 
     # --- Hooks ---
     # The bridge runs on lifecycle events, not on tool calls. Require the two
-    # event keys and confirm each backing script exists and is executable
-    # (Claude Code invokes them directly via ${CLAUDE_PLUGIN_ROOT}).
+    # event keys and confirm each backing uv script exists, is executable
+    # (direct runs via its shebang), and carries the PEP 723 dependency floor
+    # that hooks.json's `uv run --script` resolves and the release version
+    # updater bumps.
     hooks_json = read_json(plugin_dir / "hooks/hooks.json")
     hooks = hooks_json.get("hooks", {})
     for event in REQUIRED_HOOK_EVENTS:
@@ -80,6 +83,11 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
             raise SystemExit(f"Missing hook script: {script}")
         if not os.access(script, os.X_OK):
             raise SystemExit(f"Hook script is not executable: {script}")
+        text = script.read_text(encoding="utf-8")
+        if "# /// script" not in text or not re.search(
+            r'^# dependencies = \["basic-memory>=[^"]+"\]$', text, re.MULTILINE
+        ):
+            raise SystemExit(f"Hook script missing PEP 723 basic-memory floor: {script}")
 
     # --- Output style ---
     output_style = plugin_dir / "output-styles/basic-memory.md"

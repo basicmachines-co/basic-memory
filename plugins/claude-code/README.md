@@ -45,35 +45,36 @@ Plugin skills are namespaced under the plugin name:
 
 ## Requirements
 
-- **[uv](https://docs.astral.sh/uv/)** — the documented prerequisite for the hooks'
-  fallback path. Install per platform:
+- **[uv](https://docs.astral.sh/uv/)** — required: the hooks are PEP 723
+  scripts executed via `uv run --script`. Install per platform:
   - macOS: `brew install uv` (or the curl installer below)
   - Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
 - [Basic Memory](https://github.com/basicmachines-co/basic-memory) connected as an
-  MCP server. `uv tool install basic-memory` is recommended — it puts a
-  `basic-memory` binary on PATH, which the hooks call directly and which keeps the
-  hook version consistent with your MCP server.
+  MCP server. The hooks resolve their own `basic-memory` through uv, so no
+  PATH install is required for them.
 - Claude Code.
 
 ### What the hooks execute
 
-The hook scripts are zero-logic shims: they resolve the Basic Memory CLI
-(`BM_BIN` override → `basic-memory` / `bm` on PATH → `uvx "basic-memory>=<floor>"`)
-and exec `basic-memory hook <event>` with the hook JSON on stdin. All behavior
-lives in the released Python package — versioned, typed, and tested. Two
-disclosures:
+The hook scripts are zero-logic PEP 723 uv scripts: `uv run --quiet --script`
+resolves `basic-memory>=<floor>` (pinned in each script's inline metadata) and
+the script invokes `basic-memory hook <event>` in-process with the hook JSON
+on stdin. All behavior lives in the released Python package — versioned,
+typed, and tested. Setting `BM_BIN` (a binary path or a quoted launcher
+string) overrides the uv-managed environment, e.g. for development against a
+local checkout. Two disclosures:
 
-- **Network fetch on first run.** When no binary is on PATH, the `uvx` fallback
-  downloads `basic-memory` from PyPI at a pinned minimum version (bumped by
-  release tooling); later runs use uv's cache.
+- **Network fetch on first run.** uv downloads `basic-memory` from PyPI at a
+  pinned minimum version (bumped by release tooling); later runs use uv's
+  cache.
 - **Event capture is opt-in and off by default.** Setting `captureEvents: true`
   (the JSON boolean — strings never enable it) records redacted lifecycle-event
   envelopes to a local inbox under your Basic Memory home. Inspect with
   `basic-memory hook status`, project with `basic-memory hook flush`.
 
-If nothing is resolvable the shims exit silently — the plugin stays invisible
-when Basic Memory isn't installed.
+Every failure path exits 0 — the hooks stay invisible rather than disrupt a
+session.
 
 ## Installation
 

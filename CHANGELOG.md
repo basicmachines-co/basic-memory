@@ -12,8 +12,10 @@
   by `bm hook flush`; `bm hook status` shows the surface. `bm hook install` /
   `bm hook remove` wire the hooks into user-level harness config for standalone
   users with ownership-tagged, surgical merging. The Claude Code and Codex
-  plugin hooks are now zero-logic shims that exec `basic-memory hook`; their
-  `uvx` fallback floor is bumped by release tooling.
+  plugin hooks are now zero-logic PEP 723 uv scripts (`uv run --script`) that
+  invoke `basic-memory hook` in-process; their dependency floor is bumped by
+  release tooling, and `BM_BIN` overrides the uv-managed environment for
+  development.
 
 ## v0.22.1 (2026-06-12)
 

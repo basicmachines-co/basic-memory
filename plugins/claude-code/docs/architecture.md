@@ -59,7 +59,7 @@ of Claude *before the first prompt*, so the session starts oriented instead of c
 ```mermaid
 sequenceDiagram
     participant CC as Claude Code
-    participant H as session-start.sh
+    participant H as session_start.py
     participant BM as Basic Memory (bm CLI)
     participant C as Claude
 
@@ -95,7 +95,7 @@ would be lost), the hook writes a durable checkpoint so the next session can res
 ```mermaid
 sequenceDiagram
     participant CC as Claude Code
-    participant H as pre-compact.sh
+    participant H as pre_compact.py
     participant BM as Basic Memory
 
     CC->>H: PreCompact (transcript_path, cwd)
@@ -157,7 +157,7 @@ project names collide across workspaces. Reads route over the user's OAuth sessi
 
 | Path | Role |
 |------|------|
-| `hooks/session-start.sh`, `hooks/pre-compact.sh` | the ambient bridge (read / write) |
+| `hooks/session_start.py`, `hooks/pre_compact.py` | the ambient bridge (read / write) |
 | `hooks/hooks.json` | registers the hooks |
 | `output-styles/basic-memory.md` | the capture reflexes |
 | `skills/{bm-setup,bm-remember,bm-share,bm-status}/` | the deliberate slash commands |
