@@ -6,7 +6,8 @@ This module provides repository dependencies:
 - RelationRepository
 - SearchRepository
 
-Each repository is scoped to a project ID from the request.
+Each repository is scoped to the project resolved from the external UUID in the
+request path (the only resolution tier since the v1 routers were removed, #1109).
 """
 
 from typing import Annotated
@@ -15,11 +16,7 @@ from fastapi import Depends
 
 from basic_memory.deps.config import AppConfigDep
 from basic_memory.deps.db import SessionMakerDep
-from basic_memory.deps.projects import (
-    ProjectIdDep,
-    ProjectIdPathDep,
-    ProjectExternalIdPathDep,
-)
+from basic_memory.deps.projects import ProjectExternalIdPathDep
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.relation_repository import RelationRepository
@@ -27,26 +24,6 @@ from basic_memory.repository.search_repository import SearchRepository, create_s
 
 
 # --- Entity Repository ---
-
-
-async def get_entity_repository(
-    project_id: ProjectIdDep,
-) -> EntityRepository:
-    """Create an EntityRepository instance for the current project."""
-    return EntityRepository(project_id=project_id)
-
-
-EntityRepositoryDep = Annotated[EntityRepository, Depends(get_entity_repository)]
-
-
-async def get_entity_repository_v2(  # pragma: no cover
-    project_id: ProjectIdPathDep,
-) -> EntityRepository:
-    """Create an EntityRepository instance for v2 API (uses integer project_id from path)."""
-    return EntityRepository(project_id=project_id)
-
-
-EntityRepositoryV2Dep = Annotated[EntityRepository, Depends(get_entity_repository_v2)]
 
 
 async def get_entity_repository_v2_external(
@@ -64,28 +41,6 @@ EntityRepositoryV2ExternalDep = Annotated[
 # --- Observation Repository ---
 
 
-async def get_observation_repository(
-    project_id: ProjectIdDep,
-) -> ObservationRepository:
-    """Create an ObservationRepository instance for the current project."""
-    return ObservationRepository(project_id=project_id)
-
-
-ObservationRepositoryDep = Annotated[ObservationRepository, Depends(get_observation_repository)]
-
-
-async def get_observation_repository_v2(  # pragma: no cover
-    project_id: ProjectIdPathDep,
-) -> ObservationRepository:
-    """Create an ObservationRepository instance for v2 API."""
-    return ObservationRepository(project_id=project_id)
-
-
-ObservationRepositoryV2Dep = Annotated[
-    ObservationRepository, Depends(get_observation_repository_v2)
-]
-
-
 async def get_observation_repository_v2_external(
     project_id: ProjectExternalIdPathDep,
 ) -> ObservationRepository:
@@ -99,26 +54,6 @@ ObservationRepositoryV2ExternalDep = Annotated[
 
 
 # --- Relation Repository ---
-
-
-async def get_relation_repository(
-    project_id: ProjectIdDep,
-) -> RelationRepository:
-    """Create a RelationRepository instance for the current project."""
-    return RelationRepository(project_id=project_id)
-
-
-RelationRepositoryDep = Annotated[RelationRepository, Depends(get_relation_repository)]
-
-
-async def get_relation_repository_v2(  # pragma: no cover
-    project_id: ProjectIdPathDep,
-) -> RelationRepository:
-    """Create a RelationRepository instance for v2 API."""
-    return RelationRepository(project_id=project_id)
-
-
-RelationRepositoryV2Dep = Annotated[RelationRepository, Depends(get_relation_repository_v2)]
 
 
 async def get_relation_repository_v2_external(
@@ -136,9 +71,9 @@ RelationRepositoryV2ExternalDep = Annotated[
 # --- Search Repository ---
 
 
-async def get_search_repository(
+async def get_search_repository_v2_external(
     session_maker: SessionMakerDep,
-    project_id: ProjectIdDep,
+    project_id: ProjectExternalIdPathDep,
     app_config: AppConfigDep,
 ) -> SearchRepository:
     """Create a backend-specific SearchRepository instance for the current project.
@@ -146,30 +81,6 @@ async def get_search_repository(
     Uses factory function to return SQLiteSearchRepository or PostgresSearchRepository
     based on database backend configuration.
     """
-    return create_search_repository(session_maker, project_id=project_id, app_config=app_config)
-
-
-SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]
-
-
-async def get_search_repository_v2(  # pragma: no cover
-    session_maker: SessionMakerDep,
-    project_id: ProjectIdPathDep,
-    app_config: AppConfigDep,
-) -> SearchRepository:
-    """Create a SearchRepository instance for v2 API."""
-    return create_search_repository(session_maker, project_id=project_id, app_config=app_config)
-
-
-SearchRepositoryV2Dep = Annotated[SearchRepository, Depends(get_search_repository_v2)]
-
-
-async def get_search_repository_v2_external(
-    session_maker: SessionMakerDep,
-    project_id: ProjectExternalIdPathDep,
-    app_config: AppConfigDep,
-) -> SearchRepository:
-    """Create a SearchRepository instance for v2 API (uses external_id)."""
     return create_search_repository(session_maker, project_id=project_id, app_config=app_config)
 
 

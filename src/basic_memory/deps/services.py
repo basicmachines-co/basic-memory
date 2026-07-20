@@ -20,23 +20,13 @@ from loguru import logger
 from basic_memory.deps.config import AppConfigDep
 from basic_memory.deps.db import SessionMakerDep
 from basic_memory.deps.projects import (
-    ProjectConfigDep,
-    ProjectConfigV2Dep,
     ProjectConfigV2ExternalDep,
     ProjectRepositoryDep,
 )
 from basic_memory.deps.repositories import (
-    EntityRepositoryDep,
-    EntityRepositoryV2Dep,
     EntityRepositoryV2ExternalDep,
-    ObservationRepositoryDep,
-    ObservationRepositoryV2Dep,
     ObservationRepositoryV2ExternalDep,
-    RelationRepositoryDep,
-    RelationRepositoryV2Dep,
     RelationRepositoryV2ExternalDep,
-    SearchRepositoryDep,
-    SearchRepositoryV2Dep,
     SearchRepositoryV2ExternalDep,
 )
 from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
@@ -97,22 +87,6 @@ from basic_memory.services.search_service import SearchService
 # --- Entity Parser ---
 
 
-async def get_entity_parser(project_config: ProjectConfigDep) -> EntityParser:
-    return EntityParser(project_config.home)
-
-
-EntityParserDep = Annotated["EntityParser", Depends(get_entity_parser)]
-
-
-async def get_entity_parser_v2(
-    project_config: ProjectConfigV2Dep,
-) -> EntityParser:  # pragma: no cover
-    return EntityParser(project_config.home)
-
-
-EntityParserV2Dep = Annotated["EntityParser", Depends(get_entity_parser_v2)]
-
-
 async def get_entity_parser_v2_external(project_config: ProjectConfigV2ExternalDep) -> EntityParser:
     return EntityParser(project_config.home)
 
@@ -121,24 +95,6 @@ EntityParserV2ExternalDep = Annotated["EntityParser", Depends(get_entity_parser_
 
 
 # --- Markdown Processor ---
-
-
-async def get_markdown_processor(
-    entity_parser: EntityParserDep, app_config: AppConfigDep
-) -> MarkdownProcessor:
-    return MarkdownProcessor(entity_parser, app_config=app_config)
-
-
-MarkdownProcessorDep = Annotated[MarkdownProcessor, Depends(get_markdown_processor)]
-
-
-async def get_markdown_processor_v2(  # pragma: no cover
-    entity_parser: EntityParserV2Dep, app_config: AppConfigDep
-) -> MarkdownProcessor:
-    return MarkdownProcessor(entity_parser, app_config=app_config)
-
-
-MarkdownProcessorV2Dep = Annotated[MarkdownProcessor, Depends(get_markdown_processor_v2)]
 
 
 async def get_markdown_processor_v2_external(
@@ -153,36 +109,6 @@ MarkdownProcessorV2ExternalDep = Annotated[
 
 
 # --- File Service ---
-
-
-async def get_file_service(
-    project_config: ProjectConfigDep,
-    markdown_processor: MarkdownProcessorDep,
-    app_config: AppConfigDep,
-) -> FileService:
-    file_service = FileService(project_config.home, markdown_processor, app_config=app_config)
-    logger.debug(
-        f"Created FileService for project: {project_config.name}, base_path: {project_config.home} "
-    )
-    return file_service
-
-
-FileServiceDep = Annotated[FileService, Depends(get_file_service)]
-
-
-async def get_file_service_v2(  # pragma: no cover
-    project_config: ProjectConfigV2Dep,
-    markdown_processor: MarkdownProcessorV2Dep,
-    app_config: AppConfigDep,
-) -> FileService:
-    file_service = FileService(project_config.home, markdown_processor, app_config=app_config)
-    logger.debug(
-        f"Created FileService for project: {project_config.name}, base_path: {project_config.home}"
-    )
-    return file_service
-
-
-FileServiceV2Dep = Annotated[FileService, Depends(get_file_service_v2)]
 
 
 async def get_file_service_v2_external(
@@ -201,32 +127,6 @@ FileServiceV2ExternalDep = Annotated[FileService, Depends(get_file_service_v2_ex
 
 
 # --- Search Service ---
-
-
-async def get_search_service(
-    search_repository: SearchRepositoryDep,
-    entity_repository: EntityRepositoryDep,
-    file_service: FileServiceDep,
-    session_maker: SessionMakerDep,
-) -> SearchService:
-    """Create SearchService with dependencies."""
-    return SearchService(search_repository, entity_repository, file_service, session_maker)
-
-
-SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
-
-
-async def get_search_service_v2(  # pragma: no cover
-    search_repository: SearchRepositoryV2Dep,
-    entity_repository: EntityRepositoryV2Dep,
-    file_service: FileServiceV2Dep,
-    session_maker: SessionMakerDep,
-) -> SearchService:
-    """Create SearchService for v2 API."""
-    return SearchService(search_repository, entity_repository, file_service, session_maker)
-
-
-SearchServiceV2Dep = Annotated[SearchService, Depends(get_search_service_v2)]
 
 
 async def get_search_service_v2_external(
@@ -287,36 +187,6 @@ DirectoryDeleteServiceDep = Annotated[DirectoryDeleteService, Depends(get_direct
 # --- Link Resolver ---
 
 
-async def get_link_resolver(
-    entity_repository: EntityRepositoryDep,
-    search_service: SearchServiceDep,
-    session_maker: SessionMakerDep,
-) -> LinkResolver:
-    return LinkResolver(
-        entity_repository=entity_repository,
-        search_service=search_service,
-        session_maker=session_maker,
-    )
-
-
-LinkResolverDep = Annotated[LinkResolver, Depends(get_link_resolver)]
-
-
-async def get_link_resolver_v2(  # pragma: no cover
-    entity_repository: EntityRepositoryV2Dep,
-    search_service: SearchServiceV2Dep,
-    session_maker: SessionMakerDep,
-) -> LinkResolver:
-    return LinkResolver(
-        entity_repository=entity_repository,
-        search_service=search_service,
-        session_maker=session_maker,
-    )
-
-
-LinkResolverV2Dep = Annotated[LinkResolver, Depends(get_link_resolver_v2)]
-
-
 async def get_link_resolver_v2_external(
     entity_repository: EntityRepositoryV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
@@ -333,62 +203,6 @@ LinkResolverV2ExternalDep = Annotated[LinkResolver, Depends(get_link_resolver_v2
 
 
 # --- Entity Service ---
-
-
-async def get_entity_service(
-    entity_repository: EntityRepositoryDep,
-    observation_repository: ObservationRepositoryDep,
-    relation_repository: RelationRepositoryDep,
-    entity_parser: EntityParserDep,
-    file_service: FileServiceDep,
-    link_resolver: LinkResolverDep,
-    search_service: SearchServiceDep,
-    session_maker: SessionMakerDep,
-    app_config: AppConfigDep,
-) -> EntityService:
-    """Create EntityService with repository."""
-    return EntityService(
-        entity_repository=entity_repository,
-        observation_repository=observation_repository,
-        relation_repository=relation_repository,
-        entity_parser=entity_parser,
-        file_service=file_service,
-        link_resolver=link_resolver,
-        session_maker=session_maker,
-        search_service=search_service,
-        app_config=app_config,
-    )
-
-
-EntityServiceDep = Annotated[EntityService, Depends(get_entity_service)]
-
-
-async def get_entity_service_v2(  # pragma: no cover
-    entity_repository: EntityRepositoryV2Dep,
-    observation_repository: ObservationRepositoryV2Dep,
-    relation_repository: RelationRepositoryV2Dep,
-    entity_parser: EntityParserV2Dep,
-    file_service: FileServiceV2Dep,
-    link_resolver: LinkResolverV2Dep,
-    search_service: SearchServiceV2Dep,
-    session_maker: SessionMakerDep,
-    app_config: AppConfigDep,
-) -> EntityService:
-    """Create EntityService for v2 API."""
-    return EntityService(
-        entity_repository=entity_repository,
-        observation_repository=observation_repository,
-        relation_repository=relation_repository,
-        entity_parser=entity_parser,
-        file_service=file_service,
-        link_resolver=link_resolver,
-        session_maker=session_maker,
-        search_service=search_service,
-        app_config=app_config,
-    )
-
-
-EntityServiceV2Dep = Annotated[EntityService, Depends(get_entity_service_v2)]
 
 
 async def get_entity_service_v2_external(
@@ -420,45 +234,6 @@ EntityServiceV2ExternalDep = Annotated[EntityService, Depends(get_entity_service
 
 
 # --- Context Service ---
-
-
-async def get_context_service(
-    search_repository: SearchRepositoryDep,
-    entity_repository: EntityRepositoryDep,
-    observation_repository: ObservationRepositoryDep,
-    link_resolver: LinkResolverDep,
-    session_maker: SessionMakerDep,
-) -> ContextService:
-    return ContextService(
-        search_repository=search_repository,
-        entity_repository=entity_repository,
-        observation_repository=observation_repository,
-        link_resolver=link_resolver,
-        session_maker=session_maker,
-    )
-
-
-ContextServiceDep = Annotated[ContextService, Depends(get_context_service)]
-
-
-async def get_context_service_v2(  # pragma: no cover
-    search_repository: SearchRepositoryV2Dep,
-    entity_repository: EntityRepositoryV2Dep,
-    observation_repository: ObservationRepositoryV2Dep,
-    link_resolver: LinkResolverV2Dep,
-    session_maker: SessionMakerDep,
-) -> ContextService:
-    """Create ContextService for v2 API."""
-    return ContextService(
-        search_repository=search_repository,
-        entity_repository=entity_repository,
-        observation_repository=observation_repository,
-        link_resolver=link_resolver,
-        session_maker=session_maker,
-    )
-
-
-ContextServiceV2Dep = Annotated[ContextService, Depends(get_context_service_v2)]
 
 
 async def get_context_service_v2_external(
@@ -750,34 +525,6 @@ ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 
 
 # --- Directory Service ---
-
-
-async def get_directory_service(
-    entity_repository: EntityRepositoryDep,
-    session_maker: SessionMakerDep,
-) -> DirectoryService:
-    """Create DirectoryService with dependencies."""
-    return DirectoryService(
-        entity_repository=entity_repository,
-        session_maker=session_maker,
-    )
-
-
-DirectoryServiceDep = Annotated[DirectoryService, Depends(get_directory_service)]
-
-
-async def get_directory_service_v2(  # pragma: no cover
-    entity_repository: EntityRepositoryV2Dep,
-    session_maker: SessionMakerDep,
-) -> DirectoryService:
-    """Create DirectoryService for v2 API (uses integer project_id from path)."""
-    return DirectoryService(
-        entity_repository=entity_repository,
-        session_maker=session_maker,
-    )
-
-
-DirectoryServiceV2Dep = Annotated[DirectoryService, Depends(get_directory_service_v2)]
 
 
 async def get_directory_service_v2_external(

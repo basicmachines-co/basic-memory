@@ -84,7 +84,7 @@ from basic_memory.models.base import Base
 from basic_memory.repository.project_repository import ProjectRepository
 from fastapi import FastAPI
 
-from basic_memory.deps import get_project_config, get_engine_factory, get_app_config
+from basic_memory.deps import get_engine_factory, get_app_config
 
 
 # Import MCP tools so they're available for testing
@@ -465,7 +465,6 @@ def app(
 
     app = fastapi_app
     previous_overrides = dict(app.dependency_overrides)
-    app.dependency_overrides[get_project_config] = lambda: project_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     app.dependency_overrides[get_app_config] = lambda: app_config
     try:

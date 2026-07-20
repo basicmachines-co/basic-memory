@@ -8,7 +8,7 @@ onnxruntime's CPU arena (which never returns memory to the OS).
 
 These tests use the *real* composition paths — ``create_embedding_provider``, the
 ``create_search_repository`` factory, and the FastAPI deps function
-``get_search_repository`` — with a real FastEmbed provider. FastEmbed loads the
+``get_search_repository_v2_external`` — with a real FastEmbed provider. FastEmbed loads the
 ONNX model lazily on first embed, so constructing providers/repositories here is
 cheap and never touches the native model.
 
@@ -28,7 +28,7 @@ from typing import cast
 import pytest
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectEntry
-from basic_memory.deps.repositories import get_search_repository
+from basic_memory.deps.repositories import get_search_repository_v2_external
 from basic_memory.repository.embedding_provider_factory import (
     create_embedding_provider,
     reset_embedding_provider_cache,
@@ -93,7 +93,7 @@ async def test_deps_path_reuses_cached_provider(tmp_path, sqlite_engine_factory)
 
     repo = cast(
         SQLiteSearchRepository,
-        await get_search_repository(
+        await get_search_repository_v2_external(
             session_maker=session_maker,
             project_id=1,
             app_config=config,
