@@ -137,8 +137,9 @@ def _capture_folder(envelopes: list[Envelope]) -> str:
 def _artifact_username() -> str:
     try:
         return getuser()
-    except OSError:
-        # Trigger: the runtime has no passwd entry for its uid.
+    except (OSError, KeyError):
+        # Trigger: the runtime has no passwd entry for its uid. Python 3.12 may
+        # raise KeyError here; Python 3.13+ normalizes the failure to OSError.
         # Why: optional provenance must never prevent queued notes from flushing.
         # Outcome: use the host-provided identity, or a stable unknown value.
         return os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"

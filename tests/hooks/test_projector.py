@@ -55,7 +55,7 @@ def test_artifact_username_falls_back_to_environment() -> None:
 
 def test_artifact_username_is_stable_when_unavailable() -> None:
     with (
-        patch("basic_memory.hooks.projector.getuser", side_effect=OSError),
+        patch("basic_memory.hooks.projector.getuser", side_effect=KeyError),
         patch.dict("os.environ", {}, clear=True),
     ):
         assert _artifact_username() == "unknown"
