@@ -17,6 +17,9 @@ verification, decision capture, and resumable checkpoints.
   decisions with rationale, alternatives, and consequences.
 - **Remember lightly.** The `bm-remember` skill saves small facts without turning
   them into a full decision or session note.
+- **Write useful memory.** The `bm-writing` skill provides one user-customizable
+  standard for the voice, narrative quality, observations, and relations used by
+  the plugin's note-writing skills.
 - **Share deliberately.** The `bm-share` skill copies personal notes to configured
   team projects only after confirmation.
 - **Report status.** The `bm-status` skill shows configuration, reachability,
@@ -35,26 +38,22 @@ verification, decision capture, and resumable checkpoints.
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
 The hook scripts carry no logic: the brief, the checkpoint, and opt-in event
-capture all live in the released `basic-memory` package behind `bm hook`. Each
-is a self-contained PEP 723 script whose inline metadata pins the released
-dependency floor uv resolves.
+capture all live in the pinned Basic Memory revision behind `bm hook`. Each is
+a self-contained PEP 723 script pinned to a Basic Memory Git ref. Both refs
+are updated together with `just set-codex-hook-version <sha-or-tag>`.
 
 ## Requirements
 
 - **[uv](https://docs.astral.sh/uv/)** — required: the hooks are PEP 723
-  scripts executed via `uv run --script`. Install per platform:
+  scripts executed via `uv run --script`, which installs their pinned Basic
+  Memory revision. Install per platform:
   - macOS: `brew install uv` (or the curl installer below)
   - Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-- [Basic Memory](https://github.com/basicmachines-co/basic-memory). `uv tool
-  install basic-memory` is recommended (a `basic-memory` binary on PATH keeps the
-  hook version consistent with your MCP server).
 
-Disclosure: uv resolves `basic-memory>=<floor>` from each script's inline
-metadata, fetching from PyPI on first run (pinned minimum version, bumped by
-release tooling); later runs use uv's cache. `BM_BIN` (a binary path or a
-quoted launcher string) overrides the uv-managed environment for development.
-Every failure path exits 0 — the hooks never disrupt a session.
+Disclosure: uv installs the pinned Basic Memory Git ref on first run and reuses
+its cache afterward. Every failure path exits 0 — the hooks never disrupt a
+session.
 
 ## Install
 
@@ -72,6 +71,10 @@ installing so Codex can load the plugin skills, MCP configuration, and hooks.
 Each repository still needs its own `.codex/basic-memory.json` so the plugin
 knows which Basic Memory project and folders to use for that checkout. Run the
 setup skill in each repo, or create the config file shown below.
+
+To customize how Codex writes memory, edit `skills/bm-writing/SKILL.md` in the
+plugin source. `bm-checkpoint`, `bm-decide`, and `bm-remember` all apply that
+shared skill while retaining their own schemas and evidence requirements.
 
 ## Configuration
 

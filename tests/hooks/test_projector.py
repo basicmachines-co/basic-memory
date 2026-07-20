@@ -50,7 +50,11 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
     _capture(event=COMPACTION_IMMINENT, ts="2026-07-15T10:05:00+00:00")
     mock_write = AsyncMock(return_value=WRITE_OK)
 
-    with patch("basic_memory.mcp.tools.write_note", mock_write):
+    with (
+        patch("basic_memory.mcp.tools.write_note", mock_write),
+        patch("basic_memory.hooks.projector.getuser", return_value="alice"),
+        patch("basic_memory.hooks.projector.gethostname", return_value="devbox"),
+    ):
         result = await flush()
 
     assert result.swept == 2
@@ -73,6 +77,8 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
     session_metadata = session_call.kwargs["metadata"]
     assert session_metadata["created_by"] == "bm-hook/claude-code"
     assert session_metadata["caused_by_event"]
+    assert session_metadata["username"] == "alice"
+    assert session_metadata["hostname"] == "devbox"
     assert session_metadata["status"] == "open"
     content = session_call.kwargs["content"]
     assert "- [source] claude-code/s-1" in content
@@ -83,6 +89,8 @@ async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
     ledger_content = ledger_call.kwargs["content"]
     assert ledger_call.kwargs["note_type"] == "tool_ledger"
     assert ledger_call.kwargs["metadata"]["created_by"] == "bm-hook/claude-code"
+    assert ledger_call.kwargs["metadata"]["username"] == "alice"
+    assert ledger_call.kwargs["metadata"]["hostname"] == "devbox"
     assert "- [event] session_started at" in ledger_content
     assert "- [source] claude-code/s-1" in ledger_content
 

@@ -34,17 +34,23 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
 
     assert not (hooks_dir / "session-start.sh").exists()
     assert not (hooks_dir / "pre-compact.sh").exists()
+    dependency_refs: set[str] = set()
     for script, verb in (
         ("session_start.py", "session-start"),
         ("pre_compact.py", "pre-compact"),
     ):
         text = (hooks_dir / script).read_text(encoding="utf-8")
         assert "# /// script" in text
-        # The PEP 723 floor must pin a released version, declared exactly once
-        # on the anchored line update_versions bumps.
-        assert re.search(r'^# dependencies = \["basic-memory>=\d[^"]*"\]$', text, re.MULTILINE)
+        refs = re.findall(
+            r'"basic-memory @ git\+https://github\.com/'
+            r'basicmachines-co/basic-memory@([^"]+)"',
+            text,
+        )
+        assert len(refs) == 1
+        dependency_refs.add(refs[0])
         assert f'VERB = "{verb}"' in text
         assert 'HARNESS = "codex"' in text
+    assert len(dependency_refs) == 1
 
 
 def test_codex_plugin_marketplace_identity() -> None:
@@ -67,6 +73,35 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "codex plugin add codex@basic-memory" in readme
     assert "Plugin installation is user-level in Codex" in readme
     assert "Each repository still needs its own `.codex/basic-memory.json`" in readme
+
+
+def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")
+    writing = (repo_root / "plugins/codex/skills/bm-writing/SKILL.md").read_text(encoding="utf-8")
+    decide = (repo_root / "plugins/codex/skills/bm-decide/SKILL.md").read_text(encoding="utf-8")
+    remember = (repo_root / "plugins/codex/skills/bm-remember/SKILL.md").read_text(encoding="utf-8")
+    schema = (repo_root / "plugins/codex/schemas/codex-session.md").read_text(encoding="utf-8")
+
+    assert ".github/basic-memory" not in skill
+    assert "Apply the `bm-writing` skill" in skill
+    assert "Apply the `bm-writing` skill" in decide
+    assert "Apply the `bm-writing` skill" in remember
+    assert "A checkpoint is a durable handoff, not a status dump" in skill
+    assert "Begin the body with `# <exact note title>`" in skill
+    assert "username: <current username>" in skill
+    assert "hostname: <current hostname>" in skill
+    assert "- `[decision]` for each decision made or preserved" in skill
+    assert "- `[next_step]` for the next concrete action" in skill
+    assert "- relates_to [[Exact existing note title]]" in skill
+    assert "Never write `[relates_to]` or a bare `memory://` URL as an observation" in skill
+    assert "\n- Decisions\n" not in skill
+    assert "username?: string" in schema
+    assert "hostname?: string" in schema
+    assert "intentionally user-customizable" in writing
+    assert "problem -> approach -> current state and impact" in writing
+    assert "- relation_type [[Target Note]]" in writing
+    assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
 
 def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:

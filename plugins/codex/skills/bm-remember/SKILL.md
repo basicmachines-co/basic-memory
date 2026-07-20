@@ -14,6 +14,9 @@ a small fact that should survive the current thread.
    - `primaryProject`, default omitted
    - `rememberFolder`, default `codex-remember`
 
+   Apply the `bm-writing` skill before drafting the note. Match its depth to this
+   lightweight capture; do not pad a small fact into an essay.
+
 2. Identify the exact text to save. If the user supplied text, preserve their
    wording. If the user said "remember that" and the referent is unclear, ask one
    short question.

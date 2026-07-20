@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from getpass import getuser
 from pathlib import Path
+from socket import gethostname
 
 from loguru import logger
 
@@ -145,6 +147,8 @@ def _artifact_metadata(first: Envelope) -> dict[str, str]:
     metadata = {
         "created_by": f"{CREATED_BY_PREFIX}/{first.source}",
         "caused_by_event": first.id,
+        "username": getuser(),
+        "hostname": gethostname(),
     }
     metadata.update(to_frontmatter_fields(first))
     return metadata

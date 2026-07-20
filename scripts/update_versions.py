@@ -96,14 +96,11 @@ def set_package_version(data: dict[str, Any], version: str) -> None:
     data["version"] = version
 
 
-# Plugin uv hook scripts whose PEP 723 metadata pins a released dependency
-# floor. The floor moves with every release so a cold `uv run --script`
-# resolves a basic-memory that actually ships the `bm hook` verbs.
+# Claude Code uv hook scripts whose released dependency floor moves with each
+# package release. Codex hook refs are managed by `just set-codex-hook-version`.
 HOOK_SCRIPTS = (
     "plugins/claude-code/hooks/session_start.py",
     "plugins/claude-code/hooks/pre_compact.py",
-    "plugins/codex/hooks/session_start.py",
-    "plugins/codex/hooks/pre_compact.py",
 )
 
 

@@ -19,6 +19,7 @@ REQUIRED_SKILLS = (
     "bm-checkpoint",
     "bm-decide",
     "bm-remember",
+    "bm-writing",
     "bm-share",
     "bm-status",
 )
@@ -42,6 +43,23 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "type=codex_session",
         "type=session",
     ),
+    "bm-checkpoint": (
+        "Apply the `bm-writing` skill",
+        "A checkpoint is a durable handoff, not a status dump",
+        "username: <current username>",
+        "hostname: <current hostname>",
+        "- `[decision]` for each decision made or preserved",
+        "## Relations",
+        "- relates_to [[Exact existing note title]]",
+        "Never write `[relates_to]`",
+    ),
+    "bm-writing": (
+        "intentionally user-customizable",
+        "problem -> approach -> current state and impact",
+        "## Preserve The Semantic Layer",
+        "- relation_type [[Target Note]]",
+        "Do not invent intent, impact, verification, decisions, or drama",
+    ),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "decision.md", "task.md")
 REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
@@ -56,6 +74,10 @@ REQUIRED_INTERFACE_ASSETS = {
     "composerIcon": "assets/app-icon.png",
     "logo": "assets/logo.png",
 }
+HOOK_DEPENDENCY_RE = re.compile(
+    r'"basic-memory @ git\+https://github\.com/'
+    r'basicmachines-co/basic-memory@([^"]+)"'
+)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -116,16 +138,19 @@ def validate_plugin(plugin_dir: Path) -> None:
     for event in REQUIRED_HOOK_EVENTS:
         if event not in hooks:
             raise SystemExit(f"hooks/hooks.json: missing {event}")
+    dependency_refs: set[str] = set()
     for rel in REQUIRED_HOOK_SCRIPTS:
         script = plugin_dir / rel
         require_path(script, "hook script")
         if not os.access(script, os.X_OK):
             raise SystemExit(f"Hook script is not executable: {script}")
         text = script.read_text(encoding="utf-8")
-        if "# /// script" not in text or not re.search(
-            r'^# dependencies = \["basic-memory>=[^"]+"\]$', text, re.MULTILINE
-        ):
-            raise SystemExit(f"Hook script missing PEP 723 basic-memory floor: {script}")
+        dependency_match = HOOK_DEPENDENCY_RE.search(text)
+        if "# /// script" not in text or dependency_match is None:
+            raise SystemExit(f"Hook script missing pinned Basic Memory Git dependency: {script}")
+        dependency_refs.add(dependency_match.group(1))
+    if len(dependency_refs) != 1:
+        raise SystemExit("Codex hook scripts must use the same Basic Memory Git ref")
 
     # --- Skills ---
     skills_root = plugin_dir / "skills"

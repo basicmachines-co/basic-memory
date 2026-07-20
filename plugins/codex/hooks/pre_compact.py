@@ -1,28 +1,18 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["basic-memory>=0.22.1"]
+# dependencies = [
+#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@6e9f2fcf5f00f3577d38a3d8b6e2f2baca3079f7",
+# ]
 # ///
-"""PreCompact hook — the entire hook. All logic (config resolution, the
-extractive Codex checkpoint, opt-in envelope capture) lives in the released
-basic-memory package behind `basic-memory hook pre-compact`; this script is
-only the launcher, and uv resolves the dependency floor declared above.
-scripts/update_versions.py bumps that floor at release time.
-
-BM_BIN overrides the uv-managed environment for development: either a path
-to a bm binary, or a POSIX-quoted launcher string like `uvx "basic-memory"`.
+"""PreCompact hook launcher backed by a pinned Basic Memory revision.
 
 Fail-open contract: a hook must never disrupt an agent session, so every
-failure path — unresolvable dependencies, a broken BM_BIN, a crash inside
-the CLI — exits 0. Codex has no project-dir env var; project mapping uses
+failure path exits 0. Codex has no project-dir env var; project mapping uses
 the payload cwd. The hook JSON on stdin passes through untouched.
 """
 
-import os
-import shlex
-import subprocess
 import sys
-from pathlib import Path
 
 VERB = "pre-compact"
 HARNESS = "codex"
@@ -33,15 +23,6 @@ def hook_args() -> list[str]:
 
 
 def main() -> None:
-    bm_bin = os.environ.get("BM_BIN", "").strip()
-    if bm_bin:
-        # An existing path (may contain spaces) stays one word; any other
-        # value is a multi-token launcher, split with shell quoting rules.
-        launcher = [bm_bin] if Path(bm_bin).exists() else shlex.split(bm_bin)
-        subprocess.run([*launcher, *hook_args()], check=False)
-        return
-    # In-process: uv already resolved basic-memory into this script's
-    # environment, so importing the CLI skips a second process spawn.
     from basic_memory.cli.main import app
 
     sys.argv = ["basic-memory", *hook_args()]

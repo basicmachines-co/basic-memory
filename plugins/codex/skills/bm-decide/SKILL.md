@@ -15,6 +15,8 @@ choice with rationale and consequences, not a casual preference.
    - follow `placementConventions` for the directory when they are specific
    - otherwise use `decisions`
 
+   Apply the `bm-writing` skill before drafting the note.
+
 2. Clarify only if the choice itself is ambiguous. Do not ask for every field if
    the conversation already contains the rationale.
 

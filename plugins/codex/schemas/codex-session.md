@@ -19,6 +19,8 @@ settings:
     ended?: string, when the session was checkpointed
     status?(enum, lifecycle of the checkpoint): [open, resumed, closed]
     cwd?: string, working directory for the Codex thread
+    username?: string, operating-system user that created the checkpoint
+    hostname?: string, host that created the checkpoint
     codex_session_id?: string, Codex session identifier
     codex_turn_id?: string, Codex turn identifier
     trigger?: string, compaction trigger or deliberate checkpoint source

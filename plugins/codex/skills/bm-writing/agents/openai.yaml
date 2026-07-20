@@ -1,0 +1,7 @@
+interface:
+  display_name: "Memory Writing"
+  short_description: "Customize how Codex writes project memory"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "Use $bm-writing to write this Basic Memory note as useful project memory."
