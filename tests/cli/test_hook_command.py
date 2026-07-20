@@ -1435,6 +1435,43 @@ def test_remove_leaves_unrecognized_structures_alone() -> None:
     assert data["hooks"]["Odd"] == "scalar"
 
 
+def test_write_hook_config_never_truncates_target_on_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The settings file is the user's whole harness config, not just our
+    # entries — a crash mid-rewrite must leave the original intact, so the
+    # write goes tmp + os.replace. Simulate the crash by failing the tmp write.
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    precious = {"model": "opus", "permissions": {"allow": ["Bash"]}}
+    path.write_text(json.dumps(precious), encoding="utf-8")
+
+    original_write_text = Path.write_text
+
+    def exploding_write_text(
+        self: Path, content: str, *args: str | None, **kwargs: str | None
+    ) -> int:
+        if self.name.endswith(".tmp"):
+            original_write_text(self, content[: len(content) // 2], *args, **kwargs)
+            raise OSError("disk full")
+        return original_write_text(self, content, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", exploding_write_text)
+
+    with pytest.raises(OSError):
+        hook_module._write_hook_config(path, {"hooks": {"replaced": True}})
+
+    assert _read_json(path) == precious
+
+
+def test_write_hook_config_leaves_no_tmp_straggler() -> None:
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    path = _claude_settings_path()
+    assert not path.with_name(path.name + ".tmp").exists()
+
+
 def test_install_then_codex_remove_does_not_touch_claude_config() -> None:
     runner.invoke(cli_app, ["hook", "install"])
 

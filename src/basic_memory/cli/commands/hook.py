@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1035,8 +1036,16 @@ def _load_hook_config(path: Path) -> dict[str, Any]:
 
 
 def _write_hook_config(path: Path, data: dict[str, Any]) -> None:
+    """Rewrite the harness config atomically (tmp + rename, like the inbox WAL).
+
+    This file is the user's entire harness config — their hooks, permissions,
+    and model choices, not just our entries. A crash mid-write must leave the
+    original intact rather than truncate it to a partial JSON document.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _uv_install_hint() -> str:
