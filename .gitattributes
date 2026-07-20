@@ -1,0 +1,6 @@
+# Shell scripts must reach every checkout with LF endings. Marketplace plugin
+# installs are git clones, and Git for Windows defaults to core.autocrlf=true;
+# a CRLF-converted hook shim makes bash exit 2 with syntax errors on every
+# session start — breaking the hooks' fail-open contract exactly where the
+# uvx fallback is meant to protect users without a local install.
+*.sh text eol=lf
