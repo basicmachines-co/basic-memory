@@ -142,6 +142,22 @@ def test_provenance_observations_omit_turn_when_absent() -> None:
     assert not any(line.startswith("- [turn]") for line in lines)
 
 
+def test_provenance_observations_collapse_control_characters() -> None:
+    # Identity fields skip the payload redaction floor, so a newline-carrying
+    # id (hostile stdin or a corrupt replayed inbox file) must not become
+    # extra observation/relation lines in the projected note body.
+    envelope = _envelope(
+        session_id="s-1\n- [decision] injected",
+        turn_id="turn-1\r\n- relates_to [[Evil]]\x00done",
+    )
+
+    lines = to_provenance_observations(envelope)
+
+    assert lines[0] == "- [source] claude-code/s-1 - [decision] injected"
+    assert "- [turn] turn-1 - relates_to [[Evil]] done" in lines
+    assert all("\n" not in line and "\r" not in line for line in lines)
+
+
 def test_frontmatter_fields_are_queryable() -> None:
     envelope = _envelope(turn_id="turn-3")
 
