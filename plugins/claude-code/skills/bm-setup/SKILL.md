@@ -99,7 +99,17 @@ Ask only what you can't infer. Cover:
 5. **Schemas.** "I'll add schemas for session checkpoints, decisions, and tasks so
    I can find them precisely later — okay?" (See "Seed the schemas" below.)
 
-6. **How active should I be? (output style)** "Want me to proactively capture —
+6. **Lifecycle-event capture.** "Should I also keep a local, redacted trail of
+   SessionStart and PreCompact events for later projection?" Default to **off**.
+   Explain that the normal session brief and PreCompact checkpoint work either
+   way; enabling this adds envelopes to a local inbox until `bm hook flush`
+   projects them. Only the JSON boolean `true` enables capture.
+   - If enabled, optionally ask for repo-specific `redactKeys` (additional payload
+     keys) and `redactPaths` (working directories or path-bearing content). The
+     built-in redaction floor still applies when these lists are empty.
+   - Capture stays local and personal. It never writes directly to team projects.
+
+7. **How active should I be? (output style)** "Want me to proactively capture —
    search the graph before recalling, write material decisions as typed notes, and
    cite permalinks? Or keep it quiet (just the session brief, the PreCompact
    checkpoint, and `/basic-memory:bm-remember` on demand)?" Enabling it sets
@@ -107,7 +117,7 @@ Ask only what you can't infer. Cover:
    low-noise setup. (This is the single knob for how proactive the assistant is —
    the hooks always run regardless.)
 
-7. **Shared skills** (optional, default yes). "Want the full Basic Memory toolkit —
+8. **Shared skills** (optional, default yes). "Want the full Basic Memory toolkit —
    the shared `memory-*` skills (`memory-notes`, `memory-tasks`, `memory-research`,
    `memory-schema`, `memory-defrag`, …)? I can install them alongside this plugin."
    These are the canonical, framework-agnostic skills (the same set OpenClaw bundles).
@@ -120,6 +130,11 @@ Ask only what you can't infer. Cover:
 The plugin ships seed schemas at `<plugin>/schemas/` — that's **two directories up
 from this skill's directory, then `schemas/`** (this skill is at
 `<plugin>/skills/bm-setup/`). Read `session.md`, `decision.md`, and `task.md` there.
+
+These schemas cover notes the Claude integration writes directly. The normalized
+`session` and `tool_ledger` artifacts written by `bm hook flush` are core-owned
+projections; their shape belongs to the core projector and its tests, not a
+duplicated per-plugin `tool_ledger` schema.
 
 For each one:
 - Check whether the chosen project already has a schema for that type
@@ -176,6 +191,9 @@ Build the `basicMemory` block from the interview:
     "rememberFolder": "bm-remember",
     "recallTimeframe": "3d",
     "preCompactCapture": "extractive",
+    "captureEvents": false,
+    "redactKeys": [],
+    "redactPaths": [],
     "placementConventions": "<learned or suggested summary, or null>",
     "teamProjects": {}
   },
@@ -186,7 +204,9 @@ Only include `outputStyle` if the user opted in. Ask whether this is a **team
 default** (write/merge into `.claude/settings.json`, suggest committing it) or
 **personal** (`.claude/settings.local.json`). **Merge** into any existing file —
 read it, add/replace only the keys above, preserve everything else. Use compact,
-valid JSON.
+valid JSON. Always persist `captureEvents` as a JSON boolean. Empty `redactKeys`
+and `redactPaths` lists may be omitted; when present, they must be JSON arrays of
+strings.
 
 Writing the `basicMemory` block is also what stops the SessionStart hook's first-run
 nudge — the config's presence is the signal that setup has run.
@@ -203,6 +223,12 @@ uses (`basic-memory` / `bm` / `uvx basic-memory`):
 - **One shared project** (only if `secondaryProjects` is non-empty): a
   `--type decision --status open` query against the first ref. It just needs to
   return *cleanly* — `0 results` is fine; an **error** means the ref doesn't route.
+- **Hook health:** run
+  `basic-memory hook status --harness claude --project-dir <project-root>` with
+  the first available `basic-memory`, `bm`, or `uvx basic-memory` launcher. It
+  must find the intended settings and report the selected project and capture
+  state. Record the shared inbox depth and last-flush state in the setup summary;
+  the counts include envelopes from every supported harness.
 
 If a query errors, or the primary returns nothing, surface it and fix the project
 ref before closing — don't let the next session's brief come up empty.
@@ -211,7 +237,8 @@ ref before closing — don't let the next session's brief come up empty.
 
 Confirm what you did in a few lines: the project mapping, which schemas were seeded
 vs. already present, whether placement was learned or suggested, the smoke-test
-result, and whether the output style is on.
+result, whether lifecycle-event capture is enabled, any extra redaction controls,
+the shared hook inbox/flush state, and whether the output style is on.
 
 Then handle activation based on the output style:
 - **Output style enabled** → it's fixed at session start, so the full capture

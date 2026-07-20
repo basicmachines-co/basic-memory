@@ -22,6 +22,27 @@ REQUIRED_SKILLS = (
     "bm-share",
     "bm-status",
 )
+REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
+    "bm-setup": (
+        "captureEvents",
+        "redactKeys",
+        "redactPaths",
+        "hook status --harness codex",
+    ),
+    "bm-status": (
+        "hook status --harness codex",
+        "pending envelopes",
+        "processed envelopes",
+        "last flush",
+        "type=codex_session",
+        "type=session",
+    ),
+    "bm-orient": (
+        "Always query both session types",
+        "type=codex_session",
+        "type=session",
+    ),
+}
 REQUIRED_SCHEMAS = ("codex-session.md", "decision.md", "task.md")
 REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
@@ -121,6 +142,10 @@ def validate_plugin(plugin_dir: Path) -> None:
             raise SystemExit(f"{skill_file}: name must match directory")
         if not frontmatter.get("description"):
             raise SystemExit(f"{skill_file}: missing description")
+        skill_text = skill_file.read_text(encoding="utf-8")
+        for required_text in REQUIRED_SKILL_TEXT.get(skill_dir.name, ()):
+            if required_text not in skill_text:
+                raise SystemExit(f"{skill_file}: missing plugin contract text {required_text!r}")
         for rel in REQUIRED_SKILL_AGENT_FILES:
             require_path(skill_dir / rel, f"skill {rel}")
 
@@ -135,6 +160,11 @@ def validate_plugin(plugin_dir: Path) -> None:
             raise SystemExit(f"{schema_file}: expected type: schema")
         if not frontmatter.get("entity"):
             raise SystemExit(f"{schema_file}: missing entity")
+
+    readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
+    for required_text in ("normalized `session`", "`tool_ledger`", "core-owned contracts"):
+        if required_text not in readme:
+            raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")
 
     print(f"validated Codex plugin in {plugin_dir}")
 

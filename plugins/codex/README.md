@@ -19,8 +19,8 @@ verification, decision capture, and resumable checkpoints.
   them into a full decision or session note.
 - **Share deliberately.** The `bm-share` skill copies personal notes to configured
   team projects only after confirmation.
-- **Report status.** The `bm-status` skill shows configuration, reachability, and
-  recent memory state.
+- **Report status.** The `bm-status` skill shows configuration, reachability,
+  shared local hook inbox/flush health, and recent memory state.
 
 ## Package Contents
 
@@ -88,6 +88,8 @@ Run the setup skill, or create `.codex/basic-memory.json` in a repo:
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
     "captureEvents": false,
+    "redactKeys": [],
+    "redactPaths": [],
     "placementConventions": "Put decisions in decisions/ and work checkpoints in codex-sessions/."
   }
 }
@@ -96,6 +98,15 @@ Run the setup skill, or create `.codex/basic-memory.json` in a repo:
 `captureEvents` is opt-in and off by default: only the JSON boolean `true`
 enables recording of redacted lifecycle-event envelopes to a local inbox under
 your Basic Memory home (`basic-memory hook status` / `basic-memory hook flush`).
+Add `redactKeys` and `redactPaths` arrays to extend the built-in redaction floor
+for repository-specific payload fields and paths.
+
+The plugin's seed schemas cover notes Codex writes directly: `codex_session`,
+`decision`, and `task`. Optional flush projection also writes normalized
+`session` and `tool_ledger` artifacts. Those are core-owned contracts implemented
+and tested with the projector, not duplicate schema files maintained by each host
+plugin. `bm-orient` and `bm-status` still recall normalized `session` notes
+alongside Codex checkpoints.
 
 Codex plugin hooks must be reviewed and trusted before they run. Open `/hooks` in
 Codex after enabling the plugin and trust the Basic Memory hook definitions.

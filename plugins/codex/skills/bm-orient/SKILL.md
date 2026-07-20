@@ -18,7 +18,12 @@ the user asks where things stand.
    - active tasks: `type=task`, `status=active`
    - open decisions: `type=decision`, `status=open`
    - recent Codex sessions: `type=codex_session`, after `recallTimeframe`
-   - recent generic sessions only if no Codex sessions are found
+   - recent core-projected sessions: `type=session`, after `recallTimeframe`
+
+   Always query both session types. Merge and deduplicate the results, sort them
+   newest first, and prefer the highest-signal checkpoint regardless of which
+   producer wrote it. `codex_session` preserves deliberate and legacy Codex
+   checkpoints; `session` carries normalized artifacts from `bm hook flush`.
 
 3. Query configured `secondaryProjects` read-only for open decisions. Do not write
    to shared projects during orientation.

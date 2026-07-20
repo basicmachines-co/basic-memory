@@ -9,6 +9,8 @@
     "recallPrompt": "You have Basic Memory available for this project. Before answering recall questions (\"what did we decide\", \"where did we leave off\"), search the graph first — prefer structured filters (search_notes with type/status). When the user makes a material decision, capture it as a note with type: decision. Cite permalinks when referencing prior work.",
     "preCompactCapture": "extractive",
     "captureEvents": false,
+    "redactKeys": [],
+    "redactPaths": [],
     "placementConventions": null,
     "teamProjects": {
       "my-team/notes": { "promoteFolder": "shared" }

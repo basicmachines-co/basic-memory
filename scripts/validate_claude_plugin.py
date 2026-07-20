@@ -29,6 +29,20 @@ REQUIRED_HOOK_SCRIPTS = ("hooks/session_start.py", "hooks/pre_compact.py")
 REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
 # Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
 REQUIRED_SKILLS = ("bm-setup", "bm-remember", "bm-status", "bm-share")
+REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
+    "bm-setup": (
+        "captureEvents",
+        "redactKeys",
+        "redactPaths",
+        "hook status --harness claude",
+    ),
+    "bm-status": (
+        "hook status --harness claude",
+        "pending envelopes",
+        "processed envelopes",
+        "last flush",
+    ),
+}
 
 
 def read_json(path: Path) -> dict:
@@ -128,6 +142,19 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
             raise SystemExit(f"{skill_dir}: skill name must match directory")
         if not frontmatter.get("description"):
             raise SystemExit(f"{skill_md}: missing description frontmatter")
+        skill_text = skill_md.read_text(encoding="utf-8")
+        for required_text in REQUIRED_SKILL_TEXT.get(skill_dir.name, ()):
+            if required_text not in skill_text:
+                raise SystemExit(f"{skill_md}: missing plugin contract text {required_text!r}")
+
+    readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
+    for required_text in (
+        "normalized `session`",
+        "`tool_ledger`",
+        "owned and tested by Basic Memory core",
+    ):
+        if required_text not in readme:
+            raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")
 
     print(f"validated Claude Code plugin in {plugin_dir}")
 

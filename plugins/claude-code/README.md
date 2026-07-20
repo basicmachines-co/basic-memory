@@ -41,7 +41,7 @@ Plugin skills are namespaced under the plugin name:
 | `/basic-memory:bm-setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, installs the shared `memory-*` skills, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
 | `/basic-memory:bm-remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
 | `/basic-memory:bm-share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
-| `/basic-memory:bm-status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, output-style state, recent session checkpoints, and active-task count. |
+| `/basic-memory:bm-status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, shared local hook inbox/flush health, recent session checkpoints, and active-task count. |
 
 ## Requirements
 
@@ -126,6 +126,14 @@ settings (or select it via `/config`).
 | `recallPrompt` | _(built-in)_ | The instruction appended to the brief |
 | `preCompactCapture` | `extractive` | How checkpoints are produced |
 | `captureEvents` | `false` | Opt-in: record redacted lifecycle-event envelopes to the local inbox (see `basic-memory hook status` / `flush`). Only the JSON boolean `true` enables it. |
+| `redactKeys` | `[]` | Additional payload keys to redact before an event enters the local inbox |
+| `redactPaths` | `[]` | Additional paths to redact from working-directory and path-bearing capture content |
+
+The plugin seeds schemas for notes the Claude integration writes directly:
+`session`, `decision`, and `task`. Optional flush projection also writes
+normalized `session` and `tool_ledger` artifacts. Those projection contracts are
+owned and tested by Basic Memory core rather than copied into separate
+host-plugin schemas.
 
 See [DESIGN.md](./DESIGN.md) for the complete configuration schema, the
 Claude-Code-project ↔ Basic-Memory-project mapping, and team-workspace behavior.

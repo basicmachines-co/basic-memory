@@ -35,6 +35,16 @@ repo, default project, current directory, or previous local state.
 - `rememberFolder`: default `codex-remember`.
 - `placementConventions`: a short note about where decisions, tasks, and research
   notes should land.
+- `captureEvents`: whether to record redacted lifecycle-event envelopes in the
+  local hook inbox. Default to `false`; SessionStart briefs and PreCompact
+  checkpoints work without it.
+- `redactKeys` and `redactPaths`: optional additions to the built-in redaction
+  floor. Ask for these only when event capture is enabled or the user has
+  repo-specific privacy requirements.
+
+Explain the capture tradeoff before asking: enabled capture adds a local,
+redacted event trail that stays queued until `bm hook flush` projects it. It does
+not write to team projects, and only the JSON boolean `true` enables it.
 
 If there are duplicate names, show qualified names and ask the user which one to
 use. Prefer qualified project names or project ids for cloud projects. Never pick
@@ -59,14 +69,21 @@ After confirming the plan, write `.codex/basic-memory.json` in the repo:
     "captureFolder": "codex-sessions",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
+    "captureEvents": false,
+    "redactKeys": [],
+    "redactPaths": [],
     "placementConventions": "<short convention>"
   }
 }
 ```
 
 Preserve unrelated keys if the file already exists. Include `projectMode` when
-the user chose cloud, local, or mixed routing. This file is intentionally
-Codex-specific; do not write `.claude/settings.json`.
+the user chose cloud, local, or mixed routing. Always persist `captureEvents` as
+a JSON boolean. Empty `redactKeys` and `redactPaths` lists may be omitted; when
+present, they must be JSON arrays of strings. `redactKeys` extends payload-key
+redaction, while `redactPaths` also protects working-directory and path-bearing
+checkpoint content. This file is intentionally Codex-specific; do not write
+`.claude/settings.json`.
 
 ## Seed Schemas
 
@@ -79,6 +96,11 @@ exist:
 - `codex-session.md`
 - `decision.md`
 - `task.md`
+
+These schemas cover notes Codex writes directly. The normalized `session` and
+`tool_ledger` artifacts written by `bm hook flush` are core-owned projections;
+their shape belongs to the core projector and its tests, not duplicated plugin
+schema files. They remain queryable by their `type` frontmatter.
 
 Use `write_note` with `directory="schemas"`, `note_type="schema"`, schema
 frontmatter as metadata, and the markdown body as content. Do not paste the YAML
@@ -94,8 +116,12 @@ Before closing, prove the mapping works:
 
 - Search the primary project for `type=schema` with page size 5.
 - Search one shared project for open decisions if shared projects were configured.
-- If either query errors, fix the project ref before finishing.
+- Run `basic-memory hook status --harness codex --project-dir <repo-root>` (using
+  `bm` or `uvx basic-memory` if needed). Confirm that it finds this repo's
+  settings, reports the selected project, and shows the intended capture state.
+  Its inbox counts are shared across harnesses.
+- If any check errors, fix the project ref or hook launcher before finishing.
 
-Finish with the project mapping, schemas seeded or skipped, and the verification
-result. Tell the user that plugin hooks need to be reviewed and trusted in Codex
-before they run.
+Finish with the project mapping, schemas seeded or skipped, capture/redaction
+choices, shared inbox status, and the verification result. Tell the user that
+plugin hooks need to be reviewed and trusted in Codex before they run.
