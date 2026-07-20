@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -1044,7 +1045,21 @@ def _write_hook_config(path: Path, data: dict[str, Any]) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    # os.replace publishes the tmp file's mode, not the target's — and these
+    # configs may be deliberately private (0600) since they hold the user's
+    # permissions and hooks. Create the tmp at the original's mode (O_CREAT's
+    # mode is umask-masked, so it is never observable wider than the original),
+    # then chmod to the exact mode since umask may have narrowed it. A missing
+    # target is a fresh install: let umask decide, as a plain write would.
+    try:
+        mode: int | None = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = None
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode if mode is not None else 0o666)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(data, indent=2) + "\n")
+    if mode is not None:
+        os.chmod(tmp, mode)
     os.replace(tmp, path)
 
 

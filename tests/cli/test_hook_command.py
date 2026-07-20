@@ -1,6 +1,8 @@
 """Tests for the `bm hook` command group (SPEC-55 front door)."""
 
 import json
+import os
+import stat
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -1440,28 +1442,52 @@ def test_write_hook_config_never_truncates_target_on_crash(
 ) -> None:
     # The settings file is the user's whole harness config, not just our
     # entries — a crash mid-rewrite must leave the original intact, so the
-    # write goes tmp + os.replace. Simulate the crash by failing the tmp write.
+    # write goes tmp + os.replace. Simulate the crash by failing the tmp
+    # write half-way through.
     path = _claude_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     precious = {"model": "opus", "permissions": {"allow": ["Bash"]}}
     path.write_text(json.dumps(precious), encoding="utf-8")
 
-    original_write_text = Path.write_text
+    original_fdopen = os.fdopen
 
-    def exploding_write_text(
-        self: Path, content: str, *args: str | None, **kwargs: str | None
-    ) -> int:
-        if self.name.endswith(".tmp"):
-            original_write_text(self, content[: len(content) // 2], *args, **kwargs)
+    class ExplodingHandle:
+        # Signature pinned to _write_hook_config's call: os.fdopen(fd, "w", encoding=...)
+        def __init__(self, fd: int, mode: str, encoding: str) -> None:
+            self._handle = original_fdopen(fd, mode, encoding=encoding)
+
+        def write(self, content: str) -> int:
+            self._handle.write(content[: len(content) // 2])
             raise OSError("disk full")
-        return original_write_text(self, content, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "write_text", exploding_write_text)
+        def __enter__(self) -> "ExplodingHandle":
+            return self
 
-    with pytest.raises(OSError):
+        def __exit__(self, *exc: object) -> None:
+            self._handle.close()
+
+    monkeypatch.setattr(os, "fdopen", ExplodingHandle)
+
+    with pytest.raises(OSError, match="disk full"):
         hook_module._write_hook_config(path, {"hooks": {"replaced": True}})
 
     assert _read_json(path) == precious
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_write_hook_config_preserves_private_mode() -> None:
+    # A user may keep their harness config private (0600); the atomic rewrite
+    # must not widen it to umask defaults via the tmp file's mode.
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+    path.chmod(0o600)
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert "SessionStart" in _read_json(path)["hooks"]
 
 
 def test_write_hook_config_leaves_no_tmp_straggler() -> None:
