@@ -1,7 +1,7 @@
 {
-  "name": "basic-memory-local",
+  "name": "basic-memory",
   "interface": {
-    "displayName": "Basic Memory Local"
+    "displayName": "Basic Memory"
   },
   "plugins": [
     {

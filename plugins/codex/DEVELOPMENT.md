@@ -15,7 +15,7 @@ The repo marketplace lives at:
 It exposes this plugin as:
 
 ```text
-codex@basic-memory-local
+codex@basic-memory
 ```
 
 The marketplace entry points at `./plugins/codex`, resolved relative to the repository root.
@@ -26,7 +26,7 @@ From the repository root:
 
 ```bash
 codex plugin marketplace add "$(git rev-parse --show-toplevel)"
-codex plugin add codex@basic-memory-local
+codex plugin add codex@basic-memory
 ```
 
 Start a new Codex thread after installing. New threads are the reliable boundary for picking up
@@ -49,7 +49,7 @@ Then update the manifest cachebuster and reinstall from the local marketplace:
 ```bash
 python3 "$CODEX_PLUGIN_CREATOR_SCRIPTS/update_plugin_cachebuster.py" \
   "$(git rev-parse --show-toplevel)/plugins/codex"
-codex plugin add codex@basic-memory-local
+codex plugin add codex@basic-memory
 ```
 
 Start a fresh Codex thread to test the updated plugin.

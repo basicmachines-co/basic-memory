@@ -62,7 +62,7 @@ Install the plugin once from the Basic Memory repository root:
 
 ```bash
 codex plugin marketplace add "$(git rev-parse --show-toplevel)"
-codex plugin add codex@basic-memory-local
+codex plugin add codex@basic-memory
 ```
 
 Plugin installation is user-level in Codex, so one install makes the plugin
