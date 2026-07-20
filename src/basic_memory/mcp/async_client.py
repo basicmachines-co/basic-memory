@@ -457,25 +457,3 @@ async def get_client(
     logger.debug("Default routing - using ASGI client for local Basic Memory API")
     async with _asgi_client(timeout) as client:
         yield client
-
-
-def create_client() -> AsyncClient:
-    """Create an HTTP client based on explicit routing flags.
-
-    DEPRECATED: Use get_client() context manager instead for proper resource management.
-    """
-    timeout = _build_timeout()
-
-    if _force_local_mode() or not _force_cloud_mode():
-        logger.info("Creating ASGI client for local Basic Memory API")
-        # Deprecated sync path: create_client() cannot await the local ASGI
-        # pre-initialization used by get_client(), so callers that need proper
-        # resource setup should use the async context manager instead.
-        from basic_memory.api.app import app as fastapi_app
-
-        return _build_asgi_client(fastapi_app, timeout)
-
-    logger.info("Creating HTTP client for cloud proxy (legacy create_client path)")
-    config = ConfigManager().config
-    proxy_base_url = f"{config.cloud_host}/proxy"
-    return AsyncClient(base_url=proxy_base_url, timeout=timeout)

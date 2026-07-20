@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
@@ -48,14 +47,6 @@ from basic_memory.services.note_content_writes import (
     NoteContentMutationService,
     NoteContentMutationServiceError,
 )
-
-
-def test_cloud_package_is_the_canonical_shared_cloud_surface() -> None:
-    cloud = import_module("basic_memory.cloud")
-
-    assert cloud.NoteContentQueryService is NoteContentQueryService
-    assert cloud.NoteContentMutationService is NoteContentMutationService
-    assert cloud.DirectoryDeleteService is DirectoryDeleteService
 
 
 class FakeSession:

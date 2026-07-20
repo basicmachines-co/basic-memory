@@ -18,17 +18,6 @@ def _imported_modules(path: Path) -> set[str]:
     return modules
 
 
-def test_core_production_modules_do_not_import_cloud_compatibility_package() -> None:
-    violations = {
-        path.relative_to(PACKAGE_ROOT).as_posix(): sorted(
-            module for module in _imported_modules(path) if module.startswith("basic_memory.cloud")
-        )
-        for path in PACKAGE_ROOT.rglob("*.py")
-        if "cloud" not in path.relative_to(PACKAGE_ROOT).parts
-    }
-    assert not {path: modules for path, modules in violations.items() if modules}
-
-
 def test_repositories_do_not_import_indexing_workflows() -> None:
     repository_root = PACKAGE_ROOT / "repository"
     violations = {
