@@ -2,11 +2,11 @@
 
 import pytest
 
-from basic_memory.schema.parser import parse_schema_note, parse_picoschema, SchemaDefinition
-from basic_memory.schema.validator import validate_note
-from basic_memory.schema.resolver import resolve_schema
+from basic_memory.picoschema.parser import parse_schema_note, parse_picoschema, SchemaDefinition
+from basic_memory.picoschema.validator import validate_note
+from basic_memory.picoschema.resolver import resolve_schema
 
-from test_schema.helpers import (
+from test_picoschema.helpers import (
     parse_frontmatter,
     parse_observations,
     parse_relations,

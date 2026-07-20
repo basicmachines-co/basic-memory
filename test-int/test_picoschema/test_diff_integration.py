@@ -2,11 +2,11 @@
 
 import pytest
 
-from basic_memory.schema.parser import parse_schema_note
-from basic_memory.schema.diff import diff_schema
-from basic_memory.schema.inference import NoteData
+from basic_memory.picoschema.parser import parse_schema_note
+from basic_memory.picoschema.diff import diff_schema
+from basic_memory.picoschema.inference import NoteData
 
-from test_schema.helpers import (
+from test_picoschema.helpers import (
     parse_frontmatter,
     parse_observations,
     parse_relations,

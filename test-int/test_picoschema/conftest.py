@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from test_schema.helpers import (
+from test_picoschema.helpers import (
     SCHEMAS_DIR,
     VALID_DIR,
     WARNINGS_DIR,

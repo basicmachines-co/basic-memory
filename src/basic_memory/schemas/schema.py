@@ -2,7 +2,7 @@
 
 These models define the API response format for schema validation,
 inference, and drift detection operations. They mirror the dataclass
-structures in basic_memory.schema but are Pydantic models suitable
+structures in basic_memory.picoschema but are Pydantic models suitable
 for API serialization.
 """
 

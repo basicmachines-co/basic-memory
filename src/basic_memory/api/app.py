@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRouter
 from loguru import logger
 
 from basic_memory import __version__ as version
@@ -20,11 +19,6 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
     schema_router as v2_schema,
-)
-from basic_memory.api.v2.routers.project_router import (
-    add_project,
-    list_projects,
-    synchronize_projects,
 )
 import logfire
 from basic_memory.index.note_content_materialization import drain_pending_materializations
@@ -141,14 +135,6 @@ app.include_router(v2_project, prefix="/v2")
 
 # Legacy web app proxy paths (compat with /proxy/projects/projects)
 app.include_router(v2_project, prefix="/proxy/projects")
-
-# Legacy v1 compat: older CLI versions (v0.18.0 and earlier) call /projects/...
-# Using router mount causes 307 redirect which proxy doesn't follow, so add explicit routes
-legacy_router = APIRouter(tags=["legacy"])
-legacy_router.add_api_route("/projects/projects", list_projects, methods=["GET"])
-legacy_router.add_api_route("/projects/projects", add_project, methods=["POST"])
-legacy_router.add_api_route("/projects/config/sync", synchronize_projects, methods=["POST"])
-app.include_router(legacy_router)
 
 # V2 routers are the only public API surface
 

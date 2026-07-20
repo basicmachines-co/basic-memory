@@ -13,13 +13,13 @@ frequencies against the declared schema fields to surface:
 
 from dataclasses import dataclass, field
 
-from basic_memory.schema.inference import (
+from basic_memory.picoschema.inference import (
     FieldFrequency,
     NoteData,
     analyze_observations,
     analyze_relations,
 )
-from basic_memory.schema.parser import SchemaDefinition
+from basic_memory.picoschema.parser import SchemaDefinition
 
 
 @dataclass

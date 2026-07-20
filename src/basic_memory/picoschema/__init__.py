@@ -4,19 +4,19 @@ Provides Picoschema-based validation for notes using observation/relation mappin
 Schemas are just notes with type: schema — no new data model, no migration.
 """
 
-from basic_memory.schema.parser import (
+from basic_memory.picoschema.parser import (
     SchemaField,
     SchemaDefinition,
     parse_picoschema,
     parse_schema_note,
 )
-from basic_memory.schema.resolver import resolve_schema
-from basic_memory.schema.validator import (
+from basic_memory.picoschema.resolver import resolve_schema
+from basic_memory.picoschema.validator import (
     FieldResult,
     ValidationResult,
     validate_note,
 )
-from basic_memory.schema.inference import (
+from basic_memory.picoschema.inference import (
     FieldFrequency,
     InferenceResult,
     ObservationData,
@@ -26,7 +26,7 @@ from basic_memory.schema.inference import (
     analyze_observations,
     analyze_relations,
 )
-from basic_memory.schema.diff import (
+from basic_memory.picoschema.diff import (
     SchemaDrift,
     diff_schema,
 )

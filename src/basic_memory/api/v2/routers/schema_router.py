@@ -32,10 +32,10 @@ from basic_memory.schemas.schema import (
     DriftFieldResponse,
     TypeValidationSummary,
 )
-from basic_memory.schema.resolver import resolve_schema
-from basic_memory.schema.validator import validate_note
-from basic_memory.schema.inference import infer_schema, NoteData, ObservationData, RelationData
-from basic_memory.schema.diff import diff_schema
+from basic_memory.picoschema.resolver import resolve_schema
+from basic_memory.picoschema.validator import validate_note
+from basic_memory.picoschema.inference import infer_schema, NoteData, ObservationData, RelationData
+from basic_memory.picoschema.diff import diff_schema
 from basic_memory.utils import generate_permalink
 
 # Note: No prefix here -- it's added during registration as /v2/{project_id}/schema

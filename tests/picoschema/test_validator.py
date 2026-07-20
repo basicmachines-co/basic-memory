@@ -1,8 +1,8 @@
-"""Tests for basic_memory.schema.validator -- note validation against schemas."""
+"""Tests for basic_memory.picoschema.validator -- note validation against schemas."""
 
-from basic_memory.schema.inference import ObservationData, RelationData
-from basic_memory.schema.parser import SchemaField, SchemaDefinition
-from basic_memory.schema.validator import validate_note
+from basic_memory.picoschema.inference import ObservationData, RelationData
+from basic_memory.picoschema.parser import SchemaField, SchemaDefinition
+from basic_memory.picoschema.validator import validate_note
 
 # Short aliases for test readability
 Obs = ObservationData

@@ -1,6 +1,6 @@
-"""Tests for basic_memory.schema.inference -- schema inference from usage patterns."""
+"""Tests for basic_memory.picoschema.inference -- schema inference from usage patterns."""
 
-from basic_memory.schema.inference import (
+from basic_memory.picoschema.inference import (
     NoteData,
     ObservationData,
     RelationData,

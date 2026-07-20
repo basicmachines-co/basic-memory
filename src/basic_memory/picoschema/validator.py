@@ -17,8 +17,8 @@ are informational, not errors -- schemas are a subset, not a straitjacket.
 
 from dataclasses import dataclass, field as dataclass_field
 
-from basic_memory.schema.inference import ObservationData, RelationData
-from basic_memory.schema.parser import SchemaDefinition, SchemaField
+from basic_memory.picoschema.inference import ObservationData, RelationData
+from basic_memory.picoschema.parser import SchemaDefinition, SchemaField
 
 
 # --- Result Data Model ---

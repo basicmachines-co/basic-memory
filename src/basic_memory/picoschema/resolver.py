@@ -13,7 +13,7 @@ data access layer.
 
 from collections.abc import Callable, Awaitable
 
-from basic_memory.schema.parser import SchemaDefinition, parse_picoschema, parse_schema_note
+from basic_memory.picoschema.parser import SchemaDefinition, parse_picoschema, parse_schema_note
 
 
 # Type alias for the search function dependency.

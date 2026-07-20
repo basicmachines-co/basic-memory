@@ -211,6 +211,7 @@ layers implement.
 - `/markdown` - Markdown parsing and processing
 - `/mcp` - MCP server + `container.py` composition root + `clients/` typed API clients
 - `/models` - SQLAlchemy ORM models
+- `/picoschema` - Picoschema parsing, resolution, validation, inference, and drift
 - `/repository` - Data access layer
 - `/schemas` - Pydantic models for validation
 - `/services` - Business logic layer

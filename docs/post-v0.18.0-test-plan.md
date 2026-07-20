@@ -56,9 +56,9 @@ These are the most important post-`v0.18.0` feature modules currently under-cove
 
 ### Existing coverage anchor points
 
-- `tests/schema/*`
+- `tests/picoschema/*`
 - `tests/api/v2/test_schema_router.py`
-- `test-int/test_schema/*`
+- `test-int/test_picoschema/*`
 
 ### Gaps to close — DONE
 
@@ -250,7 +250,7 @@ Key finding: **FastEmbed (384-d local ONNX) matches or exceeds OpenAI (1536-d) q
 
 ### Acceptance criteria
 
-- Legacy endpoints required by older CLI versions function without `405` (`GET /projects/projects`, `POST /projects/projects`, `POST /projects/config/sync`).
+- The v2 project API remains the only public project-management surface; the temporary pre-v0.18 compatibility routes were retired after their migration window.
 - Entity creation conflicts map to conflict status (not 500).
 - `recent_activity` prompt defaults are correct.
 - No spurious `metadata: {}` in serialized frontmatter.
@@ -264,7 +264,7 @@ Key finding: **FastEmbed (384-d local ONNX) matches or exceeds OpenAI (1536-d) q
 
 ### Planned additions — DONE
 
-- ~~Add API compat test covering all legacy endpoint methods and payloads.~~ **DONE** — `test_legacy_v1_add_project_endpoint`, `test_legacy_v1_sync_config_endpoint`
+- ~~Cover the temporary legacy endpoint methods during their migration window.~~ **DONE**, then retired with the routes.
 - ~~Add CLI fast-path test for `--version` import behavior/performance guard.~~ **DONE** — `test_bm_version_does_not_import_heavy_modules`
 - ~~Add empty metadata serialization regression test.~~ **DONE** — `test_schema_to_markdown_empty_metadata_no_metadata_key`
 - Add migration safety test for SQLite generated columns (`VIRTUAL` expectation) — deferred, low risk.
@@ -295,7 +295,7 @@ Run after automated tests pass.
 
 1. ~~Fill schema MCP/client/router coverage gaps.~~ **DONE** — 18 tests in `test_tool_schema.py` + `test_client_schema.py`
 2. ~~Fill semantic search MCP + Postgres repository gaps.~~ **DONE** — 20 tests in `test_postgres_search_repository_unit.py` + `test_tool_search.py`
-3. ~~Add compatibility regression tests (legacy endpoints, migration, version fast path).~~ **DONE** — 5 tests across 3 files (see below)
+3. ~~Add compatibility regression tests (migration, version fast path, and temporary legacy routes).~~ **DONE** — the legacy-route tests were later retired with those routes.
 4. ~~Add feature-level integration tests (permalinks, watch, CLI JSON, metadata filters).~~ **DONE** — 15 tests across 4 files (see items 4, 6, 7, 8 above)
 5. ~~Expand UI SDK and template branch tests.~~ **DONE** — 31 tests in `test_ui_templates.py` + `test_ui_sdk.py` + `test_ui_resources.py`
 6. ~~Run full gate and capture results in a short release readiness summary.~~ **DONE** — see results below
@@ -318,11 +318,8 @@ Run after automated tests pass.
 
 | Test | File | What it covers |
 |------|------|----------------|
-| `test_legacy_v1_add_project_endpoint` | `tests/api/v2/test_project_router.py` | POST `/projects/projects` legacy route reachable (idempotent path) |
-| `test_legacy_v1_sync_config_endpoint` | `tests/api/v2/test_project_router.py` | POST `/projects/config/sync` legacy route reachable |
 | `test_bm_version_does_not_import_heavy_modules` | `tests/cli/test_cli_exit.py` | `bm --version` fast path does not load `basic_memory.mcp` |
 | `test_schema_to_markdown_empty_metadata_no_metadata_key` | `tests/markdown/test_entity_parser_error_handling.py` | `schema_to_markdown()` with `entity_metadata={}` emits no `metadata:` key |
-| `test_legacy_v1_list_projects_endpoint` | `tests/api/v2/test_project_router.py` | (pre-existing) GET `/projects/projects` legacy route |
 
 **Suite totals after item 3: 1764 passed, 15 skipped, 0 failures.**
 
@@ -333,7 +330,7 @@ Run after automated tests pass.
 - E2E consistency: `just doctor`
 - SQLite focused: `just test-sqlite`
 - Postgres focused: `just test-postgres`
-- Schema integration: `pytest test-int/test_schema -q`
+- Schema integration: `pytest test-int/test_picoschema -q`
 - Semantic + repo focus: `pytest tests/repository/test_postgres_search_repository.py tests/mcp/test_tool_search.py tests/services/test_semantic_search.py -q`
 - MCP integration focus: `pytest test-int/mcp -q`
 

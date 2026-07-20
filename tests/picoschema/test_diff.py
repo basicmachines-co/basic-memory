@@ -1,8 +1,8 @@
-"""Tests for basic_memory.schema.diff -- schema drift detection."""
+"""Tests for basic_memory.picoschema.diff -- schema drift detection."""
 
-from basic_memory.schema.diff import SchemaDrift, diff_schema
-from basic_memory.schema.inference import NoteData, ObservationData, RelationData
-from basic_memory.schema.parser import SchemaDefinition, SchemaField
+from basic_memory.picoschema.diff import SchemaDrift, diff_schema
+from basic_memory.picoschema.inference import NoteData, ObservationData, RelationData
+from basic_memory.picoschema.parser import SchemaDefinition, SchemaField
 
 # Short aliases for test readability
 Obs = ObservationData

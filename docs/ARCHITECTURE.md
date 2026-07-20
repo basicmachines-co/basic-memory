@@ -453,6 +453,7 @@ src/basic_memory/
 │   └── importers.py          # Importer dependencies
 ├── index/                    # Local runtime adapters + WatchCoordinator
 ├── indexing/                 # Portable indexing runners and planners
+├── picoschema/               # Picoschema parsing, resolution, validation, inference, and drift
 ├── runtime/                  # RuntimeMode + runtime Protocol contracts
 ├── project_resolver.py       # Unified project selection
 └── config.py                 # Configuration management

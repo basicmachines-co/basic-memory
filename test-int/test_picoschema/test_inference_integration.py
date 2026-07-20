@@ -2,9 +2,9 @@
 
 import pytest
 
-from basic_memory.schema.inference import infer_schema, NoteData
+from basic_memory.picoschema.inference import infer_schema, NoteData
 
-from test_schema.helpers import parse_observations, parse_relations, INFERENCE_DIR
+from test_picoschema.helpers import parse_observations, parse_relations, INFERENCE_DIR
 
 
 def load_inference_notes() -> list[NoteData]:

@@ -40,7 +40,7 @@ Validation reads observations and relations from existing data.
 
 ### 1. Picoschema Parser
 
-**Location:** `src/basic_memory/schema/parser.py`
+**Location:** `src/basic_memory/picoschema/parser.py`
 
 Parses Picoschema YAML into an internal representation.
 
@@ -97,7 +97,7 @@ schema:
 
 ### 2. Schema Resolver
 
-**Location:** `src/basic_memory/schema/resolver.py`
+**Location:** `src/basic_memory/picoschema/resolver.py`
 
 Finds the applicable schema for a note using the resolution order.
 
@@ -118,7 +118,7 @@ async def resolve_schema(
 
 ### 3. Schema Validator
 
-**Location:** `src/basic_memory/schema/validator.py`
+**Location:** `src/basic_memory/picoschema/validator.py`
 
 Validates a note's observations and relations against a resolved schema.
 
@@ -161,7 +161,7 @@ async def validate_note(
 
 ### 4. Schema Inference Engine
 
-**Location:** `src/basic_memory/schema/inference.py`
+**Location:** `src/basic_memory/picoschema/inference.py`
 
 Analyzes notes of a given type and suggests a schema based on usage frequency.
 
@@ -200,7 +200,7 @@ async def infer_schema(
 
 ### 5. Schema Diff
 
-**Location:** `src/basic_memory/schema/diff.py`
+**Location:** `src/basic_memory/picoschema/diff.py`
 
 Compares current note usage against an existing schema definition.
 
@@ -304,8 +304,8 @@ architecture).
 Build the foundation — can parse Picoschema and find schemas for notes.
 
 **Deliverables:**
-- `schema/parser.py` — Picoschema YAML → `SchemaDefinition`
-- `schema/resolver.py` — Resolution order (inline → explicit ref → implicit by type → none)
+- `picoschema/parser.py` — Picoschema YAML → `SchemaDefinition`
+- `picoschema/resolver.py` — Resolution order (inline → explicit ref → implicit by type → none)
 - Unit tests for all Picoschema syntax variations
 - Unit tests for resolution order
 
@@ -317,7 +317,7 @@ in isolation.
 Connect schemas to notes and produce validation results.
 
 **Deliverables:**
-- `schema/validator.py` — Validate note observations/relations against schema fields
+- `picoschema/validator.py` — Validate note observations/relations against schema fields
 - API endpoint: `POST /schema/validate`
 - MCP tool: `schema_validate`
 - CLI command: `bm schema validate`
@@ -330,7 +330,7 @@ Connect schemas to notes and produce validation results.
 Analyze existing notes to suggest schemas.
 
 **Deliverables:**
-- `schema/inference.py` — Frequency analysis across notes of a type
+- `picoschema/inference.py` — Frequency analysis across notes of a type
 - API endpoint: `POST /schema/infer`
 - MCP tool: `schema_infer`
 - CLI command: `bm schema infer`
@@ -343,7 +343,7 @@ Analyze existing notes to suggest schemas.
 Compare schemas against current usage.
 
 **Deliverables:**
-- `schema/diff.py` — Drift detection between schema and actual notes
+- `picoschema/diff.py` — Drift detection between schema and actual notes
 - API endpoint: `GET /schema/diff/{entity_type}`
 - CLI command: `bm schema diff`
 
@@ -351,9 +351,9 @@ Compare schemas against current usage.
 
 ## Testing Strategy
 
-- **Unit tests** (`tests/schema/`): Parser edge cases, resolution logic, validation mapping,
+- **Unit tests** (`tests/picoschema/`): Parser edge cases, resolution logic, validation mapping,
   inference thresholds
-- **Integration tests** (`test-int/schema/`): End-to-end with real markdown files, schema notes
+- **Integration tests** (`test-int/test_picoschema/`): End-to-end with real markdown files, schema notes
   on disk, CLI invocation
 - Coverage target: 100% (consistent with project standard)
 
