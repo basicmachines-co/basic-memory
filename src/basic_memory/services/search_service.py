@@ -23,7 +23,7 @@ from basic_memory.repository.search_repository import (
     SearchRepository,
     VectorSyncBatchResult,
 )
-from basic_memory.repository.search_repository_base import relaxed_query_words
+from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.services import FileService
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from basic_memory.repository.search_repository_base import relaxed_query_words
+from basic_memory.repository.search_query import relaxed_query_words
 
 
 @pytest.mark.parametrize(
@@ -24,6 +24,7 @@ def test_relaxed_query_words_supports_whitespace_separated_cjk_scripts(
 @pytest.mark.parametrize(
     "query",
     [
+        "季度",
         "SPEC-16 设计",
         "foo/bar 季度",
         "季度 季度",

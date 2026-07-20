@@ -25,10 +25,8 @@ from basic_memory.models.search import (
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import (
-    SearchRepositoryBase,
-    relaxed_query_words,
-)
+from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -1101,27 +1099,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 logger.error(f"Database error during search: {e}")
                 raise
 
-        results = [
-            SearchIndexRow(
-                project_id=self.project_id,
-                id=row.id,
-                title=row.title,
-                permalink=row.permalink,
-                file_path=row.file_path,
-                type=row.type,
-                score=row.score,
-                metadata=json.loads(row.metadata) if row.metadata else {},
-                from_id=row.from_id,
-                to_id=row.to_id,
-                relation_type=row.relation_type,
-                entity_id=row.entity_id,
-                content_snippet=row.content_snippet,
-                category=row.category,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            for row in rows
-        ]
+        results = [SearchIndexRow.from_mapping(row._asdict()) for row in rows]
 
         logger.trace(f"Found {len(results)} search results")
         for r in results:

@@ -1,10 +1,11 @@
 """Search index data structures."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 from pathlib import Path
+from typing import Any, Optional
 
 from basic_memory.schemas.search import SearchItemType
 from basic_memory.utils import ensure_timezone_aware
@@ -44,6 +45,35 @@ class SearchIndexRow:
     matched_chunk_text: Optional[str] = None
 
     CONTENT_DISPLAY_LIMIT = 4000
+
+    @classmethod
+    def from_mapping(cls, row: Mapping[str, Any]) -> "SearchIndexRow":
+        """Hydrate one persisted search row from either supported database backend."""
+        metadata = row.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = json.loads(metadata) if metadata else {}
+
+        raw_score = row.get("score")
+        return cls(
+            project_id=row["project_id"],
+            id=row["id"],
+            title=row.get("title"),
+            permalink=row.get("permalink"),
+            file_path=row["file_path"],
+            type=row["type"],
+            score=float(raw_score) if raw_score is not None else None,
+            metadata=metadata,
+            from_id=row.get("from_id"),
+            to_id=row.get("to_id"),
+            to_name=row.get("to_name"),
+            relation_type=row.get("relation_type"),
+            entity_id=row.get("entity_id"),
+            content_stems=row.get("content_stems"),
+            content_snippet=row.get("content_snippet"),
+            category=row.get("category"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     def __post_init__(self) -> None:
         """Restore typed, timezone-aware datetimes from raw search query results."""
