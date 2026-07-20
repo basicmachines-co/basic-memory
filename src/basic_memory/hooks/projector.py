@@ -29,6 +29,7 @@ from basic_memory.hooks.envelope import (
     Envelope,
     SessionKey,
     envelope_from_json,
+    single_line,
     to_frontmatter_fields,
     to_provenance_observations,
 )
@@ -154,7 +155,11 @@ def _session_note(
 ) -> tuple[str, str, dict[str, str]]:
     """Derive the SessionNote skeleton (title, body, metadata) for one group."""
     first = envelopes[0]
-    title = f"Session {_session_label(session_id)} ({source})"
+    # single_line on every dynamic line: session ids and replayed envelope
+    # fields are opaque text, and an embedded newline would parse as an extra
+    # observation/relation in the projected note (same class as the
+    # provenance-observation injection fixed in to_provenance_observations).
+    title = single_line(f"Session {_session_label(session_id)} ({source})")
     metadata = _artifact_metadata(first)
     # status/open mirrors the checkpoint notes so structured recall finds both.
     metadata["status"] = "open"
@@ -166,7 +171,10 @@ def _session_note(
         "_Session skeleton projected from captured harness events by `bm hook flush`._",
         "",
         "## Events",
-        *[f"- {envelope.event} at {envelope.ts} (`{envelope.id}`)" for envelope in envelopes],
+        *[
+            single_line(f"- {envelope.event} at {envelope.ts} (`{envelope.id}`)")
+            for envelope in envelopes
+        ],
         "",
         "## Observations",
         *to_provenance_observations(first),
@@ -183,12 +191,16 @@ def _tool_ledger_note(
     entries join when PostToolUse capture lands.
     """
     first = envelopes[0]
-    title = f"Tool Ledger {_session_label(session_id)} ({source})"
+    # single_line for the same reason as _session_note: no replayed envelope
+    # field may break out of its markdown line.
+    title = single_line(f"Tool Ledger {_session_label(session_id)} ({source})")
     metadata = _artifact_metadata(first)
 
     entries = [
-        f"- [event] {envelope.event} at {envelope.ts} "
-        f"(actor: {envelope.actor}, idempotency: {envelope.idempotency_key})"
+        single_line(
+            f"- [event] {envelope.event} at {envelope.ts} "
+            f"(actor: {envelope.actor}, idempotency: {envelope.idempotency_key})"
+        )
         for envelope in envelopes
     ]
     body = [
@@ -201,7 +213,7 @@ def _tool_ledger_note(
         *entries,
         "",
         "## Observations",
-        f"- [source] {source}/{session_id}",
+        single_line(f"- [source] {source}/{session_id}"),
     ]
     return title, "\n".join(body), metadata
 

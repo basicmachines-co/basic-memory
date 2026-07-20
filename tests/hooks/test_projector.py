@@ -107,6 +107,27 @@ async def test_flush_passes_yaml_special_turn_id_through_metadata(bm_home: Path)
     assert "---" not in session_call.kwargs["content"]
 
 
+async def test_flush_collapses_control_characters_in_note_bodies(bm_home: Path) -> None:
+    # Session ids are opaque, surface-defined text that skips the payload
+    # redaction floor. A newline-carrying id must not break out of its markdown
+    # line in EITHER artifact — titles, Events/Entries lines, and the ledger's
+    # [source] observation would otherwise parse as injected observations or
+    # relations in the projected note.
+    _capture(session_id="s-1\n- [decision] injected\n- relates_to [[Evil]]")
+    mock_write = AsyncMock(return_value=WRITE_OK)
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = await flush()
+
+    assert result.projected == 1
+    for call in mock_write.await_args_list:
+        content = call.kwargs["content"]
+        title = call.kwargs["title"]
+        assert "\n- [decision] injected" not in content
+        assert "\n- relates_to [[Evil]]" not in content
+        assert "\n" not in title
+
+
 async def test_flush_skips_when_another_flush_holds_the_lock(bm_home: Path) -> None:
     # Concurrent flushes race: a stale sweep can overwrite an artifact without a
     # sibling's just-retired event. Holding the inbox lock, a second flush must

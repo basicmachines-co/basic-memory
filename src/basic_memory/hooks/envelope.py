@@ -169,12 +169,16 @@ def create_envelope(
 # --- Projections into Basic Memory artifacts ---
 
 
-def _single_line(value: str) -> str:
-    # Identity fields are opaque, surface-defined strings that skip the payload
-    # redaction floor. Collapse control characters so a hostile or corrupt id
-    # in a fresh capture or a replayed inbox file cannot smuggle extra
-    # observation/relation lines into the note body — the same injection the
-    # frontmatter path already blocks by serializing via ``metadata=``.
+def single_line(value: str) -> str:
+    """Collapse control characters so a value renders as one markdown line.
+
+    Identity fields are opaque, surface-defined strings that skip the payload
+    redaction floor. A hostile or corrupt value in a fresh capture or a
+    replayed inbox file must not smuggle extra observation/relation lines into
+    a projected note body — the same injection the frontmatter path already
+    blocks by serializing via ``metadata=``. Every dynamic line the projector
+    emits into note markdown passes through here.
+    """
     return re.sub(r"[\x00-\x1f\x7f]+", " ", value)
 
 
@@ -187,12 +191,12 @@ def to_provenance_observations(envelope: Envelope) -> list[str]:
     SPEC-55 requires on every projected artifact.
     """
     lines = [
-        f"- [source] {_single_line(envelope.source)}/{_single_line(envelope.source_session_id)}",
-        f"- [event] {_single_line(envelope.event)} at {_single_line(envelope.ts)}",
-        f"- [idempotency] {_single_line(envelope.idempotency_key)}",
+        f"- [source] {single_line(envelope.source)}/{single_line(envelope.source_session_id)}",
+        f"- [event] {single_line(envelope.event)} at {single_line(envelope.ts)}",
+        f"- [idempotency] {single_line(envelope.idempotency_key)}",
     ]
     if envelope.source_turn_id:
-        lines.append(f"- [turn] {_single_line(envelope.source_turn_id)}")
+        lines.append(f"- [turn] {single_line(envelope.source_turn_id)}")
     return lines
 
 
