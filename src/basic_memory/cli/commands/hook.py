@@ -1055,7 +1055,12 @@ def _write_hook_config(path: Path, data: dict[str, Any]) -> None:
         mode: int | None = stat.S_IMODE(path.stat().st_mode)
     except FileNotFoundError:
         mode = None
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode if mode is not None else 0o666)
+    # A stale tmp from a crashed earlier run would keep its old (possibly
+    # wider) mode through O_CREAT — the mode argument applies only at creation.
+    # Remove it and open with O_EXCL so the tmp is always freshly created at
+    # the intended mode before any private content is written into it.
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode if mode is not None else 0o666)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(data, indent=2) + "\n")
     if mode is not None:

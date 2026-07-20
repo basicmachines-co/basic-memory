@@ -5,6 +5,7 @@ import os
 import stat
 import subprocess
 from pathlib import Path
+from typing import IO, Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -1472,6 +1473,38 @@ def test_write_hook_config_never_truncates_target_on_crash(
         hook_module._write_hook_config(path, {"hooks": {"replaced": True}})
 
     assert _read_json(path) == precious
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_write_hook_config_recreates_stale_tmp_at_private_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A crashed earlier run can leave a world-readable tmp behind; the rewrite
+    # must recreate it at the target's mode rather than reuse it (O_CREAT's
+    # mode applies only at creation), or private content would land in a 0644
+    # file before the exact-mode chmod runs.
+    path = _claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+    path.chmod(0o600)
+    stale = path.with_name(path.name + ".tmp")
+    stale.write_text("junk", encoding="utf-8")
+    stale.chmod(0o644)
+
+    tmp_modes_at_open: list[int] = []
+    original_fdopen = os.fdopen
+
+    def recording_fdopen(fd: int, mode: str, encoding: str) -> IO[Any]:
+        tmp_modes_at_open.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        return original_fdopen(fd, mode, encoding=encoding)
+
+    monkeypatch.setattr(os, "fdopen", recording_fdopen)
+
+    hook_module._write_hook_config(path, {"hooks": {"SessionStart": []}})
+
+    assert tmp_modes_at_open == [0o600]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert not stale.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
