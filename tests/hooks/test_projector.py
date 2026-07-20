@@ -10,7 +10,7 @@ from basic_memory.hooks.envelope import (
     SESSION_STARTED,
     create_envelope,
 )
-from basic_memory.hooks.projector import flush, split_project_ref
+from basic_memory.hooks.projector import _artifact_username, flush, split_project_ref
 
 WRITE_OK = {"title": "x", "action": "created"}
 
@@ -43,6 +43,22 @@ def test_split_project_ref_routes_uuids_via_project_id() -> None:
         "0198f2b4-77aa-7bbf-9c2d-51e60a92d3c4",
     )
     assert split_project_ref("my-team/notes") == ("my-team/notes", None)
+
+
+def test_artifact_username_falls_back_to_environment() -> None:
+    with (
+        patch("basic_memory.hooks.projector.getuser", side_effect=OSError),
+        patch.dict("os.environ", {"USER": "ci-user"}, clear=True),
+    ):
+        assert _artifact_username() == "ci-user"
+
+
+def test_artifact_username_is_stable_when_unavailable() -> None:
+    with (
+        patch("basic_memory.hooks.projector.getuser", side_effect=OSError),
+        patch.dict("os.environ", {}, clear=True),
+    ):
+        assert _artifact_username() == "unknown"
 
 
 async def test_flush_projects_session_and_ledger(bm_home: Path) -> None:
