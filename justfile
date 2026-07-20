@@ -644,7 +644,7 @@ release version:
     # Update all package manifests to the one Basic Memory product version.
     echo "📝 Updating consolidated package versions..."
     just set-version "{{version}}"
-    just set-codex-hook-version "$(git rev-parse HEAD)"
+    just set-codex-hook-version "{{version}}"
 
     # Trigger: main's ruleset rejects direct pushes ("Changes must be made
     # through a pull request").
@@ -764,7 +764,7 @@ beta version:
     # Update all package manifests to the one Basic Memory product version.
     echo "📝 Updating consolidated package versions..."
     just set-version "{{version}}"
-    just set-codex-hook-version "$(git rev-parse HEAD)"
+    just set-codex-hook-version "{{version}}"
 
     # Trigger: main's ruleset rejects direct pushes ("Changes must be made
     # through a pull request").

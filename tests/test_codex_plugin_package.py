@@ -53,6 +53,13 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
     assert len(dependency_refs) == 1
 
 
+def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:
+    justfile = (Path(__file__).resolve().parents[1] / "justfile").read_text(encoding="utf-8")
+
+    assert justfile.count('just set-codex-hook-version "{{version}}"') == 2
+    assert 'just set-codex-hook-version "$(git rev-parse HEAD)"' not in justfile
+
+
 def test_codex_plugin_marketplace_identity() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     marketplace = json.loads(
