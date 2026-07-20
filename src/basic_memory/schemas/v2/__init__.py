@@ -21,11 +21,6 @@ from basic_memory.schemas.v2.project_index import (
     ProjectIndexResponse,
     ProjectIndexStartedResponse,
 )
-from basic_memory.schemas.v2.resource import (
-    CreateResourceRequest,
-    UpdateResourceRequest,
-    ResourceResponse,
-)
 
 __all__ = [
     "EntityResolveRequest",
@@ -43,7 +38,4 @@ __all__ = [
     "OrphanEntitiesResponse",
     "ProjectIndexResponse",
     "ProjectIndexStartedResponse",
-    "CreateResourceRequest",
-    "UpdateResourceRequest",
-    "ResourceResponse",
 ]

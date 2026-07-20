@@ -491,8 +491,7 @@ agents can pick the right one without trial-and-error:
   `delete_note`, `read_content`, `view_note`
 - **Search & discovery:** `search`, `search_notes`, `recent_activity`,
   `list_directory`
-- **Knowledge graph:** `build_context` (navigates `memory://` URLs),
-  `canvas` (Obsidian canvas generation)
+- **Knowledge graph:** `build_context` (navigates `memory://` URLs)
 - **Projects:** `list_memory_projects`, `create_memory_project`,
   `get_current_project`, `sync_status`
 - **Schema:** `schema_infer`, `schema_validate`, `schema_diff`

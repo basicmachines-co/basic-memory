@@ -25,7 +25,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "max_related",
         "output_format",
     ],
-    "canvas": ["nodes", "edges", "title", "directory", "project", "project_id"],
     "cloud_info": [],
     "create_memory_project": [
         "project_name",
@@ -152,8 +151,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "search": {"readOnlyHint": True, "destructiveHint": False},
     "search_notes": {"readOnlyHint": True, "destructiveHint": False},
     "view_note": {"readOnlyHint": True, "destructiveHint": False},
-    # canvas falls back to PUT when the file already exists, replacing its content.
-    "canvas": {"readOnlyHint": False, "destructiveHint": True},
     # create_memory_project is purely additive: it creates a new project and errors
     # if the target already exists.
     "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
@@ -190,7 +187,6 @@ EXPECTED_EDIT_NOTE_OPERATIONS = [
 TOOL_FUNCTIONS: dict[str, object] = {
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
-    "canvas": tools.canvas,
     "cloud_info": tools.cloud_info,
     "create_memory_project": tools.create_memory_project,
     "delete_note": tools.delete_note,

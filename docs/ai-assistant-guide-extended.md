@@ -2472,73 +2472,25 @@ except:
 
 ### Knowledge Graph Visualization
 
-**Create visual representation using canvas**:
+**Create visual representations with Obsidian canvas files**:
 
-```python
-# Gather entities to visualize
-auth_context = await build_context(
-    url="memory://Authentication System",
-    depth=2,
-    project="main"
-)
+Gather entities with `build_context`, then write a
+[JSON Canvas](https://jsoncanvas.org/) file (`.canvas`) into the project
+directory. Basic Memory indexes `.canvas` files as JSON, and Obsidian opens
+them for interactive exploration:
 
-# Create nodes
-nodes = [
-    {
-        "id": "auth-system",
-        "type": "file",
-        "file": "specs/authentication-system.md",
-        "x": 0,
-        "y": 0,
-        "width": 400,
-        "height": 300
-    },
-    {
-        "id": "user-db",
-        "type": "file",
-        "file": "services/user-database.md",
-        "x": 500,
-        "y": 0,
-        "width": 400,
-        "height": 300
-    },
-    {
-        "id": "login-api",
-        "type": "file",
-        "file": "api/login-api.md",
-        "x": 250,
-        "y": 400,
-        "width": 400,
-        "height": 300
-    }
-]
-
-# Create edges showing relations
-edges = [
-    {
-        "id": "edge-1",
-        "fromNode": "auth-system",
-        "toNode": "user-db",
-        "label": "requires"
-    },
-    {
-        "id": "edge-2",
-        "fromNode": "auth-system",
-        "toNode": "login-api",
-        "label": "implemented_by"
-    }
-]
-
-# Generate canvas
-canvas = await canvas(
-    nodes=nodes,
-    edges=edges,
-    title="Authentication System Overview",
-    folder="diagrams",
-    project="main"
-)
-
-# Opens in Obsidian for interactive exploration
+```json
+{
+  "nodes": [
+    {"id": "auth-system", "type": "file", "file": "specs/authentication-system.md", "x": 0, "y": 0, "width": 400, "height": 300},
+    {"id": "user-db", "type": "file", "file": "services/user-database.md", "x": 500, "y": 0, "width": 400, "height": 300},
+    {"id": "login-api", "type": "file", "file": "api/login-api.md", "x": 250, "y": 400, "width": 400, "height": 300}
+  ],
+  "edges": [
+    {"id": "edge-1", "fromNode": "auth-system", "toNode": "user-db", "label": "requires"},
+    {"id": "edge-2", "fromNode": "auth-system", "toNode": "login-api", "label": "implemented_by"}
+  ]
+}
 ```
 
 ### Progressive Knowledge Building
@@ -3088,28 +3040,6 @@ status = await sync_status(project="main")
 - Example:
 ```python
 workspaces = await list_workspaces()
-```
-
-### Visualization
-
-**canvas(nodes, edges, title, folder, project)**
-- Create Obsidian canvas
-- Parameters:
-  - `nodes` (required): List of node objects
-  - `edges` (required): List of edge objects
-  - `title` (required): Canvas title
-  - `folder` (required): Destination folder
-  - `project` (required unless default_project_mode): Target project
-- Returns: Created canvas file
-- Example:
-```python
-await canvas(
-    nodes=[{"id": "1", "type": "file", "file": "note.md", "x": 0, "y": 0}],
-    edges=[],
-    title="Graph View",
-    folder="diagrams",
-    project="main"
-)
 ```
 
 ---

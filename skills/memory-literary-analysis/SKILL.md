@@ -23,7 +23,7 @@ Phase 1: Seed          → stub notes for known major entities
 Phase 2: Process       → chapter-by-chapter notes in batches
 Phase 3: Cross-ref     → enrich arcs, add parallels, write analysis
 Phase 4: Validate      → schema checks, drift detection, consistency
-Phase 5: Visualize     → canvas files for character webs, timelines
+Phase 5: Visualize     → Obsidian canvas files for character webs, timelines
 ```
 
 ## Phase 0: Setup
@@ -451,18 +451,21 @@ Spot-check bidirectional relations: if Chapter X `features [[Character]]`, does 
 
 ## Phase 5: Visualization
 
-Generate canvas files for visual exploration:
+Write [JSON Canvas](https://jsoncanvas.org/) files (`.canvas`) into the project directory for visual exploration in Obsidian. Query the graph first (`search_notes`, `build_context`), then lay out the results as canvas nodes and edges:
 
-```python
-# Character relationship web
-canvas(query="type:Character AND role:protagonist OR role:antagonist OR role:supporting")
-
-# Theme connections
-canvas(query="type:Theme")
-
-# Chapter timeline with key events
-canvas(query="type:Chapter", layout="timeline")
+```json
+{
+  "nodes": [
+    {"id": "ahab", "type": "file", "file": "characters/captain-ahab.md", "x": 0, "y": 0, "width": 400, "height": 300},
+    {"id": "ishmael", "type": "file", "file": "characters/ishmael.md", "x": 500, "y": 0, "width": 400, "height": 300}
+  ],
+  "edges": [
+    {"id": "e1", "fromNode": "ishmael", "toNode": "ahab", "label": "narrates"}
+  ]
+}
 ```
+
+Useful canvases: character relationship web (protagonist/antagonist/supporting), theme connections, chapter timeline with key events.
 
 ## Adapting to Other Genres
 

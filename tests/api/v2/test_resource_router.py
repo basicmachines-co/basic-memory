@@ -1,61 +1,23 @@
-"""Tests for V2 resource API routes (ID-based endpoints)."""
+"""Tests for V2 resource API routes (ID-based endpoints).
+
+The v2 resource surface is read-only: markdown notes are written through the
+knowledge router's DB-first pipeline, and every other file kind arrives
+file-first through the storage-event indexing pipeline. These tests seed
+entities directly (file on disk + entity row) instead of going through an API
+write path.
+"""
+
+from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
 
 from basic_memory.models import Project
 from basic_memory import db
+from basic_memory.models.knowledge import Entity
+from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
-from basic_memory.schemas.v2.resource import ResourceResponse
-
-
-@pytest.mark.asyncio
-async def test_create_resource(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test creating a new resource via v2 POST endpoint."""
-    create_data = {
-        "file_path": "test-resources/test-file.md",
-        "content": "# Test Resource\n\nThis is test content.",
-    }
-
-    response = await client.post(
-        f"{v2_project_url}/resource",
-        json=create_data,
-    )
-
-    assert response.status_code == 200
-    result = ResourceResponse.model_validate(response.json())
-
-    # V2 must return entity_id
-    assert result.entity_id is not None
-    assert isinstance(result.entity_id, int)
-    assert result.file_path == "test-resources/test-file.md"
-    assert result.checksum is not None
-
-
-@pytest.mark.asyncio
-async def test_create_resource_duplicate_fails(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test that creating a resource at an existing path returns 409."""
-    create_data = {
-        "file_path": "duplicate-test.md",
-        "content": "First version",
-    }
-
-    # Create first time - should succeed
-    response = await client.post(f"{v2_project_url}/resource", json=create_data)
-    assert response.status_code == 200
-
-    # Try to create again - should fail with 409
-    response = await client.post(f"{v2_project_url}/resource", json=create_data)
-    assert response.status_code == 409
-    assert "already exists" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -63,25 +25,34 @@ async def test_get_resource_by_id(
     client: AsyncClient,
     test_project: Project,
     v2_project_url: str,
+    entity_repository: EntityRepository,
+    session_maker,
 ):
-    """Test getting resource content by external_id."""
-    # First create a resource
-    test_content = "# Test Resource\n\nThis is test content."
-    create_data = {
-        "file_path": "test-get.md",
-        "content": test_content,
-    }
+    """Test getting file-backed resource content by external_id."""
+    # Seed a non-markdown file so the read takes the file-read branch rather
+    # than the accepted note-content (read-repair) path.
+    test_content = "Plain text resource content."
+    file_path = "test-resources/test-get.txt"
+    disk_path = Path(test_project.path) / file_path
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
+    disk_path.write_text(test_content)
 
-    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
-    assert create_response.status_code == 200
-    created = ResourceResponse.model_validate(create_response.json())
+    entity = Entity(
+        title="test-get.txt",
+        note_type="file",
+        content_type="text/plain",
+        file_path=file_path,
+        checksum="seeded",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.add(session, entity)
 
-    # Now get it by external_id
-    response = await client.get(f"{v2_project_url}/resource/{created.external_id}")
+    response = await client.get(f"{v2_project_url}/resource/{entity.external_id}")
 
     assert response.status_code == 200
-    # Normalize line endings for cross-platform compatibility
-    assert test_content.replace("\n", "") in response.text.replace("\r\n", "").replace("\n", "")
+    assert test_content in response.text
 
 
 @pytest.mark.asyncio
@@ -138,167 +109,14 @@ async def test_get_resource_not_found(
 
 
 @pytest.mark.asyncio
-async def test_update_resource(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test updating resource content by external_id."""
-    # Create a resource
-    create_data = {
-        "file_path": "test-update.md",
-        "content": "Original content",
-    }
-    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
-    assert create_response.status_code == 200
-    created = ResourceResponse.model_validate(create_response.json())
-
-    # Update it
-    update_data = {
-        "content": "Updated content",
-    }
-    response = await client.put(
-        f"{v2_project_url}/resource/{created.external_id}",
-        json=update_data,
-    )
-
-    assert response.status_code == 200
-    result = ResourceResponse.model_validate(response.json())
-    assert result.external_id == created.external_id
-    assert result.file_path == "test-update.md"
-
-    # Verify content was updated
-    get_response = await client.get(f"{v2_project_url}/resource/{created.external_id}")
-    assert "Updated content" in get_response.text
-
-
-@pytest.mark.asyncio
-async def test_update_resource_and_move(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test updating resource content and moving it to a new path."""
-    # Create a resource
-    create_data = {
-        "file_path": "original-location.md",
-        "content": "Original content",
-    }
-    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
-    assert create_response.status_code == 200
-    created = ResourceResponse.model_validate(create_response.json())
-
-    # Update content and move file
-    update_data = {
-        "content": "Updated content in new location",
-        "file_path": "moved/new-location.md",
-    }
-    response = await client.put(
-        f"{v2_project_url}/resource/{created.external_id}",
-        json=update_data,
-    )
-
-    assert response.status_code == 200
-    result = ResourceResponse.model_validate(response.json())
-    assert result.external_id == created.external_id
-    assert result.file_path == "moved/new-location.md"
-
-    # Verify content at new location
-    get_response = await client.get(f"{v2_project_url}/resource/{created.external_id}")
-    assert "Updated content in new location" in get_response.text
-
-
-@pytest.mark.asyncio
-async def test_update_resource_not_found(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test updating a non-existent resource returns 404."""
-    fake_uuid = "00000000-0000-0000-0000-000000000000"
-    update_data = {
-        "content": "New content",
-    }
-    response = await client.put(
-        f"{v2_project_url}/resource/{fake_uuid}",
-        json=update_data,
-    )
-
-    assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_create_resource_invalid_path(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test creating a resource with path traversal attempt fails."""
-    create_data = {
-        "file_path": "../../../etc/passwd",
-        "content": "malicious content",
-    }
-
-    response = await client.post(f"{v2_project_url}/resource", json=create_data)
-
-    assert response.status_code == 400
-    assert "Invalid file path" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_update_resource_invalid_path(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test updating a resource with path traversal attempt fails."""
-    # Create a valid resource first
-    create_data = {
-        "file_path": "valid.md",
-        "content": "Valid content",
-    }
-    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
-    assert create_response.status_code == 200
-    created = ResourceResponse.model_validate(create_response.json())
-
-    # Try to move it to an invalid path
-    update_data = {
-        "content": "Updated content",
-        "file_path": "../../../etc/passwd",
-    }
-    response = await client.put(
-        f"{v2_project_url}/resource/{created.external_id}",
-        json=update_data,
-    )
-
-    assert response.status_code == 400
-    assert "Invalid file path" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
 async def test_resource_invalid_project_id(
     client: AsyncClient,
 ):
-    """Test resource endpoints with invalid project external_id return 404."""
+    """Test resource reads with invalid project external_id return 404."""
     fake_project_uuid = "00000000-0000-0000-0000-000000000000"
     fake_entity_uuid = "00000000-0000-0000-0000-000000000001"
 
-    # Test create
-    response = await client.post(
-        f"/v2/projects/{fake_project_uuid}/resource",
-        json={"file_path": "test.md", "content": "test"},
-    )
-    assert response.status_code == 404
-
-    # Test get
     response = await client.get(f"/v2/projects/{fake_project_uuid}/resource/{fake_entity_uuid}")
-    assert response.status_code == 404
-
-    # Test update
-    response = await client.put(
-        f"/v2/projects/{fake_project_uuid}/resource/{fake_entity_uuid}",
-        json={"content": "test"},
-    )
     assert response.status_code == 404
 
 
@@ -313,3 +131,31 @@ async def test_v2_resource_endpoints_use_project_id_not_name(
 
     # Should get 404 because name is not a valid project external_id
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resource_write_methods_removed(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+):
+    """The resource surface is read-only: POST/PUT must not be routable.
+
+    Guards the write invariant from the 2026-07 architecture review: no API
+    endpoint writes resource files inline (#1106).
+    """
+    fake_entity_uuid = "00000000-0000-0000-0000-000000000001"
+
+    # No route exists at POST /resource anymore, so the path itself is gone.
+    post_response = await client.post(
+        f"{v2_project_url}/resource",
+        json={"file_path": "test.md", "content": "test"},
+    )
+    assert post_response.status_code == 404
+
+    # PUT hits the GET route's path with a disallowed method.
+    put_response = await client.put(
+        f"{v2_project_url}/resource/{fake_entity_uuid}",
+        json={"content": "test"},
+    )
+    assert put_response.status_code == 405

@@ -577,7 +577,6 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
                 ["url", "timeframe", "page", "page_size", "max_related"],
                 ["uri", "memory_url", "since", "offset", "limit", "max_results", "limit_related"],
             ),
-            "canvas": (["directory"], ["folder", "dir", "path"]),
         }
 
         for tool_name, (must_have, must_not_have) in checks.items():

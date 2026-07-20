@@ -45,8 +45,7 @@ When the user runs `/project:test-live`, execute comprehensive test plan:
 16. **edit_note** (advanced modes) - Complex find/replace operations
 
 ### **Tier 4: Specialized (Rarely Test)**
-17. **canvas** - Obsidian visualization (specialized use case)
-18. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
+17. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
 
 ## Stateless Architecture Testing
 
@@ -308,13 +307,7 @@ Test essential MCP tools that form the foundation of Basic Memory:
 
 ### Phase 6: Specialized Tools Testing (Tier 4)
 
-**16. canvas Tests (Specialized):**
-- ✅ JSON Canvas generation
-- ✅ Node and edge creation
-- ✅ Obsidian compatibility
-- ⚠️ Complex graph handling
-
-**17. MCP Prompts Tests (Specialized):**
+**16. MCP Prompts Tests (Specialized):**
 - ✅ ai_assistant_guide output
 - ✅ continue_conversation functionality
 - ✅ Formatted search results

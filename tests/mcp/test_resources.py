@@ -6,7 +6,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_ai_assistant_guide_exists(app):
-    """Test that the canvas spec resource exists and returns content."""
+    """Test that the AI assistant guide resource exists and returns content."""
     # Call the resource function
     guide = ai_assistant_guide()
 
@@ -15,5 +15,4 @@ async def test_ai_assistant_guide_exists(app):
     assert isinstance(guide, str)
     assert len(guide) > 0
 
-    # Verify it contains expected sections of the Canvas spec
     assert "# AI Assistant Guide" in guide

@@ -423,9 +423,6 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
     - `create_memory_project(project_name, project_path, set_default)` - Create new Basic Memory projects
     - `delete_project(project_name)` - Delete a project from configuration
 
-  **Visualization:**
-    - `canvas(nodes, edges, title, directory)` - Generate Obsidian canvas files for knowledge graph visualization
-
   **ChatGPT-Compatible Tools:**
     - `search(query)` - Search across knowledge base (OpenAI actions compatible)
     - `fetch(id)` - Fetch full content of a search result document
