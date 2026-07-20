@@ -214,7 +214,9 @@ layers implement.
 - `/repository` - Data access layer
 - `/schemas` - Pydantic models for validation
 - `/services` - Business logic layer
-- `/sync` - File synchronization services + `coordinator.py` for lifecycle management
+- `/index` - Local runtime indexing adapters, watch service + `watch_coordinator.py` for lifecycle management
+- `/indexing` - Portable indexing runners and planners shared by local and hosted runtimes
+- `/runtime` - RuntimeMode resolution + runtime Protocol contracts
 - `/plugins/claude-code` - Claude Code plugin marketplace package, hooks, skills, and agent harness
 - `/skills` - Canonical framework-agnostic Basic Memory `SKILL.md` source
 - `/integrations/hermes` - Hermes memory-provider plugin

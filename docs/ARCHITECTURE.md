@@ -35,7 +35,8 @@ src/basic_memory/
 │   └── container.py      # McpContainer
 ├── cli/
 │   └── container.py      # CliContainer
-└── runtime.py            # RuntimeMode enum and resolver
+└── runtime/
+    └── mode.py           # RuntimeMode enum and resolver
 ```
 
 ### Container Pattern
@@ -129,29 +130,34 @@ src/basic_memory/deps/
 
 ### Usage in Routers
 
-```python
-from basic_memory.deps.services import get_entity_service
-from basic_memory.deps.projects import get_project_config
+Projects are addressed by external UUID in the URL path; there is one provider
+per service (the name-based v1 and integer-id `_v2` tiers were removed, #1109):
 
-@router.get("/entities/{id}")
+```python
+from basic_memory.deps import EntityServiceV2ExternalDep, ProjectConfigV2ExternalDep
+
+@router.get("/entities/{entity_id}")
 async def get_entity(
-    id: int,
-    entity_service: EntityService = Depends(get_entity_service),
-    project: ProjectConfig = Depends(get_project_config),
+    entity_id: str,
+    entity_service: EntityServiceV2ExternalDep,
+    project: ProjectConfigV2ExternalDep,
 ):
-    return await entity_service.get(id)
+    return await entity_service.get_by_external_id(entity_id)
 ```
 
-### Backwards Compatibility
+### Config Injection
 
-The old `deps.py` file still exists as a thin re-export shim:
+`get_app_config` resolves config from the composition root, never from a
+`ConfigManager()` read of its own:
 
-```python
-# deps.py - backwards compatibility shim
-from basic_memory.deps import *
-```
+1. API requests read the container the lifespan stored on `app.state`.
+2. Requests served without a lifespan (the CLI/MCP local ASGI flow) fall back to
+   `api.container.resolve_container()`, which returns the installed container or
+   creates a fresh one — the `ConfigManager` read stays inside
+   `ApiContainer.create()`.
 
-New code should import from specific submodules (`basic_memory.deps.services`) for clarity.
+Tests inject config by overriding the provider:
+`app.dependency_overrides[get_app_config] = lambda: app_config`.
 
 ## Runtime Package Boundaries
 
@@ -176,8 +182,6 @@ local or hosted composition roots and adapters
 - `index/` contains the local runtime's concrete adapters and composition helpers. Shared contracts
   such as project-index requests and scheduler capabilities live in neutral modules within this
   package; hosted code must not depend on `Local*` implementations.
-- `cloud/` contains compatibility exports for downstream releases. Core production modules must
-  not import from it; new downstream code imports the neutral owner directly.
 
 Accepted Markdown create, replace, and edit operations cross one public persistence boundary:
 `persist_accepted_note_snapshot`. That operation writes the entity snapshot, `NoteContent`, graph
@@ -287,41 +291,22 @@ async with get_project_client(project, context) as (client, active_project):
     ...
 ```
 
-## Sync Coordination
+## Watch Coordination
 
-### SyncCoordinator
-
-The `SyncCoordinator` centralizes sync/watch lifecycle management:
+The `WatchCoordinator` (`index/watch_coordinator.py`) owns the local event-index
+watcher lifecycle. The API composition root creates it
+(`ApiContainer.create_watch_coordinator()`), the lifespan starts and stops it, and
+`should_watch`/`skip_reason` come from the container's runtime-mode logic — watching
+is skipped in test and cloud modes and when `index_changes` is disabled.
 
 ```python
 @dataclass
-class SyncCoordinator:
-    """Coordinates file sync and watch operations."""
+class WatchCoordinator:
+    """Coordinate local event-index watcher lifecycle across entrypoints."""
 
-    status: SyncStatus = SyncStatus.NOT_STARTED
-    sync_task: asyncio.Task | None = None
-    watch_service: WatchService | None = None
-
-    async def start(self, ...):
-        """Start sync and watch operations."""
-
-    async def stop(self):
-        """Stop all sync operations gracefully."""
-
-    def get_status_info(self) -> dict:
-        """Get current sync status for observability."""
-```
-
-### Status Enum
-
-```python
-class SyncStatus(Enum):
-    NOT_STARTED = "not_started"
-    STARTING = "starting"
-    RUNNING = "running"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    ERROR = "error"
+    config: BasicMemoryConfig
+    should_watch: bool = True
+    skip_reason: str | None = None
 ```
 
 ## Project Resolution
@@ -426,19 +411,20 @@ async def my_tool():
         knowledge_client = KnowledgeClient(client, project_id)
 ```
 
-### 4. Backwards Compatibility
+### 4. Shims Are Transitional
 
-When refactoring, maintain backwards compatibility via shims:
+When refactoring, a re-export shim may bridge a move for downstream callers — but
+shims are traps for readers once callers migrate, so they must be deleted promptly
+(the 2026-07 post-seam cleanup removed `deps.py`, `basic_memory.cloud`, and
+`create_client()`, #1107). A shim ships with its removal plan:
 
 ```python
-# Old module becomes a shim
-from basic_memory.new_location import *
-
-# Docstring explains migration path
 """
 DEPRECATED: Import from basic_memory.new_location instead.
-This shim will be removed in a future version.
+Delete this shim once <downstream repo/release> has migrated.
 """
+
+from basic_memory.new_location import *
 ```
 
 ## File Organization
@@ -447,8 +433,8 @@ This shim will be removed in a future version.
 src/basic_memory/
 ├── api/
 │   ├── container.py          # API composition root
-│   ├── routers/              # FastAPI routers
-│   └── ...
+│   ├── app.py                # FastAPI app + lifespan
+│   └── v2/routers/           # v2 routers (the only public API surface)
 ├── mcp/
 │   ├── container.py          # MCP composition root
 │   ├── clients/              # Typed API clients
@@ -465,10 +451,9 @@ src/basic_memory/
 │   ├── repositories.py       # Repository dependencies
 │   ├── services.py           # Service dependencies
 │   └── importers.py          # Importer dependencies
-├── sync/
-│   ├── coordinator.py        # SyncCoordinator
-│   └── ...
-├── runtime.py                # RuntimeMode resolution
+├── index/                    # Local runtime adapters + WatchCoordinator
+├── indexing/                 # Portable indexing runners and planners
+├── runtime/                  # RuntimeMode + runtime Protocol contracts
 ├── project_resolver.py       # Unified project selection
 └── config.py                 # Configuration management
 ```
