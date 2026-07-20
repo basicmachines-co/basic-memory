@@ -191,11 +191,13 @@ async def get_link_resolver_v2_external(
     entity_repository: EntityRepositoryV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     session_maker: SessionMakerDep,
+    app_config: AppConfigDep,
 ) -> LinkResolver:
     return LinkResolver(
         entity_repository=entity_repository,
         search_service=search_service,
         session_maker=session_maker,
+        app_config=app_config,
     )
 
 

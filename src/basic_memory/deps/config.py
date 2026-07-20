@@ -1,26 +1,32 @@
 """Configuration dependency injection for basic-memory.
 
-This module provides configuration-related dependencies.
-Note: Long-term goal is to minimize direct ConfigManager access
-and inject config from composition roots instead.
+Config enters the request DI graph from the composition root: the API lifespan
+stores its container on ``app.state`` and this provider reads it back. Only
+``ApiContainer.create()`` reads ConfigManager.
 """
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
-from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig
 
 
-def get_app_config() -> BasicMemoryConfig:  # pragma: no cover
-    """Get the application configuration.
+def get_app_config(request: Request) -> BasicMemoryConfig:
+    """Resolve the application configuration from the composition root.
 
-    Note: This is a transitional dependency. The goal is for composition roots
-    to read ConfigManager and inject config explicitly. During migration,
-    this provides the same behavior as before.
+    API requests read the container the lifespan stored on ``app.state``.
+    Requests served without a lifespan (the CLI/MCP local ASGI flow) fall back
+    to the API composition root, which creates a container on demand.
     """
-    app_config = ConfigManager().config
-    return app_config
+    container = getattr(request.app.state, "container", None)
+    if container is not None:
+        return container.config
+    # Deferred import: importing basic_memory.api at module scope re-enters this
+    # package via api.app -> routers -> deps and fails as a circular import.
+    from basic_memory.api.container import resolve_container
+
+    return resolve_container().config
 
 
 AppConfigDep = Annotated[BasicMemoryConfig, Depends(get_app_config)]

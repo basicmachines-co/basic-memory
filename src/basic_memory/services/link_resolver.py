@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -86,13 +86,14 @@ class LinkResolver:
         entity_repository: EntityRepository,
         search_service: SearchService,
         session_maker: async_sessionmaker[AsyncSession],
+        app_config: BasicMemoryConfig,
     ):
-        """Initialize with repositories."""
+        """Initialize with repositories and the caller's composition-root config."""
         self.entity_repository = entity_repository
         self.search_service = search_service
         self.session_maker = session_maker
         self._project_repository = ProjectRepository()
-        self._app_config: BasicMemoryConfig = ConfigManager().config
+        self._app_config: BasicMemoryConfig = app_config
         self._project_permalink: Optional[str] = None
         self._project_cache_by_identifier: Dict[str, Project] = {}
         self._entity_repository_cache: Dict[int, EntityRepository] = {}
@@ -484,7 +485,7 @@ class LinkResolver:
             search_repository = create_search_repository(
                 self.session_maker,
                 project_id=project.id,
-                database_backend=self._app_config.database_backend,
+                app_config=self._app_config,
             )
             search_service = SearchService(
                 search_repository,

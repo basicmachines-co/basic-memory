@@ -129,6 +129,21 @@ def get_container() -> ApiContainer:
     return _container
 
 
+def resolve_container() -> ApiContainer:
+    """Return the lifespan-installed container, or a fresh one off-lifespan.
+
+    The CLI/MCP local ASGI flow serves requests without running the API
+    lifespan, so no container is installed there. Creating a fresh container
+    keeps the ConfigManager read inside the composition root. The fresh
+    container is deliberately not cached in the module global: ConfigManager
+    already caches config with mtime invalidation, and a cached container here
+    would go stale when the CLI or tests rewrite the config file.
+    """
+    if _container is not None:
+        return _container
+    return ApiContainer.create()
+
+
 def set_container(container: ApiContainer) -> None:
     """Set the API container (called by lifespan)."""
     global _container

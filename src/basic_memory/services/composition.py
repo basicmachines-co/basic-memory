@@ -73,7 +73,7 @@ def build_default_project_search_bundle(
     project_id: ProjectId,
     session_maker: async_sessionmaker[AsyncSession],
     file_service: FileService,
-    app_config: BasicMemoryConfig | None = None,
+    app_config: BasicMemoryConfig,
     database_backend: DatabaseBackend | None = None,
 ) -> BasicMemoryProjectSearchBundle:
     """Compose default project-scoped search services without entity/indexing services."""
@@ -132,6 +132,7 @@ def build_default_project_runtime_bundle(
         entity_repository=entity_repository,
         search_service=search_service,
         session_maker=session_maker,
+        app_config=app_config,
     )
 
     if entity_service_factory is None:

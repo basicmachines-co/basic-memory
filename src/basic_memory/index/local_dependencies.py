@@ -602,7 +602,7 @@ async def build_local_index_project_dependencies(
         file_service,
         session_maker,
     )
-    link_resolver = LinkResolver(entity_repository, search_service, session_maker)
+    link_resolver = LinkResolver(entity_repository, search_service, session_maker, app_config)
     entity_service = EntityService(
         entity_parser,
         entity_repository,

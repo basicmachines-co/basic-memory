@@ -107,13 +107,15 @@ async def test_entities(entity_service, file_service):
 
 
 @pytest_asyncio.fixture
-async def link_resolver(entity_repository, search_service, test_entities, session_maker):
+async def link_resolver(
+    entity_repository, search_service, test_entities, session_maker, app_config
+):
     """Create LinkResolver instance with indexed test data."""
     # Index all test entities
     for entity in test_entities:
         await search_service.index_entity(entity)
 
-    return LinkResolver(entity_repository, search_service, session_maker)
+    return LinkResolver(entity_repository, search_service, session_maker, app_config)
 
 
 @pytest.fixture
@@ -559,7 +561,7 @@ async def test_duplicate_title_handling_in_strict_mode(
 
 @pytest.mark.asyncio
 async def test_cross_project_link_resolution(
-    session_maker, entity_repository, search_service, tmp_path
+    session_maker, entity_repository, search_service, tmp_path, app_config
 ):
     """Test resolving explicit cross-project links."""
     from basic_memory.repository.project_repository import ProjectRepository
@@ -593,7 +595,7 @@ async def test_cross_project_link_resolution(
             ),
         )
 
-    resolver = LinkResolver(entity_repository, search_service, session_maker)
+    resolver = LinkResolver(entity_repository, search_service, session_maker, app_config)
     resolved = await resolver.resolve_link("other-project::Cross Project Note", strict=True)
 
     assert resolved is not None
@@ -745,7 +747,7 @@ async def context_aware_entities(entity_repository, session_maker):
 
 @pytest_asyncio.fixture
 async def context_link_resolver(
-    entity_repository, search_service, context_aware_entities, session_maker
+    entity_repository, search_service, context_aware_entities, session_maker, app_config
 ):
     """Create LinkResolver instance with context-aware test data.
 
@@ -753,7 +755,7 @@ async def context_link_resolver(
     exact title/permalink matching, not fuzzy search. The entities are
     database-only records (no files on disk).
     """
-    return LinkResolver(entity_repository, search_service, session_maker)
+    return LinkResolver(entity_repository, search_service, session_maker, app_config)
 
 
 @pytest.mark.asyncio
@@ -1006,10 +1008,10 @@ async def relative_path_entities(entity_repository, session_maker):
 
 @pytest_asyncio.fixture
 async def relative_path_resolver(
-    entity_repository, search_service, relative_path_entities, session_maker
+    entity_repository, search_service, relative_path_entities, session_maker, app_config
 ):
     """Create LinkResolver instance with relative path test data."""
-    return LinkResolver(entity_repository, search_service, session_maker)
+    return LinkResolver(entity_repository, search_service, session_maker, app_config)
 
 
 @pytest.mark.asyncio

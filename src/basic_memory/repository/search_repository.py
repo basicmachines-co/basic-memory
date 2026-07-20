@@ -12,7 +12,7 @@ from typing import Any, Callable, List, Optional, Protocol
 from sqlalchemy import Result
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
@@ -112,7 +112,7 @@ class SearchRepository(Protocol):
 def create_search_repository(
     session_maker: async_sessionmaker[AsyncSession],
     project_id: int,
-    app_config: Optional[BasicMemoryConfig] = None,
+    app_config: BasicMemoryConfig,
     database_backend: Optional[DatabaseBackend] = None,
 ) -> SearchRepository:
     """Factory function to create the appropriate search repository based on database backend.
@@ -120,16 +120,14 @@ def create_search_repository(
     Args:
         session_maker: SQLAlchemy async session maker
         project_id: Project ID for the repository
-        database_backend: Optional explicit backend. If not provided, reads from ConfigManager.
-            Prefer passing explicitly from composition roots.
+        app_config: Application config from the caller's composition root; backend
+            detection and the shared embedding provider both derive from it
+        database_backend: Optional explicit backend override
 
     Returns:
         SearchRepository: Backend-appropriate search repository instance
     """
-    # Resolve config once so backend detection and the shared embedding provider
-    # come from the same source. Prefer the explicit arg; fall back to ConfigManager
-    # for backwards compatibility.
-    config = app_config or ConfigManager().config
+    config = app_config
     if database_backend is None:
         database_backend = config.database_backend
 

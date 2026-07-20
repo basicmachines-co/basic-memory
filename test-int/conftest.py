@@ -492,7 +492,9 @@ async def search_service(engine_factory, test_project, app_config):
     _, session_maker = engine_factory
 
     # Use factory function to create appropriate search repository
-    search_repository = create_search_repository(session_maker, project_id=test_project.id)
+    search_repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
 
     entity_repository = EntityRepository(project_id=test_project.id)
 

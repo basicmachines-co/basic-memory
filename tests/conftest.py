@@ -528,9 +528,12 @@ def link_resolver(
     entity_repository: EntityRepository,
     search_service: SearchService,
     session_maker: async_sessionmaker[AsyncSession],
+    app_config: BasicMemoryConfig,
 ):
     """Create parser instance."""
-    return LinkResolver(entity_repository, search_service, session_maker=session_maker)
+    return LinkResolver(
+        entity_repository, search_service, session_maker=session_maker, app_config=app_config
+    )
 
 
 @pytest.fixture
