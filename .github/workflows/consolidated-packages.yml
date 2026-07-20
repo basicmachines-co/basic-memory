@@ -44,6 +44,19 @@ jobs:
       - name: Verify shared version dry run
         run: just release-dry-run v0.99.0
 
+  codex:
+    name: Codex plugin
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v4
+
+      - name: Validate manifest, hooks, skills, MCP config, and schemas
+        run: just --justfile plugins/codex/justfile --working-directory plugins/codex check
+
   skills:
     name: Shared skills
     permissions:
