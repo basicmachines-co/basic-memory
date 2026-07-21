@@ -3,6 +3,7 @@
 import asyncio
 import ast
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
@@ -406,6 +407,16 @@ class SearchService:
             background_tasks.add_task(self.index_entity_data, entity, content)
         else:
             await self.index_entity_data(entity, content)
+
+    async def index_entities(self, entities: Sequence[Entity]) -> None:
+        """Refresh a group of entity search rows through one batch entry point.
+
+        Index writes stay sequential because local SQLite connections cannot
+        safely run these mutations concurrently. Callers still avoid reopening
+        repository sessions and dispatching one indexing API call per entity.
+        """
+        for entity in entities:
+            await self.index_entity_data(entity)
 
     async def index_entity_data(
         self,

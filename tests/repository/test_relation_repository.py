@@ -11,6 +11,8 @@ from basic_memory.models import Entity, Project, Relation
 from basic_memory.repository.relation_repository import (
     AcceptedRelationWrite,
     RelationRepository,
+    ResolvedRelationWrite,
+    ResolvedRelationWriteResult,
 )
 
 
@@ -701,3 +703,99 @@ async def test_replace_accepted_outgoing_relations_clears_when_empty(
         )
 
     assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    related_entity: Entity,
+    test_project: Project,
+    session_maker,
+):
+    """Canonical targets update together while redundant resolved edges are removed."""
+    accepted_target = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name="Target Alias",
+        relation_type="documents",
+    )
+    accepted_related = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name="Related Alias",
+        relation_type="references",
+    )
+    existing_edge = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=target_entity.id,
+        to_name=target_entity.title,
+        relation_type="links_to",
+    )
+    redundant_unresolved = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name="Duplicate Target Alias",
+        relation_type="links_to",
+    )
+    async with db.scoped_session(session_maker) as session:
+        session.add_all([accepted_target, accepted_related, existing_edge, redundant_unresolved])
+        await session.flush()
+        accepted_target_id = accepted_target.id
+        accepted_related_id = accepted_related.id
+        redundant_unresolved_id = redundant_unresolved.id
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.apply_resolved_targets(
+            session,
+            [
+                ResolvedRelationWrite(
+                    relation_id=accepted_related_id,
+                    from_id=source_entity.id,
+                    target_id=related_entity.id,
+                    target_name=related_entity.title,
+                    relation_type="references",
+                ),
+                ResolvedRelationWrite(
+                    relation_id=redundant_unresolved_id,
+                    from_id=source_entity.id,
+                    target_id=target_entity.id,
+                    target_name=target_entity.title,
+                    relation_type="links_to",
+                ),
+                ResolvedRelationWrite(
+                    relation_id=accepted_target_id,
+                    from_id=source_entity.id,
+                    target_id=target_entity.id,
+                    target_name=target_entity.title,
+                    relation_type="documents",
+                ),
+            ],
+        )
+
+    assert result == ResolvedRelationWriteResult(
+        affected_entity_ids=frozenset({source_entity.id}),
+        duplicate_relation_ids=(redundant_unresolved_id,),
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        documents = await relation_repository.find_by_type(session, "documents")
+        references = await relation_repository.find_by_type(session, "references")
+        links = await relation_repository.find_by_type(session, "links_to")
+        redundant = await relation_repository.find_by_id(session, redundant_unresolved_id)
+
+    assert [(relation.to_id, relation.to_name) for relation in documents] == [
+        (target_entity.id, target_entity.title)
+    ]
+    assert [(relation.to_id, relation.to_name) for relation in references] == [
+        (related_entity.id, related_entity.title)
+    ]
+    assert [(relation.to_id, relation.to_name) for relation in links] == [
+        (target_entity.id, target_entity.title)
+    ]
+    assert redundant is None

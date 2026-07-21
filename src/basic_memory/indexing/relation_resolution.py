@@ -9,12 +9,15 @@ from typing import Protocol
 
 import logfire
 from loguru import logger
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.models import IndexFileJobStatus
-from basic_memory.models import Entity, Relation
+from basic_memory.models import Entity
+from basic_memory.repository.relation_repository import (
+    ResolvedRelationWrite,
+    ResolvedRelationWriteResult,
+)
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
@@ -63,21 +66,12 @@ class RelationResolutionRelationRepository(Protocol):
     ) -> Sequence[UnresolvedRelation]:
         """Return unresolved relations for one source entity."""
 
-    # Positional-only parameters: the concrete implementation is the generic
-    # model repository, whose parameters are named for entities. `/` lets this
-    # contract name the relation id honestly without renaming the shared
-    # repository method.
-    async def update(
+    async def apply_resolved_targets(
         self,
         session: AsyncSession,
-        relation_id: int,
-        resolved_target_fields: dict[str, int | str],
-        /,
-    ) -> Relation | None:
-        """Apply resolved target fields (to_id, to_name) to one relation row."""
-
-    async def delete(self, session: AsyncSession, relation_id: int, /) -> bool:
-        """Delete one redundant unresolved relation row."""
+        writes: Sequence[ResolvedRelationWrite],
+    ) -> ResolvedRelationWriteResult:
+        """Apply canonical targets and remove duplicate edges as one batch."""
 
 
 class RelationResolutionEntityRepository(Protocol):
@@ -85,6 +79,17 @@ class RelationResolutionEntityRepository(Protocol):
 
     async def find_by_id(self, session: AsyncSession, entity_id: EntityId) -> Entity | None:
         """Return one source entity by database id."""
+
+
+class BatchRelationResolutionEntityRepository(Protocol):
+    """Repository capability for loading an affected source-entity batch."""
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[EntityId],
+    ) -> Sequence[Entity]:
+        """Return source entities by database id."""
 
 
 class RelationResolutionLinkResolver(Protocol):
@@ -107,15 +112,22 @@ class RelationResolutionEntityIndexer(Protocol):
         """Refresh derived index rows for one entity."""
 
 
+class BatchRelationResolutionEntityIndexer(Protocol):
+    """Capability for refreshing a batch of derived entity search rows."""
+
+    async def index_entities(self, entities: Sequence[Entity]) -> None:
+        """Refresh derived index rows for a group of entities."""
+
+
 @dataclass(frozen=True, slots=True)
 class RepositoryRelationResolutionRuntime:
     """Resolve forward references with project-scoped repositories and services."""
 
     session_maker: async_sessionmaker[AsyncSession]
     relation_repository: RelationResolutionRelationRepository
-    entity_repository: RelationResolutionEntityRepository
+    entity_repository: BatchRelationResolutionEntityRepository
     link_resolver: RelationResolutionLinkResolver
-    entity_indexer: RelationResolutionEntityIndexer
+    entity_indexer: BatchRelationResolutionEntityIndexer
 
     async def count_unresolved_relations(self) -> int:
         """Return the current unresolved relation count for this project."""
@@ -127,6 +139,7 @@ class RepositoryRelationResolutionRuntime:
         entity_id: EntityId | None = None,
     ) -> AffectedEntityIds:
         """Resolve visible forward references and refresh affected entities."""
+        resolved_targets_by_link_text: dict[str, ResolvedRelationTarget | None] = {}
         async with db.scoped_session(self.session_maker) as session:
             if entity_id is None:
                 unresolved_relations = await self.relation_repository.find_unresolved_relations(
@@ -145,64 +158,66 @@ class RepositoryRelationResolutionRuntime:
                     count=len(unresolved_relations),
                 )
 
-        affected_entity_ids: AffectedEntityIds = set()
-
-        for relation in unresolved_relations:
-            logger.trace(
-                "Attempting to resolve relation "
-                f"relation_id={relation.id} "
-                f"from_id={relation.from_id} "
-                f"to_name={relation.to_name}"
-            )
-            async with db.scoped_session(self.session_maker) as session:
-                resolved_entity = await self.link_resolver.resolve_link(
-                    relation.to_name,
-                    strict=True,
-                    session=session,
+            writes: list[ResolvedRelationWrite] = []
+            for relation in unresolved_relations:
+                logger.trace(
+                    "Attempting to resolve relation "
+                    f"relation_id={relation.id} "
+                    f"from_id={relation.from_id} "
+                    f"to_name={relation.to_name}"
                 )
-
-            if resolved_entity is None or resolved_entity.id == relation.from_id:
-                continue
-
-            logger.debug(
-                "Resolved forward reference "
-                f"relation_id={relation.id} "
-                f"from_id={relation.from_id} "
-                f"to_name={relation.to_name} "
-                f"resolved_id={resolved_entity.id} "
-                f"resolved_title={resolved_entity.title}",
-            )
-            try:
-                async with db.scoped_session(self.session_maker) as session:
-                    await self.relation_repository.update(
-                        session,
-                        relation.id,
-                        {
-                            "to_id": resolved_entity.id,
-                            "to_name": resolved_entity.title,
-                        },
+                if relation.to_name not in resolved_targets_by_link_text:
+                    resolved_targets_by_link_text[
+                        relation.to_name
+                    ] = await self.link_resolver.resolve_link(
+                        relation.to_name,
+                        strict=True,
+                        session=session,
                     )
-            except IntegrityError:
-                with logfire.span(
-                    "indexing.relation.resolve_conflict",
-                    relation_id=relation.id,
-                    relation_type=relation.relation_type,
-                ):
-                    # Another resolved row already represents this edge. Remove
-                    # the redundant unresolved row so future passes do not keep
-                    # retrying the same conflict.
-                    async with db.scoped_session(self.session_maker) as session:
-                        await self.relation_repository.delete(session, relation.id)
-            affected_entity_ids.add(relation.from_id)
+                resolved_entity = resolved_targets_by_link_text[relation.to_name]
+                if resolved_entity is None or resolved_entity.id == relation.from_id:
+                    continue
 
-        for affected_entity_id in sorted(affected_entity_ids):
-            async with db.scoped_session(self.session_maker) as session:
-                source_entity = await self.entity_repository.find_by_id(
-                    session,
-                    affected_entity_id,
+                logger.debug(
+                    "Resolved forward reference "
+                    f"relation_id={relation.id} "
+                    f"from_id={relation.from_id} "
+                    f"to_name={relation.to_name} "
+                    f"resolved_id={resolved_entity.id} "
+                    f"resolved_title={resolved_entity.title}",
                 )
-            if source_entity is not None:
-                await self.entity_indexer.index_entity(source_entity)
+                writes.append(
+                    ResolvedRelationWrite(
+                        relation_id=relation.id,
+                        from_id=relation.from_id,
+                        target_id=resolved_entity.id,
+                        target_name=resolved_entity.title,
+                        relation_type=relation.relation_type,
+                    )
+                )
+            write_result = await self.relation_repository.apply_resolved_targets(session, writes)
+
+        affected_entity_ids: AffectedEntityIds = set(write_result.affected_entity_ids)
+        if write_result.duplicate_relation_ids:
+            with logfire.span(
+                "indexing.relation.resolve_conflicts",
+                relation_ids=write_result.duplicate_relation_ids,
+                conflict_count=len(write_result.duplicate_relation_ids),
+            ):
+                logger.debug(
+                    "Removed redundant unresolved relations",
+                    relation_ids=write_result.duplicate_relation_ids,
+                )
+
+        if affected_entity_ids:
+            async with db.scoped_session(self.session_maker) as session:
+                source_entities = await self.entity_repository.find_by_ids(
+                    session,
+                    sorted(affected_entity_ids),
+                )
+            await self.entity_indexer.index_entities(
+                sorted(source_entities, key=lambda entity: entity.id)
+            )
 
         return affected_entity_ids
 

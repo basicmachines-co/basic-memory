@@ -45,6 +45,8 @@ from basic_memory.indexing.models import (
 )
 from basic_memory.indexing.orphan_cleanup import OrphanEntityRepository, OrphanSearchIndex
 from basic_memory.indexing.relation_resolution import (
+    BatchRelationResolutionEntityIndexer,
+    BatchRelationResolutionEntityRepository,
     RelationResolutionEntityIndexer,
     RelationResolutionEntityRepository,
     RelationResolutionLinkResolver,
@@ -110,6 +112,7 @@ class LocalIndexEntityRepository(
     IndexedFileChecksumRepository,
     CurrentMaterializedNoteEntityRepository,
     OrphanEntityRepository[Entity],
+    BatchRelationResolutionEntityRepository,
     RelationResolutionEntityRepository,
     Protocol,
 ):
@@ -163,6 +166,7 @@ class LocalIndexEntityRepository(
 
 class LocalIndexSearchService(
     OrphanSearchIndex[Entity],
+    BatchRelationResolutionEntityIndexer,
     RelationResolutionEntityIndexer,
     Protocol,
 ):

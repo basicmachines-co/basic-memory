@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Sequence, List, Optional, Any, cast
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, case, delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -29,6 +29,25 @@ class AcceptedRelationWrite:
     target_name: str
     context: str | None
     target_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedRelationWrite:
+    """One unresolved relation with its canonical resolved target."""
+
+    relation_id: int
+    from_id: int
+    target_id: int
+    target_name: str
+    relation_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedRelationWriteResult:
+    """Outcome of applying one set of resolved relation targets."""
+
+    affected_entity_ids: frozenset[int]
+    duplicate_relation_ids: tuple[int, ...]
 
 
 class RelationRepository(Repository[Relation]):
@@ -114,6 +133,120 @@ class RelationRepository(Repository[Relation]):
         query = self.select().filter(Relation.from_id == entity_id, Relation.to_id.is_(None))
         result = await self.execute_query(session, query)
         return result.scalars().all()
+
+    async def apply_resolved_targets(
+        self,
+        session: AsyncSession,
+        writes: Sequence[ResolvedRelationWrite],
+    ) -> ResolvedRelationWriteResult:
+        """Resolve relation targets in one transaction without duplicate edges.
+
+        Both relation uniqueness constraints can collide when aliases resolve to
+        the same canonical entity. The old row-at-a-time path handled that by
+        deleting the later unresolved row after an ``IntegrityError``. Planning
+        the accepted and redundant rows up front preserves that behavior while
+        allowing the mutations to run as set-based statements.
+        """
+        if not writes:
+            return ResolvedRelationWriteResult(frozenset(), ())
+
+        ordered_writes = sorted(writes, key=lambda write: write.relation_id)
+        relation_ids = {write.relation_id for write in ordered_writes}
+        source_entity_ids = {write.from_id for write in ordered_writes}
+        result = await session.execute(
+            select(
+                Relation.id,
+                Relation.from_id,
+                Relation.to_id,
+                Relation.to_name,
+                Relation.relation_type,
+            ).where(
+                Relation.project_id == self.project_id,
+                Relation.from_id.in_(source_entity_ids),
+            )
+        )
+        existing_relations = result.tuples().all()
+
+        occupied_target_keys: set[tuple[int, int, str]] = set()
+        occupied_name_keys: set[tuple[int, str, str]] = set()
+        all_name_keys: set[tuple[int, str, str]] = set()
+        for relation_id, from_id, to_id, to_name, relation_type in existing_relations:
+            name_key = (from_id, to_name, relation_type)
+            all_name_keys.add(name_key)
+            if relation_id in relation_ids:
+                continue
+            occupied_name_keys.add(name_key)
+            if to_id is not None:
+                occupied_target_keys.add((from_id, to_id, relation_type))
+
+        accepted_writes: list[ResolvedRelationWrite] = []
+        duplicate_relation_ids: list[int] = []
+        for write in ordered_writes:
+            target_key = (write.from_id, write.target_id, write.relation_type)
+            name_key = (write.from_id, write.target_name, write.relation_type)
+            if target_key in occupied_target_keys or name_key in occupied_name_keys:
+                duplicate_relation_ids.append(write.relation_id)
+                continue
+            accepted_writes.append(write)
+            occupied_target_keys.add(target_key)
+            occupied_name_keys.add(name_key)
+
+        if duplicate_relation_ids:
+            await session.execute(
+                delete(Relation).where(
+                    Relation.project_id == self.project_id,
+                    Relation.id.in_(duplicate_relation_ids),
+                )
+            )
+
+        if accepted_writes:
+            accepted_relation_ids = [write.relation_id for write in accepted_writes]
+            temporary_names_by_relation_id: dict[int, str] = {}
+            for write in accepted_writes:
+                temporary_name = f"__basic_memory_resolving_relation_{write.relation_id}__"
+                while (write.from_id, temporary_name, write.relation_type) in all_name_keys:
+                    temporary_name += "_"
+                temporary_names_by_relation_id[write.relation_id] = temporary_name
+                all_name_keys.add((write.from_id, temporary_name, write.relation_type))
+
+            # Clear both unique keys before assigning canonical targets. This
+            # makes alias swaps safe on databases that check uniqueness row by
+            # row inside a multi-row UPDATE.
+            await session.execute(
+                update(Relation)
+                .where(
+                    Relation.project_id == self.project_id,
+                    Relation.id.in_(accepted_relation_ids),
+                )
+                .values(
+                    to_id=None,
+                    to_name=case(temporary_names_by_relation_id, value=Relation.id),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await session.execute(
+                update(Relation)
+                .where(
+                    Relation.project_id == self.project_id,
+                    Relation.id.in_(accepted_relation_ids),
+                )
+                .values(
+                    to_id=case(
+                        {write.relation_id: write.target_id for write in accepted_writes},
+                        value=Relation.id,
+                    ),
+                    to_name=case(
+                        {write.relation_id: write.target_name for write in accepted_writes},
+                        value=Relation.id,
+                    ),
+                )
+                .execution_options(synchronize_session=False)
+            )
+
+        return ResolvedRelationWriteResult(
+            affected_entity_ids=frozenset(source_entity_ids),
+            duplicate_relation_ids=tuple(duplicate_relation_ids),
+        )
 
     async def add_all_ignore_duplicates(
         self, session: AsyncSession, relations: List[Relation]

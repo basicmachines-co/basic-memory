@@ -61,6 +61,10 @@ from basic_memory.indexing.relation_resolution import (
 from basic_memory.models import Entity, Project, Relation
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.relation_repository import (
+    ResolvedRelationWrite,
+    ResolvedRelationWriteResult,
+)
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
@@ -2445,6 +2449,9 @@ class RuntimeFactorySearchIndex:
     async def index_entity(self, entity: Entity) -> None:
         return None
 
+    async def index_entities(self, entities: Sequence[Entity]) -> None:
+        return None
+
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
@@ -2485,6 +2492,16 @@ class RuntimeFactoryRelationRepository:
 
     async def delete(self, session: AsyncSession, relation_id: int, /) -> bool:
         return False
+
+    async def apply_resolved_targets(
+        self,
+        session: AsyncSession,
+        writes: Sequence[ResolvedRelationWrite],
+    ) -> ResolvedRelationWriteResult:
+        return ResolvedRelationWriteResult(
+            affected_entity_ids=frozenset(write.from_id for write in writes),
+            duplicate_relation_ids=(),
+        )
 
 
 class RuntimeFactoryLinkResolver:
