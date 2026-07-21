@@ -19,6 +19,7 @@ from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
     embedding_provider_identity,
 )
+from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_chunking import (
     SemanticSourceRow,
@@ -29,6 +30,7 @@ from basic_memory.repository.semantic_chunking import (
     split_text_into_chunks,
 )
 from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
@@ -45,6 +47,10 @@ from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 # --- Semantic search constants ---
 
 VECTOR_FILTER_SCAN_LIMIT = 50000
+# Over-fetch factor for the rerank candidate chunk pool: chunks collapse to unique
+# (type, id) rows before reranking, so fetch several times reranker_candidates chunks
+# to keep enough unique documents in the rerank window.
+RERANK_POOL_CHUNK_FANOUT = 4
 FUSION_BONUS = 0.3
 FTS_GATE_THRESHOLD = 0.0
 TOP_CHUNKS_PER_RESULT = 5
@@ -77,6 +83,11 @@ class SearchRepositoryBase(ABC):
     _semantic_vector_k: int
     _semantic_min_similarity: float
     _embedding_provider: Optional[EmbeddingProvider]
+    # Class-level defaults: a repo with no reranker configured (or a lightweight
+    # test double that bypasses __init__) safely skips reranking.
+    _rerank_provider: Optional[RerankProvider] = None
+    _reranker_candidates: int = 20
+    _reranker_max_document_chars: int = 0
     _semantic_embedding_sync_batch_size: int
     _vector_dimensions: int
     _vector_tables_initialized: bool
@@ -833,6 +844,135 @@ class SearchRepositoryBase(ABC):
         parts = chunk_key.split(":")
         return parts[0], int(parts[1])
 
+    # ------------------------------------------------------------------
+    # Shared semantic search: cross-encoder reranking
+    # ------------------------------------------------------------------
+
+    def _should_rerank(self, query_text: str) -> bool:
+        """Return whether a configured reranker should run for this query."""
+        return self._rerank_provider is not None and bool(query_text)
+
+    def _candidate_limit(self, limit: int, offset: int, query_text: str) -> int:
+        """Size the retrieval candidate *chunk* pool for vector/hybrid search.
+
+        ``candidate_limit`` bounds vector chunks, but many chunks of one large note
+        collapse to a single ``(type, id)`` row before reranking, so a chunk count does
+        not equal a unique-document count. When reranking is active we over-fetch by
+        ``RERANK_POOL_CHUNK_FANOUT`` so a few multi-chunk notes can't starve the rerank
+        window below ``reranker_candidates`` unique rows. This is best-effort headroom,
+        not a hard guarantee — a single note dominating the entire nearest-neighbour set
+        can still yield fewer unique rows (a pathological corpus shape).
+        """
+        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
+        if self._should_rerank(query_text):
+            candidate_limit = max(
+                candidate_limit, self._reranker_candidates * RERANK_POOL_CHUNK_FANOUT
+            )
+        return candidate_limit
+
+    def _rerank_document_text(self, row: SearchIndexRow) -> str:
+        """Build the document text handed to the cross-encoder for one candidate.
+
+        Prefer the matched chunk (the most relevant passage of a large note),
+        falling back to the stored snippet, and prepend the title so short or
+        title-only rows still carry a usable signal. Truncate to
+        ``reranker_max_document_chars`` (when set) so long notes don't inflate
+        cross-encoder latency — the leading text carries the strongest signal.
+        """
+        body = row.matched_chunk_text or row.content_snippet or ""
+        title = row.title or ""
+        text = f"{title}\n{body}" if (title and body) else (body or title)
+        limit = self._reranker_max_document_chars
+        if limit > 0 and len(text) > limit:
+            text = text[:limit]
+        return text
+
+    @staticmethod
+    def _demote_tail(tail: list[SearchIndexRow], floor: float) -> list[SearchIndexRow]:
+        """Rescore un-reranked tail rows into ``(0, floor)`` preserving their order.
+
+        The reranked pool carries [0, 1] relevance scores while the tail still holds
+        raw retrieval scores on a different scale ([0, 1.3] for fused hybrid). Left as
+        is, a tail row could outrank a reranked row numerically — corrupting the public
+        score column and any downstream re-sort (e.g. cross-project merge). Pinning the
+        tail strictly below the reranked floor keeps the whole page monotonic and in
+        [0, 1] without a second provider call.
+        """
+        count = len(tail)
+        return [
+            replace(row, score=floor * (count - index) / (count + 1))
+            for index, row in enumerate(tail)
+        ]
+
+    async def _rerank_and_paginate(
+        self,
+        query_text: str,
+        rows: list[SearchIndexRow],
+        *,
+        offset: int,
+        limit: int,
+    ) -> list[SearchIndexRow]:
+        """Rerank the top candidates, then return the requested ``[offset:offset+limit]`` page.
+
+        Trigger: a reranker is configured and there is a real query.
+        Why: bi-encoder/FTS ranking lands the gold document in the top-N but often
+        just below the top-k cutoff (#950); a cross-encoder that reads query and
+        document together recovers those near-misses.
+        Outcome: the first ``reranker_candidates`` rows are reordered by reranker
+        relevance (which replaces ``score``); the requested page is sliced from the
+        reordered list.
+        """
+        page_end = offset + limit
+        # Skip the provider entirely when reranking cannot change the requested page:
+        # no reranker, no query, too few rows, or the whole page sits past the rerank
+        # pool (a deep page — reranking it would rescore rows we never return, and for
+        # a paid API that is wasted spend).
+        if (
+            self._rerank_provider is None
+            or not query_text
+            or len(rows) < 2
+            or offset >= self._reranker_candidates
+        ):
+            return rows[offset:page_end]
+
+        pool = rows[: self._reranker_candidates]
+        tail = rows[self._reranker_candidates :]
+        documents = [self._rerank_document_text(row) for row in pool]
+        try:
+            scores = await self._rerank_provider.rerank(query_text, documents)
+        except (SemanticDependenciesMissingError, RerankProviderContractError):
+            # Permanent faults — missing reranker deps, or a provider that broke its
+            # response contract (e.g. an incomplete rerank response). Surface these like
+            # the embedding path does; masking them would leave a permanently broken
+            # reranker silently returning un-reranked results with no signal.
+            raise
+        except Exception as exc:
+            # Transient faults — timeout, connection reset, provider outage. Reranking is
+            # an opt-in enhancement, so a blip must not turn good FTS/vector results into a
+            # hard search outage; degrade to retrieval order for this query.
+            logger.warning(
+                "Reranker failed; returning retrieval order. model={model} error={error}",
+                model=self._rerank_provider.model_name,
+                error=exc,
+            )
+            return rows[offset:page_end]
+        # Fail fast on a length mismatch: that is a provider bug, not a transient fault,
+        # and must not be papered over by truncating or zero-filling.
+        if len(scores) != len(pool):
+            raise RerankProviderContractError(
+                f"Reranker returned {len(scores)} scores for {len(pool)} documents."
+            )
+
+        order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
+        reranked = [replace(pool[i], score=scores[i]) for i in order]
+        logger.debug(
+            "Reranked candidates: pool={pool} model={model}",
+            pool=len(pool),
+            model=self._rerank_provider.model_name,
+        )
+        demoted_tail = self._demote_tail(tail, floor=reranked[-1].score or 0.0)
+        return (reranked + demoted_tail)[offset:page_end]
+
     async def _search_vector_only(
         self,
         *,
@@ -849,6 +989,7 @@ class SearchRepositoryBase(ABC):
         limit: int,
         offset: int,
         _emit_observability_log: bool = True,
+        _apply_rerank: bool = True,
     ) -> List[SearchIndexRow]:
         """Run vector-only search returning chunk-level results.
 
@@ -860,7 +1001,7 @@ class SearchRepositoryBase(ABC):
         await self._ensure_vector_tables()
         assert self._embedding_provider is not None
         query_text = search_text.strip()
-        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
+        candidate_limit = self._candidate_limit(limit, offset, query_text)
         query_start = time.perf_counter()
         embed_start = time.perf_counter()
         query_embedding = await self._embedding_provider.embed_query(query_text)
@@ -1009,6 +1150,13 @@ class SearchRepositoryBase(ABC):
         ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
         hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
         _log_vector_summary()
+        # Rerank over the wide candidate pool, then slice to the page. Suppressed when
+        # hybrid calls this internally (_apply_rerank=False) — hybrid reranks its own
+        # fused result; _rerank_and_paginate no-ops back to a plain slice otherwise.
+        if _apply_rerank:
+            return await self._rerank_and_paginate(
+                query_text, ranked_rows, offset=offset, limit=limit
+            )
         return ranked_rows[offset : offset + limit]
 
     async def _fetch_entity_rows_by_ids(self, entity_ids: list[int]) -> dict[int, SearchIndexRow]:
@@ -1098,7 +1246,7 @@ class SearchRepositoryBase(ABC):
         self._assert_semantic_available()
         query_text = search_text.strip()
         query_start = time.perf_counter()
-        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
+        candidate_limit = self._candidate_limit(limit, offset, query_text)
         fts_start = time.perf_counter()
         # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
         # branch silently degrades hybrid to vector-only ranking. Fusion plus
@@ -1134,6 +1282,7 @@ class SearchRepositoryBase(ABC):
             limit=candidate_limit,
             offset=0,
             _emit_observability_log=False,
+            _apply_rerank=False,
         )
         vector_ms = (time.perf_counter() - vector_start) * 1000
         fusion_start = time.perf_counter()
@@ -1181,15 +1330,28 @@ class SearchRepositoryBase(ABC):
             fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
-        output: list[SearchIndexRow] = []
-        for row_key, fused_score in ranked[offset : offset + limit]:
+
+        def _materialize(entry: tuple[SearchIndexKey, float]) -> SearchIndexRow:
+            row_key, fused_score = entry
             row = rows_by_key[row_key]
             # Trigger: FTS-only results have no matched_chunk_text from vector search.
             # Why: without chunk text, API falls back to truncated content, losing answer text.
             # Outcome: FTS-only results get full content_snippet as matched_chunk.
             if row.matched_chunk_text is None and row.content_snippet:
                 row = replace(row, matched_chunk_text=row.content_snippet)
-            output.append(replace(row, score=fused_score))
+            return replace(row, score=fused_score)
+
+        # Rerank the top fused candidates before paginating. When reranking is active
+        # we materialize the whole candidate list (cheap next to a cross-encoder call)
+        # and hand it to the shared paginate helper; the disabled path stays cheap by
+        # materializing only the requested page.
+        if self._should_rerank(query_text):
+            candidates = [_materialize(entry) for entry in ranked]
+            output = await self._rerank_and_paginate(
+                query_text, candidates, offset=offset, limit=limit
+            )
+        else:
+            output = [_materialize(entry) for entry in ranked[offset : offset + limit]]
         fusion_ms = (time.perf_counter() - fusion_start) * 1000
         total_ms = (time.perf_counter() - query_start) * 1000
         if total_ms > 2500:

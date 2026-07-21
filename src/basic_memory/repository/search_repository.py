@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
+from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
@@ -138,8 +139,12 @@ def create_search_repository(
     # Outcome: resolve the cached singleton here once and inject it, so the provider
     # is the single source of truth across all callers of this factory.
     embedding_provider = None
+    rerank_provider = None
     if config.semantic_search_enabled:
         embedding_provider = create_embedding_provider(config)
+        # Returns None unless reranking is enabled; resolve the cached singleton
+        # here so both backends share one process-wide reranker model.
+        rerank_provider = create_rerank_provider(config)
 
     if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
         return PostgresSearchRepository(  # pragma: no cover
@@ -147,6 +152,7 @@ def create_search_repository(
             project_id=project_id,
             app_config=app_config,
             embedding_provider=embedding_provider,
+            rerank_provider=rerank_provider,
         )
     else:
         return SQLiteSearchRepository(
@@ -154,6 +160,7 @@ def create_search_repository(
             project_id=project_id,
             app_config=app_config,
             embedding_provider=embedding_provider,
+            rerank_provider=rerank_provider,
         )
 
 

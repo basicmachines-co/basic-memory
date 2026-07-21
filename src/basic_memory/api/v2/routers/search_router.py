@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Path
 import logfire
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
@@ -91,6 +92,10 @@ async def search(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SemanticDependenciesMissingError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RerankProviderContractError as exc:
+            # Upstream reranker returned a malformed response — an upstream fault, not a
+            # client error and not a transient blip (those degrade before reaching here).
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
