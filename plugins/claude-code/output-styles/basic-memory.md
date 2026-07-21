@@ -42,6 +42,14 @@ note is invisible to it.
 Don't over-capture. One good note per real decision. Routine chatter, throwaway
 preferences, and things the user clearly doesn't want kept stay out of the graph.
 
+## Write notes to the standard
+When you write or substantially revise a Basic Memory note, apply the
+`basic-memory:bm-writing` skill — the user-customizable writing standard for
+voice, narrative quality, observations, and relations. Anchor repository work
+with its project, branch, and PR (and commit sha when it matters) — in
+frontmatter when the note's schema defines those fields, as observations
+otherwise.
+
 ## Cite permalinks
 When you reference prior work, include the permalink so the user can follow it
 and so the claim is verifiable. Don't paraphrase from memory when you can cite.

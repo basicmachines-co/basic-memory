@@ -40,6 +40,11 @@ Ask only what you can't infer. Cover:
    instead of asking, still say the use-case you assumed and the structure it
    implies, and let the user correct it in one word.
 
+   A code/dev answer makes this a **coding setup**: the Session schema is seeded
+   with git anchor fields (`repo`, `branch`, `git_sha`, `pr`) so checkpoints pin
+   exactly where the work happened (see "Seed the schemas"). Tell the user that's
+   part of the deal — it's why the focus question matters.
+
 2. **Project mapping.** "Do you already have a Basic Memory project for this, or
    should I create one?"
    - Existing → show `list_memory_projects()` and let them pick. That name becomes
@@ -156,6 +161,10 @@ For each one:
     round-trips correctly on both local and cloud. After seeding, verify one note
     with `read_note(..., output_format="json", include_frontmatter=true)` —
     `schema`/`settings` must come back as nested objects, not strings.
+- **Coding setup:** the Session seed carries git coding anchor fields in
+  `settings.frontmatter` — `repo`, `branch`, `git_sha`, `pr`. When the focus from
+  step 1 is code/dev, seed them as-is. For a non-coding setup, omit those four
+  keys from the `settings.frontmatter` map; the rest of the schema is unchanged.
 
 ### 2. Install the shared skills (if the user opted in)
 **First, guard against clobbering a source checkout.** If `./skills` already exists,

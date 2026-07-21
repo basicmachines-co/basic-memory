@@ -26,6 +26,10 @@ the session back to it before the context window compacts.
 - **Capture reflexes (output style).** An opt-in output style teaches Claude to
   search the graph before answering recall questions, capture real decisions as
   typed `decision` notes, and cite permalinks.
+- **Writing standard (`bm-writing` skill).** One user-customizable standard for
+  how Claude writes memory — voice, narrative quality, observations, relations,
+  and git anchors (project, branch, PR, sha) — applied by `bm-remember` and the
+  capture reflexes.
 - **Seed schemas.** Picoschema definitions for `session`, `decision`, and `task`
   notes, so the stuff the plugin writes is structured and findable by
   `search_notes` metadata filters — recall is precise, not fuzzy.
@@ -42,6 +46,7 @@ Plugin skills are namespaced under the plugin name:
 | `/basic-memory:bm-remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
 | `/basic-memory:bm-share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
 | `/basic-memory:bm-status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, shared local hook inbox/flush health, recent session checkpoints, and active-task count. |
+| `/basic-memory:bm-writing` | The writing standard applied whenever Claude writes or substantially revises a note. Not usually invoked directly — edit `skills/bm-writing/SKILL.md` to change how memory is written. |
 
 ## Requirements
 
@@ -130,10 +135,17 @@ settings (or select it via `/config`).
 | `redactPaths` | `[]` | Additional paths to redact from working-directory and path-bearing capture content |
 
 The plugin seeds schemas for notes the Claude integration writes directly:
-`session`, `decision`, and `task`. Optional flush projection also writes
+`session`, `decision`, and `task`. When the setup interview's focus answer is
+code/dev (a **coding setup**), the Session schema is seeded with git anchor
+fields — `repo`, `branch`, `git_sha`, `pr` — so checkpoints pin exactly where
+the work happened. Optional flush projection also writes
 normalized `session` and `tool_ledger` artifacts. Those projection contracts are
 owned and tested by Basic Memory core rather than copied into separate
 host-plugin schemas.
+
+To customize how Claude writes memory, edit `skills/bm-writing/SKILL.md` in the
+plugin source. `bm-remember` and the output style's capture reflexes apply that
+shared standard while retaining their own schemas and evidence requirements.
 
 See [DESIGN.md](./DESIGN.md) for the complete configuration schema, the
 Claude-Code-project ↔ Basic-Memory-project mapping, and team-workspace behavior.

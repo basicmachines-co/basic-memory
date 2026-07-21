@@ -8,6 +8,16 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Added
 
+- **`bm-writing` writing standard** (`skills/bm-writing/`) — the user-customizable
+  standard for how Claude writes project memory (voice, narrative spine, git
+  anchors, observations, relations, evidence boundary), ported from the Codex
+  plugin so both hosts share one contract. Applied by `bm-remember` and the
+  output style's capture reflexes; edit the SKILL.md to change how memory is
+  written.
+- **Coding setup** — when the `bm-setup` focus answer is code/dev, the Session
+  schema is seeded with git anchor frontmatter (`repo`, `branch`, `git_sha`,
+  `pr`) so checkpoints pin the repo, branch, and PR the work happened on.
+  Non-coding setups omit those fields.
 - **Team workspace support** (Phase 4). SessionStart now reads **across** the primary
   project plus configured shared/team projects — `secondaryProjects` (read-only recall
   sources) and `teamProjects` (share targets) — querying open decisions from each in

@@ -28,19 +28,32 @@ REQUIRED_HOOK_SCRIPTS = ("hooks/session_start.py", "hooks/pre_compact.py")
 # project at bootstrap). Each must be a parseable schema note.
 REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
 # Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
-REQUIRED_SKILLS = ("bm-setup", "bm-remember", "bm-status", "bm-share")
+REQUIRED_SKILLS = ("bm-setup", "bm-remember", "bm-status", "bm-share", "bm-writing")
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "captureEvents",
         "redactKeys",
         "redactPaths",
         "hook status --harness claude",
+        "coding setup",
+        "`repo`, `branch`, `git_sha`, `pr`",
     ),
     "bm-status": (
         "hook status --harness claude",
         "pending envelopes",
         "processed envelopes",
         "last flush",
+    ),
+    "bm-remember": ("Apply the `bm-writing` skill",),
+    # Mirrors the Codex validator's bm-writing contract so the shared writing
+    # standard stays in sync across host plugins.
+    "bm-writing": (
+        "intentionally user-customizable",
+        "problem -> approach -> current state and impact",
+        "## Anchor The Work",
+        "## Preserve The Semantic Layer",
+        "- relation_type [[Target Note]]",
+        "Do not invent intent, impact, verification, decisions, or drama",
     ),
 }
 

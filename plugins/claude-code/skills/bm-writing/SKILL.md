@@ -1,14 +1,14 @@
 ---
 name: bm-writing
-description: Apply the user-customizable writing standard for Basic Memory notes created or substantially revised by Codex. Use with bm-checkpoint, bm-decide, bm-remember, and other Basic Memory note-writing workflows.
+description: Apply the user-customizable writing standard for Basic Memory notes created or substantially revised by Claude. Use with bm-remember, the basic-memory output style's decision captures, and other Basic Memory note-writing workflows.
 ---
 
 # Write Useful Project Memory
 
-Use this shared standard whenever a Codex Basic Memory skill writes or
-substantially revises a note. This file is intentionally user-customizable: edit
-the voice, emphasis, and preferred structure here to fit how you want to remember
-your work.
+Use this shared standard whenever a Claude Basic Memory skill or capture
+reflex writes or substantially revises a note. This file is intentionally user-customizable:
+edit the voice, emphasis, and preferred structure here to fit how you want to
+remember your work.
 
 Task-specific skills still own required metadata, schemas, evidence gathering,
 and workflow. This skill shapes the note; it never overrides factual constraints.
@@ -40,8 +40,9 @@ and workflow. This skill shapes the note; it never overrides factual constraints
 - When the note records repository work, capture where that work lives: the
   project or repo, the git branch, and the PR or issue — plus the commit sha
   when a specific commit matters.
-- Put anchors the note's schema defines in frontmatter; record the rest as
-  observations, e.g. `- [branch] feat/bm-writing` or `- [pr] #1123`.
+- Put anchors the note's schema defines in frontmatter (session checkpoints
+  from a coding setup define `repo`, `branch`, `git_sha`, and `pr`); record the
+  rest as observations, e.g. `- [branch] feat/bm-writing` or `- [pr] #1123`.
 - Only anchor what is relevant. A remembered fact with no repo context needs no
   git anchors at all.
 

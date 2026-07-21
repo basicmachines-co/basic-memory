@@ -21,7 +21,9 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
    Both are optional. Use the defaults if the block or a key is missing. Don't fail
    if there's no settings file.
 
-2. **Derive the note.**
+2. **Derive the note.** Apply the `bm-writing` skill before drafting; match its
+   depth to this lightweight capture — keep the user's wording and do not pad a
+   small fact into an essay.
    - **Content** = the text in `$ARGUMENTS`, verbatim. Don't rewrite or pad it.
    - **Title** = the first line of that text, trimmed to ≤ 80 characters (append `…`
      if you truncate). If it's one long line, write a short descriptive title instead.

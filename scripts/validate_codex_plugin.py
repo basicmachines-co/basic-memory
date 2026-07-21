@@ -56,6 +56,7 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-writing": (
         "intentionally user-customizable",
         "problem -> approach -> current state and impact",
+        "## Anchor The Work",
         "## Preserve The Semantic Layer",
         "- relation_type [[Target Note]]",
         "Do not invent intent, impact, verification, decisions, or drama",

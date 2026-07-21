@@ -20,6 +20,10 @@ settings:
     cwd?: string, the working directory the session ran in
     claude_session_id?: string, Claude Code session identifier
     capture?(enum, how this checkpoint was produced): [extractive, summarized]
+    repo?: string, repository or code project the session worked in
+    branch?: string, git branch the session worked on
+    git_sha?: string, commit sha the session ended on
+    pr?: string, pull request or issue reference (e.g. "#1123")
 ---
 
 # Session
@@ -46,3 +50,8 @@ Sessions are found by the SessionStart hook via structured recall:
 `type: session` and `status` are the queryable fields that power recall. `warn`
 validation means a missing field is surfaced, never blocking — the user's flow
 is never gated on schema conformance.
+
+The git anchors (`repo`, `branch`, `git_sha`, `pr`) are the coding-setup fields:
+`/basic-memory:bm-setup` seeds them when the project's focus is code/dev, so a
+checkpoint pins exactly where the work happened and the next session can resume
+on the right branch. Non-coding setups omit them.
