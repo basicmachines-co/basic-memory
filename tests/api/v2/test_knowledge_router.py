@@ -1071,6 +1071,57 @@ async def test_edit_entity_by_id_find_replace(
 
 
 @pytest.mark.asyncio
+async def test_edit_entity_by_id_metadata_merges_frontmatter(
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+):
+    """PATCH with `metadata` merges frontmatter fields independent of `operation` (issue #1011)."""
+    create_data = {
+        "title": "TestMetadataMerge",
+        "directory": "test",
+        "content": "---\nstatus: open\nowner: alice\n---\n# TestMetadataMerge\n\nBody content",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+    original_external_id = created_entity.external_id
+    assert original_external_id is not None
+
+    edit_data = {
+        "operation": "append",
+        "content": "\n\nResolution notes.",
+        "metadata": {"status": "resolved", "closed_at": "2026-06-18T10:42:00Z"},
+    }
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{original_external_id}",
+        json=edit_data,
+    )
+
+    assert response.status_code == 202
+    edited_entity = EntityResponseV2.model_validate(response.json())
+    assert edited_entity.external_id is not None
+
+    file_path = file_service.get_entity_path(edited_entity)
+    file_content, _ = await file_service.read_file(file_path)
+    frontmatter = parse_frontmatter(file_content)
+
+    # New key added, existing key overwritten, unrelated key and body preserved.
+    assert frontmatter["closed_at"] == "2026-06-18T10:42:00Z"
+    assert frontmatter["status"] == "resolved"
+    assert frontmatter["owner"] == "alice"
+    assert "Body content" in file_content
+    assert "Resolution notes." in file_content
+
+    note_content = await _get_note_content(session_maker, test_project.id, edited_entity.id)
+    assert note_content is not None
+    assert parse_frontmatter(note_content.markdown_content)["status"] == "resolved"
+
+
+@pytest.mark.asyncio
 async def test_delete_entity_by_id(
     client: AsyncClient,
     file_service,

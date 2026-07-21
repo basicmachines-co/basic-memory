@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from fastmcp import Client
 
+from basic_memory.file_utils import parse_frontmatter
+
 
 @pytest.mark.asyncio
 async def test_edit_note_append_operation(mcp_server, app, test_project):
@@ -825,4 +827,96 @@ async def test_edit_note_recovers_file_on_disk_not_indexed(mcp_server, app, test
         )
         content = read_result.content[0].text
         assert "status: final" in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_metadata_merges_frontmatter(mcp_server, app, test_project):
+    """metadata merges frontmatter fields independent of `operation` (issue #1011)."""
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Metadata Merge Ticket",
+                "directory": "tickets",
+                "content": "# Metadata Merge Ticket\n\nTicket body.",
+                "metadata": {"status": "open", "opened_at": "2026-06-18T09:14:00Z"},
+            },
+        )
+
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "tickets/metadata-merge-ticket",
+                "operation": "append",
+                "content": "\n\nResolution notes.",
+                "metadata": {"status": "resolved", "closed_at": "2026-06-18T10:42:00Z"},
+            },
+        )
+
+        edit_text = edit_result.content[0].text
+        assert "Edited note (append)" in edit_text
+
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "tickets/metadata-merge-ticket"},
+        )
+        content = read_result.content[0].text
+
+        # New key added, existing key overwritten, unrelated frontmatter and body preserved.
+        frontmatter = parse_frontmatter(content)
+        assert frontmatter["status"] == "resolved"
+        assert frontmatter["closed_at"] == "2026-06-18T10:42:00Z"
+        assert frontmatter["opened_at"] == "2026-06-18T09:14:00Z"
+        assert "Ticket body." in content
+        assert "Resolution notes." in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_metadata_ignores_identity_fields(mcp_server, app, test_project):
+    """title/type/permalink in `metadata` are ignored rather than hijacking the note's identity."""
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Identity Guard Note",
+                "directory": "tickets",
+                "content": "# Identity Guard Note\n\nBody.",
+            },
+        )
+
+        await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "tickets/identity-guard-note",
+                "operation": "append",
+                "content": "",
+                "metadata": {
+                    "title": "Hijacked Title",
+                    "type": "hijacked",
+                    "permalink": "hijacked/permalink",
+                    "status": "resolved",
+                },
+            },
+        )
+
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "tickets/identity-guard-note"},
+        )
+        content = read_result.content[0].text
+        frontmatter = parse_frontmatter(content)
+
+        assert frontmatter["status"] == "resolved"
+        assert frontmatter["title"] == "Identity Guard Note"
+        # permalink is preserved, not hijacked to the metadata value. Assert on the note's
+        # own slug rather than the exact string, since the harness prefixes the project name.
+        assert frontmatter["permalink"] != "hijacked/permalink"
+        assert frontmatter["permalink"].endswith("tickets/identity-guard-note")
+        assert frontmatter["type"] == "note"
         assert "status: draft" not in content

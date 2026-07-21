@@ -7,7 +7,7 @@ from httpx import HTTPStatusError
 from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, BeforeValidator, Field
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.mcp.clients import KnowledgeClient
@@ -30,7 +30,7 @@ from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
     is_workspace_qualified_plain_identifier,
 )
-from basic_memory.utils import normalize_project_reference, validate_project_path
+from basic_memory.utils import coerce_dict, normalize_project_reference, validate_project_path
 
 EDIT_OPERATIONS = (
     "append",
@@ -347,7 +347,7 @@ Error editing note '{identifier}': {error_message}
 
 @mcp.tool(
     title="Edit Note",
-    description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section.",
+    description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section. Pass metadata to merge YAML frontmatter fields independent of the operation.",
     tags={"notes"},
     annotations={
         "title": "Edit Note",
@@ -391,6 +391,7 @@ async def edit_note(
     ] = None,
     expected_replacements: Optional[int] = None,
     replace_subsections: Optional[bool] = None,
+    metadata: Annotated[Optional[dict], BeforeValidator(coerce_dict)] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -433,6 +434,12 @@ async def edit_note(
             the replacement content may freely introduce new headings. Set to false to
             replace only the immediate content under the header, stopping at the next
             heading of any level and preserving subsections.
+        metadata: Optional dict of frontmatter fields to merge, independent of `operation`.
+            Provided keys overwrite existing frontmatter values (or are added if new);
+            unrelated frontmatter keys and the note body are left untouched. Can be
+            combined with any operation in the same call. `title`, `type`, and `permalink`
+            are ignored since those have their own dedicated handling. Key deletion is
+            not supported.
         output_format: "text" returns the existing markdown summary. "json" returns
             machine-readable edit metadata.
         context: Optional FastMCP context for performance caching.
@@ -479,6 +486,11 @@ async def edit_note(
 
         # Update status across document (expecting exactly 2 occurrences)
         edit_note("reports", "status-report", "find_replace", "In Progress", find_text="Not Started", expected_replacements=2)
+
+        # Update frontmatter fields without touching the body (any operation works;
+        # append with empty content is a no-op on the body itself)
+        edit_note("support", "tickets/2026-06-18-printer-offline", "append", "",
+                   metadata={"status": "resolved", "closed_at": "2026-06-18T10:42:00Z"})
 
     Raises:
         HTTPError: If project doesn't exist or is inaccessible
@@ -557,6 +569,7 @@ async def edit_note(
         has_find_text=bool(find_text),
         expected_replacements=effective_replacements,
         replace_subsections=effective_replace_subsections,
+        has_metadata=bool(metadata),
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -696,6 +709,7 @@ async def edit_note(
                             directory=directory,
                             content_type="text/markdown",
                             content=content,
+                            entity_metadata=metadata,
                         )
 
                         logger.info(
@@ -727,6 +741,8 @@ async def edit_note(
                         edit_data["expected_replacements"] = str(effective_replacements)
                     if not effective_replace_subsections:  # Only send if different from default
                         edit_data["replace_subsections"] = False
+                    if metadata:
+                        edit_data["metadata"] = metadata
 
                     # Call the PATCH endpoint
                     result = await knowledge_client.patch_entity(entity_id, edit_data)

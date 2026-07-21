@@ -676,6 +676,7 @@ async def _run_accepted_note_edit(
             expected_replacements=request.data.expected_replacements,
             replace_subsections=request.data.replace_subsections,
             user_profile_value=user_profile_value,
+            metadata=request.data.metadata,
         )
     except (ParseError, ValueError) as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))

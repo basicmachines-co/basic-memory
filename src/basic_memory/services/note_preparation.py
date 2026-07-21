@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import frontmatter
 import yaml
@@ -648,6 +649,54 @@ def apply_edit_operation(
     raise ValueError(f"Unsupported operation: {operation}")
 
 
+# title/type/permalink already have dedicated resolution paths in
+# prepare_edit_entity_content (H1 title reconciliation, permalink resolver). Letting a
+# metadata merge touch them would race with those paths and could be silently reverted.
+_METADATA_IDENTITY_FIELDS = frozenset({"title", "type", "permalink"})
+
+
+def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any]) -> str:
+    """Merge caller-supplied fields into a markdown string's YAML frontmatter.
+
+    Identity fields (title/type/permalink) are dropped from the merge; every other key
+    overwrites the existing frontmatter value or is added new. The note body, and any
+    frontmatter keys not present in ``metadata``, are left untouched.
+    """
+    null_keys = sorted(key for key, value in metadata.items() if value is None)
+    if null_keys:
+        # A null value would be filtered out of the indexed entity metadata right after
+        # this merge, silently losing the field even though key deletion is unsupported.
+        raise ValueError(
+            "metadata values cannot be null (key deletion is not supported): "
+            + ", ".join(null_keys)
+        )
+    sanitized = {k: v for k, v in metadata.items() if k not in _METADATA_IDENTITY_FIELDS}
+    if not sanitized:
+        return markdown_content
+
+    if has_frontmatter(markdown_content):
+        current_metadata = parse_frontmatter(markdown_content)
+        # strip=False: a frontmatter-only rewrite must not reflow the body (leading
+        # blank lines, trailing hard-break spaces). dump_frontmatter re-inserts the
+        # single blank separator line after the closing fence, so drop exactly one
+        # leading newline here to round-trip the body unchanged.
+        body = remove_frontmatter(markdown_content, strip=False)
+        if body.startswith("\r\n"):
+            body = body[2:]
+        elif body.startswith("\n"):
+            body = body[1:]
+    else:
+        current_metadata = {}
+        body = markdown_content
+
+    merged_metadata = deepcopy(current_metadata)
+    merged_metadata.update(sanitized)
+
+    post = frontmatter.Post(body)
+    post.metadata.update(merged_metadata)
+    return dump_frontmatter(post)
+
+
 async def prepare_edit_entity_content(
     dependencies: NotePreparationDependencies,
     entity: Entity,
@@ -659,19 +708,32 @@ async def prepare_edit_entity_content(
     find_text: str | None = None,
     expected_replacements: int = 1,
     replace_subsections: bool = True,
+    metadata: dict[str, Any] | None = None,
     skip_conflict_check: bool = False,
     session: AsyncSession | None = None,
 ) -> PreparedEntityWrite:
     file_path = Path(entity.file_path)
-    markdown_content = apply_edit_operation(
-        current_content,
-        operation,
-        content,
-        section,
-        find_text,
-        expected_replacements,
-        replace_subsections,
-    )
+    # Trigger: the documented metadata-only pattern is empty append/prepend plus metadata.
+    # Why: an empty append still appends "\n" to a body without a trailing newline, so a
+    # request advertised as frontmatter-only would mutate the body it promised to keep.
+    # Outcome: skip the content operation entirely and merge into the current text.
+    metadata_only_edit = bool(metadata) and operation in ("append", "prepend") and not content
+    if metadata_only_edit:
+        markdown_content = current_content
+    else:
+        markdown_content = apply_edit_operation(
+            current_content,
+            operation,
+            content,
+            section,
+            find_text,
+            expected_replacements,
+            replace_subsections,
+        )
+    # Merge before frontmatter-derived resolution below so merged keys land in the
+    # indexed entity metadata in the same pass — see _merge_metadata_into_markdown.
+    if metadata:
+        markdown_content = _merge_metadata_into_markdown(markdown_content, metadata)
     title = entity.title
     note_type = entity.note_type
     permalink = entity.permalink
@@ -876,6 +938,7 @@ class NotePreparation:
         find_text: str | None = None,
         expected_replacements: int = 1,
         replace_subsections: bool = True,
+        metadata: dict[str, Any] | None = None,
         skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
@@ -889,6 +952,7 @@ class NotePreparation:
             find_text=find_text,
             expected_replacements=expected_replacements,
             replace_subsections=replace_subsections,
+            metadata=metadata,
             skip_conflict_check=skip_conflict_check,
             session=session,
         )

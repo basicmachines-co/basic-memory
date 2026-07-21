@@ -1,6 +1,6 @@
 """Request schemas for interacting with the knowledge graph."""
 
-from typing import List, Optional, Annotated, Literal
+from typing import Any, List, Optional, Annotated, Literal
 from annotated_types import MaxLen, MinLen
 
 from pydantic import BaseModel, field_validator
@@ -81,6 +81,10 @@ class EditEntityRequest(BaseModel):
     # level-aware section including subsections; False stops at the first heading
     # of any level, preserving them.
     replace_subsections: bool = True
+    # Frontmatter fields to merge, independent of `operation` (issue #1011). Set/overwrite
+    # semantics: provided keys overwrite existing values, unrelated keys and the body are
+    # untouched. title/type/permalink are ignored — they have their own resolution paths.
+    metadata: Optional[dict[str, Any]] = None
 
     @field_validator("section")
     @classmethod

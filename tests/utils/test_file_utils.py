@@ -606,3 +606,14 @@ class TestBOMHandling:
         content_with_bom = "\ufeff---\ntitle: Test\n---\nContent here"
         result = remove_frontmatter(content_with_bom)
         assert result == "Content here"
+
+
+def test_remove_frontmatter_strip_false_preserves_body_exactly():
+    """strip=False returns the body verbatim so frontmatter-only rewrites don't reflow it."""
+    content = "---\nstatus: draft\n---\n\nBody with hard break  \n"
+    assert remove_frontmatter(content, strip=False) == "\nBody with hard break  \n"
+
+
+def test_remove_frontmatter_strip_false_without_frontmatter_returns_content_unchanged():
+    text = "  leading spaces and trailing newline\n"
+    assert remove_frontmatter(text, strip=False) == text

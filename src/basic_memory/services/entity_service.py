@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -264,6 +264,7 @@ class EntityService(BaseService[EntityModel]):
         find_text: Optional[str] = None,
         expected_replacements: int = 1,
         replace_subsections: bool = True,
+        metadata: Optional[dict[str, Any]] = None,
         skip_conflict_check: bool = False,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
@@ -273,6 +274,10 @@ class EntityService(BaseService[EntityModel]):
         does not read files, write files, or mutate database rows. That makes the
         edit base explicit so higher layers can reject stale content instead of
         silently editing whichever storage copy happens to be newest.
+
+        ``metadata``, when provided, is merged into the note's YAML frontmatter
+        independent of ``operation``. Null values are rejected — key deletion is
+        not supported.
         """
         return await self._note_preparation.prepare_edit_entity_content(
             entity,
@@ -283,6 +288,7 @@ class EntityService(BaseService[EntityModel]):
             find_text=find_text,
             expected_replacements=expected_replacements,
             replace_subsections=replace_subsections,
+            metadata=metadata,
             skip_conflict_check=skip_conflict_check,
             session=session,
         )

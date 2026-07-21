@@ -12,6 +12,7 @@ from basic_memory.repository import AcceptedObservationWrite, AcceptedRelationWr
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.entity_service import PreparedEntityFields
+from basic_memory.services.note_preparation import _merge_metadata_into_markdown
 
 
 @pytest.mark.asyncio
@@ -580,3 +581,250 @@ async def test_prepare_edit_entity_content_prepend_without_frontmatter_uses_simp
     )
 
     assert prepared.markdown_content == "Prepended line\nOriginal body"
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_adds_new_key(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata New Key",
+            directory="notes",
+            note_type="note",
+            content="---\nstatus: draft\n---\nBody",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="append",
+        content="",
+        metadata={"closed_at": "2026-06-18T10:42:00Z"},
+    )
+
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+    assert prepared_frontmatter["closed_at"] == "2026-06-18T10:42:00Z"
+    assert prepared_frontmatter["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_overwrites_existing_key(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata Overwrite",
+            directory="notes",
+            note_type="note",
+            content="---\nstatus: draft\n---\nBody",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="append",
+        content="",
+        metadata={"status": "resolved"},
+    )
+
+    assert parse_frontmatter(prepared.markdown_content)["status"] == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_preserves_unrelated_keys_and_body(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata Preserve",
+            directory="notes",
+            note_type="note",
+            content="---\nstatus: draft\nowner: alice\n---\nOriginal body",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="append",
+        content="\nMore body",
+        metadata={"status": "resolved"},
+    )
+
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+    assert prepared_frontmatter["owner"] == "alice"
+    assert prepared_frontmatter["status"] == "resolved"
+    assert "Original body" in remove_frontmatter(prepared.markdown_content)
+    assert "More body" in remove_frontmatter(prepared.markdown_content)
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_ignores_identity_fields(
+    entity_service,
+    file_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata Identity Guard",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="append",
+        content="",
+        metadata={
+            "title": "Hijacked Title",
+            "type": "hijacked",
+            "permalink": "hijacked/permalink",
+            "status": "resolved",
+        },
+    )
+
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+    assert prepared_frontmatter["status"] == "resolved"
+    assert prepared.entity_fields.title == "Metadata Identity Guard"
+    assert prepared.entity_fields.permalink == created.permalink
+    assert prepared_frontmatter["title"] == "Metadata Identity Guard"
+    assert prepared_frontmatter["permalink"] == created.permalink
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_without_existing_frontmatter(
+    entity_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata No Frontmatter",
+            directory="notes",
+            note_type="note",
+            content="Plain body",
+        )
+    )
+
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        "Plain body",
+        operation="append",
+        content="",
+        metadata={"status": "resolved"},
+    )
+
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+    assert prepared_frontmatter["status"] == "resolved"
+    assert "Plain body" in remove_frontmatter(prepared.markdown_content)
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_only_edit_preserves_body_exactly(
+    entity_service,
+) -> None:
+    """A frontmatter-only request must not reflow the body (PR #1090 review).
+
+    Trailing hard-break spaces, extra blank lines, and a missing final newline
+    are all meaningful markdown; the merge must round-trip them byte-exact.
+    """
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata Body Fidelity",
+            directory="notes",
+            note_type="note",
+            content="Plain body",
+        )
+    )
+    body = "Line with hard break  \n\n\n  indented tail without trailing newline"
+    current_content = f"---\nstatus: draft\n---\n\n{body}"
+
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="append",
+        content="",
+        metadata={"status": "resolved"},
+    )
+
+    assert parse_frontmatter(prepared.markdown_content)["status"] == "resolved"
+    assert prepared.markdown_content.endswith(f"---\n\n{body}")
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_only_edit_skips_append_newline(
+    entity_service,
+) -> None:
+    """The documented metadata-only pattern must be a true body no-op (PR #1090 review).
+
+    An empty append normally appends "\\n" to content without a trailing
+    newline; combined with metadata that mutated a body the caller asked to
+    leave untouched.
+    """
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata NoOp Append",
+            directory="notes",
+            note_type="note",
+            content="Plain body",
+        )
+    )
+
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        "Plain body without trailing newline",
+        operation="append",
+        content="",
+        metadata={"status": "resolved"},
+    )
+
+    assert prepared.markdown_content.endswith("Plain body without trailing newline")
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_rejects_null_values(
+    entity_service,
+) -> None:
+    """Null metadata values are rejected instead of silently dropping the field (PR #1090 review)."""
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata Null Guard",
+            directory="notes",
+            note_type="note",
+            content="---\nstatus: draft\n---\nBody",
+        )
+    )
+
+    with pytest.raises(ValueError, match="key deletion is not supported.*status"):
+        await entity_service.prepare_edit_entity_content(
+            created,
+            "---\nstatus: draft\n---\nBody",
+            operation="append",
+            content="",
+            metadata={"status": None},
+        )
+
+
+def test_merge_metadata_into_markdown_identity_only_metadata_is_noop():
+    """A merge holding only identity fields must leave the markdown byte-identical."""
+    markdown = "---\nstatus: draft\n---\n\nBody  \n"
+    merged = _merge_metadata_into_markdown(markdown, {"title": "X", "type": "y", "permalink": "z"})
+    assert merged == markdown
+
+
+def test_merge_metadata_into_markdown_preserves_crlf_body():
+    """CRLF notes keep their body when the separator line is dropped for re-dumping."""
+    markdown = "---\r\nstatus: draft\r\n---\r\n\r\nBody line\r\n"
+    merged = _merge_metadata_into_markdown(markdown, {"status": "resolved"})
+    assert merged.endswith("Body line\r\n")
+    assert parse_frontmatter(merged)["status"] == "resolved"

@@ -162,7 +162,18 @@ class _CreatePreparer:
         self.conflict_calls: list[tuple[str, bool, AsyncSession | None]] = []
         self.replace_calls: list[tuple[Entity, EntitySchema, str, AsyncSession | None]] = []
         self.edit_calls: list[
-            tuple[Entity, str, str, str, str | None, str | None, int, bool, AsyncSession | None]
+            tuple[
+                Entity,
+                str,
+                str,
+                str,
+                str | None,
+                str | None,
+                int,
+                bool,
+                dict | None,
+                AsyncSession | None,
+            ]
         ] = []
         self.move_calls: list[tuple[Entity, str, str, AsyncSession | None]] = []
         self.self_relation_calls: list[tuple[str, Entity, AsyncSession | None]] = []
@@ -210,6 +221,7 @@ class _CreatePreparer:
         find_text: str | None = None,
         expected_replacements: int = 1,
         replace_subsections: bool = True,
+        metadata: dict | None = None,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         self.edit_calls.append(
@@ -222,6 +234,7 @@ class _CreatePreparer:
                 find_text,
                 expected_replacements,
                 replace_subsections,
+                metadata,
                 session,
             )
         )
@@ -1169,6 +1182,7 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content(
             "# Old",
             1,
             True,
+            None,
             cast(AsyncSession, session),
         )
     ]
@@ -1180,6 +1194,70 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content(
     assert change.materialization.source == "mcp"
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
+    """The `metadata` field on EditEntityRequest must reach the edit preparer.
+
+    Regression guard for issue #1011: `metadata` merges frontmatter fields
+    independent of `operation`, so the accepted-note-edit runner must pass it
+    through unchanged instead of silently dropping it.
+    """
+    session = _MutationSession()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    await run_accepted_note_edit(
+        cast(AsyncSession, session),
+        request=AcceptedNoteEditMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=EditEntityRequest(
+                operation="find_replace",
+                content="# Replacement",
+                find_text="# Old",
+                expected_replacements=1,
+                metadata={"status": "resolved"},
+            ),
+            actor=AcceptedNoteMutationActor(user_profile_id=None),
+            source="mcp",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+            preparer_factory=preparer_factory,
+            pending_entity_repository=pending_entity_repository,
+            note_content_accept_repository=note_content_accept_repository,
+            search_repository=search_repository,
+        ),
+    )
+
+    assert preparer.edit_calls == [
+        (
+            entity,
+            "# Old\n",
+            "find_replace",
+            "# Replacement",
+            None,
+            "# Old",
+            1,
+            True,
+            {"status": "resolved"},
+            cast(AsyncSession, session),
+        )
+    ]
 
 
 @pytest.mark.asyncio

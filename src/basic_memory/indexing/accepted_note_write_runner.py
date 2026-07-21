@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,6 +88,7 @@ class AcceptedNoteEditPreparer(Protocol):
         find_text: str | None = ...,
         expected_replacements: int = ...,
         replace_subsections: bool = ...,
+        metadata: dict[str, Any] | None = ...,
         session: AsyncSession | None = ...,
     ) -> PreparedEntityWrite: ...
 
@@ -310,6 +311,7 @@ async def prepare_accepted_note_edit(
     expected_replacements: int,
     replace_subsections: bool,
     user_profile_value: str | None,
+    metadata: dict[str, Any] | None = None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a partial accepted edit and apply its entity fields."""
     prepared = await preparer.prepare_edit_entity_content(
@@ -321,6 +323,7 @@ async def prepare_accepted_note_edit(
         find_text=find_text,
         expected_replacements=expected_replacements,
         replace_subsections=replace_subsections,
+        metadata=metadata,
         session=session,
     )
     result = AcceptedPreparedNoteWrite(

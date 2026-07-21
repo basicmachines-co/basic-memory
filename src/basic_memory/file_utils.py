@@ -431,12 +431,16 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
         raise
 
 
-def remove_frontmatter(content: str) -> str:
+def remove_frontmatter(content: str, *, strip: bool = True) -> str:
     """
     Remove YAML frontmatter from content.
 
     Args:
         content: Content with frontmatter
+        strip: When True (default), strip surrounding whitespace from the returned
+            body — the historical behavior. Pass False to get the body exactly as
+            it appears after the closing fence; frontmatter-only rewrites must not
+            reflow the note body (issue #1090 review).
 
     Returns:
         Content with frontmatter removed, or original content if no frontmatter
@@ -452,10 +456,10 @@ def remove_frontmatter(content: str) -> str:
     # Why: inline `---` is ordinary content, not frontmatter (issue #972)
     # Outcome: return the content untouched (stripped to preserve prior behavior)
     if split is None:
-        return content.strip()
+        return content.strip() if strip else content
 
     _, body = split
-    return body.strip()
+    return body.strip() if strip else body
 
 
 def dump_frontmatter(post: frontmatter.Post) -> str:
