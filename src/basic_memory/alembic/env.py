@@ -29,9 +29,7 @@ if sys.version_info < (3, 14) and not running_on_uvloop():
         # running loop (ValueError).
         # Outcome: log at DEBUG (observable, not noisy) and fall through to the
         # thread-based migration fallback.
-        logger.debug(
-            f"nest_asyncio not applied ({exc!r}); using thread-based migration fallback"
-        )
+        logger.debug(f"nest_asyncio not applied ({exc!r}); using thread-based migration fallback")
 
 # Trigger: only set test env when actually running under pytest
 # Why: alembic/env.py is imported during normal operations (MCP server startup, migrations)

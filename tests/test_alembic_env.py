@@ -46,12 +46,8 @@ def load_alembic_env_module(monkeypatch, tmp_path):
 
     fake_config = FakeAlembicConfig()
     monkeypatch.setattr(alembic_context, "config", fake_config, raising=False)
-    monkeypatch.setattr(
-        alembic_context, "configure", lambda *args, **kwargs: None, raising=False
-    )
-    monkeypatch.setattr(
-        alembic_context, "begin_transaction", lambda: nullcontext(), raising=False
-    )
+    monkeypatch.setattr(alembic_context, "configure", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(alembic_context, "begin_transaction", lambda: nullcontext(), raising=False)
     monkeypatch.setattr(alembic_context, "run_migrations", lambda: None, raising=False)
     monkeypatch.setattr(alembic_context, "is_offline_mode", lambda: True, raising=False)
 
@@ -70,9 +66,7 @@ def test_asyncio_run_failure_closes_migration_coroutine(monkeypatch, tmp_path):
     env_module = load_alembic_env_module(monkeypatch, tmp_path)
     fake_coro = FakeCoroutine()
 
-    monkeypatch.setattr(
-        env_module, "run_async_migrations", lambda connectable: fake_coro
-    )
+    monkeypatch.setattr(env_module, "run_async_migrations", lambda connectable: fake_coro)
 
     def raising_asyncio_run(coro):
         raise RuntimeError("asyncio.run() cannot be called from a running event loop")
@@ -87,7 +81,6 @@ def test_asyncio_run_failure_closes_migration_coroutine(monkeypatch, tmp_path):
 
 def test_running_loop_uses_thread_path(monkeypatch, tmp_path):
     """When a loop is already running, _run_async_engine_migrations must use the thread path."""
-    import asyncio
 
     env_module = load_alembic_env_module(monkeypatch, tmp_path)
     connectable = object()
@@ -107,9 +100,7 @@ def test_running_loop_uses_thread_path(monkeypatch, tmp_path):
     env_module._run_async_engine_migrations(connectable)
 
     assert thread_calls == [connectable], "thread fallback should have been called"
-    assert (
-        asyncio_run_calls == []
-    ), "asyncio.run path must not be called when loop is running"
+    assert asyncio_run_calls == [], "asyncio.run path must not be called when loop is running"
 
 
 def test_no_running_loop_uses_asyncio_run_path(monkeypatch, tmp_path):
@@ -131,12 +122,8 @@ def test_no_running_loop_uses_asyncio_run_path(monkeypatch, tmp_path):
 
     env_module._run_async_engine_migrations(connectable)
 
-    assert asyncio_run_calls == [
-        connectable
-    ], "asyncio.run path should have been called"
-    assert (
-        thread_calls == []
-    ), "thread fallback must not be called when no loop is running"
+    assert asyncio_run_calls == [connectable], "asyncio.run path should have been called"
+    assert thread_calls == [], "thread fallback must not be called when no loop is running"
 
 
 def test_runtime_error_from_asyncio_run_propagates(monkeypatch, tmp_path):
@@ -148,9 +135,7 @@ def test_runtime_error_from_asyncio_run_propagates(monkeypatch, tmp_path):
     def raising_run(connectable):
         raise RuntimeError("unexpected failure")
 
-    monkeypatch.setattr(
-        env_module, "_run_async_migrations_with_asyncio_run", raising_run
-    )
+    monkeypatch.setattr(env_module, "_run_async_migrations_with_asyncio_run", raising_run)
 
     with pytest.raises(RuntimeError, match="unexpected failure"):
         env_module._run_async_engine_migrations(object())

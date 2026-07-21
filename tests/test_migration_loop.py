@@ -14,22 +14,16 @@ import pytest
 from basic_memory import migration_loop
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="uvloop is not available on Windows"
-)
+@pytest.mark.skipif(sys.platform == "win32", reason="uvloop is not available on Windows")
 def test_running_on_uvloop_true_when_policy_is_uvloop(monkeypatch):
     import uvloop
 
-    monkeypatch.setattr(
-        asyncio, "get_event_loop_policy", lambda: uvloop.EventLoopPolicy()
-    )
+    monkeypatch.setattr(asyncio, "get_event_loop_policy", lambda: uvloop.EventLoopPolicy())
     assert migration_loop.running_on_uvloop() is True
 
 
 def test_running_on_uvloop_false_for_default_policy(monkeypatch):
-    monkeypatch.setattr(
-        asyncio, "get_event_loop_policy", lambda: asyncio.DefaultEventLoopPolicy()
-    )
+    monkeypatch.setattr(asyncio, "get_event_loop_policy", lambda: asyncio.DefaultEventLoopPolicy())
     assert migration_loop.running_on_uvloop() is False
 
 
