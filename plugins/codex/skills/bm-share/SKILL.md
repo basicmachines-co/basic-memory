@@ -11,7 +11,8 @@ stay personal.
 
 ## Steps
 
-1. Read `.codex/basic-memory.json` and resolve:
+1. Read `~/.codex/basic-memory.json`, then the nearest project
+   `.codex/basic-memory.json`; project keys override user keys. Resolve:
    - `primaryProject`
    - `teamProjects`, a map of project ref to settings
 

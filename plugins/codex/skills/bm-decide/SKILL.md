@@ -10,7 +10,8 @@ choice with rationale and consequences, not a casual preference.
 
 ## Steps
 
-1. Resolve `.codex/basic-memory.json`:
+1. Resolve `~/.codex/basic-memory.json`, then the nearest project
+   `.codex/basic-memory.json`; project keys override user keys:
    - write to `primaryProject` when set
    - follow `placementConventions` for the directory when they are specific
    - otherwise use `decisions`

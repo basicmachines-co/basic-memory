@@ -38,7 +38,7 @@ verification, decision capture, and resumable checkpoints.
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
-The hook scripts carry no logic: the brief, the checkpoint, and opt-in event
+The hook scripts carry no logic: the brief, the checkpoint, and lifecycle-event
 capture all live in the pinned Basic Memory revision behind `bm hook`. Each is
 a self-contained PEP 723 script pinned to a Basic Memory Git ref. Both refs
 are updated together with `just set-codex-hook-version <sha-or-tag>`.
@@ -69,9 +69,10 @@ Plugin installation is user-level in Codex, so one install makes the plugin
 available across projects on the same machine. Start a new Codex thread after
 installing so Codex can load the plugin skills, MCP configuration, and hooks.
 
-Each repository still needs its own `.codex/basic-memory.json` so the plugin
-knows which Basic Memory project and folders to use for that checkout. Run the
-setup skill in each repo, or create the config file shown below.
+Configuration can live at user level in `~/.codex/basic-memory.json` or at
+project level in `.codex/basic-memory.json`. User-level settings are the base;
+the nearest project file overrides only the keys it declares. The setup skill
+asks which scope to use and recommends user-level configuration by default.
 
 To customize how Codex writes memory, edit `skills/bm-writing/SKILL.md` in the
 plugin source. `bm-checkpoint`, `bm-decide`, and `bm-remember` all apply that
@@ -79,7 +80,7 @@ shared skill while retaining their own schemas and evidence requirements.
 
 ## Configuration
 
-Run the setup skill, or create `.codex/basic-memory.json` in a repo:
+Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
 
 ```json
 {
@@ -89,23 +90,35 @@ Run the setup skill, or create `.codex/basic-memory.json` in a repo:
     "teamProjects": {},
     "focus": "code/dev",
     "sessionProfile": "coding",
-    "repository": "owner/repo",
-    "captureFolder": "codex",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
-    "captureEvents": false,
+    "captureEvents": true,
     "redactKeys": [],
     "redactPaths": [],
-    "placementConventions": "Put decisions in decisions/ and work checkpoints in codex/."
+    "placementConventions": "Put decisions in decisions/ and work checkpoints in codex/<repo-dir>/."
   }
 }
 ```
 
-`captureEvents` is opt-in and off by default: only the JSON boolean `true`
-enables recording of redacted lifecycle-event envelopes to a local inbox under
-your Basic Memory home (`basic-memory hook status` / `basic-memory hook flush`).
-Add `redactKeys` and `redactPaths` arrays to extend the built-in redaction floor
-for repository-specific payload fields and paths.
+Codex event capture is on by default. Set the JSON boolean `false` at user or
+project level to opt out; malformed values fail closed. Captured, redacted
+lifecycle-event envelopes land in a local inbox under your Basic Memory home
+(`basic-memory hook status` / `basic-memory hook flush`). Add `redactKeys` and
+`redactPaths` arrays to extend the built-in redaction floor.
+
+When `captureFolder` is omitted, Codex resolves the Git top-level directory and
+writes to `codex/<repo-dir>`. An explicit folder still wins.
+
+For a coding profile, keep the checkout-specific repository identifier in the
+project file without duplicating the shared settings:
+
+```json
+{
+  "basicMemory": {
+    "repository": "owner/repo"
+  }
+}
+```
 
 The plugin's seed schemas cover notes Codex writes directly: `codex_session`,
 `coding_session`, `decision`, and `task`. Coding sessions require structured

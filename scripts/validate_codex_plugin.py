@@ -26,6 +26,9 @@ REQUIRED_SKILLS = (
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "captureEvents",
+        "user-level",
+        "project-level",
+        "codex/<repo-dir>",
         "redactKeys",
         "redactPaths",
         "sessionProfile",
@@ -33,6 +36,7 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "hook status --harness codex",
     ),
     "bm-status": (
+        "~/.codex/basic-memory.json",
         "hook status --harness codex",
         "pending envelopes",
         "processed envelopes",

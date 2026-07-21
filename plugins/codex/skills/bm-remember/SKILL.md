@@ -10,7 +10,8 @@ a small fact that should survive the current thread.
 
 ## Steps
 
-1. Read `.codex/basic-memory.json` if present:
+1. Read `~/.codex/basic-memory.json`, then the nearest project
+   `.codex/basic-memory.json`; project keys override user keys:
    - `primaryProject`, default omitted
    - `rememberFolder`, default `codex-remember`
 

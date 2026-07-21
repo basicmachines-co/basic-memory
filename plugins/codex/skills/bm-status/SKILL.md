@@ -19,8 +19,9 @@ Gather a concise diagnostic. Do not over-investigate.
    claiming the hooks cannot work.
 
 2. Plugin config:
-   - read `.codex/basic-memory.json`
-   - report `primaryProject`, `secondaryProjects`, `teamProjects`,
+   - read `~/.codex/basic-memory.json`, then the nearest project
+     `.codex/basic-memory.json`; project keys override user keys
+   - report the resolved `primaryProject`, `secondaryProjects`, `teamProjects`,
      `captureFolder`, `rememberFolder`, `recallTimeframe`, `focus`,
      `sessionProfile`, `repository`, `captureEvents`, `redactKeys`, and
      `redactPaths`

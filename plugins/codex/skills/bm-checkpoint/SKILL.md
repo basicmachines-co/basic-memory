@@ -11,10 +11,11 @@ context transition.
 
 ## Gather
 
-Read `.codex/basic-memory.json` if present:
+Read `~/.codex/basic-memory.json`, then the nearest project
+`.codex/basic-memory.json`; project keys override user keys:
 
 - `primaryProject`, default omitted
-- `captureFolder`, default `codex`
+- `captureFolder`, default `codex/<git top-level directory name>`
 - `placementConventions`, optional
 - `sessionProfile`, default `general`
 - `repository`, required when `sessionProfile` is `coding`

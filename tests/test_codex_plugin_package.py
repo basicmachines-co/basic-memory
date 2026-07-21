@@ -79,7 +79,9 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert 'codex plugin marketplace add "$(git rev-parse --show-toplevel)"' in readme
     assert "codex plugin add codex@basic-memory" in readme
     assert "Plugin installation is user-level in Codex" in readme
-    assert "Each repository still needs its own `.codex/basic-memory.json`" in readme
+    assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
+    assert "the nearest project file overrides only the keys it declares" in readme
+    assert "keep the checkout-specific repository identifier in the" in readme
 
 
 def test_coding_session_schema_is_shared_across_host_plugins() -> None:
