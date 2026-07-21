@@ -17,6 +17,7 @@ from basic_memory.indexing.embedding_index_planning import (
     run_embedding_index,
     run_embedding_index_batch,
     summarize_embedding_index_batch_result,
+    vector_sync_perf_counter,
 )
 
 
@@ -176,6 +177,15 @@ def test_embedding_index_planner_dedupes_entities_and_fingerprints_versions() ->
     assert plan.fingerprint == same_plan.fingerprint
 
 
+def test_embedding_index_planner_rejects_invalid_entity_shard_size() -> None:
+    with pytest.raises(ValueError, match="shard_size must be greater than zero"):
+        EmbeddingIndexPlanner().plan_entity_shard(["chunk-1"], shard_size=0)
+
+
+def test_vector_sync_perf_counter_returns_monotonic_seconds() -> None:
+    assert isinstance(vector_sync_perf_counter(), float)
+
+
 def test_embedding_index_batch_result_summarizes_plan_and_sync_counts() -> None:
     planner = EmbeddingIndexPlanner()
     plan = planner.plan(
@@ -267,3 +277,16 @@ async def test_run_embedding_index_batch_dedupes_and_summarizes_vector_sync() ->
         deferred_entities=1,
         reason="entity embedding batch indexed: 2 entities",
     )
+
+
+@pytest.mark.asyncio
+async def test_run_embedding_index_batch_skips_empty_request() -> None:
+    vector_sync = BatchVectorSync()
+
+    result = await run_embedding_index_batch(
+        EmbeddingIndexBatchJobRequest(project_id=7, project_path="main"),
+        vector_sync=vector_sync,
+    )
+
+    assert result == EmbeddingIndexBatchResult.no_entities()
+    assert vector_sync.synced_entity_ids == []

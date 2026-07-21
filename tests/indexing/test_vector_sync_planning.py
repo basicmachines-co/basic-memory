@@ -12,10 +12,10 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.progress import VectorSyncProgress
-from basic_memory.indexing.vector_sync_planning import (
+from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexPlanner,
     RepositoryVectorSyncEntitySource,
     VectorSyncBatchProgressCallback,
-    plan_vector_sync_progress,
     run_vector_sync,
 )
 
@@ -186,7 +186,7 @@ def test_vector_sync_plan_starts_new_progress_for_non_resume_phase() -> None:
         embedding_jobs_total=20,
     )
 
-    planned = plan_vector_sync_progress(
+    planned = EmbeddingIndexPlanner().plan_progress(
         checkpoint_phase="relations_complete",
         candidate_entity_ids=[22, 33, 11, 44, 33],
         resume_progress=resume_progress,
@@ -210,7 +210,7 @@ def test_vector_sync_plan_reuses_resume_state_for_vector_resume_phase() -> None:
         elapsed_seconds=3.0,
     )
 
-    planned = plan_vector_sync_progress(
+    planned = EmbeddingIndexPlanner().plan_progress(
         checkpoint_phase="syncing_vectors",
         candidate_entity_ids=[20, 30],
         resume_progress=resume_progress,
@@ -226,7 +226,7 @@ def test_vector_sync_plan_reuses_resume_state_for_vector_resume_phase() -> None:
 def test_vector_sync_plan_uses_resume_state_after_forward_refs_complete() -> None:
     resume_progress = VectorSyncProgress(entity_ids=[1])
 
-    planned = plan_vector_sync_progress(
+    planned = EmbeddingIndexPlanner().plan_progress(
         checkpoint_phase="forward_refs_complete",
         candidate_entity_ids=[2, 1, 3],
         resume_progress=resume_progress,
@@ -237,7 +237,7 @@ def test_vector_sync_plan_uses_resume_state_after_forward_refs_complete() -> Non
 
 
 def test_vector_sync_plan_dedupes_candidates_for_empty_resume() -> None:
-    planned = plan_vector_sync_progress(
+    planned = EmbeddingIndexPlanner().plan_progress(
         checkpoint_phase=None,
         candidate_entity_ids=[5, 5, 6],
         resume_progress=VectorSyncProgress(),
@@ -264,7 +264,7 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
         ]
     )
     monkeypatch.setattr(
-        "basic_memory.indexing.vector_sync_planning.vector_sync_perf_counter",
+        "basic_memory.indexing.embedding_index_planning.vector_sync_perf_counter",
         SequencePerfCounter([20.0, 20.0, 23.0]),
     )
 
@@ -326,7 +326,7 @@ async def test_run_vector_sync_logs_periodic_batch_progress(
         progress_events=[(1, 1, 3)],
     )
     monkeypatch.setattr(
-        "basic_memory.indexing.vector_sync_planning.vector_sync_perf_counter",
+        "basic_memory.indexing.embedding_index_planning.vector_sync_perf_counter",
         SequencePerfCounter([0.0, 0.0, 6.5, 8.0]),
     )
 

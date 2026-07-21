@@ -25,6 +25,15 @@ from basic_memory.indexing.forward_reference_resolution import (
     run_forward_reference_entity_refresh,
     run_forward_reference_resolution,
 )
+from basic_memory.indexing.embedding_index_planning import (
+    CheckpointPhase,
+    EmbeddingIndexPlanner,
+    EntityId,
+    RepositoryVectorSyncEntitySource,
+    VectorSyncEntitySource,
+    VectorSyncExecutor,
+    run_vector_sync,
+)
 from basic_memory.indexing.relation_resolution import (
     RelationResolutionEntityIndexer,
     RelationResolutionEntityRepository,
@@ -36,15 +45,6 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMoveRun,
     RepositoryProjectIndexMaintenanceStore,
     StoreProjectIndexMaintenanceRunner,
-)
-from basic_memory.indexing.vector_sync_planning import (
-    CheckpointPhase,
-    EntityId,
-    RepositoryVectorSyncEntitySource,
-    VectorSyncEntitySource,
-    VectorSyncExecutor,
-    plan_vector_sync_progress,
-    run_vector_sync,
 )
 from basic_memory.runtime.storage import ProjectId
 
@@ -97,7 +97,7 @@ class ProjectIndexRuntime:
         candidate_entity_ids = sorted(
             indexed_entity_ids | relation_cleanup_entity_ids | forward_ref_reindexed_entity_ids
         )
-        return plan_vector_sync_progress(
+        return EmbeddingIndexPlanner().plan_progress(
             checkpoint_phase=checkpoint_phase,
             candidate_entity_ids=candidate_entity_ids,
             resume_progress=resume_progress,

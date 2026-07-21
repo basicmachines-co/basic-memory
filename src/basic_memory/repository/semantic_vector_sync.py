@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -14,6 +13,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.indexing.embedding_index_planning import EntityVectorShardPlan
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.schemas.search import SearchItemType
 
@@ -99,19 +99,6 @@ class EntitySyncRuntime:
 
 
 @dataclass(frozen=True)
-class EntityVectorShardPlan:
-    """Shard selection for one entity's pending embedding work."""
-
-    scheduled_chunk_keys: set[str]
-    pending_jobs_total: int
-    shard_index: int
-    shard_count: int
-    remaining_jobs_after_shard: int
-    oversized_entity: bool
-    entity_complete: bool
-
-
-@dataclass(frozen=True)
 class VectorChunkState:
     """Existing vector chunk state fetched for one prepare window."""
 
@@ -121,41 +108,6 @@ class VectorChunkState:
     entity_fingerprint: str
     embedding_model: str
     has_embedding: bool
-
-
-def plan_entity_vector_shard(
-    pending_records: list[VectorChunkRecord],
-    *,
-    shard_size: int = OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
-) -> EntityVectorShardPlan:
-    """Select the bounded shard to process for one entity sync invocation."""
-    pending_jobs_total = len(pending_records)
-    if pending_jobs_total == 0:
-        return EntityVectorShardPlan(
-            scheduled_chunk_keys=set(),
-            pending_jobs_total=0,
-            shard_index=1,
-            shard_count=1,
-            remaining_jobs_after_shard=0,
-            oversized_entity=False,
-            entity_complete=True,
-        )
-
-    ordered_pending_records = sorted(pending_records, key=lambda record: record["chunk_key"])
-    scheduled_records = ordered_pending_records[:shard_size]
-    remaining_jobs_after_shard = pending_jobs_total - len(scheduled_records)
-    return EntityVectorShardPlan(
-        scheduled_chunk_keys={record["chunk_key"] for record in scheduled_records},
-        pending_jobs_total=pending_jobs_total,
-        shard_index=1,
-        shard_count=max(
-            1,
-            math.ceil(pending_jobs_total / shard_size),
-        ),
-        remaining_jobs_after_shard=remaining_jobs_after_shard,
-        oversized_entity=pending_jobs_total > shard_size,
-        entity_complete=remaining_jobs_after_shard == 0,
-    )
 
 
 def log_vector_shard_plan(

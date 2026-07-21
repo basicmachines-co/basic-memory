@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from basic_memory.indexing.embedding_index_planning import EmbeddingIndexPlanner
 from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
@@ -239,7 +240,11 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
 
 
 def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
-    empty_plan = semantic_vector_sync.plan_entity_vector_shard([])
+    planner = EmbeddingIndexPlanner()
+    empty_plan = planner.plan_entity_shard(
+        [],
+        shard_size=semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
+    )
     assert empty_plan.entity_complete is True
     assert empty_plan.scheduled_chunk_keys == set()
 
@@ -262,7 +267,10 @@ def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
         }
         for index in range(semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE + 1)
     ]
-    oversized_plan = semantic_vector_sync.plan_entity_vector_shard(oversized_records)
+    oversized_plan = planner.plan_entity_shard(
+        [record["chunk_key"] for record in oversized_records],
+        shard_size=semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
+    )
     semantic_vector_sync.log_vector_shard_plan(
         repository,
         entity_id=1,
@@ -406,11 +414,6 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         repository,
         "_timestamp_now_expr",
         Mock(return_value="CURRENT_TIMESTAMP"),
-    )
-    monkeypatch.setattr(
-        repository,
-        "_plan_entity_vector_shard",
-        semantic_vector_sync.plan_entity_vector_shard,
     )
     monkeypatch.setattr(repository, "_log_vector_shard_plan", Mock())
     delete_stale_chunks = AsyncMock()

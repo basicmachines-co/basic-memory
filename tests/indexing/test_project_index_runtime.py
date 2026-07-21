@@ -25,7 +25,7 @@ from basic_memory.indexing.project_index_maintenance import (
     RepositoryProjectIndexMaintenanceStore,
     StoreProjectIndexMaintenanceRunner,
 )
-from basic_memory.indexing.vector_sync_planning import RepositoryVectorSyncEntitySource
+from basic_memory.indexing.embedding_index_planning import RepositoryVectorSyncEntitySource
 from basic_memory.indexing.forward_reference_resolution import (
     RepositoryForwardReferenceEntityRefreshRuntime,
     RepositoryForwardReferenceRelationSource,
