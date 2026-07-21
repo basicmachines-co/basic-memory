@@ -828,3 +828,12 @@ def test_merge_metadata_into_markdown_preserves_crlf_body():
     merged = _merge_metadata_into_markdown(markdown, {"status": "resolved"})
     assert merged.endswith("Body line\r\n")
     assert parse_frontmatter(merged)["status"] == "resolved"
+
+
+def test_merge_metadata_into_markdown_preserves_separatorless_body():
+    """A note whose body starts right after the closing fence must not gain a blank line."""
+    markdown = "---\nstatus: draft\n---\nBody line\n"
+    merged = _merge_metadata_into_markdown(markdown, {"status": "resolved"})
+    assert merged.endswith("---\nBody line\n")
+    assert "\n\nBody line" not in merged
+    assert parse_frontmatter(merged)["status"] == "resolved"

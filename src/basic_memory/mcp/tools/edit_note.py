@@ -592,6 +592,17 @@ async def edit_note(
             section_ops = ("replace_section", "insert_before_section", "insert_after_section")
             if operation in section_ops and not section:
                 raise ValueError("section parameter is required for section-based operations")
+            # Reject null metadata values before dispatch so both the edit path and the
+            # append/prepend auto-create fallback behave identically — the service-side
+            # guard only covers existing notes, and an auto-created note would otherwise
+            # be written with a YAML null that indexing silently filters out.
+            if metadata:
+                null_keys = sorted(k for k, v in metadata.items() if v is None)
+                if null_keys:
+                    raise ValueError(
+                        "metadata values cannot be null (key deletion is not supported): "
+                        + ", ".join(null_keys)
+                    )
 
             # Use the PATCH endpoint to edit the entity
             try:

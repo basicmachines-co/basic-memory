@@ -674,6 +674,7 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
     if not sanitized:
         return markdown_content
 
+    had_separator = True
     if has_frontmatter(markdown_content):
         current_metadata = parse_frontmatter(markdown_content)
         # strip=False: a frontmatter-only rewrite must not reflow the body (leading
@@ -685,6 +686,8 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
             body = body[2:]
         elif body.startswith("\n"):
             body = body[1:]
+        else:
+            had_separator = False
     else:
         current_metadata = {}
         body = markdown_content
@@ -694,6 +697,13 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
 
     post = frontmatter.Post(body)
     post.metadata.update(merged_metadata)
+    if not had_separator and body:
+        # Trigger: the original note had no blank line between the closing fence and
+        # the body ("---\nBody"), but dump_frontmatter always emits one.
+        # Outcome: serialize the frontmatter alone and reattach the body verbatim so
+        # a frontmatter-only merge cannot insert a blank line into the body.
+        post.content = ""
+        return dump_frontmatter(post) + body
     return dump_frontmatter(post)
 
 

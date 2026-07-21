@@ -920,3 +920,30 @@ async def test_edit_note_metadata_ignores_identity_fields(mcp_server, app, test_
         assert frontmatter["permalink"].endswith("tickets/identity-guard-note")
         assert frontmatter["type"] == "note"
         assert "status: draft" not in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_metadata_null_values_rejected_before_auto_create(
+    mcp_server, app, test_project
+):
+    """Null metadata values fail up front — including on the append auto-create path.
+
+    Without the tool-level guard an auto-created note would be written with a
+    YAML null that indexing silently filters out of entity_metadata.
+    """
+    async with Client(mcp_server) as client:
+        with pytest.raises(Exception) as exc_info:
+            await client.call_tool(
+                "edit_note",
+                {
+                    "project": test_project.name,
+                    "identifier": "conversations/never-created",
+                    "operation": "append",
+                    "content": "",
+                    "metadata": {"status": None},
+                },
+            )
+
+        error_message = str(exc_info.value)
+        assert "key deletion is not supported" in error_message
+        assert "status" in error_message
