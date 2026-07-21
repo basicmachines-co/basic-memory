@@ -1,12 +1,10 @@
 """Abstract base class for search repository implementations."""
 
 import asyncio
-import hashlib
-import json
 import math
-import re
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -23,6 +21,14 @@ from basic_memory.repository.embedding_provider import (
     embedding_provider_identity,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.semantic_chunking import (
+    SemanticSourceRow,
+    VectorChunkRecord,
+    build_entity_fingerprint,
+    build_vector_chunk_records,
+    compose_row_source_text,
+    split_text_into_chunks,
+)
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
@@ -34,12 +40,8 @@ from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 VECTOR_FILTER_SCAN_LIMIT = 50000
 FUSION_BONUS = 0.3
 FTS_GATE_THRESHOLD = 0.0
-MAX_VECTOR_CHUNK_CHARS = 900
-VECTOR_CHUNK_OVERLAP_CHARS = 120
 TOP_CHUNKS_PER_RESULT = 5
 SMALL_NOTE_CONTENT_LIMIT = 2000
-HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
-BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
 _SQLITE_MAX_PREPARE_WINDOW = 8
 
@@ -512,89 +514,29 @@ class SearchRepositoryBase(ABC):
                 "and set semantic_search_enabled=true."
             )
 
-    def _compose_row_source_text(self, row) -> str:
+    def _compose_row_source_text(self, row: SemanticSourceRow) -> str:
         """Build the text blob that will be chunked and embedded for one search_index row.
 
         For entity rows we use title, permalink, and content_snippet (the actual
         human-readable content).  content_stems is an FTS-optimised variant that
         includes word-boundary expansions and would dilute embedding quality.
         """
-        if row.type == SearchItemType.ENTITY.value:
-            row_parts = [
-                row.title or "",
-                row.permalink or "",
-                row.content_snippet or "",
-            ]
-            return "\n\n".join(part for part in row_parts if part)
+        return compose_row_source_text(row)
 
-        if row.type == SearchItemType.OBSERVATION.value:
-            row_parts = [
-                row.title or "",
-                row.permalink or "",
-                row.category or "",
-                row.content_snippet or "",
-            ]
-            return "\n\n".join(part for part in row_parts if part)
-
-        row_parts = [
-            row.title or "",
-            row.permalink or "",
-            row.relation_type or "",
-            row.content_snippet or "",
-        ]
-        return "\n\n".join(part for part in row_parts if part)
-
-    def _build_chunk_records(self, rows) -> list[dict[str, str]]:
-        records_by_key: dict[str, dict[str, str]] = {}
-        duplicate_chunk_keys = 0
-        for row in rows:
-            source_text = self._compose_row_source_text(row)
-            chunks = self._split_text_into_chunks(source_text)
-            for chunk_index, chunk_text in enumerate(chunks):
-                chunk_key = f"{row.type}:{row.id}:{chunk_index}"
-                source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-                # Trigger: SQLite FTS5 can accumulate duplicate logical rows for the
-                # same search_index id because it does not enforce relational uniqueness.
-                # Why: duplicate chunk keys would schedule duplicate writes for the same
-                # chunk row and eventually trip UNIQUE(rowid) in search_vector_embeddings.
-                # Outcome: collapse chunk work to one deterministic record per chunk key.
-                if chunk_key in records_by_key:
-                    duplicate_chunk_keys += 1
-                records_by_key[chunk_key] = {
-                    "chunk_key": chunk_key,
-                    "chunk_text": chunk_text,
-                    "source_hash": source_hash,
-                }
-
-        if duplicate_chunk_keys:
+    def _build_chunk_records(self, rows: Iterable[SemanticSourceRow]) -> list[VectorChunkRecord]:
+        chunk_build = build_vector_chunk_records(rows)
+        if chunk_build.duplicate_chunk_keys:
             logger.warning(
                 "Collapsed duplicate vector chunk keys before embedding sync: "
                 "project_id={project_id} duplicate_chunk_keys={duplicate_chunk_keys}",
                 project_id=self.project_id,
-                duplicate_chunk_keys=duplicate_chunk_keys,
+                duplicate_chunk_keys=chunk_build.duplicate_chunk_keys,
             )
 
-        return list(records_by_key.values())
+        return chunk_build.records
 
-    def _build_entity_fingerprint(self, chunk_records: list[dict[str, str]]) -> str:
-        """Hash the semantic chunk inputs for one entity.
-
-        Trigger: vector sync eligibility depends on the chunk records derived
-        from search_index rows, not raw file bytes.
-        Why: title/permalink/observation metadata can change vector inputs even
-        when unrelated file bytes do not, and vice versa.
-        Outcome: one deterministic fingerprint invalidates the entity-level skip
-        whenever the embeddable chunk set changes.
-        """
-        canonical_records = [
-            {
-                "chunk_key": record["chunk_key"],
-                "source_hash": record["source_hash"],
-            }
-            for record in sorted(chunk_records, key=lambda record: record["chunk_key"])
-        ]
-        payload = json.dumps(canonical_records, separators=(",", ":"), sort_keys=True)
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    def _build_entity_fingerprint(self, chunk_records: list[VectorChunkRecord]) -> str:
+        return build_entity_fingerprint(chunk_records)
 
     def _embedding_model_key(self) -> str:
         """Build a stable model identity for vector invalidation checks."""
@@ -610,7 +552,7 @@ class SearchRepositoryBase(ABC):
 
     def _plan_entity_vector_shard(
         self,
-        pending_records: list[dict[str, str]],
+        pending_records: list[VectorChunkRecord],
     ) -> _EntityVectorShardPlan:
         """Select the bounded shard to process for one entity sync invocation."""
         pending_jobs_total = len(pending_records)
@@ -666,138 +608,7 @@ class SearchRepositoryBase(ABC):
     # --- Text splitting ---
 
     def _split_text_into_chunks(self, text_value: str) -> list[str]:
-        normalized = (text_value or "").strip()
-        if not normalized:
-            return []
-
-        # Split on markdown headers AND bullet boundaries to ensure each
-        # discrete fact gets its own embedding vector for granular retrieval.
-        lines = normalized.splitlines()
-        sections: list[str] = []
-        current_section: list[str] = []
-        for line in lines:
-            if HEADER_LINE_PATTERN.match(line) and current_section:
-                sections.append("\n".join(current_section).strip())
-                current_section = [line]
-            elif BULLET_PATTERN.match(line) and current_section:
-                sections.append("\n".join(current_section).strip())
-                current_section = [line]
-            else:
-                current_section.append(line)
-        if current_section:
-            sections.append("\n".join(current_section).strip())
-
-        chunked_sections: list[str] = []
-        current_chunk = ""
-
-        for section in sections:
-            is_bullet = bool(BULLET_PATTERN.match(section))
-
-            if len(section) > MAX_VECTOR_CHUNK_CHARS:
-                if current_chunk:
-                    chunked_sections.append(current_chunk)
-                    current_chunk = ""
-                long_chunks = self._split_long_section(section)
-                if long_chunks:
-                    chunked_sections.extend(long_chunks[:-1])
-                    current_chunk = long_chunks[-1]
-                continue
-
-            # Keep bullets as individual chunks for granular fact retrieval.
-            # Non-bullet sections (headers, prose) merge up to MAX_VECTOR_CHUNK_CHARS.
-            if is_bullet:
-                if current_chunk:
-                    chunked_sections.append(current_chunk)
-                    current_chunk = ""
-                chunked_sections.append(section)
-                continue
-
-            candidate = section if not current_chunk else f"{current_chunk}\n\n{section}"
-            if len(candidate) <= MAX_VECTOR_CHUNK_CHARS:
-                current_chunk = candidate
-                continue
-
-            chunked_sections.append(current_chunk)
-            current_chunk = section
-
-        if current_chunk:
-            chunked_sections.append(current_chunk)
-
-        return [chunk for chunk in chunked_sections if chunk.strip()]
-
-    @staticmethod
-    def _split_into_paragraphs(section_text: str) -> list[str]:
-        """Split section into paragraphs, treating bullet lists as separate items.
-
-        Double newlines always split. Within a single-newline block, bullet
-        boundaries (lines starting with - or *) also create splits so that
-        individual facts in a list become separate embeddable chunks.
-        """
-        raw_paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
-        result: list[str] = []
-        for para in raw_paragraphs:
-            lines = para.split("\n")
-            # Check if this paragraph contains bullet items
-            has_bullets = any(BULLET_PATTERN.match(line) for line in lines)
-            if not has_bullets:
-                result.append(para)
-                continue
-            # Split on bullet boundaries: group consecutive non-bullet lines
-            # with their preceding bullet
-            current_item: list[str] = []
-            for line in lines:
-                if BULLET_PATTERN.match(line) and current_item:
-                    result.append("\n".join(current_item).strip())
-                    current_item = [line]
-                else:
-                    current_item.append(line)
-            if current_item:
-                result.append("\n".join(current_item).strip())
-        return [p for p in result if p]
-
-    def _split_long_section(self, section_text: str) -> list[str]:
-        paragraphs = self._split_into_paragraphs(section_text)
-        if not paragraphs:
-            return []
-
-        chunks: list[str] = []
-        current = ""
-        for paragraph in paragraphs:
-            if len(paragraph) > MAX_VECTOR_CHUNK_CHARS:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                chunks.extend(self._split_by_char_window(paragraph))
-                continue
-
-            candidate = paragraph if not current else f"{current}\n\n{paragraph}"
-            if len(candidate) <= MAX_VECTOR_CHUNK_CHARS:
-                current = candidate
-            else:
-                if current:
-                    chunks.append(current)
-                current = paragraph
-
-        if current:
-            chunks.append(current)
-        return chunks
-
-    def _split_by_char_window(self, paragraph: str) -> list[str]:
-        text_value = paragraph.strip()
-        if not text_value:
-            return []
-
-        chunks: list[str] = []
-        start = 0
-        while start < len(text_value):
-            end = min(len(text_value), start + MAX_VECTOR_CHUNK_CHARS)
-            chunk = text_value[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-            if end >= len(text_value):
-                break
-            start = max(0, end - VECTOR_CHUNK_OVERLAP_CHARS)
-        return chunks
+        return split_text_into_chunks(text_value)
 
     # ------------------------------------------------------------------
     # Shared semantic search: sync_entity_vectors orchestration
@@ -1389,7 +1200,7 @@ class SearchRepositoryBase(ABC):
 
         timestamp_expr = self._timestamp_now_expr()
         metadata_update_ids: list[int] = []
-        pending_records: list[dict[str, str]] = []
+        pending_records: list[VectorChunkRecord] = []
         skipped_chunks_count = 0
         for record in chunk_records:
             current = existing_by_key.get(record["chunk_key"])
@@ -1485,7 +1296,7 @@ class SearchRepositoryBase(ABC):
         session: AsyncSession,
         *,
         entity_id: int,
-        scheduled_records: list[dict[str, str]],
+        scheduled_records: list[VectorChunkRecord],
         existing_by_key: dict[str, VectorChunkState],
         entity_fingerprint: str,
         embedding_model: str,

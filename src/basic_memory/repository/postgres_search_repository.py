@@ -17,6 +17,7 @@ from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     VectorChunkState,
@@ -480,7 +481,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         session: AsyncSession,
         *,
         entity_id: int,
-        scheduled_records: list[dict[str, str]],
+        scheduled_records: list[VectorChunkRecord],
         existing_by_key: dict[str, VectorChunkState],
         entity_fingerprint: str,
         embedding_model: str,
