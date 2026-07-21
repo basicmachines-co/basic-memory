@@ -1122,6 +1122,16 @@ def _codex_stop_response(payload: dict[str, Any]) -> dict[str, Any]:
     if request is None:
         return {"continue": True}
 
+    current_turn_id = payload.get("turn_id")
+    # Trigger: the saved request belongs to an earlier Codex turn, or the
+    # current Stop cannot prove it belongs to the requesting turn.
+    # Why: an interrupted continuation can leave the request behind; blocking
+    # a later turn would author a checkpoint from the wrong working context.
+    # Outcome: abandon the stale handshake and let the current turn end.
+    if request.source_turn_id is not None and current_turn_id != request.source_turn_id:
+        checkpoint_requests.clear(session_id)
+        return {"continue": True}
+
     # Trigger: Codex says this Stop is already a continuation. Why: blocking
     # again would create a Stop-hook loop. Outcome: clear the local handshake
     # and allow the turn to end. Until Codex confirms that continuation state,

@@ -845,6 +845,28 @@ def test_codex_stop_without_checkpoint_request_is_json_noop(bm_home: Path) -> No
     assert json.loads(result.stdout) == {"continue": True}
 
 
+def test_codex_stop_clears_checkpoint_request_from_prior_turn(bm_home: Path) -> None:
+    from basic_memory.hooks import checkpoint_requests
+
+    checkpoint_requests.create("s-abc12345", "turn-42")
+
+    result = runner.invoke(
+        cli_app,
+        ["hook", "stop", "--harness", "codex"],
+        input=json.dumps(
+            {
+                "session_id": "s-abc12345",
+                "turn_id": "turn-43",
+                "stop_hook_active": False,
+            }
+        ),
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"continue": True}
+    assert checkpoint_requests.read("s-abc12345") is None
+
+
 def test_pre_compact_codex_malformed_project_does_not_use_user_checkpoint_route(
     bm_home: Path, tmp_path: Path
 ) -> None:
