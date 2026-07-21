@@ -72,7 +72,8 @@ summarizing the real convention.
 
 ## Apply
 
-After confirming the plan, write the chosen user-level or project-level file:
+After confirming the plan, write the shared settings to the chosen user-level or
+project-level file:
 
 ```json
 {
@@ -83,7 +84,6 @@ After confirming the plan, write the chosen user-level or project-level file:
     "teamProjects": {},
     "focus": "<focus>",
     "sessionProfile": "coding",
-    "repository": "owner/name",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
     "captureEvents": true,
@@ -104,10 +104,19 @@ working-directory and path-bearing checkpoint content. User and project
 redaction lists accumulate. These files are intentionally Codex-specific; do
 not write `.claude/settings.json`.
 
-When common settings live at user level but a coding repository identifier is
-checkout-specific, keep only `repository` in the project file. The project key
-overrides the shared user-level value without duplicating the rest of the
-configuration.
+For a user-level coding setup, always keep the confirmed repository identifier in
+the project file so it cannot affect other repositories:
+
+```json
+{
+  "basicMemory": {
+    "repository": "owner/name"
+  }
+}
+```
+
+For a project-level setup, add `repository` to the shared settings in that same
+project file.
 
 Persist `sessionProfile` explicitly. Persist `repository` only for the `coding`
 profile, after the user confirms it. A coding setup is incomplete without a
