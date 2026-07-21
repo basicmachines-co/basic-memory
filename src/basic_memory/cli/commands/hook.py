@@ -773,7 +773,9 @@ def _coding_context(cfg: dict, directory: str) -> CodingContext:
         raise RuntimeError("coding session profile requires basicMemory.repository; rerun bm-setup")
     return CodingContext(
         repository=repository.strip(),
-        repo_root=_required_git_value(directory, "rev-parse", "--show-toplevel"),
+        # as_posix keeps repo_root in the forward-slash form git already emits on
+        # every platform, so stored path identity is queryable cross-platform.
+        repo_root=Path(_required_git_value(directory, "rev-parse", "--show-toplevel")).as_posix(),
         branch=_required_git_value(directory, "rev-parse", "--abbrev-ref", "HEAD"),
         git_sha=_required_git_value(directory, "rev-parse", "HEAD"),
         pull_request=_pull_request_context(directory),
@@ -849,6 +851,13 @@ def _checkpoint_note(
 
     safe_coding_context: dict[str, str] | None = None
     if coding_context is not None:
+        # Trigger: coding sessions require repo_root == cwd to be comparable identity.
+        # Why: git emits repo_root with forward slashes on every platform, while the
+        # event cwd arrives in native form — on Windows that's C:\Users vs C:/Users.
+        # Outcome: store the coding note's cwd in the same POSIX form as repo_root.
+        # (Redaction ran first; the [redacted-path] sentinel has no separators and
+        # passes through as_posix unchanged.)
+        metadata["cwd"] = Path(safe_cwd).as_posix()
         safe_coding_context = {
             "repository": redactor.redact_text(coding_context.repository),
             "repo_root": redactor.redact_text(coding_context.repo_root),
