@@ -847,6 +847,41 @@ def test_pre_compact_codex_skips_working_tree_when_workspace_denied(
     assert kwargs["metadata"]["cwd"] == "[REDACTED_PATH]"
 
 
+def test_pre_compact_codex_malformed_project_does_not_use_user_checkpoint_route(
+    bm_home: Path, tmp_path: Path
+) -> None:
+    home = Path.home()
+    (home / ".codex").mkdir(parents=True, exist_ok=True)
+    (home / ".codex" / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "user-wide",
+                    "captureEvents": True,
+                    "redactPaths": ["/shared/private"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text("{broken", encoding="utf-8")
+    transcript = _transcript(tmp_path)
+    mock_write = AsyncMock()
+
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(project, transcript_path=str(transcript), trigger="auto"),
+        )
+
+    assert result.exit_code == 0
+    assert not (bm_home / "inbox").exists()
+    mock_write.assert_not_awaited()
+
+
 # --- Fail-open contract ---
 
 
@@ -1652,6 +1687,31 @@ def test_claude_settings_non_dict_block_is_ignored(tmp_path: Path) -> None:
 
 
 def test_codex_settings_broken_file_counts_as_configured(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text("{broken", encoding="utf-8")
+
+    merged, found = hook_module.load_codex_settings(project)
+
+    assert merged == {"captureEvents": False, "captureFolder": "codex"}
+    assert found is True
+
+
+def test_codex_settings_malformed_project_invalidates_user_fallback(tmp_path: Path) -> None:
+    home = Path.home()
+    (home / ".codex").mkdir(parents=True, exist_ok=True)
+    (home / ".codex" / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "user-wide",
+                    "captureEvents": True,
+                    "redactPaths": ["/shared/private"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     project = tmp_path / "proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text("{broken", encoding="utf-8")
