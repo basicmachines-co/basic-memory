@@ -53,6 +53,10 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-checkpoint": (
         "Apply the `bm-writing` skill",
         "A checkpoint is a durable handoff, not a status dump",
+        "## Privacy Gate",
+        "`redactKeys` and `redactPaths` accumulate",
+        "[REDACTED_PATH]",
+        "skip the checkpoint",
         "username: <current username>",
         "hostname: <current hostname>",
         "type: coding_session",

@@ -157,6 +157,20 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
 
+def test_codex_checkpoint_applies_accumulated_redaction_before_write() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")
+
+    assert "## Privacy Gate" in skill
+    assert "`redactKeys` and `redactPaths` accumulate" in skill
+    assert "Scrub **every string** passed to `write_note`" in skill
+    assert "Do not omit schema-required path fields; use the marker" in skill
+    assert "[REDACTED_PATH]" in skill
+    assert "[REDACTED]" in skill
+    assert "fail closed: skip the checkpoint" in skill
+    assert "Do not fall back to an unredacted note" in skill
+
+
 def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / ".agents/skills/infographics/SKILL.md").read_text(encoding="utf-8")
