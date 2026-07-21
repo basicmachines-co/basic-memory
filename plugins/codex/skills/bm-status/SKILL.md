@@ -30,7 +30,8 @@ Gather a concise diagnostic. Do not over-investigate.
 3. Core hook health:
    - with the first available launcher, run
      `basic-memory hook status --harness codex --project-dir <repo-root>`
-   - report the shared inbox path, pending envelopes, processed envelopes, last
+   - report the shared inbox path, pending envelopes, archived envelopes,
+     pending checkpoint requests, last
      flush, settings state, resolved primary project, capture state, capture
      folder, Basic Memory version, and uv version from that command
    - inbox counts are global across supported harnesses; do not attribute a
@@ -44,12 +45,12 @@ Gather a concise diagnostic. Do not over-investigate.
      they run
 
 5. Basic Memory queries:
-   - query recent `type=codex_session` and `type=session`; when
+   - query recent `type=codex_session`; when
      `sessionProfile=coding`, also query `type=coding_session` with
      `repository=<configured repository>`, then merge, deduplicate, sort newest
      first, and keep the newest five; never run an unscoped coding-session query
-     when the repository is missing; the Codex types cover deliberate and
-     PreCompact checkpoints, while `session` covers core projections
+     when the repository is missing; these are agent-authored checkpoints, while
+     lifecycle envelopes remain local operational trace
    - active `type=task`, `status=active`
    - open `type=decision`, `status=open`
 
@@ -73,10 +74,11 @@ Basic Memory for Codex
 - Redact paths: <configured count or none>
 - Shared hook inbox: <path or unavailable>
 - Shared pending envelopes: <count or unavailable>
-- Shared processed envelopes: <count or unavailable>
+- Shared archived envelopes: <count or unavailable>
+- Pending checkpoint requests: <count or unavailable>
 - Last flush: <timestamp, never, or unavailable>
 - Hook runtime: basic-memory <version>; uv <version or missing>
-- Recent checkpoints: <count across coding_session, codex_session, and session>
+- Recent checkpoints: <count across coding_session and codex_session>
 - Active tasks: <count>
 - Open decisions: <count>
 - Hooks: installed; trust review required in Codex

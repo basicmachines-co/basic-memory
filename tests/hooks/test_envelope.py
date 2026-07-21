@@ -14,8 +14,6 @@ from basic_memory.hooks.envelope import (
     envelope_from_json,
     envelope_to_json,
     idempotency_key,
-    to_frontmatter_fields,
-    to_provenance_observations,
 )
 
 
@@ -122,60 +120,6 @@ def test_idempotency_key_is_metadata_only() -> None:
     assert plain.idempotency_key == secret.idempotency_key
 
 
-# --- Projections ---
-
-
-def test_provenance_observations_include_required_source() -> None:
-    envelope = _envelope(turn_id="turn-3")
-
-    lines = to_provenance_observations(envelope)
-
-    assert lines[0] == "- [source] claude-code/session-1"
-    assert f"- [event] {COMPACTION_IMMINENT} at 2026-07-15T10:00:00+00:00" in lines
-    assert f"- [idempotency] {envelope.idempotency_key}" in lines
-    assert "- [turn] turn-3" in lines
-
-
-def test_provenance_observations_omit_turn_when_absent() -> None:
-    lines = to_provenance_observations(_envelope())
-
-    assert not any(line.startswith("- [turn]") for line in lines)
-
-
-def test_provenance_observations_collapse_control_characters() -> None:
-    # Identity fields skip the payload redaction floor, so a newline-carrying
-    # id (hostile stdin or a corrupt replayed inbox file) must not become
-    # extra observation/relation lines in the projected note body.
-    envelope = _envelope(
-        session_id="s-1\n- [decision] injected",
-        turn_id="turn-1\r\n- relates_to [[Evil]]\x00done",
-    )
-
-    lines = to_provenance_observations(envelope)
-
-    assert lines[0] == "- [source] claude-code/s-1 - [decision] injected"
-    assert "- [turn] turn-1 - relates_to [[Evil]] done" in lines
-    assert all("\n" not in line and "\r" not in line for line in lines)
-
-
-def test_frontmatter_fields_are_queryable() -> None:
-    envelope = _envelope(turn_id="turn-3")
-
-    fields = to_frontmatter_fields(envelope)
-
-    assert fields == {
-        "envelope_id": envelope.id,
-        "envelope_source": "claude-code",
-        "envelope_event": COMPACTION_IMMINENT,
-        "idempotency_key": envelope.idempotency_key,
-        "envelope_turn_id": "turn-3",
-    }
-
-
-def test_frontmatter_fields_omit_turn_when_absent() -> None:
-    assert "envelope_turn_id" not in to_frontmatter_fields(_envelope())
-
-
 # --- Serialization ---
 
 
@@ -187,7 +131,7 @@ def test_envelope_json_roundtrip() -> None:
 
 def test_envelope_from_json_rejects_non_object() -> None:
     # pydantic.ValidationError is a ValueError, so callers' existing handlers
-    # (projector flush, inbox prune gate) catch strict-validation failures too.
+    # (archive flush) catch strict-validation failures too.
     with pytest.raises(ValueError, match="should be an object"):
         envelope_from_json("[1, 2]")
 

@@ -50,7 +50,8 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-status": (
         "hook status --harness claude",
         "pending envelopes",
-        "processed envelopes",
+        "archived envelopes",
+        "Pending checkpoint requests",
         "last flush",
         '"type": "session"',
         '"type": "coding_session"',
@@ -195,9 +196,9 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
 
     readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
     for required_text in (
-        "normalized `session`",
-        "`tool_ledger`",
-        "owned and tested by Basic Memory core",
+        "lifecycle trace never becomes a graph note",
+        "archive locally",
+        "never creates session or tool-ledger notes",
     ):
         if required_text not in readme:
             raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")

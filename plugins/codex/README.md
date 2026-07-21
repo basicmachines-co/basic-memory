@@ -11,9 +11,10 @@ verification, decision capture, and resumable checkpoints.
 
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
   decisions, and recent Codex checkpoints before substantial work.
-- **Checkpoint work.** The `bm-checkpoint` skill and `PreCompact` hook write
-  general `codex_session` notes or schema-backed `coding_session` notes with
-  structured repository and pull-request context.
+- **Checkpoint work.** `PreCompact` records a private request and the `Stop`
+  hook asks the active Codex turn to run `bm-checkpoint` once after compaction.
+  The resulting `codex_session` or `coding_session` note is agent-authored from
+  the compacted working context, with repository and pull-request evidence.
 - **Capture decisions.** The `bm-decide` skill records durable engineering
   decisions with rationale, alternatives, and consequences.
 - **Remember lightly.** The `bm-remember` skill saves small facts without turning
@@ -32,16 +33,18 @@ verification, decision capture, and resumable checkpoints.
 | --- | --- |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
-| `hooks/hooks.json` | SessionStart and PreCompact hook registration |
+| `hooks/hooks.json` | SessionStart, PreCompact, and Stop hook registration |
 | `hooks/session_start.py` | uv script: runs `basic-memory hook session-start --harness codex` |
 | `hooks/pre_compact.py` | uv script: runs `basic-memory hook pre-compact --harness codex` |
+| `hooks/stop.py` | uv script: runs `basic-memory hook stop --harness codex` |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
-The hook scripts carry no logic: the brief, the checkpoint, and lifecycle-event
-capture all live in the pinned Basic Memory revision behind `bm hook`. Each is
-a self-contained PEP 723 script pinned to a Basic Memory Git ref. Both refs
-are updated together with `just set-codex-hook-version <sha-or-tag>`.
+The hook scripts carry no logic: the brief, checkpoint coordination, and
+lifecycle-event capture all live in the pinned Basic Memory revision behind
+`bm hook`. Each is a self-contained PEP 723 script pinned to a Basic Memory Git
+ref. All refs are updated together with
+`just set-codex-hook-version <sha-or-tag>`.
 
 ## Requirements
 
@@ -68,6 +71,13 @@ codex plugin add codex@basic-memory
 Plugin installation is user-level in Codex, so one install makes the plugin
 available across projects on the same machine. Start a new Codex thread after
 installing so Codex can load the plugin skills, MCP configuration, and hooks.
+
+When adding the marketplace from the Git repository UI, leave **Sparse paths**
+empty. If a sparse checkout is required, include both `.agents/plugins` and
+`plugins/codex`. Selecting only `plugins/codex` omits
+`.agents/plugins/marketplace.json`, so Codex correctly reports that the checked
+out marketplace root has no supported manifest. The marketplace file should not
+be moved into the plugin directory.
 
 Configuration can live at user level in `~/.codex/basic-memory.json` or at
 project level in `.codex/basic-memory.json`. User-level settings are the base;
@@ -103,9 +113,16 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
 
 Codex event capture is on by default. Set the JSON boolean `false` at user or
 project level to opt out; malformed values fail closed. Captured, redacted
-lifecycle-event envelopes land in a local inbox under your Basic Memory home
-(`basic-memory hook status` / `basic-memory hook flush`). Add `redactKeys` and
-`redactPaths` arrays to extend the built-in redaction floor.
+lifecycle-event envelopes land in a local inbox under your Basic Memory home.
+The lifecycle trace stays local: `basic-memory hook flush` only moves valid
+envelopes into the local retention archive and never creates graph notes. Add
+`redactKeys` and `redactPaths` arrays to extend the built-in redaction floor.
+
+Codex ignores PreCompact stdout, so PreCompact cannot ask the model to write a
+note directly. It leaves a private request for the Stop hook. Stop then blocks
+the turn once with a request to run `bm-checkpoint`; the active model writes an
+agent-authored checkpoint from its compacted context, and the next Stop is a
+no-op to prevent loops.
 
 When `captureFolder` is omitted, Codex resolves the Git top-level directory and
 writes to `codex/<repo-dir>`. An explicit folder still wins.
@@ -125,12 +142,9 @@ identifier in the project file without duplicating the shared settings:
 The plugin's seed schemas cover notes Codex writes directly: `codex_session`,
 `coding_session`, `decision`, and `task`. Coding sessions require structured
 repository, repository-root, working-directory, branch, and Git SHA frontmatter;
-current pull-request fields are added when a PR exists. Optional flush projection
-also writes normalized `session` and `tool_ledger` artifacts. Those are
-core-owned contracts implemented and tested with the projector, not duplicate
-schema files maintained by each host plugin. `bm-orient` and `bm-status` still
-recall normalized `session` notes
-alongside Codex checkpoints.
+current pull-request fields are added when a PR exists. Lifecycle envelopes are
+operational trace rather than knowledge, so orientation only recalls authored
+checkpoint types.
 
 Codex plugin hooks must be reviewed and trusted before they run. Open `/hooks` in
 Codex after enabling the plugin and trust the Basic Memory hook definitions.

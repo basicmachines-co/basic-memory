@@ -36,8 +36,9 @@ of a session; this is the deliberate mid-session version with deeper reads.
    report that setup is incomplete. Merge and deduplicate the results, sort them
    newest first, and prefer the highest-signal checkpoint regardless of which
    producer wrote it. `coding_session` carries schema-required, queryable Git
-   context; `session` covers general checkpoints, PreCompact captures, and
-   normalized `bm hook flush` projections.
+   context; `session` covers general checkpoints and PreCompact captures. Do not
+   query lifecycle trace: `bm hook flush` archives it locally rather than
+   promoting it into the graph.
 
 3. Query configured `secondaryProjects` read-only for open decisions. Do not write
    to shared projects during orientation.

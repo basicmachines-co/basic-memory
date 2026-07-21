@@ -1,20 +1,18 @@
 """SPEC-55 producer envelope for harness lifecycle events.
 
 Adapted from ``plugins/shared/harness_envelope.py`` on the #1064 salvage branch
-(credit: sourrrish) — the contract shape, idempotency keying, and provenance
-projections proven there carry into core, extended with the 2026-07-15
-revision fields: ``id`` (UUIDv7), ``actor``, ``caused_by``, and
-``promotion_status``.
+(credit: sourrrish) — the contract shape and idempotency keying proven there
+carry into core, extended with the 2026-07-15 revision fields: ``id`` (UUIDv7),
+``actor``, ``caused_by``, and ``promotion_status``.
 
-Envelopes are trace, not memory: they stay ``promotion_status: raw`` until a
-projector promotes them. The idempotency key is computed from metadata only,
-so redaction never changes identity.
+Envelopes are trace, not memory: they remain ``promotion_status: raw`` and are
+archived locally rather than promoted into the graph. The idempotency key is
+computed from metadata only, so redaction never changes identity.
 """
 
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -25,8 +23,7 @@ from basic_memory.hooks.redaction import Redactor
 ENVELOPE_VERSION = 1
 
 # A harness session, identified by its producing surface and opaque session id.
-# The inbox groups, prunes, and routes by this pair, so it earns a name rather
-# than an anonymous ``tuple[str, str]`` threaded through the projector.
+# Retained as a named compatibility type for trace consumers.
 type SessionKey = tuple[str, str]
 
 # --- Event registry ---
@@ -50,9 +47,8 @@ ACTOR_RUNTIME = "runtime"
 class Envelope(BaseModel):
     """Normalized event record from a harness lifecycle hook (SPEC-55 Contract 1).
 
-    Each field is chosen so the downstream consumer (the projector today, the
-    SPEC-54 worker later) can coalesce SessionNote / ToolLedger artifacts
-    without understanding raw hook payload formats.
+    Each field records stable operational identity without requiring a consumer
+    to understand raw hook payload formats.
 
     This is a persistence boundary: the inbox is a durable WAL that outlives code
     versions, so parsing must fail fast on junk — a shape mismatch means
@@ -71,7 +67,7 @@ class Envelope(BaseModel):
     source_session_id: str  # opaque, surface-defined
     ts: str  # ISO 8601
     cwd: str
-    project_hint: str  # consumers fail fast when this doesn't resolve
+    project_hint: str  # mapping at capture time; trace only, never an implicit write route
     idempotency_key: str  # sha256(source:session:event:ts-to-minute)[:16]
     envelope_version: int = ENVELOPE_VERSION
     source_turn_id: str | None = None
@@ -84,7 +80,7 @@ class Envelope(BaseModel):
     @classmethod
     def _supported_version(cls, version: int) -> int:
         # A future version is a forward-compat signal, not corruption — surface
-        # it as an error the projector counts and `bm hook status` shows.
+        # it as an error the archive sweep counts and `bm hook status` shows.
         if version != ENVELOPE_VERSION:
             raise ValueError(f"unsupported envelope_version {version!r}")
         return version
@@ -134,7 +130,7 @@ def create_envelope(
     pass through the Stage-1 redaction floor here, at the factory — no envelope
     built through this path can carry unredacted payload values or a denied
     workspace path into the inbox. ``project_hint`` is a project name, not a
-    path, so it is left intact (the projector resolves against it).
+    path, so it is left intact as capture-time diagnostic context.
     """
     if event not in V0_EVENTS:
         raise ValueError(f"Unknown event {event!r}; v0 supports: {sorted(V0_EVENTS)}")
@@ -166,57 +162,6 @@ def create_envelope(
     )
 
 
-# --- Projections into Basic Memory artifacts ---
-
-
-def single_line(value: str) -> str:
-    """Collapse control characters so a value renders as one markdown line.
-
-    Identity fields are opaque, surface-defined strings that skip the payload
-    redaction floor. A hostile or corrupt value in a fresh capture or a
-    replayed inbox file must not smuggle extra observation/relation lines into
-    a projected note body — the same injection the frontmatter path already
-    blocks by serializing via ``metadata=``. Every dynamic line the projector
-    emits into note markdown passes through here.
-    """
-    return re.sub(r"[\x00-\x1f\x7f]+", " ", value)
-
-
-def to_provenance_observations(envelope: Envelope) -> list[str]:
-    """Observation lines stamping an artifact with its producer provenance.
-
-    Appended to a note's "## Observations" section so downstream consumers
-    (recall, consolidation, memory routines) can trace where the artifact came
-    from without storing the raw event. The ``[source]`` observation is the one
-    SPEC-55 requires on every projected artifact.
-    """
-    lines = [
-        f"- [source] {single_line(envelope.source)}/{single_line(envelope.source_session_id)}",
-        f"- [event] {single_line(envelope.event)} at {single_line(envelope.ts)}",
-        f"- [idempotency] {single_line(envelope.idempotency_key)}",
-    ]
-    if envelope.source_turn_id:
-        lines.append(f"- [turn] {single_line(envelope.source_turn_id)}")
-    return lines
-
-
-def to_frontmatter_fields(envelope: Envelope) -> dict[str, str]:
-    """Envelope fields suitable for note frontmatter.
-
-    Makes projected artifacts queryable by source, event, envelope id, and
-    idempotency key through metadata search.
-    """
-    fields_out = {
-        "envelope_id": envelope.id,
-        "envelope_source": envelope.source,
-        "envelope_event": envelope.event,
-        "idempotency_key": envelope.idempotency_key,
-    }
-    if envelope.source_turn_id:
-        fields_out["envelope_turn_id"] = envelope.source_turn_id
-    return fields_out
-
-
 # --- Serialization ---
 
 
@@ -230,7 +175,7 @@ def envelope_from_json(text: str) -> Envelope:
 
     Delegates to the model's strict validation (see :class:`Envelope`): a shape
     mismatch, wrong scalar type, unknown key, or unsupported version raises a
-    ``pydantic.ValidationError`` — itself a ``ValueError`` — which the projector
-    and inbox already catch and count.
+    ``pydantic.ValidationError`` — itself a ``ValueError`` — which the archive
+    sweep catches and counts.
     """
     return Envelope.model_validate_json(text)

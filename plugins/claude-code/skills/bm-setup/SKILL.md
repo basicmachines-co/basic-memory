@@ -112,10 +112,11 @@ Ask only what you can't infer. Cover:
    schemas" below.)
 
 6. **Lifecycle-event capture.** "Should I also keep a local, redacted trail of
-   SessionStart and PreCompact events for later projection?" Default to **off**.
+   SessionStart and PreCompact events for diagnostics?" Default to **off**.
    Explain that the normal session brief and PreCompact checkpoint work either
    way; enabling this adds envelopes to a local inbox until `bm hook flush`
-   projects them. Only the JSON boolean `true` enables capture.
+   archives them locally. It never creates knowledge-graph notes. Only the JSON
+   boolean `true` enables capture.
    - If enabled, optionally ask for repo-specific `redactKeys` (additional payload
      keys) and `redactPaths` (working directories or path-bearing content). The
      built-in redaction floor still applies when these lists are empty.
@@ -144,10 +145,9 @@ from this skill's directory, then `schemas/`** (this skill is at
 `<plugin>/skills/bm-setup/`). Read `coding-session.md` for a coding profile or
 `session.md` for a general profile, then read `decision.md` and `task.md`.
 
-These schemas cover notes the Claude integration writes directly. The normalized
-`session` and `tool_ledger` artifacts written by `bm hook flush` are core-owned
-projections; their shape belongs to the core projector and its tests, not a
-duplicated per-plugin `tool_ledger` schema.
+These schemas cover notes the Claude integration writes directly. Lifecycle
+envelopes are not notes: `bm hook flush` archives that operational trace locally,
+so there is no projected session or tool-ledger schema to seed.
 
 For each one:
 - Check whether the chosen project already has a schema for that type

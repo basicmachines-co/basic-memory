@@ -58,8 +58,8 @@ coding checkpoints store structured repository, branch, SHA, working-directory,
 and optional pull-request metadata in Basic Memory.
 
 Explain the capture tradeoff before asking: enabled capture adds a local,
-redacted event trail that stays queued until `bm hook flush` projects it. It does
-not write to team projects. The default is enabled; an explicit JSON boolean
+redacted event trail that stays queued until `bm hook flush` archives it locally.
+It never creates knowledge-graph notes or writes to team projects. The default is enabled; an explicit JSON boolean
 `false` disables it, and malformed values fail closed.
 
 If there are duplicate names, show qualified names and ask the user which one to
@@ -142,10 +142,9 @@ Then seed these schemas for both profiles:
 - `decision.md`
 - `task.md`
 
-These schemas cover notes Codex writes directly. The normalized `session` and
-`tool_ledger` artifacts written by `bm hook flush` are core-owned projections;
-their shape belongs to the core projector and its tests, not duplicated plugin
-schema files. They remain queryable by their `type` frontmatter.
+These schemas cover notes Codex writes directly. Lifecycle envelopes are not
+notes: `bm hook flush` archives that operational trace locally, so there is no
+projected session or tool-ledger schema to seed.
 
 Use `write_note` with `directory="schemas"`, `note_type="schema"`, schema
 frontmatter as metadata, and the markdown body as content. Do not paste the YAML

@@ -23,16 +23,16 @@ the user asks where things stand.
    - recent coding sessions: `type=coding_session`,
      `repository=<configured repository>`, after `recallTimeframe`, when
      `sessionProfile=coding`
-   - recent core-projected sessions: `type=session`, after `recallTimeframe`
 
-   Always query `codex_session` and `session`; include `coding_session` for a
+   Always query `codex_session`; include `coding_session` for a
    coding profile only with the configured `repository` metadata filter. Never
    run an unscoped coding-session query; if the repository is missing, report
    that setup is incomplete. Merge and deduplicate the results, sort them
    newest first, and prefer the highest-signal checkpoint regardless of which
    producer wrote it. `coding_session` carries schema-required, queryable Git
-   context; `codex_session` preserves general and legacy Codex checkpoints;
-   `session` carries normalized artifacts from `bm hook flush`.
+   context; `codex_session` preserves general and legacy Codex checkpoints.
+   Do not query lifecycle trace: `bm hook flush` archives it locally and never
+   promotes it into the graph.
 
 3. Query configured `secondaryProjects` read-only for open decisions. Do not write
    to shared projects during orientation.

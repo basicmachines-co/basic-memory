@@ -6,8 +6,8 @@ description: Save a deliberate Codex work checkpoint to Basic Memory with change
 # Checkpoint Codex Work
 
 Create a durable handoff note for current Codex work. Use this when the user asks
-to checkpoint, wrap up, hand off, remember the state of the work, or before a long
-context transition.
+to checkpoint, wrap up, hand off, remember the state of the work, or when the
+Stop hook requests the deliberate handoff after compaction.
 
 ## Gather
 

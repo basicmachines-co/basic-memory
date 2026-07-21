@@ -38,6 +38,7 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
     for script, verb in (
         ("session_start.py", "session-start"),
         ("pre_compact.py", "pre-compact"),
+        ("stop.py", "stop"),
     ):
         text = (hooks_dir / script).read_text(encoding="utf-8")
         assert "# /// script" in text
@@ -58,6 +59,7 @@ def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:
 
     assert justfile.count('just set-codex-hook-version "{{version}}"') == 2
     assert 'just set-codex-hook-version "$(git rev-parse HEAD)"' not in justfile
+    assert "uv add --script plugins/codex/hooks/stop.py" in justfile
 
 
 def test_codex_plugin_marketplace_identity() -> None:
@@ -79,6 +81,8 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert 'codex plugin marketplace add "$(git rev-parse --show-toplevel)"' in readme
     assert "codex plugin add codex@basic-memory" in readme
     assert "Plugin installation is user-level in Codex" in readme
+    assert "Selecting only `plugins/codex` omits" in readme
+    assert "marketplace file should not" in readme
     assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
     assert "the nearest project file overrides only the keys it declares" in readme
     assert "keep both the profile and checkout-specific repository" in readme

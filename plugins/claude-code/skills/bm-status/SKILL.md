@@ -32,7 +32,8 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
 
 3. **Core hook health.** With the first available launcher, run
    `basic-memory hook status --harness claude --project-dir <project-root>`.
-   Report its shared inbox path, pending envelopes, processed envelopes, last
+   Report its shared inbox path, pending envelopes, archived envelopes, pending
+   checkpoint requests, last
    flush, settings state, resolved primary project, capture state, capture folder,
    Basic Memory version, and uv version. Inbox counts are global across supported
    harnesses; do not attribute a backlog solely to Claude. Treat this command's
@@ -76,7 +77,8 @@ you couldn't determine, rather than failing the whole report):
 - Redact paths:      <configured count or none>
 - Shared hook inbox: <path or unavailable>
 - Shared pending envelopes: <count or unavailable>
-- Shared processed envelopes: <count or unavailable>
+- Shared archived envelopes: <count or unavailable>
+- Pending checkpoint requests: <count or unavailable>
 - Last flush:        <timestamp, never, or unavailable>
 - Hook runtime:      basic-memory <version>; uv <version or missing>
 - Recent checkpoints: <n across session and coding_session>

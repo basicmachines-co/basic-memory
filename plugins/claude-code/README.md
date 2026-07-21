@@ -94,7 +94,8 @@ local checkout. Two disclosures:
 - **Event capture is opt-in and off by default.** Setting `captureEvents: true`
   (the JSON boolean — strings never enable it) records redacted lifecycle-event
   envelopes to a local inbox under your Basic Memory home. Inspect with
-  `basic-memory hook status`, project with `basic-memory hook flush`.
+  `basic-memory hook status`, archive locally with `basic-memory hook flush`.
+  The lifecycle trace never becomes a graph note.
 
 Every failure path exits 0 — the hooks stay invisible rather than disrupt a
 session.
@@ -160,10 +161,9 @@ general setup seeds `session`; a **coding setup** (persisted as
 `sessionProfile: "coding"` with a user-confirmed `repository`) seeds
 `coding_session`, whose required repository, repo-root, working-directory,
 branch, and Git SHA frontmatter make checkpoints queryable by structured
-filters; typed pull-request fields are added when a PR exists. Optional flush projection also writes
-normalized `session` and `tool_ledger` artifacts. Those projection contracts are
-owned and tested by Basic Memory core rather than copied into separate
-host-plugin schemas.
+filters; typed pull-request fields are added when a PR exists. Lifecycle-event
+envelopes are operational trace rather than knowledge; `bm hook flush` archives
+them locally and never creates session or tool-ledger notes.
 
 To customize how Claude writes memory, edit `skills/bm-writing/SKILL.md` in the
 plugin source. `bm-remember` and the output style's capture reflexes apply that

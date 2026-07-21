@@ -26,8 +26,6 @@ from basic_memory.config import CONFIG_DIR_MODE, CONFIG_FILE_MODE, resolve_data_
 from basic_memory.hooks._uuid7 import uuid7_unix_ms
 from basic_memory.hooks.envelope import (
     Envelope,
-    SessionKey,
-    envelope_from_json,
     envelope_to_json,
 )
 
@@ -98,7 +96,7 @@ def list_envelopes() -> list[Path]:
 
 
 def mark_processed(path: Path) -> Path:
-    """Retire a projected envelope into processed/ (kept for audit, then pruned).
+    """Retire an envelope into the local audit archive (kept, then pruned).
 
     Tolerant of a concurrent flush that already retired this envelope: a missing
     source with the destination already present means another sweep moved it
@@ -114,33 +112,6 @@ def mark_processed(path: Path) -> Path:
             return destination
         raise
     return destination
-
-
-def _unresolvable_pending_gate(
-    routable_sessions: frozenset[SessionKey],
-) -> Callable[[Path], bool]:
-    """Build the prune gate: a pending envelope is unresolvable only if it can
-    *never* flush — it parses, carries no project hint, and its session is not
-    routable through any sibling.
-
-    Kept (not pruned): a parse failure (corrupt/future-versioned — the trace
-    ``bm hook status`` surfaces for a human); a present hint (mapped, pending
-    only because a write failed and must self-heal); and — crucially — a
-    hint-less file whose ``(source, session_id)`` appears in ``routable_sessions``
-    (another envelope in that session, pending or already processed, carries a
-    hint, so the group self-heals and rebuilds the full session on a later sweep).
-    """
-
-    def gate(path: Path) -> bool:
-        try:
-            envelope = envelope_from_json(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):  # ValueError covers json.JSONDecodeError
-            return False
-        if envelope.project_hint.strip():
-            return False
-        return envelope.session_key not in routable_sessions
-
-    return gate
 
 
 def _prune_dir(
@@ -186,35 +157,6 @@ def prune_processed(older_than_days: int = DEFAULT_RETENTION_DAYS) -> int:
     return _prune_dir(processed_dir(), older_than_days)
 
 
-def prune_pending(
-    older_than_days: int = DEFAULT_RETENTION_DAYS,
-    routable_sessions: frozenset[SessionKey] = frozenset(),
-) -> int:
-    """Delete pending envelopes older than the retention window.
-
-    A session that never resolves a project mapping (``primaryProject`` unset for
-    its whole lifetime) produces envelopes the projector can never route — it
-    holds them pending, waiting for a mapping that, for a fully-unmapped session,
-    never comes. Bounding the inbox by the same window the processed side already
-    uses keeps that unresolvable trace from accumulating without limit, while
-    still giving a mapping the full window to appear (a later same-session
-    capture carrying a hint resolves the whole group via the projector's merge).
-
-    ``routable_sessions`` is the set of ``(source, session_id)`` the caller knows
-    to be routable (a hinted envelope somewhere in the session — pending or
-    processed). Only *unresolvable* pending entries are pruned: a corrupt file, a
-    mapped write-failure, and a hint-less file belonging to a routable session
-    are all left in place, so retention never defeats self-heal (the session
-    still rebuilds in full on a later sweep) or eats the corruption trace
-    ``bm hook status`` surfaces.
-    """
-    return _prune_dir(
-        inbox_dir(),
-        older_than_days,
-        should_prune=_unresolvable_pending_gate(routable_sessions),
-    )
-
-
 # --- Flush bookkeeping (the `bm hook status` debuggability surface) ---
 
 
@@ -239,10 +181,9 @@ def last_flush() -> str | None:
 def flush_lock() -> Iterator[bool]:
     """Hold an exclusive advisory lock over the inbox for the duration of a flush.
 
-    Two overlapping ``bm hook flush`` runs can interleave their list → write →
-    retire steps so a stale sweep overwrites a SessionNote/ToolLedger without a
-    sibling's just-retired event, dropping that event's row until another event
-    arrives in the session. Serializing flushes closes the race.
+    Two overlapping ``bm hook flush`` runs can classify the same replay before
+    either retires it. Serializing the list → classify → archive sweep keeps the
+    local dedup counts deterministic.
 
     Yields ``True`` to the holder and ``False`` to any flush that arrives while
     the lock is held — that flush skips rather than blocks, because the holder
