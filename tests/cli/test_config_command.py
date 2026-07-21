@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from typer.testing import CliRunner
@@ -257,7 +258,10 @@ def test_config_get_masks_database_url_credentials(runner, write_config):
     assert result.exit_code == 0, result.output
     assert "dbpass" not in result.output
     assert "dbuser" not in result.output
-    assert "host.example.com" in result.output
+    # Parse the masked URL and compare the hostname exactly — a bare substring
+    # check trips CodeQL's incomplete-URL-sanitization rule and proves less.
+    masked_url = result.output.split("database_url = ", 1)[1].strip()
+    assert urlsplit(masked_url).hostname == "host.example.com"
 
 
 def test_config_get_shows_not_set_for_unset_secret(runner, write_config):
