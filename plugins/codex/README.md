@@ -91,7 +91,6 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
     "secondaryProjects": [],
     "teamProjects": {},
     "focus": "code/dev",
-    "sessionProfile": "coding",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
     "captureEvents": true,
@@ -111,12 +110,13 @@ lifecycle-event envelopes land in a local inbox under your Basic Memory home
 When `captureFolder` is omitted, Codex resolves the Git top-level directory and
 writes to `codex/<repo-dir>`. An explicit folder still wins.
 
-For a coding profile, keep the checkout-specific repository identifier in the
-project file without duplicating the shared settings:
+For a coding profile, keep both the profile and checkout-specific repository
+identifier in the project file without duplicating the shared settings:
 
 ```json
 {
   "basicMemory": {
+    "sessionProfile": "coding",
     "repository": "owner/repo"
   }
 }

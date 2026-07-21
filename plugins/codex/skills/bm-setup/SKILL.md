@@ -83,7 +83,7 @@ project-level file:
     "projectMode": "cloud",
     "teamProjects": {},
     "focus": "<focus>",
-    "sessionProfile": "coding",
+    "sessionProfile": "<general-or-coding>",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
     "captureEvents": true,
@@ -104,12 +104,14 @@ working-directory and path-bearing checkpoint content. User and project
 redaction lists accumulate. These files are intentionally Codex-specific; do
 not write `.claude/settings.json`.
 
-For a user-level coding setup, always keep the confirmed repository identifier in
-the project file so it cannot affect other repositories:
+For a user-level coding setup, omit `sessionProfile` from the shared user file and
+keep both the coding profile and confirmed repository identifier in the project
+file so neither can affect other repositories:
 
 ```json
 {
   "basicMemory": {
+    "sessionProfile": "coding",
     "repository": "owner/name"
   }
 }
@@ -118,10 +120,11 @@ the project file so it cannot affect other repositories:
 For a project-level setup, add `repository` to the shared settings in that same
 project file.
 
-Persist `sessionProfile` explicitly. Persist `repository` only for the `coding`
-profile, after the user confirms it. A coding setup is incomplete without a
-repository identifier because the `coding_session` schema requires queryable Git
-identity fields.
+Persist `sessionProfile` explicitly in the chosen file, except for a user-level
+coding setup where it belongs in the project file alongside `repository`. Persist
+`repository` only for the `coding` profile, after the user confirms it. A coding
+setup is incomplete without a repository identifier because the `coding_session`
+schema requires queryable Git identity fields.
 
 ## Seed Schemas
 

@@ -81,7 +81,25 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "Plugin installation is user-level in Codex" in readme
     assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
     assert "the nearest project file overrides only the keys it declares" in readme
-    assert "keep the checkout-specific repository identifier in the" in readme
+    assert "keep both the profile and checkout-specific repository" in readme
+
+
+def test_user_level_coding_profile_stays_with_repository_override() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    readme = (repo_root / "plugins/codex/README.md").read_text(encoding="utf-8")
+    setup = (repo_root / "plugins/codex/skills/bm-setup/SKILL.md").read_text(encoding="utf-8")
+
+    readme_blocks = re.findall(r"```json\n(.*?)\n```", readme, flags=re.DOTALL)
+    shared_settings = json.loads(readme_blocks[0])["basicMemory"]
+    project_settings = json.loads(readme_blocks[1])["basicMemory"]
+
+    assert "sessionProfile" not in shared_settings
+    assert project_settings == {
+        "sessionProfile": "coding",
+        "repository": "owner/repo",
+    }
+    assert "omit `sessionProfile` from the shared user file" in setup
+    assert '"sessionProfile": "coding",\n    "repository": "owner/name"' in setup
 
 
 def test_coding_session_schema_is_shared_across_host_plugins() -> None:
