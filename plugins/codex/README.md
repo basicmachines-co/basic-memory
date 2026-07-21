@@ -12,7 +12,8 @@ verification, decision capture, and resumable checkpoints.
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
   decisions, and recent Codex checkpoints before substantial work.
 - **Checkpoint work.** The `bm-checkpoint` skill and `PreCompact` hook write
-  `type: codex_session` notes with the current work cursor.
+  general `codex_session` notes or schema-backed `coding_session` notes with
+  structured repository and pull-request context.
 - **Capture decisions.** The `bm-decide` skill records durable engineering
   decisions with rationale, alternatives, and consequences.
 - **Remember lightly.** The `bm-remember` skill saves small facts without turning
@@ -87,13 +88,15 @@ Run the setup skill, or create `.codex/basic-memory.json` in a repo:
     "secondaryProjects": [],
     "teamProjects": {},
     "focus": "code/dev",
-    "captureFolder": "codex-sessions",
+    "sessionProfile": "coding",
+    "repository": "owner/repo",
+    "captureFolder": "codex",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
     "captureEvents": false,
     "redactKeys": [],
     "redactPaths": [],
-    "placementConventions": "Put decisions in decisions/ and work checkpoints in codex-sessions/."
+    "placementConventions": "Put decisions in decisions/ and work checkpoints in codex/."
   }
 }
 ```
@@ -105,10 +108,13 @@ Add `redactKeys` and `redactPaths` arrays to extend the built-in redaction floor
 for repository-specific payload fields and paths.
 
 The plugin's seed schemas cover notes Codex writes directly: `codex_session`,
-`decision`, and `task`. Optional flush projection also writes normalized
-`session` and `tool_ledger` artifacts. Those are core-owned contracts implemented
-and tested with the projector, not duplicate schema files maintained by each host
-plugin. `bm-orient` and `bm-status` still recall normalized `session` notes
+`coding_session`, `decision`, and `task`. Coding sessions require structured
+repository, repository-root, working-directory, branch, and Git SHA frontmatter;
+current pull-request fields are added when a PR exists. Optional flush projection
+also writes normalized `session` and `tool_ledger` artifacts. Those are
+core-owned contracts implemented and tested with the projector, not duplicate
+schema files maintained by each host plugin. `bm-orient` and `bm-status` still
+recall normalized `session` notes
 alongside Codex checkpoints.
 
 Codex plugin hooks must be reviewed and trusted before they run. Open `/hooks` in

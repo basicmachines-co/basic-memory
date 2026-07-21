@@ -82,6 +82,18 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "Each repository still needs its own `.codex/basic-memory.json`" in readme
 
 
+def test_coding_session_schema_is_shared_across_host_plugins() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    codex_schema = (repo_root / "plugins/codex/schemas/coding-session.md").read_text(
+        encoding="utf-8"
+    )
+    claude_schema = (repo_root / "plugins/claude-code/schemas/coding-session.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert codex_schema == claude_schema
+
+
 def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")

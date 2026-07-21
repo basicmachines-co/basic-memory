@@ -11,25 +11,34 @@ the user asks where things stand.
 ## Steps
 
 1. Read `.codex/basic-memory.json` if present. Use `primaryProject`, `secondaryProjects`,
-   `recallTimeframe`, and `placementConventions`. If the file is missing, continue
+   `recallTimeframe`, `sessionProfile`, `repository`, and `placementConventions`.
+   If the file is missing, continue
    against the default Basic Memory project and mention that setup has not been run.
 
 2. Query the primary project:
    - active tasks: `type=task`, `status=active`
    - open decisions: `type=decision`, `status=open`
    - recent Codex sessions: `type=codex_session`, after `recallTimeframe`
+   - recent coding sessions: `type=coding_session`,
+     `repository=<configured repository>`, after `recallTimeframe`, when
+     `sessionProfile=coding`
    - recent core-projected sessions: `type=session`, after `recallTimeframe`
 
-   Always query both session types. Merge and deduplicate the results, sort them
+   Always query `codex_session` and `session`; include `coding_session` for a
+   coding profile only with the configured `repository` metadata filter. Never
+   run an unscoped coding-session query; if the repository is missing, report
+   that setup is incomplete. Merge and deduplicate the results, sort them
    newest first, and prefer the highest-signal checkpoint regardless of which
-   producer wrote it. `codex_session` preserves deliberate and legacy Codex
-   checkpoints; `session` carries normalized artifacts from `bm hook flush`.
+   producer wrote it. `coding_session` carries schema-required, queryable Git
+   context; `codex_session` preserves general and legacy Codex checkpoints;
+   `session` carries normalized artifacts from `bm hook flush`.
 
 3. Query configured `secondaryProjects` read-only for open decisions. Do not write
    to shared projects during orientation.
 
 4. Read the highest-signal hits before summarizing. Prefer notes that match the
-   current repo, named route, issue, branch, or file path.
+   current repository, branch, Git SHA, pull request, named route, issue, or file
+   path. For coding sessions, use structured metadata filters before text search.
 
 5. Present a compact orientation:
    - active work

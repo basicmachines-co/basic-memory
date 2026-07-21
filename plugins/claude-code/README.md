@@ -20,9 +20,9 @@ the session back to it before the context window compacts.
   queries Basic Memory for your active tasks and recent work and puts a short
   brief in front of Claude — so you start where you left off instead of cold.
 - **Compaction checkpoint (PreCompact hook).** Right before Claude Code compacts
-  the context window, the plugin writes a `type: session` checkpoint note to the
-  graph, so the texture of the session survives and the next one can resume from
-  it.
+  the context window, the plugin writes a general `session` or schema-backed
+  `coding_session` checkpoint note to the graph, so the texture of the session
+  survives and the next one can resume from it.
 - **Deliberate checkpoints (`bm-checkpoint` skill).** On request — "checkpoint
   this", "wrap up", "hand off" — Claude writes a durable handoff note: the story,
   verification actually run, decisions, blockers, and the next action. In a
@@ -138,19 +138,19 @@ settings (or select it via `/config`).
 | `recallTimeframe` | `3d` | Recency window for the session brief |
 | `recallPrompt` | _(built-in)_ | The instruction appended to the brief |
 | `preCompactCapture` | `extractive` | How checkpoints are produced |
-| `sessionProfile` | `general` | `coding` makes deliberate checkpoints schema-backed `coding_session` notes with required Git identity |
+| `sessionProfile` | `general` | `coding` makes checkpoints schema-backed `coding_session` notes with required Git identity |
 | `repository` | _(none)_ | User-confirmed stable repository identifier (`owner/name`); required for the `coding` profile |
 | `captureEvents` | `false` | Opt-in: record redacted lifecycle-event envelopes to the local inbox (see `basic-memory hook status` / `flush`). Only the JSON boolean `true` enables it. |
 | `redactKeys` | `[]` | Additional payload keys to redact before an event enters the local inbox |
 | `redactPaths` | `[]` | Additional paths to redact from working-directory and path-bearing capture content |
 
 The plugin seeds schemas for notes the Claude integration writes directly:
-`session`, `decision`, and `task`. A **coding setup** (the interview's focus
-answer is code/dev, persisted as `sessionProfile: "coding"` with a
-user-confirmed `repository`) also seeds `coding_session`, whose required
-repository, repo-root, working-directory, branch, and Git SHA frontmatter make
-checkpoints queryable by structured filters; typed pull-request fields are
-added when a PR exists. Optional flush projection also writes
+`decision`, `task`, and the session type relevant to the selected profile. A
+general setup seeds `session`; a **coding setup** (persisted as
+`sessionProfile: "coding"` with a user-confirmed `repository`) seeds
+`coding_session`, whose required repository, repo-root, working-directory,
+branch, and Git SHA frontmatter make checkpoints queryable by structured
+filters; typed pull-request fields are added when a PR exists. Optional flush projection also writes
 normalized `session` and `tool_ledger` artifacts. Those projection contracts are
 owned and tested by Basic Memory core rather than copied into separate
 host-plugin schemas.

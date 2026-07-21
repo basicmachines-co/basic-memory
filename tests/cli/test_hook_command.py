@@ -407,7 +407,7 @@ def test_session_start_codex_profile(bm_home: Path, tmp_path: Path) -> None:
     session_query = mock_search.await_args_list[2].kwargs
     assert session_query["note_types"] == ["codex_session", "session"]
     assert session_query["after_date"] == "7d"
-    assert "codex-sessions/" in result.stdout
+    assert "codex/" in result.stdout
 
 
 def test_session_start_codex_recalls_flushed_generic_session(bm_home: Path, tmp_path: Path) -> None:
@@ -741,7 +741,7 @@ def test_pre_compact_codex_includes_workspace_sections(bm_home: Path, tmp_path: 
     assert result.exit_code == 0
     assert mock_write.await_args is not None
     kwargs = mock_write.await_args.kwargs
-    assert kwargs["directory"] == "codex-sessions"
+    assert kwargs["directory"] == "codex"
     assert kwargs["tags"] == ["codex", "auto-capture"]
     assert kwargs["title"].startswith("Codex session ")
     assert kwargs["note_type"] == "codex_session"

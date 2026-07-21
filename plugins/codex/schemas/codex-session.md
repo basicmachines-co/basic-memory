@@ -30,7 +30,7 @@ settings:
 
 # Codex Session
 
-A **CodexSession** note is a resumable engineering checkpoint. It captures the
+A **CodexSession** note is a resumable general checkpoint. It captures the
 thread cursor: what changed, what was verified, what decisions matter, and what
 the next Codex thread should do first.
 

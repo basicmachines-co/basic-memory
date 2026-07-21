@@ -70,6 +70,7 @@ MAX_BRIEF_CHARS = 10_000
 QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
+CODING_SESSION_PROFILE = "coding"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ class HarnessProfile:
     pin_tip: str
     default_recall_prompt: str
     include_workspace_sections: bool  # codex adds git status + assistant cursor
+    coding_session_note_type: str
 
 
 PROFILES: dict[Harness, HarnessProfile] = {
@@ -120,10 +122,11 @@ PROFILES: dict[Harness, HarnessProfile] = {
             "Cite permalinks when referencing prior work."
         ),
         include_workspace_sections=False,
+        coding_session_note_type="coding_session",
     ),
     Harness.codex: HarnessProfile(
         default_recall_timeframe="7d",
-        default_capture_folder="codex-sessions",
+        default_capture_folder="codex",
         session_note_type="codex_session",
         # Codex stamps checkpoints codex_session, but the projector writes plain
         # `session` — recall both so flushed sessions aren't invisible to Codex.
@@ -148,6 +151,7 @@ PROFILES: dict[Harness, HarnessProfile] = {
             "AGENTS.md or checked-in docs."
         ),
         include_workspace_sections=True,
+        coding_session_note_type="coding_session",
     ),
 }
 
@@ -378,26 +382,66 @@ async def _gather_context(
     primary: str,
     timeframe: str,
     shared_refs: list[str],
+    repository: str | None = None,
 ) -> _BriefContext:
     # Cloud reads cost a round-trip each; asyncio.gather keeps total wall-clock
     # at ~one query instead of the sum (ports the hook scripts' thread pool).
     project = primary or None
+    session_queries = []
+    if repository is not None:
+        # A Basic Memory project can serve several repositories. Repository
+        # metadata is therefore the isolation boundary for coding checkpoints;
+        # never recall another checkout's branch or pull request as this one's.
+        session_queries.append(
+            _query(
+                project,
+                note_types=[profile.coding_session_note_type],
+                metadata_filters={"repository": repository},
+                after_date=timeframe,
+            )
+        )
+    # General and core-projected sessions remain a lower-priority compatibility
+    # path. They predate required repository metadata and cannot be safely
+    # narrowed, so coding_session results are always merged first.
+    session_queries.append(
+        _query(project, note_types=list(profile.recall_session_types), after_date=timeframe)
+    )
     results = await asyncio.gather(
         _query(project, note_types=["task"], status="active"),
         _query(project, note_types=["decision"], status="open"),
-        _query(project, note_types=list(profile.recall_session_types), after_date=timeframe),
+        *session_queries,
         *[_query(ref, note_types=["decision"], status="open") for ref in shared_refs],
     )
+    session_end = 2 + len(session_queries)
     return _BriefContext(
         tasks=results[0],
         decisions=results[1],
-        sessions=results[2],
-        shared=dict(zip(shared_refs, results[3:])),
+        sessions=_merge_search_results(results[2:session_end]),
+        shared=dict(zip(shared_refs, results[session_end:])),
     )
 
 
 def _rows(result: dict | None) -> list[dict]:
     return (result or {}).get("results") or []
+
+
+def _merge_search_results(results: list[dict | None]) -> dict | None:
+    """Merge bounded recall queries while preserving their priority order."""
+    if all(result is None for result in results):
+        return None
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for result in results:
+        for row in _rows(result):
+            identity = str(row.get("permalink") or row.get("file_path") or row.get("title") or row)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(row)
+            if len(merged) == 5:
+                return {"results": merged}
+    return {"results": merged}
 
 
 def _label(result: dict) -> str:
@@ -451,8 +495,20 @@ def _build_brief(
     placement_conventions = str(cfg.get("placementConventions") or "").strip()
     capture_folder = str(cfg.get("captureFolder") or profile.default_capture_folder).strip()
     shared_refs, shared_capped = _shared_project_refs(cfg, primary)
+    repository = None
+    if cfg.get("sessionProfile") == CODING_SESSION_PROFILE:
+        configured_repository = cfg.get("repository")
+        if not isinstance(configured_repository, str) or not configured_repository.strip():
+            return (
+                "# Basic Memory\n\n"
+                "_Coding session setup is incomplete: `basicMemory.repository` is missing. "
+                f"Rerun Basic Memory setup before recalling repository work. {profile.status_hint}_"
+            )
+        repository = configured_repository.strip()
 
-    context = run_with_cleanup(_gather_context(profile, primary, timeframe, shared_refs))
+    context = run_with_cleanup(
+        _gather_context(profile, primary, timeframe, shared_refs, repository=repository)
+    )
 
     # Trigger: every primary query failed (no default project, misnamed project,
     # unreachable cloud, transient error). Why: a broken query must never error
@@ -637,13 +693,102 @@ def _git_status(directory: str) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()][:20]
 
 
+@dataclass(frozen=True, slots=True)
+class PullRequestContext:
+    number: int
+    title: str
+    url: str
+    state: str
+    base_branch: str
+    head_branch: str
+
+
+@dataclass(frozen=True, slots=True)
+class CodingContext:
+    repository: str
+    repo_root: str
+    branch: str
+    git_sha: str
+    pull_request: PullRequestContext | None
+
+
+def _required_git_value(directory: str, *args: str) -> str:
+    """Read one required Git value for a structured coding checkpoint."""
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"could not read Git context: git {' '.join(args)}") from exc
+    value = result.stdout.strip()
+    if result.returncode != 0 or not value:
+        raise RuntimeError(f"could not read Git context: git {' '.join(args)}")
+    return value
+
+
+def _pull_request_context(directory: str) -> PullRequestContext | None:
+    """Resolve the current branch's PR when the optional GitHub CLI can do so."""
+    gh = shutil.which("gh")
+    if gh is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                gh,
+                "pr",
+                "view",
+                "--json",
+                "number,title,url,state,baseRefName,headRefName",
+            ],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+        return PullRequestContext(
+            number=int(payload["number"]),
+            title=str(payload["title"]),
+            url=str(payload["url"]),
+            state=str(payload["state"]).lower(),
+            base_branch=str(payload["baseRefName"]),
+            head_branch=str(payload["headRefName"]),
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _coding_context(cfg: dict, directory: str) -> CodingContext:
+    repository = cfg.get("repository")
+    if not isinstance(repository, str) or not repository.strip():
+        raise RuntimeError("coding session profile requires basicMemory.repository; rerun bm-setup")
+    return CodingContext(
+        repository=repository.strip(),
+        repo_root=_required_git_value(directory, "rev-parse", "--show-toplevel"),
+        branch=_required_git_value(directory, "rev-parse", "--abbrev-ref", "HEAD"),
+        git_sha=_required_git_value(directory, "rev-parse", "HEAD"),
+        pull_request=_pull_request_context(directory),
+    )
+
+
 def _checkpoint_note(
     profile: HarnessProfile,
     event: NormalizedHookEvent,
     conversation: list[tuple[str, str]],
     primary: str,
+    working_directory: str,
+    coding_context: CodingContext | None,
     extra_redact_paths: list[str],
-) -> tuple[str, str, dict[str, str]]:
+) -> tuple[str, str, dict[str, Any]]:
     """Build the pre-compaction checkpoint note (title, body, frontmatter).
 
     Extractive cut: the opening request and most recent turns lifted straight
@@ -673,7 +818,7 @@ def _checkpoint_note(
     # cwd is a user path too: a session under a configured redactPaths (or a
     # default deny dir) must not leak the raw path into the note frontmatter or
     # body. Redact once so both draw from the scrubbed string.
-    safe_cwd = redactor.redact_text(event.cwd)
+    safe_cwd = redactor.redact_text(working_directory)
     opening = user_messages[0]
     recent_user = user_messages[-3:]
 
@@ -685,7 +830,7 @@ def _checkpoint_note(
 
     # Frontmatter as a dict (write_note serializes + quotes it); `type` rides the
     # note_type arg. Order preserved for stable, readable output.
-    metadata: dict[str, str] = {
+    metadata: dict[str, Any] = {
         "status": "open",
         "started": iso,
         "ended": iso,
@@ -702,6 +847,31 @@ def _checkpoint_note(
         metadata["model"] = event.model
     metadata["capture"] = "extractive"
 
+    safe_coding_context: dict[str, str] | None = None
+    if coding_context is not None:
+        safe_coding_context = {
+            "repository": redactor.redact_text(coding_context.repository),
+            "repo_root": redactor.redact_text(coding_context.repo_root),
+            "branch": redactor.redact_text(coding_context.branch),
+            # A commit SHA is public repository identity, but its hex shape trips
+            # high-entropy secret detection. Preserve it so coding checkpoints
+            # remain queryable by the exact revision they describe.
+            "git_sha": coding_context.git_sha,
+        }
+        metadata.update(safe_coding_context)
+        if coding_context.pull_request is not None:
+            pull_request = coding_context.pull_request
+            metadata.update(
+                {
+                    "pull_request_number": pull_request.number,
+                    "pull_request_title": redactor.redact_text(pull_request.title),
+                    "pull_request_url": redactor.redact_text(pull_request.url),
+                    "pull_request_state": pull_request.state,
+                    "pull_request_base": redactor.redact_text(pull_request.base_branch),
+                    "pull_request_head": redactor.redact_text(pull_request.head_branch),
+                }
+            )
+
     body = [
         "",
         f"# {title}",
@@ -717,6 +887,19 @@ def _checkpoint_note(
         "## Recent thread",
         *[f"- {_clip(message, 200)}" for message in recent_user],
     ]
+    if safe_coding_context is not None:
+        body += [
+            "",
+            "## Repository",
+            f"- Repository: `{safe_coding_context['repository']}`",
+            f"- Branch: `{safe_coding_context['branch']}`",
+            f"- Git SHA: `{safe_coding_context['git_sha']}`",
+        ]
+        if coding_context is not None and coding_context.pull_request is not None:
+            body.append(
+                f"- Pull request: #{coding_context.pull_request.number} — "
+                f"{metadata['pull_request_url']}"
+            )
     if profile.include_workspace_sections:
         recent_assistant = assistant_messages[-2:]
         if recent_assistant:
@@ -727,7 +910,7 @@ def _checkpoint_note(
         # `git status --short` emits repo-relative filenames with no absolute
         # prefix (`M customer-roadmap.md`), so per-row redaction can't match the
         # deny path — the whole denied workspace's file list would leak.
-        status_lines = [] if safe_cwd == REDACTED_PATH else _git_status(event.cwd)
+        status_lines = [] if safe_cwd == REDACTED_PATH else _git_status(working_directory)
         if status_lines:
             # git status rows carry filenames/paths too — pass them through the
             # same floor as the transcript text and cwd (a secret token in a
@@ -805,8 +988,19 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
     if not conversation or not any(role == "user" for role, _ in conversation):
         return
 
+    working_directory = event.cwd or str(mapping_dir)
+    coding_profile = cfg.get("sessionProfile") == CODING_SESSION_PROFILE
+    coding_context = _coding_context(cfg, working_directory) if coding_profile else None
+    note_type = profile.coding_session_note_type if coding_profile else profile.session_note_type
+
     title, content, metadata = _checkpoint_note(
-        profile, event, conversation, primary, _string_list(cfg.get("redactPaths"))
+        profile,
+        event,
+        conversation,
+        primary,
+        working_directory,
+        coding_context,
+        _string_list(cfg.get("redactPaths")),
     )
 
     # Deferred import (#886); same internal write path as `bm tool write-note`.
@@ -822,7 +1016,7 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
             project=project,
             project_id=project_id,
             tags=list(profile.checkpoint_tags),
-            note_type=profile.session_note_type,
+            note_type=note_type,
             # Frontmatter as metadata: write_note serializes/quotes it, so a
             # YAML-special value (e.g. a cwd with a colon) can't break parsing.
             metadata=metadata,
@@ -1184,6 +1378,8 @@ def status(
         f"settings ({harness.value}, {mapping_dir}): {'found' if configured else 'not found'}"
     )
     typer.echo(f"primary project: {str(cfg.get('primaryProject') or '').strip() or '(not set)'}")
+    typer.echo(f"session profile: {str(cfg.get('sessionProfile') or 'general').strip()}")
+    typer.echo(f"repository: {str(cfg.get('repository') or '').strip() or '(not set)'}")
     typer.echo(f"capture events: {'on' if cfg.get('captureEvents') is True else 'off'}")
     typer.echo(
         f"capture folder: {str(cfg.get('captureFolder') or profile.default_capture_folder).strip()}"

@@ -107,9 +107,9 @@ Ask only what you can't infer. Cover:
    SessionStart brief surfaces it (alongside `captureFolder`), so this is what makes
    your captures land where the user expects — without it, placement is guesswork.
 
-5. **Schemas.** "I'll add schemas for session checkpoints, decisions, and tasks
-   — plus coding sessions for a coding setup — so I can find them precisely
-   later — okay?" (See "Seed the schemas" below.)
+5. **Schemas.** "I'll add the session schema for this profile, plus decision and
+   task schemas, so I can find them precisely later — okay?" (See "Seed the
+   schemas" below.)
 
 6. **Lifecycle-event capture.** "Should I also keep a local, redacted trail of
    SessionStart and PreCompact events for later projection?" Default to **off**.
@@ -141,7 +141,8 @@ Ask only what you can't infer. Cover:
 ### 1. Seed the schemas
 The plugin ships seed schemas at `<plugin>/schemas/` — that's **two directories up
 from this skill's directory, then `schemas/`** (this skill is at
-`<plugin>/skills/bm-setup/`). Read `session.md`, `decision.md`, and `task.md` there.
+`<plugin>/skills/bm-setup/`). Read `coding-session.md` for a coding profile or
+`session.md` for a general profile, then read `decision.md` and `task.md`.
 
 These schemas cover notes the Claude integration writes directly. The normalized
 `session` and `tool_ledger` artifacts written by `bm hook flush` are core-owned
@@ -168,11 +169,10 @@ For each one:
     round-trips correctly on both local and cloud. After seeding, verify one note
     with `read_note(..., output_format="json", include_frontmatter=true)` —
     `schema`/`settings` must come back as nested objects, not strings.
-- **Coding setup:** when `sessionProfile` is `coding`, also read and seed
-  `coding-session.md` (title `Coding Session`) the same way. Its Git identity
-  fields (`repository`, `repo_root`, `cwd`, `branch`, `git_sha`) are required by
-  design — required-and-proven fields are what make coding checkpoints queryable
-  — so seed the schema unmodified.
+- **Coding setup:** the selected `coding-session.md` schema's Git identity fields
+  (`repository`, `repo_root`, `cwd`, `branch`, `git_sha`) are required by design.
+  Required-and-proven fields are what make coding checkpoints queryable, so seed
+  the schema unmodified instead of also seeding the general Session schema.
 
 ### 2. Install the shared skills (if the user opted in)
 **First, guard against clobbering a source checkout.** If `./skills` already exists,

@@ -22,7 +22,8 @@ Gather a concise diagnostic. Do not over-investigate.
    - read `.codex/basic-memory.json`
    - report `primaryProject`, `secondaryProjects`, `teamProjects`,
      `captureFolder`, `rememberFolder`, `recallTimeframe`, `focus`,
-     `captureEvents`, `redactKeys`, and `redactPaths`
+     `sessionProfile`, `repository`, `captureEvents`, `redactKeys`, and
+     `redactPaths`
 
 3. Core hook health:
    - with the first available launcher, run
@@ -41,9 +42,12 @@ Gather a concise diagnostic. Do not over-investigate.
      they run
 
 5. Basic Memory queries:
-   - query recent `type=codex_session` and `type=session`, then merge, deduplicate,
-     sort newest first, and keep the newest five; the first type covers deliberate
-     and PreCompact Codex checkpoints, while the second covers core projections
+   - query recent `type=codex_session` and `type=session`; when
+     `sessionProfile=coding`, also query `type=coding_session` with
+     `repository=<configured repository>`, then merge, deduplicate, sort newest
+     first, and keep the newest five; never run an unscoped coding-session query
+     when the repository is missing; the Codex types cover deliberate and
+     PreCompact checkpoints, while `session` covers core projections
    - active `type=task`, `status=active`
    - open `type=decision`, `status=open`
 
@@ -60,6 +64,8 @@ Basic Memory for Codex
 - Capture folder: <captureFolder>
 - Remember folder: <rememberFolder>
 - Recall timeframe: <recallTimeframe>
+- Session profile: <general | coding>
+- Repository: <owner/name or none>
 - Event capture: <enabled | disabled>
 - Redact keys: <configured count or none>
 - Redact paths: <configured count or none>
@@ -68,7 +74,7 @@ Basic Memory for Codex
 - Shared processed envelopes: <count or unavailable>
 - Last flush: <timestamp, never, or unavailable>
 - Hook runtime: basic-memory <version>; uv <version or missing>
-- Recent checkpoints: <count across codex_session and session>
+- Recent checkpoints: <count across coding_session, codex_session, and session>
 - Active tasks: <count>
 - Open decisions: <count>
 - Hooks: installed; trust review required in Codex

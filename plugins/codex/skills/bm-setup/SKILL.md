@@ -28,10 +28,14 @@ repo, default project, current directory, or previous local state.
 - storage mode: cloud, local, or mixed. Prefer the user's stated mode over any
   CLI default.
 - `focus`: code/dev, research, writing, planning, or mixed.
+- `sessionProfile`: `coding` or `general`. Recommend `coding` for code/dev. For
+  mixed use, ask whether this repository should capture Git and pull-request
+  context. Do not infer `coding` merely because the current directory is a Git
+  checkout.
 - `primaryProject`: an existing Basic Memory project or a new one to create.
 - `secondaryProjects`: optional read-only projects for session-start context.
 - `teamProjects`: optional share targets for `bm-share`.
-- `captureFolder`: default `codex-sessions`.
+- `captureFolder`: default `codex`.
 - `rememberFolder`: default `codex-remember`.
 - `placementConventions`: a short note about where decisions, tasks, and research
   notes should land.
@@ -41,6 +45,13 @@ repo, default project, current directory, or previous local state.
 - `redactKeys` and `redactPaths`: optional additions to the built-in redaction
   floor. Ask for these only when event capture is enabled or the user has
   repo-specific privacy requirements.
+
+For the `coding` session profile, verify the current directory is inside a Git
+repository. Resolve a stable `repository` identifier such as `owner/name` from
+the current GitHub repository or origin remote, show it to the user, and ask for
+confirmation. Do not guess when the remote is missing or ambiguous. Explain that
+coding checkpoints store structured repository, branch, SHA, working-directory,
+and optional pull-request metadata in Basic Memory.
 
 Explain the capture tradeoff before asking: enabled capture adds a local,
 redacted event trail that stays queued until `bm hook flush` projects it. It does
@@ -66,7 +77,9 @@ After confirming the plan, write `.codex/basic-memory.json` in the repo:
     "projectMode": "cloud",
     "teamProjects": {},
     "focus": "<focus>",
-    "captureFolder": "codex-sessions",
+    "sessionProfile": "coding",
+    "repository": "owner/name",
+    "captureFolder": "codex",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
     "captureEvents": false,
@@ -85,15 +98,24 @@ redaction, while `redactPaths` also protects working-directory and path-bearing
 checkpoint content. This file is intentionally Codex-specific; do not write
 `.claude/settings.json`.
 
+Persist `sessionProfile` explicitly. Persist `repository` only for the `coding`
+profile, after the user confirms it. A coding setup is incomplete without a
+repository identifier because the `coding_session` schema requires queryable Git
+identity fields.
+
 ## Seed Schemas
 
 Read the schema files from `<plugin-root>/schemas/`. This skill lives at
 `<plugin-root>/skills/bm-setup/SKILL.md`, so the schemas are two directories up.
 
-Seed these schema notes into the chosen `primaryProject` if they do not already
-exist:
+Seed the session schema relevant to the selected profile into the chosen
+`primaryProject` if it does not already exist:
 
-- `codex-session.md`
+- `coding-session.md` for `sessionProfile: coding`
+- `codex-session.md` for `sessionProfile: general`
+
+Then seed these schemas for both profiles:
+
 - `decision.md`
 - `task.md`
 
@@ -114,11 +136,13 @@ ambiguous.
 
 Before closing, prove the mapping works:
 
-- Search the primary project for `type=schema` with page size 5.
+- Search the primary project for `type=schema` with page size 10. For a coding
+  setup, confirm the `Coding Session` schema is present.
 - Search one shared project for open decisions if shared projects were configured.
 - Run `basic-memory hook status --harness codex --project-dir <repo-root>` (using
   `bm` or `uvx basic-memory` if needed). Confirm that it finds this repo's
-  settings, reports the selected project, and shows the intended capture state.
+  settings, reports the selected project, session profile, repository, and
+  intended capture state.
   Its inbox counts are shared across harnesses.
 - If any check errors, fix the project ref or hook launcher before finishing.
 
