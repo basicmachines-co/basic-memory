@@ -71,8 +71,10 @@ installing so Codex can load the plugin skills, MCP configuration, and hooks.
 
 Configuration can live at user level in `~/.codex/basic-memory.json` or at
 project level in `.codex/basic-memory.json`. User-level settings are the base;
-the nearest project file overrides only the keys it declares. The setup skill
-asks which scope to use and recommends user-level configuration by default.
+the nearest project file overrides only the keys it declares. `redactKeys` and
+`redactPaths` are the privacy exception: their user and project lists accumulate.
+The setup skill asks which scope to use and recommends user-level configuration
+by default.
 
 To customize how Codex writes memory, edit `skills/bm-writing/SKILL.md` in the
 plugin source. `bm-checkpoint`, `bm-decide`, and `bm-remember` all apply that

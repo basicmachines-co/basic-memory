@@ -27,7 +27,8 @@ repo, default project, current directory, or previous local state.
 
 - config level: user-level `~/.codex/basic-memory.json` or project-level
   `.codex/basic-memory.json`. Ask explicitly and recommend user level by default.
-  Project settings override user settings key by key.
+  Project settings override user settings key by key, except `redactKeys` and
+  `redactPaths`, which accumulate so project config cannot weaken user privacy.
 - storage mode: cloud, local, or mixed. Prefer the user's stated mode over any
   CLI default.
 - `focus`: code/dev, research, writing, planning, or mixed.
@@ -99,8 +100,9 @@ override. Preserve unrelated keys if the chosen file already exists. Include
 `captureEvents` as a JSON boolean. Empty `redactKeys` and `redactPaths` lists may
 be omitted; when present, they must be JSON arrays of strings. `redactKeys`
 extends payload-key redaction, while `redactPaths` also protects
-working-directory and path-bearing checkpoint content. These files are
-intentionally Codex-specific; do not write `.claude/settings.json`.
+working-directory and path-bearing checkpoint content. User and project
+redaction lists accumulate. These files are intentionally Codex-specific; do
+not write `.claude/settings.json`.
 
 When common settings live at user level but a coding repository identifier is
 checkout-specific, keep only `repository` in the project file. The project key

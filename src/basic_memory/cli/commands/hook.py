@@ -285,10 +285,11 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     """Merge user and project Codex settings, then resolve checkout defaults.
 
     Precedence (lowest to highest): ``~/.codex/basic-memory.json``, then the
-    nearest project ``.codex/basic-memory.json``. Codex capture is enabled when
-    omitted, and its default folder is namespaced by the Git repository
-    directory. A malformed source counts as configured but disables capture;
-    a later valid source can explicitly re-enable it.
+    nearest project ``.codex/basic-memory.json``. Redaction lists accumulate so
+    a project cannot weaken user-level privacy rules. Codex capture is enabled
+    when omitted, and its default folder is namespaced by the Git repository
+    directory. A malformed source counts as configured but disables capture; a
+    later valid source can explicitly re-enable it.
     """
     merged: dict = {
         "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
@@ -311,7 +312,13 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
             # An unreadable privacy setting must never silently enable capture.
             merged["captureEvents"] = False
             continue
+        cumulative_redactions: dict[str, list[str]] = {}
+        for key in ("redactKeys", "redactPaths"):
+            values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
+            if values:
+                cumulative_redactions[key] = list(dict.fromkeys(values))
         merged.update(block)
+        merged.update(cumulative_redactions)
 
     return merged, found
 

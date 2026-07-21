@@ -1706,6 +1706,8 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
                     "primaryProject": "user-wide",
                     "recallTimeframe": "9d",
                     "captureEvents": True,
+                    "redactKeys": ["token", "shared-secret"],
+                    "redactPaths": ["/shared/private"],
                 }
             }
         ),
@@ -1715,7 +1717,16 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
     (project / ".codex").mkdir(parents=True)
     _init_git_repo(project)
     (project / ".codex" / "basic-memory.json").write_text(
-        json.dumps({"basicMemory": {"primaryProject": "project-level"}}), encoding="utf-8"
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "project-level",
+                    "redactKeys": ["token", "repo-secret"],
+                    "redactPaths": [],
+                }
+            }
+        ),
+        encoding="utf-8",
     )
 
     merged, found = hook_module.load_codex_settings(project)
@@ -1725,6 +1736,8 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
     assert merged["recallTimeframe"] == "9d"
     assert merged["captureEvents"] is True
     assert merged["captureFolder"] == "codex/widgets"
+    assert merged["redactKeys"] == ["token", "shared-secret", "repo-secret"]
+    assert merged["redactPaths"] == ["/shared/private"]
 
 
 def test_codex_project_settings_override_user_capture_defaults(tmp_path: Path) -> None:
