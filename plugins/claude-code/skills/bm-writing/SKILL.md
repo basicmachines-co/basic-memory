@@ -33,6 +33,9 @@ and workflow. This skill shapes the note; it never overrides factual constraints
   as "made progress" or "updated the implementation."
 - Use substantive prose for context and reasoning. Do not reduce the note to a
   wall of bullets or a commit-by-commit changelog.
+- Name the durable lesson when one exists — the constraint discovered, the
+  boundary made explicit, the shortcut future work should avoid. That is the
+  part that turns a status report into project memory.
 - Match depth to the subject. A small remembered fact should remain small.
 
 ## Anchor The Work
@@ -40,9 +43,10 @@ and workflow. This skill shapes the note; it never overrides factual constraints
 - When the note records repository work, capture where that work lives: the
   project or repo, the git branch, and the PR or issue — plus the commit sha
   when a specific commit matters.
-- Put anchors the note's schema defines in frontmatter (session checkpoints
-  from a coding setup define `repo`, `branch`, `git_sha`, and `pr`); record the
-  rest as observations, e.g. `- [branch] feat/bm-writing` or `- [pr] #1123`.
+- Put anchors the note's schema defines in frontmatter (coding-session
+  checkpoints require `repository`, `branch`, and `git_sha`, with typed
+  pull-request fields); record the rest as observations, e.g.
+  `- [branch] feat/bm-writing` or `- [pr] #1123`.
 - Only anchor what is relevant. A remembered fact with no repo context needs no
   git anchors at all.
 

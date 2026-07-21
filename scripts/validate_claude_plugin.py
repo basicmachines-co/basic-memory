@@ -26,23 +26,46 @@ REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
 REQUIRED_HOOK_SCRIPTS = ("hooks/session_start.py", "hooks/pre_compact.py")
 # Seed schemas the plugin ships for its note types (copied into the user's
 # project at bootstrap). Each must be a parseable schema note.
-REQUIRED_SCHEMAS = ("session.md", "decision.md", "task.md")
+REQUIRED_SCHEMAS = ("session.md", "coding-session.md", "decision.md", "task.md")
 # Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
-REQUIRED_SKILLS = ("bm-setup", "bm-remember", "bm-status", "bm-share", "bm-writing")
+REQUIRED_SKILLS = (
+    "bm-setup",
+    "bm-checkpoint",
+    "bm-remember",
+    "bm-status",
+    "bm-share",
+    "bm-writing",
+)
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "captureEvents",
         "redactKeys",
         "redactPaths",
+        "sessionProfile",
+        "coding-session.md",
         "hook status --harness claude",
-        "coding setup",
-        "`repo`, `branch`, `git_sha`, `pr`",
     ),
     "bm-status": (
         "hook status --harness claude",
         "pending envelopes",
         "processed envelopes",
         "last flush",
+        '"type": "session"',
+        '"type": "coding_session"',
+    ),
+    # Mirrors the Codex validator's bm-checkpoint contract, adapted to the
+    # Claude harness (settings-based config, session/coding_session types).
+    "bm-checkpoint": (
+        "Apply the `bm-writing` skill",
+        "A checkpoint is a durable handoff, not a status dump",
+        "username: <current username>",
+        "hostname: <current hostname>",
+        "type: coding_session",
+        "pull_request_number",
+        "- `[decision]` for each decision made or preserved",
+        "## Relations",
+        "- relates_to [[Exact existing note title]]",
+        "Never write `[relates_to]`",
     ),
     "bm-remember": ("Apply the `bm-writing` skill",),
     # Mirrors the Codex validator's bm-writing contract so the shared writing

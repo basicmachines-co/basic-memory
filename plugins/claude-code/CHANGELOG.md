@@ -14,10 +14,20 @@ Memory's durable graph**, rather than a memory layer of its own. See
   plugin so both hosts share one contract. Applied by `bm-remember` and the
   output style's capture reflexes; edit the SKILL.md to change how memory is
   written.
-- **Coding setup** — when the `bm-setup` focus answer is code/dev, the Session
-  schema is seeded with git anchor frontmatter (`repo`, `branch`, `git_sha`,
-  `pr`) so checkpoints pin the repo, branch, and PR the work happened on.
-  Non-coding setups omit those fields.
+- **`/basic-memory:bm-checkpoint`** (`skills/bm-checkpoint/`) — deliberate,
+  high-signal checkpoints: the story (problem → approach → impact), the durable
+  lesson (`## Project Memory`), verification actually run, decisions, blockers,
+  and the next action, written to the standard. The deliberate counterpart to
+  the automatic PreCompact checkpoint.
+- **Coding setup (`sessionProfile: "coding"`)** — `bm-setup` asks whether the
+  project should capture Git and pull-request context, resolves a stable
+  `repository` identifier (`owner/name`) and confirms it with the user, and
+  seeds a `coding_session` schema whose repository, repo-root, working-directory,
+  branch, and Git SHA frontmatter are **required** — evidence-proven from git
+  itself, never inferred from conversation. Typed pull-request fields are added
+  when a PR exists. Coding checkpoints become queryable by structured filters
+  (`metadata_filters={"repository": ..., "pull_request_number": ...}`) instead
+  of prose search. Mirrors the Codex plugin's coding-session design for parity.
 - **Team workspace support** (Phase 4). SessionStart now reads **across** the primary
   project plus configured shared/team projects — `secondaryProjects` (read-only recall
   sources) and `teamProjects` (share targets) — querying open decisions from each in

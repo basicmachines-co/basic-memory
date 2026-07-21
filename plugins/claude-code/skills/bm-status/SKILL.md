@@ -23,8 +23,9 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    - From the `basicMemory` block: `primaryProject` (or note none is pinned — the
      default project is used), `secondaryProjects` (team/shared read sources),
      `teamProjects` (share targets for `/basic-memory:bm-share`), `captureFolder`
-     (default `sessions`), `rememberFolder` (default `bm-remember`), and
-     `preCompactCapture` mode (default `extractive`), `captureEvents` (default
+     (default `sessions`), `rememberFolder` (default `bm-remember`),
+     `preCompactCapture` mode (default `extractive`), `sessionProfile` (default
+     `general`), `repository` (coding profile only), `captureEvents` (default
      `false`), `redactKeys`, and `redactPaths`.
    - From the **root** settings object (not `basicMemory`): whether `outputStyle` is
      `basic-memory` — i.e. whether the capture reflexes are on.
@@ -41,7 +42,10 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
 
 4. **Recent checkpoints.** `search_notes` with
    `metadata_filters={"type": "session"}`, `page_size` 5, scoped to `primaryProject`
-   if one is set. List the most recent session checkpoints by title + permalink.
+   if one is set. When `sessionProfile` is `coding`, also query
+   `metadata_filters={"type": "coding_session", "repository": "<configured repository>"}`,
+   then merge, deduplicate, sort newest first, and keep the newest five. List them
+   by title + permalink.
 
 5. **Active tasks.** `search_notes` with
    `metadata_filters={"type": "task", "status": "active"}` — report just the count.
@@ -65,6 +69,8 @@ you couldn't determine, rather than failing the whole report):
 - Remember folder:   <rememberFolder>
 - Output style:      <enabled | not enabled>
 - PreCompact:        <mode>
+- Session profile:   <general | coding>
+- Repository:        <owner/name or none>
 - Event capture:     <enabled | disabled>
 - Redact keys:       <configured count or none>
 - Redact paths:      <configured count or none>
@@ -73,7 +79,7 @@ you couldn't determine, rather than failing the whole report):
 - Shared processed envelopes: <count or unavailable>
 - Last flush:        <timestamp, never, or unavailable>
 - Hook runtime:      basic-memory <version>; uv <version or missing>
-- Recent checkpoints: <n>
+- Recent checkpoints: <n across session and coding_session>
     - <title> — <permalink>
     ...
 - Active tasks:      <n>

@@ -33,6 +33,9 @@ and workflow. This skill shapes the note; it never overrides factual constraints
   as "made progress" or "updated the implementation."
 - Use substantive prose for context and reasoning. Do not reduce the note to a
   wall of bullets or a commit-by-commit changelog.
+- Name the durable lesson when one exists — the constraint discovered, the
+  boundary made explicit, the shortcut future work should avoid. That is the
+  part that turns a status report into project memory.
 - Match depth to the subject. A small remembered fact should remain small.
 
 ## Anchor The Work

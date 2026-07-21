@@ -50,6 +50,11 @@ with its project, branch, and PR (and commit sha when it matters) — in
 frontmatter when the note's schema defines those fields, as observations
 otherwise.
 
+When the user asks to checkpoint, wrap up, or hand off the current work, run
+the `basic-memory:bm-checkpoint` skill rather than improvising a note — it
+gathers the evidence (git state, verification actually run) and writes the
+durable handoff.
+
 ## Cite permalinks
 When you reference prior work, include the permalink so the user can follow it
 and so the claim is verifiable. Don't paraphrase from memory when you can cite.
