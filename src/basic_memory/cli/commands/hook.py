@@ -288,9 +288,9 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     nearest project ``.codex/basic-memory.json``. Redaction lists accumulate so
     a project cannot weaken user-level privacy rules. Codex capture is enabled
     when omitted, and its default folder is namespaced by the Git repository
-    directory. A malformed source counts as configured, invalidates all
-    lower-precedence settings, and disables capture; a later valid source can
-    explicitly rebuild the settings and re-enable it.
+    directory. Any malformed source counts as configured and fails closed for
+    the whole evaluation so a later source cannot rebuild routing without the
+    missing redaction policy.
     """
     defaults: dict = {
         "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
@@ -311,13 +311,11 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
             continue
         found = True
         if block is None:
-            # Trigger: a higher-precedence config exists but cannot be trusted.
-            # Why: falling back to earlier routing or redaction settings could
-            # persist repository data while silently skipping intended overrides.
-            # Outcome: discard the fallback route and disable event capture; a
-            # later valid source may explicitly rebuild the effective settings.
-            merged = {**defaults, "captureEvents": False}
-            continue
+            # Trigger: any configured source exists but cannot be trusted.
+            # Why: continuing could combine a later checkpoint route with a
+            # missing earlier redaction policy and persist unredacted data.
+            # Outcome: discard every route and disable capture for this event.
+            return {**defaults, "captureEvents": False}, True
         cumulative_redactions: dict[str, list[str]] = {}
         for key in ("redactKeys", "redactPaths"):
             values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
