@@ -83,8 +83,10 @@ When the current branch has a pull request, also add the typed optional fields
 `pull_request_number`, `pull_request_title`, `pull_request_url`, lowercase
 `pull_request_state`, `pull_request_base`, and `pull_request_head`. Resolve the
 pull request with a read-only GitHub query (e.g. `gh pr view --json ...`); omit
-those fields when no PR exists. Never infer or copy repository/PR identity only
-from conversation text. Stop if the required coding fields cannot be proven.
+those fields when no PR exists. Write the number as a quoted string, for example
+`pull_request_number: "123"`, so exact metadata queries behave consistently
+across storage backends. Never infer or copy repository/PR identity only from
+conversation text. Stop if the required coding fields cannot be proven.
 
 Begin the body with `# <exact note title>`.
 

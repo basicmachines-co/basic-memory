@@ -94,6 +94,16 @@ def test_coding_session_schema_is_shared_across_host_plugins() -> None:
     assert codex_schema == claude_schema
 
 
+def test_coding_checkpoint_skills_quote_pull_request_numbers() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    for plugin in ("codex", "claude-code"):
+        skill = (repo_root / "plugins" / plugin / "skills/bm-checkpoint/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        assert 'pull_request_number: "123"' in skill
+
+
 def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")
