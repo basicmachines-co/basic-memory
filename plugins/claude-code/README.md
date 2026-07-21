@@ -29,6 +29,14 @@ the session back to it before the context window compacts.
   coding setup these are schema-backed `coding_session` notes with required
   repository, branch, and SHA context, plus typed pull-request context when a PR
   exists, queryable by structured filters instead of prose search.
+- **Orient from memory (`bm-orient` skill).** A deliberate mid-session "where do
+  things stand" — reads active tasks, open decisions, and recent checkpoints
+  (repository-scoped for coding setups) and presents an evidence-backed
+  orientation with permalinks.
+- **Capture decisions (`bm-decide` skill).** Records a durable choice with
+  rationale, alternatives, consequences, and affected work — the deliberate
+  version of the output style's inline decision capture, available whether or
+  not that style is enabled.
 - **Capture reflexes (output style).** An opt-in output style teaches Claude to
   search the graph before answering recall questions, capture real decisions as
   typed `decision` notes, and cite permalinks.
@@ -50,7 +58,9 @@ Plugin skills are namespaced under the plugin name:
 | Command | What it does |
 |---------|--------------|
 | `/basic-memory:bm-setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, installs the shared `memory-*` skills, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
+| `/basic-memory:bm-orient` | Deliberate orientation — reads active tasks, open decisions, and recent checkpoints from the graph and summarizes where things stand, with permalinks. The mid-session counterpart to the SessionStart brief. |
 | `/basic-memory:bm-checkpoint` | Deliberate checkpoint — writes a durable handoff note (story, verification, decisions, next action). Coding setups get schema-backed `coding_session` notes with required Git identity. Also fires when you say "checkpoint this" or "wrap up". |
+| `/basic-memory:bm-decide` | Capture a durable decision — rationale, alternatives, consequences, affected work — as a `type: decision` note findable by structured recall. Also fires when you say "record this decision". |
 | `/basic-memory:bm-remember <text>` | Quick capture — saves the text to the `bm-remember` folder with a `manual-capture` tag. Also fires when you say "remember that…". |
 | `/basic-memory:bm-share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
 | `/basic-memory:bm-status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, shared local hook inbox/flush health, recent session checkpoints, and active-task count. |

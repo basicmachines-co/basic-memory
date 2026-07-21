@@ -48,8 +48,8 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
 
 - This is a *quick* capture. Keep the user's wording; don't add observations,
   relations, or structure unless they ask.
-- For a decision with rationale and alternatives, write a `type: decision` note
-  instead (the basic-memory output style covers this). Wrapping up a work session is
-  the PreCompact checkpoint's job, not this skill's.
+- For a decision with rationale and alternatives, use the `bm-decide` skill
+  instead (the basic-memory output style also captures these inline). Wrapping up
+  a work session is `bm-checkpoint`'s job, not this skill's.
 - Use whichever Basic Memory MCP server is connected — don't assume a specific tool
   name prefix.

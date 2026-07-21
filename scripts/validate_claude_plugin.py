@@ -30,7 +30,9 @@ REQUIRED_SCHEMAS = ("session.md", "coding-session.md", "decision.md", "task.md")
 # Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
 REQUIRED_SKILLS = (
     "bm-setup",
+    "bm-orient",
     "bm-checkpoint",
+    "bm-decide",
     "bm-remember",
     "bm-status",
     "bm-share",
@@ -68,6 +70,14 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "Never write `[relates_to]`",
     ),
     "bm-remember": ("Apply the `bm-writing` skill",),
+    "bm-decide": ("Apply the `bm-writing` skill",),
+    # Coding-session recall must stay repository-scoped — an unscoped query
+    # crosses repos and pollutes orientation.
+    "bm-orient": (
+        'Always query `"type": "session"`',
+        '"type": "coding_session"',
+        "Never run an unscoped coding-session query",
+    ),
     # Mirrors the Codex validator's bm-writing contract so the shared writing
     # standard stays in sync across host plugins.
     "bm-writing": (

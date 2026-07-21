@@ -8,6 +8,16 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Added
 
+- **`/basic-memory:bm-orient`** (`skills/bm-orient/`) — deliberate mid-session
+  orientation: reads active tasks, open decisions, and recent checkpoints
+  (repository-scoped `coding_session` recall for coding setups — never an
+  unscoped query) and presents an evidence-backed summary with permalinks.
+  Ported from the Codex plugin for parity.
+- **`/basic-memory:bm-decide`** (`skills/bm-decide/`) — deliberate decision
+  capture: rationale, alternatives, consequences, and affected work as a
+  `type: decision` note, written to the `bm-writing` standard. Works whether or
+  not the output style's inline capture reflex is enabled. Ported from the
+  Codex plugin for parity.
 - **`bm-writing` writing standard** (`skills/bm-writing/`) — the user-customizable
   standard for how Claude writes project memory (voice, narrative spine, git
   anchors, observations, relations, evidence boundary), ported from the Codex

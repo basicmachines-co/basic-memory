@@ -41,6 +41,8 @@ note is invisible to it.
 
 Don't over-capture. One good note per real decision. Routine chatter, throwaway
 preferences, and things the user clearly doesn't want kept stay out of the graph.
+When the user explicitly asks to record a decision, run the
+`basic-memory:bm-decide` skill — the deliberate version of this reflex.
 
 ## Write notes to the standard
 When you write or substantially revise a Basic Memory note, apply the
