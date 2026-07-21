@@ -863,7 +863,9 @@ def _checkpoint_note(
             pull_request = coding_context.pull_request
             metadata.update(
                 {
-                    "pull_request_number": pull_request.number,
+                    # PR numbers are identifiers, not quantities. Keeping them as strings
+                    # also makes exact metadata queries portable across SQLite and Postgres.
+                    "pull_request_number": str(pull_request.number),
                     "pull_request_title": redactor.redact_text(pull_request.title),
                     "pull_request_url": redactor.redact_text(pull_request.url),
                     "pull_request_state": pull_request.state,

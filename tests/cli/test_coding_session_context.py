@@ -123,7 +123,7 @@ def test_coding_profile_writes_required_git_and_pull_request_frontmatter(
     assert metadata["repo_root"] == metadata["cwd"]
     assert metadata["branch"] == "feature"
     assert metadata["git_sha"] == expected_sha
-    assert metadata["pull_request_number"] == 1124
+    assert metadata["pull_request_number"] == "1124"
     assert metadata["pull_request_state"] == "open"
     assert metadata["pull_request_base"] == "main"
     assert metadata["pull_request_head"] == "feature"

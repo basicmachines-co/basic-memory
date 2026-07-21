@@ -23,7 +23,7 @@ settings:
     git_sha: string, exact Git commit at checkpoint time
     ended?: string, when the session was checkpointed
     status?(enum, lifecycle of the checkpoint): [open, resumed, closed]
-    pull_request_number?: integer, current pull request number
+    pull_request_number?: string, current pull request number as a queryable identifier
     pull_request_title?: string, current pull request title
     pull_request_url?: string, canonical pull request URL
     pull_request_state?(enum, pull request state at checkpoint time): [open, closed, merged]
@@ -49,7 +49,7 @@ Examples:
 
 `search_notes(note_types=["coding_session"], metadata_filters={"repository": "owner/repo"})`
 
-`search_notes(note_types=["coding_session"], metadata_filters={"pull_request_number": 123})`
+`search_notes(note_types=["coding_session"], metadata_filters={"pull_request_number": "123"})`
 
 Pull-request fields are optional because valid coding work can precede a pull
 request. When a pull request exists, checkpoint writers populate the complete
