@@ -10,7 +10,12 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager, has_cloud_credentials
+from basic_memory.config import BasicMemoryConfig, ConfigManager, has_cloud_credentials
+from basic_memory.repository.rerank_provider_factory import create_rerank_provider
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    SemanticDependenciesMissingError,
+)
 from basic_memory.utils import (
     build_canonical_permalink,
     coerce_dict,
@@ -446,6 +451,47 @@ def _result_score(result: SearchResult | dict[str, Any]) -> float:
     return float(score) if isinstance(score, int | float) else 0.0
 
 
+async def _rerank_merged_results(
+    query: str | None,
+    merged_results: list[dict[str, Any]],
+    config: BasicMemoryConfig,
+) -> list[dict[str, Any]]:
+    """Rescore the merged cross-project pool with one cross-encoder call.
+
+    Each project search reranks independently, so per-project scores are not
+    comparable across projects — merging and sorting by them gives an uncalibrated
+    global order. A single rerank over the merged candidates restores one consistent
+    ranking (scores are overwritten in place). No-op when reranking is disabled.
+    Transient reranker failures fall back to the per-project order; permanent faults
+    (missing deps, provider-contract breaks) surface, matching the repository path.
+    """
+    provider = create_rerank_provider(config)
+    if provider is None or not query or len(merged_results) < 2:
+        return merged_results
+
+    cap = config.reranker_max_document_chars
+    documents: list[str] = []
+    for result in merged_results:
+        title = result.get("title") or ""
+        body = result.get("matched_chunk") or result.get("content") or ""
+        text = f"{title}\n{body}" if (title and body) else (body or title)
+        if cap > 0 and len(text) > cap:
+            text = text[:cap]
+        documents.append(text)
+
+    try:
+        scores = await provider.rerank(query, documents)
+    except (SemanticDependenciesMissingError, RerankProviderContractError):
+        raise
+    except Exception as exc:
+        logger.warning(f"Cross-project rerank failed; keeping per-project order. error={exc}")
+        return merged_results
+
+    for result, score in zip(merged_results, scores):
+        result["score"] = score
+    return merged_results
+
+
 def _qualify_permalink_for_project(permalink: object, project: str | None) -> object:
     """Return a workspace-qualified permalink when the project ref supplies one."""
     if not isinstance(permalink, str) or not permalink.strip():
@@ -608,6 +654,9 @@ async def _search_all_projects(
         any_project_has_more = any_project_has_more or results.get("has_more") is True
         merged_results.extend(_qualify_results_for_project(raw_results, project_ref))
 
+    # Calibrate ordering across projects with one rerank over the merged pool
+    # (no-op when reranking is disabled).
+    merged_results = await _rerank_merged_results(query, merged_results, config)
     sorted_results = sorted(merged_results, key=_result_score, reverse=True)
     start = (requested_page - 1) * requested_page_size
     end = start + requested_page_size
