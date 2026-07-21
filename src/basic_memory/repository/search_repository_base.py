@@ -14,10 +14,6 @@ from sqlalchemy import Executable, Result, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.indexing.embedding_index_planning import (
-    EmbeddingIndexPlanner,
-    EntityVectorShardPlan as _EntityVectorShardPlan,
-)
 from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
@@ -38,6 +34,7 @@ from basic_memory.repository.semantic_errors import (
 )
 from basic_memory.repository.semantic_vector_sync import (
     EntitySyncRuntime as _EntitySyncRuntime,
+    EntityVectorShardPlan as _EntityVectorShardPlan,
     PendingEmbeddingJob as _PendingEmbeddingJob,
     PreparedEntityVectorSync as _PreparedEntityVectorSync,
     VectorChunkState,
@@ -468,8 +465,8 @@ class SearchRepositoryBase(ABC):
         pending_records: list[VectorChunkRecord],
     ) -> _EntityVectorShardPlan:
         """Select the bounded shard to process for one entity sync invocation."""
-        return EmbeddingIndexPlanner().plan_entity_shard(
-            [record["chunk_key"] for record in pending_records],
+        return semantic_vector_sync.plan_entity_vector_shard(
+            pending_records,
             shard_size=OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
         )
 

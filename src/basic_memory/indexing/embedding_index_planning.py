@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -221,19 +220,6 @@ class EmbeddingIndexPlan:
         return len(self.entity_ids)
 
 
-@dataclass(frozen=True, slots=True)
-class EntityVectorShardPlan:
-    """Shard selection for one entity's pending embedding work."""
-
-    scheduled_chunk_keys: set[str]
-    pending_jobs_total: int
-    shard_index: int
-    shard_count: int
-    remaining_jobs_after_shard: int
-    oversized_entity: bool
-    entity_complete: bool
-
-
 class EmbeddingIndexBatchSummary(Protocol):
     """Vector sync counts produced by the concrete search backend."""
 
@@ -348,40 +334,6 @@ class EmbeddingIndexPlanner:
         )
         planned_vector_progress.entity_ids = list(vector_sync_entity_ids)
         return planned_vector_progress
-
-    def plan_entity_shard(
-        self,
-        pending_chunk_keys: Sequence[str],
-        *,
-        shard_size: int,
-    ) -> EntityVectorShardPlan:
-        """Select the bounded shard to process for one entity sync invocation."""
-        if shard_size <= 0:
-            raise ValueError("shard_size must be greater than zero")
-
-        pending_jobs_total = len(pending_chunk_keys)
-        if pending_jobs_total == 0:
-            return EntityVectorShardPlan(
-                scheduled_chunk_keys=set(),
-                pending_jobs_total=0,
-                shard_index=1,
-                shard_count=1,
-                remaining_jobs_after_shard=0,
-                oversized_entity=False,
-                entity_complete=True,
-            )
-
-        scheduled_chunk_keys = sorted(pending_chunk_keys)[:shard_size]
-        remaining_jobs_after_shard = pending_jobs_total - len(scheduled_chunk_keys)
-        return EntityVectorShardPlan(
-            scheduled_chunk_keys=set(scheduled_chunk_keys),
-            pending_jobs_total=pending_jobs_total,
-            shard_index=1,
-            shard_count=max(1, math.ceil(pending_jobs_total / shard_size)),
-            remaining_jobs_after_shard=remaining_jobs_after_shard,
-            oversized_entity=pending_jobs_total > shard_size,
-            entity_complete=remaining_jobs_after_shard == 0,
-        )
 
 
 def plan_embedding_index_batch_jobs(

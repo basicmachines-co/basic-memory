@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from basic_memory.indexing.embedding_index_planning import EmbeddingIndexPlanner
 from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
@@ -240,8 +239,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
 
 
 def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
-    planner = EmbeddingIndexPlanner()
-    empty_plan = planner.plan_entity_shard(
+    empty_plan = semantic_vector_sync.plan_entity_vector_shard(
         [],
         shard_size=semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
     )
@@ -267,8 +265,8 @@ def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
         }
         for index in range(semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE + 1)
     ]
-    oversized_plan = planner.plan_entity_shard(
-        [record["chunk_key"] for record in oversized_records],
+    oversized_plan = semantic_vector_sync.plan_entity_vector_shard(
+        oversized_records,
         shard_size=semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
     )
     semantic_vector_sync.log_vector_shard_plan(
@@ -283,6 +281,9 @@ def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
     monkeypatch.setattr(search_repository_base_module, "OVERSIZED_ENTITY_VECTOR_SHARD_SIZE", 2)
     compatibility_plan = repository._plan_entity_vector_shard(oversized_records[:3])
     assert compatibility_plan.scheduled_chunk_keys == {"chunk-000", "chunk-001"}
+
+    with pytest.raises(ValueError, match="shard_size must be greater than zero"):
+        semantic_vector_sync.plan_entity_vector_shard(oversized_records[:1], shard_size=0)
 
 
 @pytest.mark.asyncio

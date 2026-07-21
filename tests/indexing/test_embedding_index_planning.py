@@ -177,11 +177,6 @@ def test_embedding_index_planner_dedupes_entities_and_fingerprints_versions() ->
     assert plan.fingerprint == same_plan.fingerprint
 
 
-def test_embedding_index_planner_rejects_invalid_entity_shard_size() -> None:
-    with pytest.raises(ValueError, match="shard_size must be greater than zero"):
-        EmbeddingIndexPlanner().plan_entity_shard(["chunk-1"], shard_size=0)
-
-
 def test_vector_sync_perf_counter_returns_monotonic_seconds() -> None:
     assert isinstance(vector_sync_perf_counter(), float)
 
