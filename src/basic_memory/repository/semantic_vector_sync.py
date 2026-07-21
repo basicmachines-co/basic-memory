@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 import time
 from collections.abc import Callable
@@ -77,6 +76,38 @@ class EntityVectorShardPlan:
     remaining_jobs_after_shard: int
     oversized_entity: bool
     entity_complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteEntityVectorPreparePlan:
+    """Delete stale vector state for an entity with no indexable source rows."""
+
+    entity_id: int
+    sync_start: float
+    prepare_start: float
+    source_rows_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class UpsertEntityVectorPreparePlan:
+    """Write-side mutations planned from one entity's prefetched vector state."""
+
+    entity_id: int
+    sync_start: float
+    prepare_start: float
+    source_rows_count: int
+    existing_by_key: dict[str, VectorChunkState]
+    stale_ids: list[int]
+    metadata_update_ids: list[int]
+    scheduled_records: list[VectorChunkRecord]
+    entity_fingerprint: str
+    embedding_model: str
+    chunks_total: int
+    chunks_skipped: int
+    shard_plan: EntityVectorShardPlan
+
+
+type EntityVectorPreparePlan = DeleteEntityVectorPreparePlan | UpsertEntityVectorPreparePlan
 
 
 @dataclass
@@ -630,7 +661,7 @@ async def prepare_entity_vector_jobs_window(
     repository: SearchRepositoryBase,
     entity_ids: list[int],
 ) -> list[PreparedEntityVectorSync | BaseException]:
-    """Prepare one window of entity vector jobs with shared read-side batching."""
+    """Prepare one entity window with batched reads and one write transaction."""
     if not entity_ids:
         return []
 
@@ -650,24 +681,50 @@ async def prepare_entity_vector_jobs_window(
         # Outcome: every entity in the window gets the same failure object.
         return [exc for _ in entity_ids]
 
-    # Trigger: prepare now does one shared read pass per window instead of
-    # paying the same select/join round-trips per entity.
-    # Why: both SQLite and Postgres were still burning wall clock in read-side
-    # fingerprint/orphan checks even when every entity ended up skipped.
-    # Outcome: batch the reads once, close that shared read session, and
-    # then fan back out over entities while preserving input order.
-    prepared_window = await asyncio.gather(
-        *(
-            repository._prepare_entity_vector_jobs_prefetched(
+    prepared_by_index: dict[int, PreparedEntityVectorSync | BaseException] = {}
+    mutation_plans: list[tuple[int, EntityVectorPreparePlan]] = []
+    for index, entity_id in enumerate(entity_ids):
+        try:
+            planned = plan_entity_vector_jobs_prefetched(
+                repository,
                 entity_id=entity_id,
                 source_rows=source_rows_by_entity.get(entity_id, []),
                 existing_rows=existing_rows_by_entity.get(entity_id, []),
             )
-            for entity_id in entity_ids
-        ),
-        return_exceptions=True,
-    )
-    return list(prepared_window)
+        except Exception as exc:
+            prepared_by_index[index] = exc
+            continue
+
+        if isinstance(planned, PreparedEntityVectorSync):
+            prepared_by_index[index] = planned
+        else:
+            mutation_plans.append((index, planned))
+
+    if mutation_plans:
+        try:
+            # Trigger: every entity in this prepare window has already been
+            # diffed against one shared read snapshot.
+            # Why: opening and committing one transaction per entity adds a
+            # Neon round-trip and repeated writer setup for the same window.
+            # Outcome: apply the planned mutations in input order and commit
+            # the whole window once; skip-only entities never enter the write.
+            async with repository._prepare_entity_write_scope():
+                async with db.scoped_session(repository.session_maker) as session:
+                    await repository._prepare_vector_session(session)
+                    for index, plan in mutation_plans:
+                        prepared_by_index[index] = await apply_entity_vector_prepare_plan(
+                            repository,
+                            session,
+                            plan,
+                        )
+                    await session.commit()
+        except Exception as exc:
+            # The mutation plans share one transaction, so a failed write
+            # invalidates every entity whose result depended on that commit.
+            for index, _plan in mutation_plans:
+                prepared_by_index[index] = exc
+
+    return [prepared_by_index[index] for index in range(len(entity_ids))]
 
 
 async def prepare_entity_vector_jobs(
@@ -689,34 +746,52 @@ async def prepare_entity_vector_jobs_prefetched(
     source_rows: list[Any],
     existing_rows: list[VectorChunkState],
 ) -> PreparedEntityVectorSync:
-    """Prepare one entity using prefetched window rows."""
+    """Prepare one entity using prefetched rows and its own write transaction."""
+    planned = plan_entity_vector_jobs_prefetched(
+        repository,
+        entity_id=entity_id,
+        source_rows=source_rows,
+        existing_rows=existing_rows,
+    )
+    if isinstance(planned, PreparedEntityVectorSync):
+        return planned
+
+    async with repository._prepare_entity_write_scope():
+        async with db.scoped_session(repository.session_maker) as session:
+            await repository._prepare_vector_session(session)
+            prepared = await apply_entity_vector_prepare_plan(repository, session, planned)
+            await session.commit()
+            return prepared
+
+
+def plan_entity_vector_jobs_prefetched(
+    repository: SearchRepositoryBase,
+    *,
+    entity_id: int,
+    source_rows: list[Any],
+    existing_rows: list[VectorChunkState],
+) -> PreparedEntityVectorSync | EntityVectorPreparePlan:
+    """Plan one entity from prefetched rows without opening a write transaction."""
     sync_start = time.perf_counter()
     prepare_start = sync_start
     source_rows_count = len(source_rows)
 
-    async def delete_entity_chunks_and_finish() -> PreparedEntityVectorSync:
-        """Delete derived rows and return the empty prepare result."""
-        async with repository._prepare_entity_write_scope():
-            async with db.scoped_session(repository.session_maker) as session:
-                await repository._prepare_vector_session(session)
-                await repository._delete_entity_chunks(session, entity_id)
-                await session.commit()
-        prepare_seconds = time.perf_counter() - prepare_start
-        return PreparedEntityVectorSync(
+    def delete_entity_chunks() -> DeleteEntityVectorPreparePlan:
+        """Plan cleanup for an entity without indexable semantic source rows."""
+        return DeleteEntityVectorPreparePlan(
             entity_id=entity_id,
             sync_start=sync_start,
+            prepare_start=prepare_start,
             source_rows_count=source_rows_count,
-            embedding_jobs=[],
-            prepare_seconds=prepare_seconds,
         )
 
     if not source_rows:
-        return await delete_entity_chunks_and_finish()
+        return delete_entity_chunks()
 
     chunk_records = repository._build_chunk_records(source_rows)
     built_chunk_records_count = len(chunk_records)
     if not chunk_records:
-        return await delete_entity_chunks_and_finish()
+        return delete_entity_chunks()
 
     current_entity_fingerprint = repository._build_entity_fingerprint(chunk_records)
     current_embedding_model = repository._embedding_model_key()
@@ -756,7 +831,6 @@ async def prepare_entity_vector_jobs_prefetched(
             prepare_seconds=prepare_seconds,
         )
 
-    timestamp_expr = repository._timestamp_now_expr()
     metadata_update_ids: list[int] = []
     pending_records: list[VectorChunkRecord] = []
     skipped_chunks_count = 0
@@ -791,58 +865,83 @@ async def prepare_entity_vector_jobs_prefetched(
         if record["chunk_key"] in shard_plan.scheduled_chunk_keys
     ]
 
-    embedding_jobs: list[tuple[int, str]] = []
-    if stale_ids or metadata_update_ids or scheduled_records:
-        # Trigger: prepare needs to mutate chunk rows for this entity.
-        # Why: Postgres can keep these write-side steps concurrent, while
-        # SQLite should funnel them through one writer even after shared reads.
-        # Outcome: backends share the batched read path without forcing
-        # SQLite into unnecessary concurrent write transactions.
-        async with repository._prepare_entity_write_scope():
-            async with db.scoped_session(repository.session_maker) as session:
-                await repository._prepare_vector_session(session)
-                if stale_ids:
-                    await repository._delete_stale_chunks(session, stale_ids, entity_id)
-                for row_id in metadata_update_ids:
-                    await session.execute(
-                        text(
-                            "UPDATE search_vector_chunks "
-                            "SET entity_fingerprint = :entity_fingerprint, "
-                            "embedding_model = :embedding_model, "
-                            f"updated_at = {timestamp_expr} "
-                            "WHERE id = :id"
-                        ),
-                        {
-                            "id": row_id,
-                            "entity_fingerprint": current_entity_fingerprint,
-                            "embedding_model": current_embedding_model,
-                        },
-                    )
-                if scheduled_records:
-                    embedding_jobs = await repository._upsert_scheduled_chunk_records(
-                        session,
-                        entity_id=entity_id,
-                        scheduled_records=scheduled_records,
-                        existing_by_key=existing_by_key,
-                        entity_fingerprint=current_entity_fingerprint,
-                        embedding_model=current_embedding_model,
-                    )
-                await session.commit()
-
-    prepare_seconds = time.perf_counter() - prepare_start
-    return PreparedEntityVectorSync(
+    return UpsertEntityVectorPreparePlan(
         entity_id=entity_id,
         sync_start=sync_start,
+        prepare_start=prepare_start,
         source_rows_count=source_rows_count,
-        embedding_jobs=embedding_jobs,
+        existing_by_key=existing_by_key,
+        stale_ids=stale_ids,
+        metadata_update_ids=metadata_update_ids,
+        scheduled_records=scheduled_records,
+        entity_fingerprint=current_entity_fingerprint,
+        embedding_model=current_embedding_model,
         chunks_total=built_chunk_records_count,
         chunks_skipped=skipped_chunks_count,
-        entity_complete=shard_plan.entity_complete,
-        oversized_entity=shard_plan.oversized_entity,
-        pending_jobs_total=shard_plan.pending_jobs_total,
-        shard_index=shard_plan.shard_index,
-        shard_count=shard_plan.shard_count,
-        remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
+        shard_plan=shard_plan,
+    )
+
+
+async def apply_entity_vector_prepare_plan(
+    repository: SearchRepositoryBase,
+    session: AsyncSession,
+    plan: EntityVectorPreparePlan,
+) -> PreparedEntityVectorSync:
+    """Apply one planned entity mutation inside the caller-owned transaction."""
+    if isinstance(plan, DeleteEntityVectorPreparePlan):
+        await repository._delete_entity_chunks(session, plan.entity_id)
+        return PreparedEntityVectorSync(
+            entity_id=plan.entity_id,
+            sync_start=plan.sync_start,
+            source_rows_count=plan.source_rows_count,
+            embedding_jobs=[],
+            prepare_seconds=time.perf_counter() - plan.prepare_start,
+        )
+
+    timestamp_expr = repository._timestamp_now_expr()
+    if plan.stale_ids:
+        await repository._delete_stale_chunks(session, plan.stale_ids, plan.entity_id)
+    for row_id in plan.metadata_update_ids:
+        await session.execute(
+            text(
+                "UPDATE search_vector_chunks "
+                "SET entity_fingerprint = :entity_fingerprint, "
+                "embedding_model = :embedding_model, "
+                f"updated_at = {timestamp_expr} "
+                "WHERE id = :id"
+            ),
+            {
+                "id": row_id,
+                "entity_fingerprint": plan.entity_fingerprint,
+                "embedding_model": plan.embedding_model,
+            },
+        )
+
+    embedding_jobs: list[tuple[int, str]] = []
+    if plan.scheduled_records:
+        embedding_jobs = await repository._upsert_scheduled_chunk_records(
+            session,
+            entity_id=plan.entity_id,
+            scheduled_records=plan.scheduled_records,
+            existing_by_key=plan.existing_by_key,
+            entity_fingerprint=plan.entity_fingerprint,
+            embedding_model=plan.embedding_model,
+        )
+
+    prepare_seconds = time.perf_counter() - plan.prepare_start
+    return PreparedEntityVectorSync(
+        entity_id=plan.entity_id,
+        sync_start=plan.sync_start,
+        source_rows_count=plan.source_rows_count,
+        embedding_jobs=embedding_jobs,
+        chunks_total=plan.chunks_total,
+        chunks_skipped=plan.chunks_skipped,
+        entity_complete=plan.shard_plan.entity_complete,
+        oversized_entity=plan.shard_plan.oversized_entity,
+        pending_jobs_total=plan.shard_plan.pending_jobs_total,
+        shard_index=plan.shard_plan.shard_index,
+        shard_count=plan.shard_plan.shard_count,
+        remaining_jobs_after_shard=plan.shard_plan.remaining_jobs_after_shard,
         prepare_seconds=prepare_seconds,
         queue_start=time.perf_counter(),
     )

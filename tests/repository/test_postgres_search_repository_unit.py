@@ -5,7 +5,6 @@ covering utility functions, formatting helpers, and constructor paths that
 are difficult to reach in integration tests.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -288,7 +287,7 @@ class TestBatchPrepareWindow:
     """Cover the shared batched prepare window used by Postgres."""
 
     @pytest.mark.asyncio
-    async def test_sync_entity_vectors_batch_uses_shared_prepare_window(self, monkeypatch):
+    async def test_sync_entity_vectors_batch_uses_shared_prepare_transactions(self, monkeypatch):
         repo = _make_repo(
             semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
@@ -298,45 +297,50 @@ class TestBatchPrepareWindow:
         repo._vector_tables_initialized = True
 
         fetched_windows: list[list[int]] = []
-        prepared_windows: list[list[int]] = []
-        active_prepares = 0
-        max_active_prepares = 0
+        upserted_entity_ids: list[int] = []
+        sessions: list[AsyncMock] = []
+        write_scope_entries = 0
 
         async def _stub_fetch_source_rows(session, entity_ids: list[int]):
             fetched_windows.append(list(entity_ids))
-            return {entity_id: [object()] for entity_id in entity_ids}
+            return {entity_id: [entity_id] for entity_id in entity_ids}
 
         async def _stub_fetch_existing_rows(session, entity_ids: list[int]):
             return {entity_id: [] for entity_id in entity_ids}
 
-        async def _stub_prepare_prefetched(
+        def _stub_build_chunk_records(source_rows):
+            entity_id = source_rows[0]
+            return [
+                {
+                    "chunk_key": f"entity:{entity_id}:0",
+                    "chunk_text": f"chunk {entity_id}",
+                    "source_hash": f"hash-{entity_id}",
+                }
+            ]
+
+        async def _stub_upsert(
+            session,
             *,
             entity_id: int,
-            source_rows,
-            existing_rows,
-        ) -> _PreparedEntityVectorSync:
-            nonlocal active_prepares, max_active_prepares
-            assert len(source_rows) == 1
-            assert existing_rows == []
-            active_prepares += 1
-            max_active_prepares = max(max_active_prepares, active_prepares)
-            await asyncio.sleep(0)
-            active_prepares -= 1
-            prepared_windows.append([entity_id])
-            return _PreparedEntityVectorSync(
-                entity_id=entity_id,
-                sync_start=float(entity_id),
-                source_rows_count=1,
-                embedding_jobs=[],
-                entity_skipped=True,
-                chunks_total=1,
-                chunks_skipped=1,
-                prepare_seconds=0.1,
-            )
+            scheduled_records,
+            existing_by_key,
+            entity_fingerprint: str,
+            embedding_model: str,
+        ):
+            upserted_entity_ids.append(entity_id)
+            return []
+
+        @asynccontextmanager
+        async def _track_write_scope():
+            nonlocal write_scope_entries
+            write_scope_entries += 1
+            yield
 
         @asynccontextmanager
         async def fake_scoped_session(session_maker):
-            yield AsyncMock()
+            session = AsyncMock()
+            sessions.append(session)
+            yield session
 
         monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
         monkeypatch.setattr(
@@ -345,9 +349,10 @@ class TestBatchPrepareWindow:
         )
         monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
         monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
-        monkeypatch.setattr(
-            repo, "_prepare_entity_vector_jobs_prefetched", _stub_prepare_prefetched
-        )
+        monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
+        monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
+        monkeypatch.setattr(repo, "_prepare_entity_write_scope", _track_write_scope)
+        monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
 
         result = await repo.sync_entity_vectors_batch([1, 2, 3, 4])
 
@@ -355,8 +360,9 @@ class TestBatchPrepareWindow:
         assert result.entities_synced == 4
         assert result.entities_failed == 0
         assert fetched_windows == [[1, 2], [3, 4]]
-        assert prepared_windows == [[1], [2], [3], [4]]
-        assert max_active_prepares == 2
+        assert upserted_entity_ids == [1, 2, 3, 4]
+        assert write_scope_entries == 2
+        assert [session.commit.await_count for session in sessions] == [0, 1, 0, 1]
 
 
 @pytest.mark.asyncio

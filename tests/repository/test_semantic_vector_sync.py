@@ -338,6 +338,61 @@ async def test_prepare_window_handles_empty_input_and_shared_read_failure(monkey
 
 
 @pytest.mark.asyncio
+async def test_prepare_window_reports_shared_transaction_failure_for_mutation_plans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _TestRepository()
+    skip_result = _prepared_entity(entity_id=1)
+    sessions = iter([AsyncMock(), AsyncMock()])
+
+    @asynccontextmanager
+    async def scoped_session(_session_maker):
+        yield next(sessions)
+
+    @asynccontextmanager
+    async def write_scope():
+        yield
+
+    def _stub_plan(repository, *, entity_id, source_rows, existing_rows):
+        if entity_id == 1:
+            return skip_result
+        if entity_id == 4:
+            raise ValueError("planning failed")
+        return semantic_vector_sync.DeleteEntityVectorPreparePlan(
+            entity_id=entity_id,
+            sync_start=0.0,
+            prepare_start=0.0,
+            source_rows_count=0,
+        )
+
+    monkeypatch.setattr(semantic_vector_sync.db, "scoped_session", scoped_session)
+    monkeypatch.setattr(repository, "_prepare_vector_session", AsyncMock())
+    monkeypatch.setattr(repository, "_fetch_prepare_window_source_rows", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        repository, "_fetch_prepare_window_existing_rows", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(repository, "_prepare_entity_write_scope", write_scope)
+    monkeypatch.setattr(semantic_vector_sync, "plan_entity_vector_jobs_prefetched", _stub_plan)
+    monkeypatch.setattr(
+        repository,
+        "_delete_entity_chunks",
+        AsyncMock(side_effect=[None, RuntimeError("write failed")]),
+    )
+
+    prepared = await semantic_vector_sync.prepare_entity_vector_jobs_window(
+        repository,
+        [1, 2, 3, 4],
+    )
+
+    assert prepared[0] is skip_result
+    assert isinstance(prepared[1], RuntimeError)
+    assert prepared[1] is prepared[2]
+    assert str(prepared[1]) == "write failed"
+    assert isinstance(prepared[3], ValueError)
+    assert str(prepared[3]) == "planning failed"
+
+
+@pytest.mark.asyncio
 async def test_prepare_single_entity_propagates_window_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -433,6 +488,41 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
     )
 
     delete_stale_chunks.assert_awaited_once_with(session, [7], 1)
+
+
+@pytest.mark.asyncio
+async def test_prefetched_prepare_returns_unchanged_entity_without_write(monkeypatch) -> None:
+    repository = _TestRepository()
+    record = {
+        "chunk_key": "existing",
+        "chunk_text": "text",
+        "source_hash": "source-hash",
+    }
+    existing_row = semantic_vector_sync.VectorChunkState(
+        id=7,
+        chunk_key="existing",
+        source_hash="source-hash",
+        entity_fingerprint="fingerprint",
+        embedding_model="model",
+        has_embedding=True,
+    )
+    monkeypatch.setattr(repository, "_build_chunk_records", Mock(return_value=[record]))
+    monkeypatch.setattr(
+        repository,
+        "_build_entity_fingerprint",
+        Mock(return_value="fingerprint"),
+    )
+    monkeypatch.setattr(repository, "_embedding_model_key", Mock(return_value="model"))
+
+    prepared = await semantic_vector_sync.prepare_entity_vector_jobs_prefetched(
+        repository,
+        entity_id=1,
+        source_rows=[object()],
+        existing_rows=[existing_row],
+    )
+
+    assert prepared.entity_skipped is True
+    assert prepared.embedding_jobs == []
 
 
 @pytest.mark.asyncio

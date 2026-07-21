@@ -409,6 +409,8 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     fetched_windows: list[list[int]] = []
     active_write_scopes = 0
     max_active_write_scopes = 0
+    write_scope_entries = 0
+    sessions: list[AsyncMock] = []
 
     async def _stub_fetch_source_rows(session, entity_ids: list[int]):
         fetched_windows.append(list(entity_ids))
@@ -428,8 +430,9 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
 
     @asynccontextmanager
     async def _track_write_scope():
-        nonlocal active_write_scopes, max_active_write_scopes
+        nonlocal active_write_scopes, max_active_write_scopes, write_scope_entries
         async with repo._sqlite_prepare_write_lock:
+            write_scope_entries += 1
             active_write_scopes += 1
             max_active_write_scopes = max(max_active_write_scopes, active_write_scopes)
             try:
@@ -451,7 +454,9 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
 
     @asynccontextmanager
     async def fake_scoped_session(session_maker):
-        yield AsyncMock()
+        session = AsyncMock()
+        sessions.append(session)
+        yield session
 
     monkeypatch.setattr(
         "basic_memory.repository.search_repository_base.db.scoped_session",
@@ -470,6 +475,8 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     assert fetched_windows == [[1, 2]]
     assert [result.entity_id for result in prepared_results] == [1, 2]
     assert max_active_write_scopes == 1
+    assert write_scope_entries == 1
+    assert [session.commit.await_count for session in sessions] == [0, 1]
 
 
 @pytest.mark.asyncio
