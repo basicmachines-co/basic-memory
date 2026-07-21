@@ -22,8 +22,7 @@ Gather a concise diagnostic. Do not over-investigate.
    - read `.codex/basic-memory.json`
    - report `primaryProject`, `secondaryProjects`, `teamProjects`,
      `captureFolder`, `rememberFolder`, `recallTimeframe`, `focus`,
-     `sessionProfile`, `repository`, `captureEvents`, `redactKeys`, and
-     `redactPaths`
+     `captureEvents`, `redactKeys`, and `redactPaths`
 
 3. Core hook health:
    - with the first available launcher, run
@@ -43,10 +42,8 @@ Gather a concise diagnostic. Do not over-investigate.
 
 5. Basic Memory queries:
    - query recent `type=codex_session` and `type=session`, then merge, deduplicate,
-     sort newest first, and keep the newest five; `codex_session` covers deliberate
-     and PreCompact checkpoints, while `session` covers core projections. For a
-     coding profile, filter `codex_session` by the configured `repo` metadata and
-     report whether recent matches contain the required Git metadata.
+     sort newest first, and keep the newest five; the first type covers deliberate
+     and PreCompact Codex checkpoints, while the second covers core projections
    - active `type=task`, `status=active`
    - open `type=decision`, `status=open`
 
@@ -63,8 +60,6 @@ Basic Memory for Codex
 - Capture folder: <captureFolder>
 - Remember folder: <rememberFolder>
 - Recall timeframe: <recallTimeframe>
-- Session profile: <general | coding>
-- Repository: <owner/name or none>
 - Event capture: <enabled | disabled>
 - Redact keys: <configured count or none>
 - Redact paths: <configured count or none>

@@ -12,8 +12,7 @@ verification, decision capture, and resumable checkpoints.
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
   decisions, and recent Codex checkpoints before substantial work.
 - **Checkpoint work.** The `bm-checkpoint` skill and `PreCompact` hook write
-  `codex_session` notes, with a stricter schema-backed coding profile for
-  structured repository and pull-request context.
+  `type: codex_session` notes with the current work cursor.
 - **Capture decisions.** The `bm-decide` skill records durable engineering
   decisions with rationale, alternatives, and consequences.
 - **Remember lightly.** The `bm-remember` skill saves small facts without turning
@@ -88,8 +87,6 @@ Run the setup skill, or create `.codex/basic-memory.json` in a repo:
     "secondaryProjects": [],
     "teamProjects": {},
     "focus": "code/dev",
-    "sessionProfile": "coding",
-    "repository": "owner/repo",
     "captureFolder": "codex-sessions",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
@@ -108,14 +105,10 @@ Add `redactKeys` and `redactPaths` arrays to extend the built-in redaction floor
 for repository-specific payload fields and paths.
 
 The plugin's seed schemas cover notes Codex writes directly: `codex_session`,
-`decision`, and `task`. Coding setups seed the stricter CodexSession schema
-variant, which requires structured repo, repository-root, working-directory,
-branch, and Git SHA frontmatter; current pull-request fields are added when a PR
-exists. Optional flush projection also writes normalized `session` and
-`tool_ledger` artifacts. Those are
-core-owned contracts implemented and tested with the projector, not duplicate
-schema files maintained by each host plugin. `bm-orient` and `bm-status` still
-recall normalized `session` notes
+`decision`, and `task`. Optional flush projection also writes normalized
+`session` and `tool_ledger` artifacts. Those are core-owned contracts implemented
+and tested with the projector, not duplicate schema files maintained by each host
+plugin. `bm-orient` and `bm-status` still recall normalized `session` notes
 alongside Codex checkpoints.
 
 Codex plugin hooks must be reviewed and trusted before they run. Open `/hooks` in

@@ -16,8 +16,6 @@ Read `.codex/basic-memory.json` if present:
 - `primaryProject`, default omitted
 - `captureFolder`, default `codex-sessions`
 - `placementConventions`, optional
-- `sessionProfile`, default `general`
-- `repository`, required when `sessionProfile` is `coding`
 
 Apply the `bm-writing` skill before drafting the note.
 
@@ -29,9 +27,6 @@ Gather repo evidence:
 - tradeoffs, sharp edges, useful simplifications, and intentionally parked work
 - `git status --short`
 - current branch
-- repository root and current working directory
-- current Git SHA
-- current pull request number, title, URL, state, base, and head when one exists
 - changed files you touched
 - tests or checks actually run
 - failures or skipped checks
@@ -47,7 +42,7 @@ Do not claim a test passed unless you ran it or the user supplied the result.
 A checkpoint is a durable handoff, not a status dump or commit-by-commit
 changelog. Tell the story for a human or agent returning later.
 
-Write a note to Basic Memory. For the `general` profile:
+Write a note to Basic Memory:
 
 - `title`: `Codex checkpoint - <short topic>`
 - `directory`: configured `captureFolder`
@@ -61,22 +56,6 @@ Write a note to Basic Memory. For the `general` profile:
   - `username: <current username>`
   - `hostname: <current hostname>`
   - `capture: deliberate`
-
-For the `coding` profile, keep `type: codex_session` and use the same common
-frontmatter plus these fields required by the coding CodexSession schema:
-
-- `repo: <confirmed stable repository identifier>`
-- `repo_root: <git rev-parse --show-toplevel>`
-- `cwd: <current cwd>`
-- `branch: <git rev-parse --abbrev-ref HEAD>`
-- `git_sha: <git rev-parse HEAD>`
-
-When the current branch has a pull request, also add the typed optional fields
-`pr`, `pr_title`, `pr_url`, `pr_state`, `pr_base`, and `pr_head`. Use a canonical
-`#<number>` value for `pr`. Resolve the
-pull request with a read-only GitHub query; omit those fields when no PR exists.
-Never infer or copy repository/PR identity only from conversation text. Stop if
-the required coding fields cannot be proven.
 
 Begin the body with `# <exact note title>`.
 

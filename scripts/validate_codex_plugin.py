@@ -28,8 +28,6 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "captureEvents",
         "redactKeys",
         "redactPaths",
-        "sessionProfile",
-        "codex-session-coding.md",
         "hook status --harness codex",
     ),
     "bm-status": (
@@ -41,7 +39,7 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "type=session",
     ),
     "bm-orient": (
-        "Always query `codex_session` and `session`",
+        "Always query both session types",
         "type=codex_session",
         "type=session",
     ),
@@ -50,8 +48,6 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "A checkpoint is a durable handoff, not a status dump",
         "username: <current username>",
         "hostname: <current hostname>",
-        "type: codex_session",
-        "pr_title",
         "- `[decision]` for each decision made or preserved",
         "## Relations",
         "- relates_to [[Exact existing note title]]",
@@ -66,12 +62,7 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "Do not invent intent, impact, verification, decisions, or drama",
     ),
 }
-REQUIRED_SCHEMAS = (
-    "codex-session.md",
-    "codex-session-coding.md",
-    "decision.md",
-    "task.md",
-)
+REQUIRED_SCHEMAS = ("codex-session.md", "decision.md", "task.md")
 REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
 # moved into the basic-memory package behind `bm hook` (SPEC-55).
