@@ -59,6 +59,7 @@ TOP_CHUNKS_PER_RESULT = 5
 SMALL_NOTE_CONTENT_LIMIT = 2000
 OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE
 _SQLITE_MAX_PREPARE_WINDOW = semantic_vector_sync.SQLITE_MAX_PREPARE_WINDOW
+_BUILT_IN_VECTOR_INDEX_NAMES = frozenset({"pgvector", "sqlite-vec"})
 
 # Entity, observation, and relation rows in search_index carry ids from independent
 # auto-increment sequences, so a bare id is ambiguous across row types. Every map in
@@ -644,10 +645,12 @@ class SearchRepositoryBase(ABC):
         A full reindex clears the manifest even when semantic search is disabled,
         so stale ready rows cannot become current if the feature is re-enabled.
         Adapter cleanup is best-effort because the manifest remains the search
-        authority and an unavailable extension must not block an FTS rebuild.
+        authority. Ownership mismatches fail closed because only the manifest
+        identifies the extension that can safely remove previously written vectors.
         Project deletion opts into strict cleanup so external data ownership is
         preserved for a retry instead of being discarded after an adapter failure.
         """
+        configured_index = self._semantic_vector_index_name
         async with db.scoped_session(self.session_maker) as session:
             connection = await session.connection()
             manifest_exists = await connection.run_sync(
@@ -656,21 +659,59 @@ class SearchRepositoryBase(ABC):
             if not manifest_exists:
                 return
 
-            manifest_has_embedding_status = await connection.run_sync(
-                lambda sync_connection: any(
-                    column["name"] == "embedding_status"
+            manifest_columns = await connection.run_sync(
+                lambda sync_connection: {
+                    str(column["name"])
                     for column in inspect(sync_connection).get_columns("search_vector_chunks")
+                }
+            )
+            manifest_has_embedding_status = "embedding_status" in manifest_columns
+
+            entity_ids_by_vector_index: dict[str, list[int]] = {}
+            if "vector_index" in manifest_columns:
+                result = await session.execute(
+                    text(
+                        "SELECT DISTINCT entity_id, vector_index FROM search_vector_chunks "
+                        "WHERE project_id = :project_id ORDER BY vector_index, entity_id"
+                    ),
+                    {"project_id": self.project_id},
                 )
+                for entity_id, vector_index in result.all():
+                    entity_ids_by_vector_index.setdefault(str(vector_index), []).append(
+                        int(entity_id)
+                    )
+            else:
+                result = await session.execute(
+                    text(
+                        "SELECT DISTINCT entity_id FROM search_vector_chunks "
+                        "WHERE project_id = :project_id ORDER BY entity_id"
+                    ),
+                    {"project_id": self.project_id},
+                )
+                legacy_vector_index = (
+                    "sqlite-vec" if connection.dialect.name == "sqlite" else "pgvector"
+                )
+                entity_ids_by_vector_index[legacy_vector_index] = [
+                    int(entity_id) for entity_id in result.scalars().all()
+                ]
+
+            external_vector_indexes = (
+                frozenset(entity_ids_by_vector_index) - _BUILT_IN_VECTOR_INDEX_NAMES
             )
 
-            result = await session.execute(
-                text(
-                    "SELECT DISTINCT entity_id FROM search_vector_chunks "
-                    "WHERE project_id = :project_id ORDER BY entity_id"
-                ),
-                {"project_id": self.project_id},
-            )
-            entity_ids = [int(entity_id) for entity_id in result.scalars().all()]
+            # Trigger: manifests belong to an external index other than the available adapter.
+            # Why: adapter configuration can change after vectors were written, and deleting
+            # the manifest would discard the only durable routing information for old vectors.
+            # Outcome: fail before touching any adapter or manifest so the owner can be restored.
+            if external_vector_indexes and (
+                not hasattr(self, "_semantic_vector_index")
+                or external_vector_indexes != frozenset({configured_index})
+            ):
+                raise SemanticVectorIndexExtensionError(
+                    "Cannot delete project vectors owned by external indexes "
+                    f"{sorted(external_vector_indexes)!r} with configured adapter "
+                    f"{configured_index!r}. Restore the owning adapter and retry."
+                )
 
             # Trigger: the manifest predates embedding lifecycle state.
             # Why: legacy SQLite schemas must reach cleanup before lazy schema repair runs.
@@ -686,22 +727,11 @@ class SearchRepositoryBase(ABC):
                 )
                 await session.commit()
 
-        # Trigger: project deletion requires strict cleanup, but semantic search
-        # was disabled before this repository was composed.
-        # Why: deleting the manifest without an adapter would orphan externally
-        # stored vectors and discard the only durable ownership list.
-        # Outcome: retain the manifest and require the caller to restore the
-        # configured adapter before retrying project deletion.
-        if entity_ids and strict_adapter_cleanup and not hasattr(self, "_semantic_vector_index"):
-            raise SemanticVectorIndexExtensionError(
-                "Cannot delete project vectors because the configured semantic vector "
-                "adapter is unavailable. Enable semantic search and retry project deletion."
-            )
-
-        if hasattr(self, "_semantic_vector_index"):
+        adapter_entity_ids = entity_ids_by_vector_index.get(configured_index, [])
+        if adapter_entity_ids and hasattr(self, "_semantic_vector_index"):
             try:
                 await self._semantic_vector_index.initialize()
-                for entity_id in entity_ids:
+                for entity_id in adapter_entity_ids:
                     await self._semantic_vector_index.delete_entity(entity_id)
             except Exception as exc:
                 # Trigger: a configured external adapter cannot initialize or delete.
@@ -716,7 +746,7 @@ class SearchRepositoryBase(ABC):
                     vector_index=self._semantic_vector_index_name,
                     error=exc,
                 )
-                if strict_adapter_cleanup:
+                if strict_adapter_cleanup and configured_index not in _BUILT_IN_VECTOR_INDEX_NAMES:
                     raise
 
         async with db.scoped_session(self.session_maker) as session:

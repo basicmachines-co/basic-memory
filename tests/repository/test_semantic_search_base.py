@@ -169,9 +169,9 @@ async def test_project_vector_cleanup_clears_disabled_manifest(monkeypatch):
     repo = _ConcreteRepo()
     session = AsyncMock()
     connection = AsyncMock()
-    connection.run_sync.return_value = True
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    entity_result = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [41, 42]))
+    entity_result = SimpleNamespace(all=lambda: [(41, "pgvector"), (42, "pgvector")])
     session.execute.return_value = entity_result
 
     @asynccontextmanager
@@ -193,7 +193,8 @@ async def test_project_vector_cleanup_handles_legacy_manifest_without_status(mon
     repo = _ConcreteRepo()
     session = AsyncMock()
     connection = AsyncMock()
-    connection.run_sync.side_effect = [True, False]
+    connection.run_sync.side_effect = [True, set()]
+    connection.dialect.name = "sqlite"
     session.connection.return_value = connection
     session.execute.return_value = SimpleNamespace(
         scalars=lambda: SimpleNamespace(all=lambda: [41])
@@ -224,11 +225,9 @@ async def test_project_vector_cleanup_uses_available_adapter(monkeypatch):
     repo._semantic_vector_index_name = "milvus"
     session = AsyncMock()
     connection = AsyncMock()
-    connection.run_sync.return_value = True
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(
-        scalars=lambda: SimpleNamespace(all=lambda: [41, 42])
-    )
+    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus"), (42, "milvus")])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
@@ -257,11 +256,9 @@ async def test_project_vector_cleanup_clears_manifest_after_adapter_failure(monk
     repo._semantic_vector_index_name = "milvus"
     session = AsyncMock()
     connection = AsyncMock()
-    connection.run_sync.return_value = True
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(
-        scalars=lambda: SimpleNamespace(all=lambda: [41])
-    )
+    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus")])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
@@ -291,11 +288,9 @@ async def test_strict_project_vector_cleanup_preserves_manifest_after_adapter_fa
     repo._semantic_vector_index_name = "milvus"
     session = AsyncMock()
     connection = AsyncMock()
-    connection.run_sync.return_value = True
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(
-        scalars=lambda: SimpleNamespace(all=lambda: [41])
-    )
+    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus")])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
@@ -318,11 +313,9 @@ async def test_strict_project_vector_cleanup_preserves_manifest_without_adapter(
     repo = _ConcreteRepo()
     session = AsyncMock()
     connection = AsyncMock()
-    connection.run_sync.return_value = True
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(
-        scalars=lambda: SimpleNamespace(all=lambda: [41])
-    )
+    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus")])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
@@ -330,13 +323,69 @@ async def test_strict_project_vector_cleanup_preserves_manifest_without_adapter(
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
-    with pytest.raises(SemanticVectorIndexExtensionError, match="adapter is unavailable"):
+    with pytest.raises(SemanticVectorIndexExtensionError, match="owned by external indexes"):
         await repo.delete_project_vector_rows(strict_adapter_cleanup=True)
 
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
     assert not any(
         statement.startswith("DELETE FROM search_vector_chunks") for statement in statements
     )
+
+
+@pytest.mark.asyncio
+async def test_project_vector_cleanup_preserves_mismatched_external_owner(monkeypatch):
+    """Cleanup must not route old extension rows through the newly configured adapter."""
+    repo = _ConcreteRepo()
+    adapter: Any = SimpleNamespace(
+        initialize=AsyncMock(),
+        delete_entity=AsyncMock(),
+    )
+    repo._semantic_vector_index = adapter
+    repo._semantic_vector_index_name = "pgvector"
+    session = AsyncMock()
+    connection = AsyncMock()
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
+    session.connection.return_value = connection
+    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus")])
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    with pytest.raises(SemanticVectorIndexExtensionError, match="milvus"):
+        await repo.delete_project_vector_rows()
+
+    adapter.initialize.assert_not_awaited()
+    statements = [str(call.args[0]) for call in session.execute.await_args_list]
+    assert not any(statement.startswith("UPDATE search_vector_chunks") for statement in statements)
+    assert not any(
+        statement.startswith("DELETE FROM search_vector_chunks") for statement in statements
+    )
+
+
+@pytest.mark.asyncio
+async def test_strict_project_vector_cleanup_allows_disabled_builtin_owner(monkeypatch):
+    """Project deletion should not require the semantic stack for built-in vectors."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "pgvector"
+    session = AsyncMock()
+    connection = AsyncMock()
+    connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
+    session.connection.return_value = connection
+    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "pgvector")])
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo.delete_project_vector_rows(strict_adapter_cleanup=True)
+
+    statements = [str(call.args[0]) for call in session.execute.await_args_list]
+    assert any(statement.startswith("DELETE FROM search_vector_chunks") for statement in statements)
 
 
 @pytest.mark.asyncio
