@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
@@ -24,6 +24,12 @@ from basic_memory.repository.search_repository_base import (
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.repository.semantic_vector_index_factory import (
+    build_vector_index_scope,
+    resolve_semantic_vector_index_name,
+)
+from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -58,6 +64,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         project_id: int,
         app_config: BasicMemoryConfig | None = None,
         embedding_provider: EmbeddingProvider | None = None,
+        vector_index_name: str | None = None,
+        vector_index: SemanticVectorIndex | None = None,
     ):
         super().__init__(session_maker, project_id)
         self._app_config = app_config or ConfigManager().config
@@ -71,6 +79,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             self._app_config.semantic_postgres_prepare_concurrency
         )
         self._embedding_provider = embedding_provider
+        self._semantic_vector_index_name = vector_index_name or "pgvector"
         self._vector_dimensions = 384
         self._vector_tables_initialized = False
         self._vector_tables_lock = asyncio.Lock()
@@ -79,6 +88,26 @@ class PostgresSearchRepository(SearchRepositoryBase):
             self._embedding_provider = create_embedding_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
+            effective_name = vector_index_name or resolve_semantic_vector_index_name(
+                self._app_config,
+                DatabaseBackend.POSTGRES,
+            )
+            if vector_index is None:
+                if effective_name != "pgvector":
+                    raise SemanticDependenciesMissingError(
+                        f"Semantic vector index '{effective_name}' must be created by the "
+                        "search repository composition root."
+                    )
+                vector_index = PgVectorIndex(
+                    session_maker,
+                    build_vector_index_scope(
+                        self._app_config,
+                        self._embedding_provider,
+                        project_id,
+                    ),
+                )
+            self._semantic_vector_index_name = effective_name
+            self._semantic_vector_index = vector_index
 
     async def init_search_index(self):
         """Create Postgres table with tsvector column and GIN indexes.
@@ -276,22 +305,22 @@ class PostgresSearchRepository(SearchRepositoryBase):
             return cleaned_term
 
     # ------------------------------------------------------------------
-    # pgvector utility
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _format_pgvector_literal(vector: list[float]) -> str:
-        if not vector:
-            return "[]"
-        values = ",".join(f"{float(value):.12g}" for value in vector)
-        return f"[{values}]"
-
-    # ------------------------------------------------------------------
     # Abstract hook implementations (vector/semantic, Postgres-specific)
     # ------------------------------------------------------------------
 
     async def _ensure_vector_tables(self) -> None:
         self._assert_semantic_available()
+        if not hasattr(self, "_semantic_vector_index"):
+            assert self._embedding_provider is not None
+            self._semantic_vector_index_name = "pgvector"
+            self._semantic_vector_index = PgVectorIndex(
+                self.session_maker,
+                build_vector_index_scope(
+                    self._app_config,
+                    self._embedding_provider,
+                    self.project_id,
+                ),
+            )
         if self._vector_tables_initialized:
             return
 
@@ -302,13 +331,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 return
 
             async with db.scoped_session(self.session_maker) as session:
-                try:
-                    await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                except Exception as exc:
-                    raise SemanticDependenciesMissingError(
-                        "pgvector extension is unavailable for this Postgres database."
-                    ) from exc
-
                 # --- Chunks table (dimension-independent, may already exist via migration) ---
                 # Trigger: fresh Postgres projects may not have vector chunk tables yet.
                 # Why: runtime can bootstrap missing tables, but schema evolution must stay
@@ -326,6 +348,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
                             source_hash TEXT NOT NULL,
                             entity_fingerprint TEXT NOT NULL,
                             embedding_model TEXT NOT NULL,
+                            vector_index TEXT NOT NULL,
+                            embedding_status TEXT NOT NULL
+                                CHECK (embedding_status IN ('pending', 'ready')),
                             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                             UNIQUE (project_id, entity_id, chunk_key)
                         )
@@ -341,94 +366,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     )
                 )
 
-                # --- Embeddings table (dimension-dependent, created at runtime) ---
-                # Trigger: provider dimensions may differ from what was previously deployed.
-                # Why: the column type `vector(N)` is fixed at table creation; switching
-                # from FastEmbed (384) to OpenAI (1536) requires recreation.
-                # Outcome: mismatched table is dropped and recreated with correct dims.
-                # Embeddings are derived data — re-indexing will repopulate them.
-                existing_dims = await self._get_existing_embedding_dims(session)
-                if existing_dims is not None and existing_dims != self._vector_dimensions:
-                    logger.warning(
-                        f"Embedding dimension mismatch: table has {existing_dims}, "
-                        f"provider expects {self._vector_dimensions}. "
-                        "Dropping and recreating search_vector_embeddings."
-                    )
-                    await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
-
-                await session.execute(
-                    text(
-                        f"""
-                        CREATE TABLE IF NOT EXISTS search_vector_embeddings (
-                            chunk_id BIGINT PRIMARY KEY
-                                REFERENCES search_vector_chunks(id) ON DELETE CASCADE,
-                            project_id INTEGER NOT NULL,
-                            embedding vector({self._vector_dimensions}) NOT NULL,
-                            embedding_dims INTEGER NOT NULL,
-                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                        )
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_project_dims
-                        ON search_vector_embeddings (project_id, embedding_dims)
-                        """
-                    )
-                )
-                # HNSW index for approximate nearest-neighbour search.
-                # Without this every vector query is a sequential scan.
-                await session.execute(
-                    text(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_hnsw
-                        ON search_vector_embeddings
-                        USING hnsw (embedding vector_cosine_ops)
-                        WITH (m = 16, ef_construction = 64)
-                        """
-                    )
-                )
                 await session.commit()
+
+            await self._semantic_vector_index.initialize()
 
             logger.debug(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
             self._vector_tables_initialized = True
-
-    async def _get_existing_embedding_dims(self, session: AsyncSession) -> int | None:
-        """Query the vector column dimension from an existing search_vector_embeddings table.
-
-        Returns None when the table does not exist.
-        Uses information_schema to avoid regclass cast errors on missing tables,
-        then reads atttypmod from pg_attribute for the actual dimension value.
-        """
-        # Check table existence via information_schema (no exception on missing)
-        exists_result = await session.execute(
-            text(
-                """
-                SELECT 1 FROM information_schema.tables
-                WHERE table_name = 'search_vector_embeddings'
-                """
-            )
-        )
-        if exists_result.fetchone() is None:
-            return None
-
-        result = await session.execute(
-            text(
-                """
-                SELECT atttypmod
-                FROM pg_attribute
-                WHERE attrelid = 'search_vector_embeddings'::regclass
-                  AND attname = 'embedding'
-                """
-            )
-        )
-        row = result.fetchone()
-        if row is None:
-            return None
-        # pgvector stores dimensions in atttypmod directly
-        return int(row[0])
 
     async def _run_vector_query(
         self,
@@ -436,41 +379,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         query_embedding: list[float],
         candidate_limit: int,
     ) -> list[dict]:
-        if not query_embedding:
-            return []
-
-        embedding_dims = len(query_embedding)
-        query_embedding_literal = self._format_pgvector_literal(query_embedding)
-
-        vector_result = await session.execute(
-            text(
-                """
-                WITH vector_matches AS (
-                    SELECT
-                        e.chunk_id,
-                        (e.embedding <=> CAST(:query_embedding AS vector)) AS distance
-                    FROM search_vector_embeddings e
-                    WHERE e.project_id = :project_id
-                      AND e.embedding_dims = :embedding_dims
-                    ORDER BY e.embedding <=> CAST(:query_embedding AS vector)
-                    LIMIT :vector_k
-                )
-                SELECT c.entity_id, c.chunk_key, c.chunk_text, vector_matches.distance AS best_distance
-                FROM vector_matches
-                JOIN search_vector_chunks c ON c.id = vector_matches.chunk_id
-                WHERE c.project_id = :project_id
-                ORDER BY best_distance ASC
-                LIMIT :vector_k
-                """
-            ),
-            {
-                "query_embedding": query_embedding_literal,
-                "project_id": self.project_id,
-                "embedding_dims": embedding_dims,
-                "vector_k": candidate_limit,
-            },
-        )
-        return [dict(row) for row in vector_result.mappings().all()]
+        return await super()._run_vector_query(session, query_embedding, candidate_limit)
 
     def _vector_prepare_window_size(self) -> int:
         """Use a bounded config-driven prepare window for Postgres vector sync."""
@@ -493,6 +402,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         upsert_params: dict[str, object] = {
             "project_id": self.project_id,
             "entity_id": entity_id,
+            "vector_index": self._semantic_vector_index_name,
         }
         upsert_values: list[str] = []
         # The SQL template is built from integer enumerate() indices only.
@@ -507,7 +417,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 "("
                 ":entity_id, :project_id, "
                 f":chunk_key_{index}, :chunk_text_{index}, :source_hash_{index}, "
-                f":entity_fingerprint_{index}, :embedding_model_{index}, NOW()"
+                f":entity_fingerprint_{index}, :embedding_model_{index}, "
+                ":vector_index, 'pending', NOW()"
                 ")"
             )
 
@@ -521,6 +432,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     source_hash,
                     entity_fingerprint,
                     embedding_model,
+                    vector_index,
+                    embedding_status,
                     updated_at
                 ) VALUES {", ".join(upsert_values)}
                 ON CONFLICT (project_id, entity_id, chunk_key) DO UPDATE SET
@@ -528,6 +441,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     source_hash = EXCLUDED.source_hash,
                     entity_fingerprint = EXCLUDED.entity_fingerprint,
                     embedding_model = EXCLUDED.embedding_model,
+                    vector_index = EXCLUDED.vector_index,
+                    embedding_status = EXCLUDED.embedding_status,
                     updated_at = NOW()
                 RETURNING id, chunk_key
             """),
@@ -541,59 +456,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
             for record in scheduled_records
         ]
 
-    async def _write_embeddings(
-        self,
-        session: AsyncSession,
-        jobs: list[tuple[int, str]],
-        embeddings: list[list[float]],
-    ) -> None:
-        params: dict[str, object] = {"project_id": self.project_id}
-        value_rows: list[str] = []
-
-        # The SQL template is built from integer enumerate() indices only.
-        # No user-controlled text is interpolated into the statement.
-        for index, ((row_id, _), vector) in enumerate(zip(jobs, embeddings, strict=True)):
-            params[f"chunk_id_{index}"] = row_id
-            params[f"embedding_{index}"] = self._format_pgvector_literal(vector)
-            params[f"embedding_dims_{index}"] = len(vector)
-            value_rows.append(
-                "("
-                f":chunk_id_{index}, :project_id, CAST(:embedding_{index} AS vector), "
-                f":embedding_dims_{index}, NOW()"
-                ")"
-            )
-
-        await session.execute(
-            text(f"""
-                INSERT INTO search_vector_embeddings (
-                    chunk_id,
-                    project_id,
-                    embedding,
-                    embedding_dims,
-                    updated_at
-                ) VALUES {", ".join(value_rows)}
-                ON CONFLICT (chunk_id) DO UPDATE SET
-                    project_id = EXCLUDED.project_id,
-                    embedding = EXCLUDED.embedding,
-                    embedding_dims = EXCLUDED.embedding_dims,
-                    updated_at = NOW()
-            """),
-            params,
-        )
-
     async def _delete_entity_chunks(
         self,
         session: AsyncSession,
         entity_id: int,
     ) -> None:
-        # Postgres has ON DELETE CASCADE from embeddings → chunks
-        await session.execute(
-            text(
-                "DELETE FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND entity_id = :entity_id"
-            ),
-            {"project_id": self.project_id, "entity_id": entity_id},
-        )
+        await super()._delete_entity_chunks(session, entity_id)
 
     async def _delete_stale_chunks(
         self,
@@ -601,21 +469,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         stale_ids: list[int],
         entity_id: int,
     ) -> None:
-        stale_placeholders = ", ".join(f":stale_id_{idx}" for idx in range(len(stale_ids)))
-        stale_params = {
-            "project_id": self.project_id,
-            "entity_id": entity_id,
-            **{f"stale_id_{idx}": row_id for idx, row_id in enumerate(stale_ids)},
-        }
-        # CASCADE handles embedding deletion
-        await session.execute(
-            text(
-                "DELETE FROM search_vector_chunks "
-                f"WHERE id IN ({stale_placeholders}) "
-                "AND project_id = :project_id AND entity_id = :entity_id"
-            ),
-            stale_params,
-        )
+        await super()._delete_stale_chunks(session, stale_ids, entity_id)
 
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert pgvector cosine distance to cosine similarity.

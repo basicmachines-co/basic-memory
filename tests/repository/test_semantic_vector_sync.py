@@ -304,9 +304,9 @@ async def test_prepare_window_read_helpers_handle_empty_inputs() -> None:
 
     assert source_rows == {}
     assert existing_rows == {}
-    assert "LEFT JOIN search_vector_embeddings" in (
-        semantic_vector_sync.prepare_window_existing_rows_sql(":entity_id_0")
-    )
+    manifest_sql = semantic_vector_sync.prepare_window_existing_rows_sql(":entity_id_0")
+    assert "embedding_status" in manifest_sql
+    assert "search_vector_embeddings" not in manifest_sql
     session.execute.assert_not_awaited()
 
 

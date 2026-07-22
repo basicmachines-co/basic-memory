@@ -17,6 +17,7 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
+from basic_memory.repository.semantic_vector_index_factory import create_semantic_vector_index
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -96,6 +97,18 @@ class SearchRepository(Protocol):
         """Delete semantic vector chunks and embeddings for one entity."""
         ...
 
+    async def delete_project_vector_rows(self) -> None:
+        """Delete all semantic vector chunks and embeddings for this project."""
+        ...
+
+    async def delete_stale_vector_rows(self) -> None:
+        """Delete semantic vectors whose source entities no longer exist."""
+        ...
+
+    async def reconcile_vector_index(self) -> None:
+        """Remove adapter vectors that have no current ready manifest row."""
+        ...
+
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
@@ -138,8 +151,17 @@ def create_search_repository(
     # Outcome: resolve the cached singleton here once and inject it, so the provider
     # is the single source of truth across all callers of this factory.
     embedding_provider = None
+    vector_index_name = None
+    vector_index = None
     if config.semantic_search_enabled:
         embedding_provider = create_embedding_provider(config)
+        vector_index_name, vector_index = create_semantic_vector_index(
+            session_maker=session_maker,
+            project_id=project_id,
+            app_config=config,
+            database_backend=database_backend,
+            embedding_provider=embedding_provider,
+        )
 
     if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
         return PostgresSearchRepository(  # pragma: no cover
@@ -147,6 +169,8 @@ def create_search_repository(
             project_id=project_id,
             app_config=app_config,
             embedding_provider=embedding_provider,
+            vector_index_name=vector_index_name,
+            vector_index=vector_index,
         )
     else:
         return SQLiteSearchRepository(
@@ -154,6 +178,8 @@ def create_search_repository(
             project_id=project_id,
             app_config=app_config,
             embedding_provider=embedding_provider,
+            vector_index_name=vector_index_name,
+            vector_index=vector_index,
         )
 
 

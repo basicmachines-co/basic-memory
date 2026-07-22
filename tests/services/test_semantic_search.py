@@ -247,11 +247,14 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
     )
     monkeypatch.setattr(search_service, "_purge_stale_search_rows", purge_stale_rows)
     monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_batch)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(search_service.repository, "reconcile_vector_index", reconcile)
 
     stats = await search_service.reindex_vectors()
 
     purge_stale_rows.assert_awaited_once()
     sync_batch.assert_awaited_once_with([41, 42], progress_callback=None)
+    reconcile.assert_awaited_once()
     assert stats == {
         "total_entities": 2,
         "embedded": 1,
@@ -284,10 +287,13 @@ async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service,
 
     monkeypatch.setattr(repository, "delete_stale_vector_rows", delete_stale_vector_rows)
     monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_entity_vectors_batch)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(repository, "reconcile_vector_index", reconcile)
 
     stats = await search_service.reindex_vectors()
 
     assert calls == ["purge", "sync"]
+    reconcile.assert_awaited_once()
     assert stats == {
         "total_entities": 1,
         "embedded": 1,
@@ -297,8 +303,8 @@ async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service,
 
 
 @pytest.mark.asyncio
-async def test_reindex_all_uses_sqlite_vec_aware_drop(search_service, monkeypatch):
-    """Full service reindex should not drop vec0 tables through a raw connection."""
+async def test_reindex_all_uses_vector_adapter_cleanup(search_service, monkeypatch):
+    """Full service reindex should clean vectors through the repository boundary."""
     repository = _sqlite_repo(search_service)
     executed_sql: list[str] = []
     calls: list[str] = []
@@ -306,17 +312,17 @@ async def test_reindex_all_uses_sqlite_vec_aware_drop(search_service, monkeypatc
     async def execute_query(query, params=None):
         executed_sql.append(str(query))
 
-    async def drop_vector_tables():
-        calls.append("drop_vector_tables")
+    async def delete_project_vector_rows():
+        calls.append("delete_project_vector_rows")
 
     monkeypatch.setattr(repository, "execute_query", execute_query)
-    monkeypatch.setattr(repository, "drop_vector_tables", drop_vector_tables)
+    monkeypatch.setattr(repository, "delete_project_vector_rows", delete_project_vector_rows)
     monkeypatch.setattr(search_service, "init_search_index", AsyncMock())
     monkeypatch.setattr(search_service.entity_repository, "find_all", AsyncMock(return_value=[]))
 
     await search_service.reindex_all()
 
-    assert calls == ["drop_vector_tables"]
+    assert calls == ["delete_project_vector_rows"]
     assert all("search_vector_embeddings" not in sql for sql in executed_sql)
 
 
@@ -381,6 +387,8 @@ async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
     )
     monkeypatch.setattr(search_service, "_purge_stale_search_rows", purge_stale_rows)
     monkeypatch.setattr(repository, "delete_project_vector_rows", delete_project_vectors)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(repository, "reconcile_vector_index", reconcile)
     monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_batch)
 
     stats = await search_service.reindex_vectors(force_full=True)
@@ -388,6 +396,7 @@ async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
     purge_stale_rows.assert_awaited_once()
     delete_project_vectors.assert_awaited_once()
     sync_batch.assert_awaited_once_with([41, 42], progress_callback=None)
+    reconcile.assert_awaited_once()
     assert stats == {
         "total_entities": 2,
         "embedded": 2,

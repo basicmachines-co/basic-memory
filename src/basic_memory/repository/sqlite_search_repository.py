@@ -1,7 +1,6 @@
 """SQLite FTS5-based search repository implementation."""
 
 import asyncio
-import json
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -20,7 +19,6 @@ from basic_memory.models.search import (
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
-    create_sqlite_search_vector_embeddings,
 )
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
@@ -29,6 +27,9 @@ from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
+from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -48,6 +49,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         project_id: int,
         app_config: BasicMemoryConfig | None = None,
         embedding_provider: EmbeddingProvider | None = None,
+        vector_index_name: str | None = None,
+        vector_index: SemanticVectorIndex | None = None,
     ):
         super().__init__(session_maker, project_id)
         self._entity_columns: set[str] | None = None
@@ -59,6 +62,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             self._app_config.semantic_embedding_sync_batch_size
         )
         self._embedding_provider = embedding_provider
+        self._semantic_vector_index_name = vector_index_name or "sqlite-vec"
         self._sqlite_vec_load_lock = asyncio.Lock()
         self._sqlite_prepare_write_lock = asyncio.Lock()
         self._vector_tables_initialized = False
@@ -71,6 +75,14 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             self._embedding_provider = create_embedding_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
+            self._semantic_vector_index = vector_index or SQLiteVecIndex(
+                session_maker,
+                build_vector_index_scope(
+                    self._app_config,
+                    self._embedding_provider,
+                    project_id,
+                ),
+            )
 
     async def _get_entity_columns(self) -> set[str]:
         if self._entity_columns is None:
@@ -441,6 +453,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
     async def _ensure_vector_tables(self) -> None:
         self._assert_semantic_available()
+        if not hasattr(self, "_semantic_vector_index"):
+            assert self._embedding_provider is not None
+            self._semantic_vector_index = SQLiteVecIndex(
+                self.session_maker,
+                build_vector_index_scope(
+                    self._app_config,
+                    self._embedding_provider,
+                    self.project_id,
+                ),
+            )
         if self._vector_tables_initialized:
             return
 
@@ -463,6 +485,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 "source_hash",
                 "entity_fingerprint",
                 "embedding_model",
+                "vector_index",
+                "embedding_status",
                 "updated_at",
             }
             schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns
@@ -474,6 +498,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 logger.warning("search_vector_chunks schema mismatch, recreating vector tables")
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+                if isinstance(self._semantic_vector_index, SQLiteVecIndex):
+                    self._semantic_vector_index.invalidate_initialization()
 
             await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS)
             await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY)
@@ -484,24 +510,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             # Outcome: remove disposable derived data so chunk/vector schema is deterministic.
             await session.execute(text("DROP TABLE IF EXISTS search_vector_index"))
 
-            vector_sql_result = await session.execute(
-                text(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type = 'table' AND name = 'search_vector_embeddings'"
-                )
-            )
-            vector_sql = vector_sql_result.scalar()
-            expected_dimension_sql = f"float[{self._vector_dimensions}]"
-
-            if vector_sql and expected_dimension_sql not in vector_sql:
-                logger.warning(
-                    f"Embedding dimension mismatch (expected {self._vector_dimensions}), "
-                    "recreating search_vector_embeddings"
-                )
-                await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
-
-            await session.execute(create_sqlite_search_vector_embeddings(self._vector_dimensions))
             await session.commit()
+
+        await self._semantic_vector_index.initialize()
 
         logger.debug(f"SQLite vector tables ready (dimensions={self._vector_dimensions})")
         self._vector_tables_initialized = True
@@ -519,82 +530,14 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         query_embedding: list[float],
         candidate_limit: int,
     ) -> list[dict]:
-        # Constraint: sqlite-vec enforces k <= 4096 for knn queries
-        vector_k = min(candidate_limit, self.SQLITE_VEC_MAX_K)
-        query_embedding_json = json.dumps(query_embedding)
-        vector_result = await session.execute(
-            text(
-                "WITH vector_matches AS ("
-                "  SELECT rowid, distance "
-                "  FROM search_vector_embeddings "
-                "  WHERE embedding MATCH :query_embedding "
-                "    AND k = :vector_k"
-                ") "
-                "SELECT c.entity_id, c.chunk_key, c.chunk_text, vector_matches.distance AS best_distance "
-                "FROM vector_matches "
-                "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
-                "WHERE c.project_id = :project_id "
-                "ORDER BY best_distance ASC "
-                "LIMIT :candidate_limit"
-            ),
-            {
-                "query_embedding": query_embedding_json,
-                "project_id": self.project_id,
-                "vector_k": vector_k,
-                "candidate_limit": candidate_limit,
-            },
-        )
-        return [dict(row) for row in vector_result.mappings().all()]
-
-    async def _write_embeddings(
-        self,
-        session: AsyncSession,
-        jobs: list[tuple[int, str]],
-        embeddings: list[list[float]],
-    ) -> None:
-        rowids = [row_id for row_id, _ in jobs]
-        delete_params = {f"rowid_{idx}": rowid for idx, rowid in enumerate(rowids)}
-        delete_placeholders = ", ".join(f":rowid_{idx}" for idx in range(len(rowids)))
-        await session.execute(
-            text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({delete_placeholders})"),
-            delete_params,
-        )
-
-        insert_rows = [
-            {"rowid": row_id, "embedding": json.dumps(embedding)}
-            for (row_id, _), embedding in zip(jobs, embeddings, strict=True)
-        ]
-        await session.execute(
-            text(
-                "INSERT INTO search_vector_embeddings (rowid, embedding) "
-                "VALUES (:rowid, :embedding)"
-            ),
-            insert_rows,
-        )
+        return await super()._run_vector_query(session, query_embedding, candidate_limit)
 
     async def _delete_entity_chunks(
         self,
         session: AsyncSession,
         entity_id: int,
     ) -> None:
-        # sqlite-vec has no CASCADE — must delete embeddings before chunks
-        await session.execute(
-            text(
-                "DELETE FROM search_vector_embeddings "
-                "WHERE rowid IN ("
-                "SELECT id FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND entity_id = :entity_id"
-                ")"
-            ),
-            {"project_id": self.project_id, "entity_id": entity_id},
-        )
-        await session.execute(
-            text(
-                "DELETE FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND entity_id = :entity_id"
-            ),
-            {"project_id": self.project_id, "entity_id": entity_id},
-        )
+        await super()._delete_entity_chunks(session, entity_id)
 
     async def _delete_stale_chunks(
         self,
@@ -602,47 +545,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         stale_ids: list[int],
         entity_id: int,
     ) -> None:
-        stale_params = {
-            "project_id": self.project_id,
-            "entity_id": entity_id,
-            **{f"row_{idx}": row_id for idx, row_id in enumerate(stale_ids)},
-        }
-        stale_placeholders = ", ".join(f":row_{idx}" for idx in range(len(stale_ids)))
-        await session.execute(
-            text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({stale_placeholders})"),
-            stale_params,
-        )
-        await session.execute(
-            text(
-                "DELETE FROM search_vector_chunks "
-                f"WHERE id IN ({stale_placeholders}) "
-                "AND project_id = :project_id AND entity_id = :entity_id"
-            ),
-            stale_params,
-        )
-
-    async def delete_project_vector_rows(self) -> None:
-        """Delete all vector rows for this project on a sqlite-vec-enabled connection."""
-        await self._ensure_vector_tables()
-
-        async with db.scoped_session(self.session_maker) as session:
-            await self._ensure_sqlite_vec_loaded(session)
-
-            # Constraint: sqlite-vec stores embeddings separately with no cascade delete.
-            # Why: full rebuild must clear embeddings before chunk rows or stale vectors remain.
-            # Outcome: the next sync recreates the project's derived vectors from scratch.
-            await session.execute(
-                text(
-                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                    "SELECT id FROM search_vector_chunks WHERE project_id = :project_id)"
-                ),
-                {"project_id": self.project_id},
-            )
-            await session.execute(
-                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
-                {"project_id": self.project_id},
-            )
-            await session.commit()
+        await super()._delete_stale_chunks(session, stale_ids, entity_id)
 
     async def drop_vector_tables(self) -> None:
         """Drop SQLite vector tables on a sqlite-vec-enabled connection."""
@@ -662,38 +565,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             await session.execute(text("DROP TABLE IF EXISTS search_vector_index"))
             await session.commit()
         self._vector_tables_initialized = False
-
-    async def delete_stale_vector_rows(self) -> None:
-        """Delete vector rows whose source entities no longer exist."""
-        await self._ensure_vector_tables()
-
-        async with db.scoped_session(self.session_maker) as session:
-            await self._ensure_sqlite_vec_loaded(session)
-
-            stale_entity_filter = (
-                "entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)"
-            )
-            params = {"project_id": self.project_id}
-
-            # Trigger: deleted entities left behind derived vector rows.
-            # Why: sqlite-vec does not provide cascade cleanup from our chunk table.
-            # Outcome: stale vector state disappears before coverage stats or reindex runs.
-            await session.execute(
-                text(
-                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                    "SELECT id FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND {stale_entity_filter})"
-                ),
-                params,
-            )
-            await session.execute(
-                text(
-                    "DELETE FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND {stale_entity_filter}"
-                ),
-                params,
-            )
-            await session.commit()
 
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert L2 distance to cosine similarity for normalized embeddings.
@@ -715,15 +586,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             yield
 
     def _prepare_window_existing_rows_sql(self, placeholders: str) -> str:
-        """SQLite sqlite-vec stores embeddings by rowid rather than chunk_id."""
-        return (
-            "SELECT c.entity_id, c.id, c.chunk_key, c.source_hash, c.entity_fingerprint, "
-            "c.embedding_model, (e.rowid IS NOT NULL) AS has_embedding "
-            "FROM search_vector_chunks c "
-            "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
-            f"WHERE c.project_id = :project_id AND c.entity_id IN ({placeholders}) "
-            "ORDER BY c.entity_id ASC, c.chunk_key ASC"
-        )
+        """Use the authoritative SQL manifest for adapter-independent readiness."""
+        return super()._prepare_window_existing_rows_sql(placeholders)
 
     # ------------------------------------------------------------------
     # Index / bulk index overrides (FTS-only, no vector side-effects)

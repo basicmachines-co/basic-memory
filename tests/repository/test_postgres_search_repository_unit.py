@@ -12,6 +12,7 @@ import pytest
 
 import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_repository_base import _PreparedEntityVectorSync
 from basic_memory.repository.semantic_errors import (
@@ -60,21 +61,21 @@ def _make_repo(
     )
 
 
-# --- _format_pgvector_literal tests (lines 248-252) -----------------------
+# --- PgVectorIndex vector literal formatting ------------------------------
 
 
 class TestFormatPgvectorLiteral:
-    """Cover PostgresSearchRepository._format_pgvector_literal."""
+    """Cover the pgvector adapter's wire-format helper."""
 
     def test_empty_vector(self):
-        assert PostgresSearchRepository._format_pgvector_literal([]) == "[]"
+        assert PgVectorIndex._format_vector([]) == "[]"
 
     def test_single_value(self):
-        result = PostgresSearchRepository._format_pgvector_literal([1.0])
+        result = PgVectorIndex._format_vector([1.0])
         assert result == "[1]"
 
     def test_multiple_values(self):
-        result = PostgresSearchRepository._format_pgvector_literal([0.1, 0.2, 0.3])
+        result = PgVectorIndex._format_vector([0.1, 0.2, 0.3])
         assert result.startswith("[")
         assert result.endswith("]")
         parts = result.strip("[]").split(",")
@@ -82,15 +83,15 @@ class TestFormatPgvectorLiteral:
 
     def test_high_precision(self):
         """Verify that 12-significant-digit formatting is used."""
-        result = PostgresSearchRepository._format_pgvector_literal([1.23456789012345])
+        result = PgVectorIndex._format_vector([1.23456789012345])
         assert "1.23456789012" in result
 
     def test_integers_formatted_without_trailing_zeros(self):
-        result = PostgresSearchRepository._format_pgvector_literal([1.0, 2.0, 3.0])
+        result = PgVectorIndex._format_vector([1.0, 2.0, 3.0])
         assert result == "[1,2,3]"
 
     def test_negative_values(self):
-        result = PostgresSearchRepository._format_pgvector_literal([-0.5, 0.5])
+        result = PgVectorIndex._format_vector([-0.5, 0.5])
         assert "-0.5" in result
         assert "0.5" in result
 
@@ -188,7 +189,17 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             "basic_memory.repository.postgres_search_repository.db.scoped_session",
             fake_scoped_session,
         )
-        monkeypatch.setattr(repo, "_get_existing_embedding_dims", AsyncMock(return_value=None))
+        missing_table = MagicMock()
+        missing_table.fetchone.return_value = None
+        session.execute.side_effect = [
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+            missing_table,
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+        ]
 
         await repo._ensure_vector_tables()
 
@@ -199,7 +210,7 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             "CREATE TABLE IF NOT EXISTS search_vector_embeddings" in sql for sql in executed_sql
         )
         assert not any("ALTER TABLE search_vector_chunks" in sql for sql in executed_sql)
-        session.commit.assert_awaited_once()
+        assert session.commit.await_count == 2
         assert repo._vector_tables_initialized is True
 
 
@@ -259,28 +270,6 @@ class TestDeleteEntityChunks:
         params = call_args[0][1]
         assert params["project_id"] == repo.project_id
         assert params["entity_id"] == 42
-
-
-# --- _write_embeddings (lines 437-439) -------------------------------------
-
-
-class TestWriteEmbeddings:
-    """Cover _write_embeddings upsert logic."""
-
-    @pytest.mark.asyncio
-    async def test_write_embeddings_executes_single_bulk_upsert(self):
-        repo = _make_repo()
-        session = AsyncMock()
-        jobs = [(100, "chunk text A"), (200, "chunk text B")]
-        embeddings = [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]]
-        await repo._write_embeddings(session, jobs, embeddings)
-        assert session.execute.call_count == 1
-        params = session.execute.call_args[0][1]
-        assert params["chunk_id_0"] == 100
-        assert params["chunk_id_1"] == 200
-        assert params["project_id"] == repo.project_id
-        assert params["embedding_dims_0"] == 4
-        assert params["embedding_dims_1"] == 4
 
 
 class TestBatchPrepareWindow:

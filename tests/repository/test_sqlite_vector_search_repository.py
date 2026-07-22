@@ -2,9 +2,10 @@
 
 import asyncio
 import hashlib
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,8 +16,17 @@ from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
+from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.semantic_vector_index import (
+    VectorIndexScope,
+    VectorKey,
+    VectorMatch,
+    VectorRecord,
+)
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+from basic_memory.repository import sqlite_vec_index as sqlite_vec_index_module
+from basic_memory.repository.sqlite_vec_index import SQLITE_VEC_MAX_K, SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -51,6 +61,61 @@ class StubEmbeddingProviderV2(StubEmbeddingProvider):
     """Same vectors, different model identity to force resync."""
 
     model_name = "stub-v2"
+
+
+class RecordingVectorIndex:
+    """In-memory adapter with injectable write/delete failures."""
+
+    def __init__(self) -> None:
+        self.scope = VectorIndexScope(
+            namespace="test",
+            project_id=1,
+            embedding_identity="test",
+            dimensions=4,
+        )
+        self.records: dict[VectorKey, tuple[float, ...]] = {}
+        self.upsert_calls: list[list[VectorRecord]] = []
+        self.deleted_entities: list[int] = []
+        self.reconcile_calls: list[list[VectorKey]] = []
+        self.fail_upsert = False
+        self.fail_delete_entity = False
+        self.fail_search = False
+
+    async def initialize(self) -> None:
+        return None
+
+    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+        self.upsert_calls.append(list(records))
+        if self.fail_upsert:
+            raise RuntimeError("adapter write failed")
+        self.records.update({record.key: record.values for record in records})
+
+    async def delete(self, keys: Sequence[VectorKey]) -> None:
+        for key in keys:
+            self.records.pop(key, None)
+
+    async def delete_entity(self, entity_id: int) -> None:
+        self.deleted_entities.append(entity_id)
+        if self.fail_delete_entity:
+            raise RuntimeError("adapter delete failed")
+        self.records = {
+            key: values for key, values in self.records.items() if key.entity_id != entity_id
+        }
+
+    async def delete_orphans(self, live_keys: Sequence[VectorKey]) -> None:
+        self.reconcile_calls.append(list(live_keys))
+        live_key_set = set(live_keys)
+        self.records = {key: values for key, values in self.records.items() if key in live_key_set}
+
+    async def search(
+        self,
+        query: Sequence[float],
+        *,
+        limit: int,
+    ) -> list[VectorMatch]:
+        if self.fail_search:
+            raise RuntimeError("adapter query failed")
+        return [VectorMatch(key=key, similarity=1.0) for key in list(self.records)[:limit]]
 
 
 def _entity_row(
@@ -172,6 +237,8 @@ async def test_sqlite_vec_tables_are_created_and_rebuilt(search_repository):
             "source_hash",
             "entity_fingerprint",
             "embedding_model",
+            "vector_index",
+            "embedding_status",
             "updated_at",
         }
 
@@ -182,6 +249,76 @@ async def test_sqlite_vec_tables_are_created_and_rebuilt(search_repository):
             )
         )
         assert table_result.scalar_one() == "search_vector_embeddings"
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
+    """Reconciliation removes non-ready local rows without touching another project."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec reconciliation behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    embedding_identity = search_repository._embedding_model_key()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                ":id, :entity_id, :project_id, :chunk_key, 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', :embedding_status)"
+            ),
+            [
+                {
+                    "id": 901,
+                    "entity_id": 901,
+                    "project_id": search_repository.project_id,
+                    "chunk_key": "entity:901:0",
+                    "embedding_model": embedding_identity,
+                    "embedding_status": "pending",
+                },
+                {
+                    "id": 902,
+                    "entity_id": 902,
+                    "project_id": search_repository.project_id,
+                    "chunk_key": "entity:902:0",
+                    "embedding_model": embedding_identity,
+                    "embedding_status": "ready",
+                },
+                {
+                    "id": 903,
+                    "entity_id": 903,
+                    "project_id": search_repository.project_id + 1,
+                    "chunk_key": "entity:903:0",
+                    "embedding_model": embedding_identity,
+                    "embedding_status": "pending",
+                },
+            ],
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, embedding) "
+                "VALUES (:rowid, :embedding)"
+            ),
+            [{"rowid": rowid, "embedding": "[1,0,0,0]"} for rowid in (901, 902, 903)],
+        )
+        await session.commit()
+
+    await index.delete_orphans([])
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        remaining = await session.execute(
+            text(
+                "SELECT rowid FROM search_vector_embeddings "
+                "WHERE rowid IN (901, 902, 903) ORDER BY rowid"
+            )
+        )
+        assert remaining.scalars().all() == [902, 903]
 
 
 @pytest.mark.asyncio
@@ -250,6 +387,312 @@ async def test_sqlite_chunk_upsert_and_delete_lifecycle(search_repository):
             {"project_id": search_repository.project_id, "entity_id": 101},
         )
         assert int(embedding_count.scalar_one()) == 0
+
+
+@pytest.mark.asyncio
+async def test_adapter_write_failure_stays_pending_and_retries_idempotently(search_repository):
+    """A partial external write must never make an uncommitted vector searchable."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("Semantic manifest behavior is exercised through local SQLite.")
+
+    _enable_semantic(search_repository)
+    adapter = RecordingVectorIndex()
+    adapter.fail_upsert = True
+    search_repository._semantic_vector_index = adapter
+    search_repository._semantic_vector_index_name = "recording"
+    await search_repository.init_search_index()
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=111,
+            entity_id=111,
+            title="Retryable Adapter Write",
+            permalink="specs/retryable-adapter-write",
+            content_stems="auth token retry",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="adapter write failed"):
+        await search_repository.sync_entity_vectors(111)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        failed_state = await session.execute(
+            text(
+                "SELECT DISTINCT embedding_status FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 111},
+        )
+        assert failed_state.scalars().all() == ["pending"]
+
+    adapter.fail_upsert = False
+    await search_repository.sync_entity_vectors(111)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        recovered_state = await session.execute(
+            text(
+                "SELECT DISTINCT vector_index, embedding_status FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 111},
+        )
+        assert recovered_state.all() == [("recording", "ready")]
+
+    assert len(adapter.upsert_calls) == 2
+    assert [record.key for record in adapter.upsert_calls[0]] == [
+        record.key for record in adapter.upsert_calls[1]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ready_commit_failure_retries_same_stable_adapter_key(
+    search_repository,
+    monkeypatch,
+):
+    """An adapter success followed by SQL failure must remain a safe idempotent retry."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("Semantic manifest behavior is exercised through local SQLite.")
+
+    _enable_semantic(search_repository)
+    adapter = RecordingVectorIndex()
+    search_repository._semantic_vector_index = adapter
+    search_repository._semantic_vector_index_name = "recording"
+    await search_repository.init_search_index()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        inserted = await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                ":entity_id, :project_id, :chunk_key, :chunk_text, :source_hash, "
+                ":entity_fingerprint, :embedding_model, :vector_index, 'pending'"
+                ") RETURNING id"
+            ),
+            {
+                "entity_id": 115,
+                "project_id": search_repository.project_id,
+                "chunk_key": "entity:115:0",
+                "chunk_text": "ready commit retry",
+                "source_hash": "hash",
+                "entity_fingerprint": "fingerprint",
+                "embedding_model": search_repository._embedding_model_key(),
+                "vector_index": "recording",
+            },
+        )
+        row_id = int(inserted.scalar_one())
+        await session.commit()
+
+    original_scoped_session = search_repository_base_module.db.scoped_session
+    context_count = 0
+
+    @asynccontextmanager
+    async def fail_ready_commit(session_maker):
+        nonlocal context_count
+        context_count += 1
+        async with original_scoped_session(session_maker) as session:
+            if context_count == 2:
+
+                async def fail_commit() -> None:
+                    raise RuntimeError("ready commit failed")
+
+                monkeypatch.setattr(session, "commit", fail_commit)
+            yield session
+
+    monkeypatch.setattr(
+        search_repository_base_module.db,
+        "scoped_session",
+        fail_ready_commit,
+    )
+    with pytest.raises(RuntimeError, match="ready commit failed"):
+        await search_repository._persist_embeddings(
+            [(row_id, "ready commit retry")],
+            [[1.0, 0.0, 0.0, 0.0]],
+        )
+    monkeypatch.setattr(
+        search_repository_base_module.db,
+        "scoped_session",
+        original_scoped_session,
+    )
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        failed_status = await session.execute(
+            text("SELECT embedding_status FROM search_vector_chunks WHERE id = :row_id"),
+            {"row_id": row_id},
+        )
+        assert failed_status.scalar_one() == "pending"
+
+    await search_repository._persist_embeddings(
+        [(row_id, "ready commit retry")],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        recovered_status = await session.execute(
+            text("SELECT embedding_status FROM search_vector_chunks WHERE id = :row_id"),
+            {"row_id": row_id},
+        )
+        assert recovered_status.scalar_one() == "ready"
+
+    assert len(adapter.upsert_calls) == 2
+    assert adapter.upsert_calls[0][0].key == adapter.upsert_calls[1][0].key
+
+
+@pytest.mark.asyncio
+async def test_adapter_delete_failure_stays_pending_until_retry(search_repository):
+    """External delete failure preserves non-searchable manifest intent for retry."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("Semantic manifest behavior is exercised through local SQLite.")
+
+    _enable_semantic(search_repository)
+    adapter = RecordingVectorIndex()
+    search_repository._semantic_vector_index = adapter
+    search_repository._semantic_vector_index_name = "recording"
+    await search_repository.init_search_index()
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=112,
+            entity_id=112,
+            title="Retryable Adapter Delete",
+            permalink="specs/retryable-adapter-delete",
+            content_stems="schema migration retry",
+        )
+    )
+    await search_repository.sync_entity_vectors(112)
+
+    adapter.fail_delete_entity = True
+    with pytest.raises(RuntimeError, match="adapter delete failed"):
+        await search_repository.delete_entity_vector_rows(112)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        failed_state = await session.execute(
+            text(
+                "SELECT DISTINCT embedding_status FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 112},
+        )
+        assert failed_state.scalars().all() == ["pending"]
+
+    adapter.fail_delete_entity = False
+    await search_repository.delete_entity_vector_rows(112)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        row_count = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 112},
+        )
+        assert row_count.scalar_one() == 0
+
+    assert adapter.deleted_entities == [112, 112]
+
+
+@pytest.mark.asyncio
+async def test_adapter_matches_hydrate_only_current_ready_manifest_rows(search_repository):
+    """Stale external matches fail closed unless SQL says the current row is ready."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("Semantic manifest behavior is exercised through local SQLite.")
+
+    _enable_semantic(search_repository)
+    adapter = RecordingVectorIndex()
+    search_repository._semantic_vector_index = adapter
+    search_repository._semantic_vector_index_name = "recording"
+    await search_repository.init_search_index()
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=113,
+            entity_id=113,
+            title="Manifest Authority",
+            permalink="specs/manifest-authority",
+            content_stems="queue worker task",
+        )
+    )
+    await search_repository.sync_entity_vectors(113)
+    adapter.records[VectorKey(entity_id=999, chunk_key="foreign:999:0")] = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+
+    ready_results = await search_repository.search(
+        search_text="queue worker",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+    )
+    assert {result.entity_id for result in ready_results} == {113}
+
+    await search_repository.reconcile_vector_index()
+    assert set(adapter.records) == set(adapter.reconcile_calls[0])
+    assert {key.entity_id for key in adapter.records} == {113}
+
+    adapter.fail_search = True
+    with pytest.raises(RuntimeError, match="adapter query failed"):
+        await search_repository.search(
+            search_text="queue worker",
+            retrieval_mode=SearchRetrievalMode.VECTOR,
+        )
+    adapter.fail_search = False
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await session.execute(
+            text(
+                "UPDATE search_vector_chunks SET embedding_status = 'pending' "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 113},
+        )
+        await session.commit()
+
+    pending_results = await search_repository.search(
+        search_text="queue worker",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+    )
+    assert pending_results == []
+
+
+@pytest.mark.asyncio
+async def test_vector_index_switch_reembeds_manifest_rows(search_repository):
+    """Changing the selected adapter identity invalidates otherwise unchanged chunks."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("Semantic manifest behavior is exercised through local SQLite.")
+
+    _enable_semantic(search_repository)
+    adapter = RecordingVectorIndex()
+    search_repository._semantic_vector_index = adapter
+    search_repository._semantic_vector_index_name = "recording-a"
+    await search_repository.init_search_index()
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=114,
+            entity_id=114,
+            title="Index Switch",
+            permalink="specs/index-switch",
+            content_stems="database semantic index switch",
+        )
+    )
+    await search_repository.sync_entity_vectors(114)
+
+    search_repository._semantic_vector_index_name = "recording-b"
+    await search_repository.sync_entity_vectors(114)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        state = await session.execute(
+            text(
+                "SELECT DISTINCT vector_index, embedding_status FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 114},
+        )
+        assert state.all() == [("recording-b", "ready")]
+
+    assert len(adapter.upsert_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -693,8 +1136,8 @@ async def test_sqlite_hybrid_search_combines_fts_and_vector(search_repository):
 
 
 @pytest.mark.asyncio
-async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository):
-    """_run_vector_query must cap the knn k param at SQLITE_VEC_MAX_K (4096).
+async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository, monkeypatch):
+    """The sqlite-vec adapter caps k while preserving the requested outer limit.
 
     sqlite-vec raises OperationalError when k > 4096. The candidate_limit
     passed from the base class can exceed this for large projects, so
@@ -706,34 +1149,39 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository):
     _enable_semantic(search_repository)
     await search_repository.init_search_index()
 
-    # Track the parameters passed to session.execute
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
     captured_params: list[dict] = []
+    session = AsyncMock()
 
     async def capturing_execute(stmt, params=None):
         if params and "vector_k" in params:
             captured_params.append(dict(params))
-        # Return empty result set
         mock_result = MagicMock()
         mock_result.mappings.return_value.all.return_value = []
         return mock_result
 
-    async with db.scoped_session(search_repository.session_maker) as session:
-        await search_repository._prepare_vector_session(session)
-        cast(Any, session).execute = capturing_execute
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
 
-        query_embedding = [0.1] * search_repository._vector_dimensions
+    session.execute = capturing_execute
+    monkeypatch.setattr(sqlite_vec_index_module.db, "scoped_session", fake_scoped_session)
+    monkeypatch.setattr(index, "_ensure_loaded", AsyncMock())
+    query_embedding = [0.1] * search_repository._vector_dimensions
 
-        # candidate_limit exceeds sqlite-vec limit
-        await search_repository._run_vector_query(session, query_embedding, 10000)
+    await index.search(query_embedding, limit=10000)
 
-        assert len(captured_params) == 1
-        assert captured_params[0]["vector_k"] == SQLiteSearchRepository.SQLITE_VEC_MAX_K
-        assert captured_params[0]["candidate_limit"] == 10000
+    assert captured_params == [
+        {
+            "query": "[0.1, 0.1, 0.1, 0.1]",
+            "vector_k": SQLITE_VEC_MAX_K,
+            "project_id": search_repository.project_id,
+            "embedding_identity": search_repository._embedding_model_key(),
+            "limit": 10000,
+        }
+    ]
 
-        # candidate_limit within limit should pass through unchanged
-        captured_params.clear()
-        await search_repository._run_vector_query(session, query_embedding, 500)
-
-        assert len(captured_params) == 1
-        assert captured_params[0]["vector_k"] == 500
-        assert captured_params[0]["candidate_limit"] == 500
+    captured_params.clear()
+    await index.search(query_embedding, limit=500)
+    assert captured_params[0]["vector_k"] == 500
+    assert captured_params[0]["limit"] == 500
