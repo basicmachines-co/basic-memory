@@ -547,6 +547,29 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     ) -> None:
         await super()._delete_stale_chunks(session, stale_ids, entity_id)
 
+    async def _delete_project_builtin_vector_rows(self, session: AsyncSession) -> None:
+        """Delete sqlite-vec rows atomically with their project manifest."""
+        table_result = await session.execute(
+            text(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('search_vector_chunks', 'search_vector_embeddings')"
+            )
+        )
+        table_sql = {str(name): str(sql or "") for name, sql in table_result.all()}
+        if not {"search_vector_chunks", "search_vector_embeddings"}.issubset(table_sql):
+            return
+
+        vector_sql = table_sql["search_vector_embeddings"]
+        if "using vec0" in vector_sql.lower():
+            await self._ensure_sqlite_vec_loaded(session)
+        await session.execute(
+            text(
+                "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                "SELECT id FROM search_vector_chunks WHERE project_id = :project_id)"
+            ),
+            {"project_id": self.project_id},
+        )
+
     async def drop_vector_tables(self) -> None:
         """Drop SQLite vector tables on a sqlite-vec-enabled connection."""
         async with db.scoped_session(self.session_maker) as session:

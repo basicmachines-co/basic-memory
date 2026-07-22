@@ -661,9 +661,42 @@ class SearchRepositoryBase(ABC):
                 "Enable semantic search and retry the entity deletion."
             )
 
+        deleted_entity_ids = tuple(dict.fromkeys(entity_ids))
+        if not deleted_entity_ids:
+            return
+
+        # Trigger: DB-first deletion runs inside a caller-owned SQL transaction.
+        # Why: the external adapter cannot participate in that transaction. If its
+        # delete succeeds and the caller later rolls back, ready manifests would
+        # incorrectly claim the now-missing vectors are searchable.
+        # Outcome: commit a non-searchable retry marker in an independent session
+        # before touching external storage; a retried delete remains idempotent.
+        params = {
+            "project_id": self.project_id,
+            "vector_index": configured_index,
+            **{
+                f"entity_id_{index}": entity_id
+                for index, entity_id in enumerate(deleted_entity_ids)
+            },
+        }
+        placeholders = ", ".join(f":entity_id_{index}" for index in range(len(deleted_entity_ids)))
+        async with db.scoped_session(self.session_maker) as session:
+            await session.execute(
+                text(
+                    "UPDATE search_vector_chunks SET embedding_status = 'pending' "
+                    "WHERE project_id = :project_id AND vector_index = :vector_index "
+                    f"AND entity_id IN ({placeholders})"
+                ),
+                params,
+            )
+            await session.commit()
+
         await self._semantic_vector_index.initialize()
-        for entity_id in entity_ids:
+        for entity_id in deleted_entity_ids:
             await self._semantic_vector_index.delete_entity(entity_id)
+
+    async def _delete_project_builtin_vector_rows(self, session: AsyncSession) -> None:
+        """Delete backend-owned vector rows before their SQL manifest is removed."""
 
     def _assert_manifest_vector_ownership(self, vector_index_names: Iterable[object]) -> None:
         """Reject cleanup that cannot reach every externally owned vector."""
@@ -781,6 +814,7 @@ class SearchRepositoryBase(ABC):
                     raise
 
         async with db.scoped_session(self.session_maker) as session:
+            await self._delete_project_builtin_vector_rows(session)
             await session.execute(
                 text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
                 {"project_id": self.project_id},

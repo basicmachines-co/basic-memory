@@ -291,6 +291,57 @@ async def test_sqlite_vec_recreated_storage_invalidates_ready_manifest(search_re
 
 
 @pytest.mark.asyncio
+async def test_disabled_semantic_cleanup_deletes_sqlite_vec_rows(search_repository):
+    """Project cleanup must not strand sqlite-vec rows when semantic search is disabled."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec storage cleanup is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    embedding_identity = search_repository._embedding_model_key()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+        await index._ensure_loaded(session)
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                "906, 906, :project_id, 'entity:906:0', 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
+            ),
+            {
+                "project_id": search_repository.project_id,
+                "embedding_model": embedding_identity,
+            },
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, embedding) VALUES (906, :embedding)"
+            ),
+            {"embedding": "[1.0, 0.0, 0.0, 0.0]"},
+        )
+        await session.commit()
+
+    search_repository._semantic_enabled = False
+    del search_repository._semantic_vector_index
+    await search_repository.delete_project_vector_rows()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        manifest_count = await session.scalar(
+            text("SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :project_id"),
+            {"project_id": search_repository.project_id},
+        )
+        vector_count = await session.scalar(
+            text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = 906")
+        )
+    assert manifest_count == 0
+    assert vector_count == 0
+
+
+@pytest.mark.asyncio
 async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
     """Reconciliation removes orphan/local stale rows without touching another project."""
     if not isinstance(search_repository, SQLiteSearchRepository):

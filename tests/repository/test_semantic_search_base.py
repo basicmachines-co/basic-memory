@@ -407,15 +407,25 @@ async def test_strict_project_vector_cleanup_allows_disabled_builtin_owner(monke
 
 
 @pytest.mark.asyncio
-async def test_external_entity_cleanup_uses_matching_project_adapter() -> None:
-    """DB-first deletes should invoke the configured extension before manifest removal."""
+async def test_external_entity_cleanup_uses_matching_project_adapter(monkeypatch) -> None:
+    """DB-first deletes should durably stage manifests before invoking the extension."""
     repo = _ConcreteRepo()
+    events: list[str] = []
     adapter: Any = SimpleNamespace(
-        initialize=AsyncMock(),
-        delete_entity=AsyncMock(),
+        initialize=AsyncMock(side_effect=lambda: events.append("initialize")),
+        delete_entity=AsyncMock(side_effect=lambda _entity_id: events.append("delete")),
     )
     repo._semantic_vector_index = adapter
     repo._semantic_vector_index_name = "milvus"
+    session = AsyncMock()
+    session.execute.side_effect = lambda *_args, **_kwargs: events.append("stage")
+    session.commit.side_effect = lambda: events.append("commit")
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
     await repo.delete_external_entity_vectors(
         [41, 42],
@@ -424,6 +434,11 @@ async def test_external_entity_cleanup_uses_matching_project_adapter() -> None:
 
     adapter.initialize.assert_awaited_once()
     assert adapter.delete_entity.await_args_list == [((41,), {}), ((42,), {})]
+    assert events == ["stage", "commit", "initialize", "delete", "delete"]
+    stage_statement = str(session.execute.await_args.args[0])
+    assert stage_statement.startswith(
+        "UPDATE search_vector_chunks SET embedding_status = 'pending'"
+    )
 
 
 @pytest.mark.asyncio
