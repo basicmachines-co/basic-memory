@@ -10,8 +10,11 @@ from typing import Literal, NotRequired, Protocol, TypedDict
 from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from basic_memory.indexing.project_index_maintenance import delete_project_index_vector_rows
 from basic_memory.models import Entity, NoteContent, Project, Relation
+from basic_memory.repository.accepted_note_vector_cleanup import (
+    ProjectIndexExternalVectorCleaner,
+    delete_project_index_vector_rows,
+)
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeDirectoryFileSnapshot,
@@ -144,6 +147,8 @@ class DirectoryDeleteRuntime:
 class RepositoryDirectoryDeleteAcceptanceStore:
     """Repository-backed directory-delete acceptance store."""
 
+    external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None
+
     async def load_project_id(
         self,
         session: AsyncSession,
@@ -235,11 +240,19 @@ class RepositoryDirectoryDeleteAcceptanceStore:
             ).bindparams(bindparam("entity_ids", expanding=True)),
             {"project_id": project_id, "entity_ids": deleted_entity_ids},
         )
-        await delete_project_index_vector_rows(
-            session,
-            project_id=project_id,
-            entity_ids=deleted_entity_ids,
-        )
+        if self.external_vector_cleaner is None:
+            await delete_project_index_vector_rows(
+                session,
+                project_id=project_id,
+                entity_ids=deleted_entity_ids,
+            )
+        else:
+            await delete_project_index_vector_rows(
+                session,
+                project_id=project_id,
+                entity_ids=deleted_entity_ids,
+                external_vector_cleaner=self.external_vector_cleaner,
+            )
         await session.execute(delete(Entity).where(Entity.id.in_(deleted_entity_ids)))
         return relation_cleanup_entity_ids
 

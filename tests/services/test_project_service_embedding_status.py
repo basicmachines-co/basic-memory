@@ -131,6 +131,48 @@ async def test_embedding_status_vector_tables_missing(
 
 
 @pytest.mark.asyncio
+async def test_embedding_status_treats_legacy_sqlite_manifest_as_unavailable(
+    project_service: ProjectService,
+    test_graph,
+    test_project,
+):
+    """Legacy SQLite manifests should recommend rebuild instead of querying new columns."""
+    if _is_postgres():
+        pytest.skip("The legacy in-place manifest schema only applies to SQLite.")
+
+    await _execute(project_service, text("DROP TABLE search_vector_chunks"), {})
+    await _execute(
+        project_service,
+        text(
+            "CREATE TABLE search_vector_chunks ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "entity_id INTEGER NOT NULL, "
+            "project_id INTEGER NOT NULL, "
+            "chunk_key TEXT NOT NULL, "
+            "chunk_text TEXT NOT NULL, "
+            "source_hash TEXT NOT NULL, "
+            "entity_fingerprint TEXT NOT NULL, "
+            "embedding_model TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ),
+        {},
+    )
+
+    with patch.object(
+        type(project_service),
+        "config_manager",
+        new_callable=lambda: property(
+            lambda self: _config_manager_with(semantic_search_enabled=True)
+        ),
+    ):
+        status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.vector_tables_exist is False
+    assert status.reindex_recommended is True
+    assert "schema is outdated" in (status.reindex_reason or "")
+
+
+@pytest.mark.asyncio
 async def test_embedding_status_entities_without_chunks(
     project_service: ProjectService, test_graph, test_project
 ):

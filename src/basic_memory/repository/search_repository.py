@@ -6,6 +6,7 @@ The actual repository implementations are backend-specific:
 - PostgresSearchRepository: Uses tsvector/tsquery with GIN indexes
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Callable, List, Optional, Protocol
 
@@ -17,7 +18,10 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import VectorSyncBatchResult
-from basic_memory.repository.semantic_vector_index_factory import create_semantic_vector_index
+from basic_memory.repository.semantic_vector_index_factory import (
+    create_semantic_vector_index,
+    resolve_semantic_vector_index_name,
+)
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -97,6 +101,15 @@ class SearchRepository(Protocol):
         """Delete semantic vector chunks and embeddings for one entity."""
         ...
 
+    async def delete_external_entity_vectors(
+        self,
+        entity_ids: Sequence[int],
+        *,
+        vector_index_names: frozenset[str],
+    ) -> None:
+        """Delete DB-first entity vectors through an extension adapter."""
+        ...
+
     async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
         """Delete all semantic vector chunks and embeddings for this project."""
         ...
@@ -151,7 +164,7 @@ def create_search_repository(
     # Outcome: resolve the cached singleton here once and inject it, so the provider
     # is the single source of truth across all callers of this factory.
     embedding_provider = None
-    vector_index_name = None
+    vector_index_name = resolve_semantic_vector_index_name(config, database_backend)
     vector_index = None
     if config.semantic_search_enabled:
         embedding_provider = create_embedding_provider(config)

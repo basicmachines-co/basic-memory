@@ -340,6 +340,39 @@ async def test_strict_project_vector_cleanup_preserves_manifest_without_adapter(
 
 
 @pytest.mark.asyncio
+async def test_external_entity_cleanup_uses_matching_project_adapter() -> None:
+    """DB-first deletes should invoke the configured extension before manifest removal."""
+    repo = _ConcreteRepo()
+    adapter: Any = SimpleNamespace(
+        initialize=AsyncMock(),
+        delete_entity=AsyncMock(),
+    )
+    repo._semantic_vector_index = adapter
+    repo._semantic_vector_index_name = "milvus"
+
+    await repo.delete_external_entity_vectors(
+        [41, 42],
+        vector_index_names=frozenset({"milvus"}),
+    )
+
+    adapter.initialize.assert_awaited_once()
+    assert adapter.delete_entity.await_args_list == [((41,), {}), ((42,), {})]
+
+
+@pytest.mark.asyncio
+async def test_external_entity_cleanup_rejects_mismatched_adapter() -> None:
+    """A configured adapter must not delete rows owned by another extension."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+
+    with pytest.raises(SemanticVectorIndexExtensionError, match="owned by"):
+        await repo.delete_external_entity_vectors(
+            [41],
+            vector_index_names=frozenset({"pinecone"}),
+        )
+
+
+@pytest.mark.asyncio
 async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeypatch):
     """Batch sync should flush queued jobs at semantic_embedding_sync_batch_size boundaries."""
     repo = _ConcreteRepo()

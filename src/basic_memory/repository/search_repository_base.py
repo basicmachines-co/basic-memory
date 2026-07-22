@@ -2,7 +2,7 @@
 
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -609,6 +609,32 @@ class SearchRepositoryBase(ABC):
                 delete_entity_vectors=True,
             )
         )
+
+    async def delete_external_entity_vectors(
+        self,
+        entity_ids: Sequence[int],
+        *,
+        vector_index_names: frozenset[str],
+    ) -> None:
+        """Delete DB-first entity vectors through the configured extension adapter."""
+        if not vector_index_names:
+            return
+        configured_index = self._semantic_vector_index_name
+        if vector_index_names != frozenset({configured_index}):
+            raise SemanticVectorIndexExtensionError(
+                "Cannot delete external vectors owned by "
+                f"{sorted(vector_index_names)!r} with configured adapter "
+                f"{configured_index!r}."
+            )
+        if not hasattr(self, "_semantic_vector_index"):
+            raise SemanticVectorIndexExtensionError(
+                f"Semantic vector adapter {configured_index!r} is unavailable. "
+                "Enable semantic search and retry the entity deletion."
+            )
+
+        await self._semantic_vector_index.initialize()
+        for entity_id in entity_ids:
+            await self._semantic_vector_index.delete_entity(entity_id)
 
     async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
         """Delete this project's vectors through the configured storage adapter.

@@ -1083,7 +1083,21 @@ class ProjectService:
             table_result = await self.repository.execute_query(session, table_check_sql, {})
             vector_tables_exist = (table_result.scalar() or 0) == 1
 
-            if not vector_tables_exist:
+            manifest_schema_current = vector_tables_exist
+            if vector_tables_exist and not is_postgres:
+                columns_result = await self.repository.execute_query(
+                    session,
+                    text("PRAGMA table_info(search_vector_chunks)"),
+                    {},
+                )
+                manifest_columns = {str(row[1]) for row in columns_result.fetchall()}
+                manifest_schema_current = {
+                    "embedding_model",
+                    "vector_index",
+                    "embedding_status",
+                }.issubset(manifest_columns)
+
+            if not manifest_schema_current:
                 # Count distinct entities in search index for the recommendation message
                 si_result = await self.repository.execute_query(
                     session,
@@ -1106,7 +1120,9 @@ class ProjectService:
                     vector_tables_exist=False,
                     reindex_recommended=True,
                     reindex_reason=(
-                        "Vector manifest not initialized — run: bm reindex --embeddings"
+                        "Vector manifest schema is outdated — run: bm reindex --embeddings"
+                        if vector_tables_exist
+                        else "Vector manifest not initialized — run: bm reindex --embeddings"
                     ),
                 )
 

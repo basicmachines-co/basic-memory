@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.repository.accepted_note_vector_cleanup import (
+    ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
 from basic_memory.runtime.storage import ProjectId
@@ -337,6 +338,7 @@ async def delete_project_index_entities(
     *,
     project_id: ProjectId,
     entity_ids: Sequence[int],
+    external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None,
 ) -> frozenset[int]:
     """Delete indexed entities and return surviving relation sources needing repair."""
     deleted_entity_ids = tuple(entity_ids)
@@ -362,11 +364,19 @@ async def delete_project_index_entities(
         "relation_row_type": "relation",
     }
     await session.execute(DELETE_PROJECT_INDEX_SEARCH_ROWS_SQL, delete_params)
-    await delete_project_index_vector_rows(
-        session,
-        project_id=project_id,
-        entity_ids=deleted_entity_ids,
-    )
+    if external_vector_cleaner is None:
+        await delete_project_index_vector_rows(
+            session,
+            project_id=project_id,
+            entity_ids=deleted_entity_ids,
+        )
+    else:
+        await delete_project_index_vector_rows(
+            session,
+            project_id=project_id,
+            entity_ids=deleted_entity_ids,
+            external_vector_cleaner=external_vector_cleaner,
+        )
     await session.execute(
         delete(Entity).where(
             Entity.project_id == project_id,
@@ -542,6 +552,7 @@ class RepositoryProjectIndexMaintenanceStore:
 
     session_maker: async_sessionmaker[AsyncSession]
     project_id: ProjectId
+    external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None
     move_content_updater: ProjectIndexMoveContentUpdater | None = None
     delete_path_verifier: ProjectIndexDeletePathVerifier = TrustPlannedProjectIndexDeleteVerifier()
     # Trigger: an entity occupies a move destination at apply time.
@@ -616,6 +627,7 @@ class RepositoryProjectIndexMaintenanceStore:
                     session,
                     project_id=self.project_id,
                     entity_ids=tuple(replaced_entity_ids),
+                    external_vector_cleaner=self.external_vector_cleaner,
                 )
                 await self._execute_move_batch_updates(
                     session,
@@ -854,6 +866,7 @@ class RepositoryProjectIndexMaintenanceStore:
                 session,
                 project_id=self.project_id,
                 entity_ids=deleted_entity_ids,
+                external_vector_cleaner=self.external_vector_cleaner,
             )
 
         return ProjectIndexDeleteBatchResult(
