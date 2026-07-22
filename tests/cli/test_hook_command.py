@@ -884,6 +884,18 @@ def test_codex_pre_compact_only_captures_lifecycle_event(bm_home: Path, tmp_path
     assert not (bm_home / "checkpoint-requests").exists()
 
 
+def test_deprecated_codex_stop_is_json_noop(bm_home: Path) -> None:
+    """Older installed Stop entries must remain fail-open until reinstall."""
+    result = runner.invoke(
+        cli_app,
+        ["hook", "stop", "--harness", "codex"],
+        input=json.dumps({"session_id": "stale", "stop_hook_active": False}),
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"continue": True}
+
+
 def test_codex_transcript_parser_reads_response_items_only(tmp_path: Path) -> None:
     transcript = _codex_transcript(tmp_path)
 

@@ -7,8 +7,10 @@ checkpoint prompting, lifecycle-event capture into the inbox WAL, and the
 flush/status operator surface.
 
 Contracts:
-  - Harness verbs (session-start, pre-compact) are fail-open: any error logs
+  - Active harness verbs (session-start, pre-compact) are fail-open: any error logs
     to stderr and exits 0 — a hook must never disrupt an agent session.
+  - The retired stop verb remains a JSON no-op for upgraded installs whose
+    existing Codex configuration has not been reinstalled yet.
   - Codex event capture defaults on. An explicit JSON boolean ``false`` turns
     it off, while malformed values and malformed config fail closed.
   - Graph-derived brief content is fenced and labeled as reference data, not
@@ -1138,6 +1140,13 @@ def pre_compact(
 ) -> None:
     """Capture compaction trace and coordinate a durable checkpoint."""
     _run_fail_open("pre-compact", lambda: _pre_compact(harness, project_dir))
+
+
+@hook_app.command("stop")
+def stop(harness: Harness = HARNESS_OPTION) -> None:
+    """Allow stale pre-upgrade Stop hooks to finish without blocking Codex."""
+    del harness
+    print('{"continue":true}')
 
 
 @hook_app.command("flush")
