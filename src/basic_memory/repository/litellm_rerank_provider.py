@@ -56,24 +56,32 @@ class LiteLLMRerankProvider(RerankProvider):
             params["api_base"] = self._api_base
 
         response = await litellm.arerank(**params)
-        results = response.results if hasattr(response, "results") else response["results"]
+        # litellm.arerank returns RerankResponse (Cohere response format): `results`
+        # is an optional list of TypedDict items with required `index` and
+        # `relevance_score` keys. A missing/empty list is a contract break, not a
+        # transient blip.
+        results = response.results
+        if not results:
+            raise RerankProviderContractError(
+                f"Rerank response contained no results for {len(documents)} documents."
+            )
 
         # Rerank responses are indexed and may arrive out of order, so rebuild an
         # input-aligned score vector. We request top_n == len(documents), so a
-        # complete response must cover every index; a gap means a truncated/partial
-        # response we must not silently paper over with a 0.0 floor (fail fast).
+        # complete response must cover every index exactly once; out-of-range
+        # indices or gaps are truncated/malformed responses we must not silently
+        # paper over with a 0.0 floor (fail fast).
         scores = [0.0] * len(documents)
         seen: set[int] = set()
         for item in results:
-            if isinstance(item, dict):
-                index = int(item["index"])
-                score = float(item["relevance_score"])
-            else:
-                index = int(item.index)
-                score = float(item.relevance_score)
-            scores[index] = score
+            index = int(item["index"])
+            if not 0 <= index < len(documents):
+                raise RerankProviderContractError(
+                    f"Rerank response index {index} is out of range for {len(documents)} documents."
+                )
+            scores[index] = float(item["relevance_score"])
             seen.add(index)
-        if len(seen) != len(documents):
+        if seen != set(range(len(documents))):
             raise RerankProviderContractError(
                 f"Rerank response covered {len(seen)} of {len(documents)} documents."
             )

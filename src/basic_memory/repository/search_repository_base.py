@@ -19,7 +19,12 @@ from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
     embedding_provider_identity,
 )
-from basic_memory.repository.rerank_provider import RerankProvider
+from basic_memory.repository.rerank_provider import (
+    PERMANENT_RERANK_ERRORS,
+    RerankProvider,
+    build_rerank_document,
+    demote_tail_scores,
+)
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_chunking import (
     SemanticSourceRow,
@@ -874,18 +879,10 @@ class SearchRepositoryBase(ABC):
         """Build the document text handed to the cross-encoder for one candidate.
 
         Prefer the matched chunk (the most relevant passage of a large note),
-        falling back to the stored snippet, and prepend the title so short or
-        title-only rows still carry a usable signal. Truncate to
-        ``reranker_max_document_chars`` (when set) so long notes don't inflate
-        cross-encoder latency — the leading text carries the strongest signal.
+        falling back to the stored snippet.
         """
         body = row.matched_chunk_text or row.content_snippet or ""
-        title = row.title or ""
-        text = f"{title}\n{body}" if (title and body) else (body or title)
-        limit = self._reranker_max_document_chars
-        if limit > 0 and len(text) > limit:
-            text = text[:limit]
-        return text
+        return build_rerank_document(row.title, body, self._reranker_max_document_chars)
 
     @staticmethod
     def _demote_tail(tail: list[SearchIndexRow], floor: float) -> list[SearchIndexRow]:
@@ -898,10 +895,9 @@ class SearchRepositoryBase(ABC):
         tail strictly below the reranked floor keeps the whole page monotonic and in
         [0, 1] without a second provider call.
         """
-        count = len(tail)
         return [
-            replace(row, score=floor * (count - index) / (count + 1))
-            for index, row in enumerate(tail)
+            replace(row, score=score)
+            for row, score in zip(tail, demote_tail_scores(floor, len(tail)))
         ]
 
     async def _rerank_and_paginate(
@@ -921,6 +917,10 @@ class SearchRepositoryBase(ABC):
         Outcome: the first ``reranker_candidates`` rows are reordered by reranker
         relevance (which replaces ``score``); the requested page is sliced from the
         reordered list.
+
+        Score-scale caveat: pages past ``reranker_candidates`` skip the rerank and
+        keep raw retrieval scores (up to ~1.3 for fused hybrid), so scores are not
+        comparable across that page boundary — only within a page.
         """
         page_end = offset + limit
         # Skip the provider entirely when reranking cannot change the requested page:
@@ -940,7 +940,7 @@ class SearchRepositoryBase(ABC):
         documents = [self._rerank_document_text(row) for row in pool]
         try:
             scores = await self._rerank_provider.rerank(query_text, documents)
-        except (SemanticDependenciesMissingError, RerankProviderContractError):
+        except PERMANENT_RERANK_ERRORS:
             # Permanent faults — missing reranker deps, or a provider that broke its
             # response contract (e.g. an incomplete rerank response). Surface these like
             # the embedding path does; masking them would leave a permanently broken

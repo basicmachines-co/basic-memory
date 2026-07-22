@@ -376,13 +376,18 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
 class _FakeReranker:
     model_name = "fake"
 
-    def __init__(self, by_marker=None, exc=None):
+    def __init__(self, by_marker=None, exc=None, scores_override=None):
         self.by_marker = by_marker or {}
         self.exc = exc
+        self.scores_override = scores_override
+        self.last_documents: list[str] = []
 
     async def rerank(self, query, documents):
+        self.last_documents = documents
         if self.exc is not None:
             raise self.exc
+        if self.scores_override is not None:
+            return self.scores_override
         scores = []
         for doc in documents:
             score = 0.0
@@ -420,7 +425,9 @@ async def test_rerank_merged_results_rescores_pool(monkeypatch):
         {"title": "Alpha", "content": "a", "score": 0.8},
         {"title": "Bravo", "content": "b", "score": 0.3},
     ]
-    out = await search_mod._rerank_merged_results("q", merged, _cfg())
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type="hybrid", page_window=10
+    )
     # Scores overwritten by the single merged-pool rerank (input order preserved;
     # the caller sorts). Bravo now outranks Alpha across the calibrated pool.
     assert [r["score"] for r in out] == [0.1, 0.9]
@@ -431,7 +438,9 @@ async def test_rerank_merged_results_noop_when_disabled(monkeypatch):
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
     monkeypatch.setattr(search_mod, "create_rerank_provider", lambda config: None)
     merged = [{"title": "A", "score": 0.8}, {"title": "B", "score": 0.3}]
-    out = await search_mod._rerank_merged_results("q", merged, _cfg())
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type="hybrid", page_window=10
+    )
     assert out is merged and [r["score"] for r in out] == [0.8, 0.3]
 
 
@@ -442,7 +451,9 @@ async def test_rerank_merged_results_single_result_noop(monkeypatch):
         search_mod, "create_rerank_provider", lambda config: _FakeReranker({"A": 0.9})
     )
     merged = [{"title": "A", "score": 0.5}]
-    out = await search_mod._rerank_merged_results("q", merged, _cfg())
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type="hybrid", page_window=10
+    )
     assert out == [{"title": "A", "score": 0.5}]
 
 
@@ -455,7 +466,9 @@ async def test_rerank_merged_results_degrades_on_transient_error(monkeypatch):
         lambda config: _FakeReranker(exc=RuntimeError("outage")),
     )
     merged = [{"title": "A", "score": 0.8}, {"title": "B", "score": 0.3}]
-    out = await search_mod._rerank_merged_results("q", merged, _cfg())
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type="hybrid", page_window=10
+    )
     assert [r["score"] for r in out] == [0.8, 0.3]  # per-project order kept
 
 
@@ -471,4 +484,93 @@ async def test_rerank_merged_results_surfaces_permanent_fault(monkeypatch):
     )
     merged = [{"title": "A", "score": 0.8}, {"title": "B", "score": 0.3}]
     with pytest.raises(RerankProviderContractError):
-        await search_mod._rerank_merged_results("q", merged, _cfg())
+        await search_mod._rerank_merged_results(
+            "q", merged, _cfg(), search_type="hybrid", page_window=10
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_type", ["text", "title", "permalink"])
+async def test_rerank_merged_results_skips_explicit_ranking_search_types(monkeypatch, search_type):
+    """text/title/permalink carry user-requested ranking; the reranker must not touch it."""
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+
+    def _fail_factory(config):
+        raise AssertionError("provider must not be created for non-semantic search types")
+
+    monkeypatch.setattr(search_mod, "create_rerank_provider", _fail_factory)
+    merged = [{"title": "A", "score": 0.8}, {"title": "B", "score": 0.3}]
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type=search_type, page_window=10
+    )
+    assert [r["score"] for r in out] == [0.8, 0.3]
+
+
+@pytest.mark.asyncio
+async def test_rerank_merged_results_defers_to_default_search_type(monkeypatch):
+    """search_type=None resolves through _default_search_type, same as per-project search."""
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    merged = [
+        {"title": "Alpha", "content": "a", "score": 0.8},
+        {"title": "Bravo", "content": "b", "score": 0.3},
+    ]
+
+    monkeypatch.setattr(search_mod, "_default_search_type", lambda: "text")
+    monkeypatch.setattr(
+        search_mod,
+        "create_rerank_provider",
+        lambda config: _FakeReranker({"Alpha": 0.1, "Bravo": 0.9}),
+    )
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type=None, page_window=10
+    )
+    assert [r["score"] for r in out] == [0.8, 0.3]  # default text → untouched
+
+    monkeypatch.setattr(search_mod, "_default_search_type", lambda: "hybrid")
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(), search_type=None, page_window=10
+    )
+    assert [r["score"] for r in out] == [0.1, 0.9]  # default hybrid → reranked
+
+
+@pytest.mark.asyncio
+async def test_rerank_merged_results_caps_pool_and_demotes_tail(monkeypatch):
+    """Only the best max(reranker_candidates, page_window) results hit the provider."""
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    reranker = _FakeReranker({"Alpha": 0.2, "Bravo": 0.6})
+    monkeypatch.setattr(search_mod, "create_rerank_provider", lambda config: reranker)
+    merged = [
+        {"title": "Alpha", "content": "a", "score": 0.9},
+        {"title": "Bravo", "content": "b", "score": 0.5},
+        {"title": "Charlie", "content": "c", "score": 0.1},  # past the pool
+    ]
+
+    out = await search_mod._rerank_merged_results(
+        "q", merged, _cfg(reranker_candidates=2), search_type="hybrid", page_window=1
+    )
+
+    # The provider saw only the top-2 pool; Charlie was demoted, not rescored.
+    assert len(reranker.last_documents) == 2
+    assert all("Charlie" not in doc for doc in reranker.last_documents)
+    scores = {r["title"]: r["score"] for r in out}
+    assert scores["Alpha"] == 0.2 and scores["Bravo"] == 0.6
+    # Tail pinned strictly below the reranked floor so the global sort stays monotonic.
+    assert scores["Charlie"] < min(scores["Alpha"], scores["Bravo"])
+
+
+@pytest.mark.asyncio
+async def test_rerank_merged_results_score_count_mismatch_raises(monkeypatch):
+    """A short score list must fail fast, not silently rescore a prefix (zip truncation)."""
+    from basic_memory.repository.semantic_errors import RerankProviderContractError
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    monkeypatch.setattr(
+        search_mod,
+        "create_rerank_provider",
+        lambda config: _FakeReranker(scores_override=[0.5]),
+    )
+    merged = [{"title": "A", "score": 0.8}, {"title": "B", "score": 0.3}]
+    with pytest.raises(RerankProviderContractError, match="1 scores for 2 documents"):
+        await search_mod._rerank_merged_results(
+            "q", merged, _cfg(), search_type="hybrid", page_window=10
+        )

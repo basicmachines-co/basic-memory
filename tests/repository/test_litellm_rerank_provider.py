@@ -8,14 +8,6 @@ from basic_memory.repository.litellm_rerank_provider import LiteLLMRerankProvide
 from basic_memory.repository.semantic_errors import RerankProviderContractError
 
 
-class _RerankResult:
-    """Object-style rerank result item (Cohere/Jina SDK shape)."""
-
-    def __init__(self, index: int, relevance_score: float):
-        self.index = index
-        self.relevance_score = relevance_score
-
-
 class _Response:
     def __init__(self, results):
         self.results = results
@@ -54,9 +46,11 @@ async def test_rerank_realigns_out_of_order_indexed_results(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rerank_handles_object_style_results_and_routing(monkeypatch):
+async def test_rerank_forwards_routing_params(monkeypatch):
     recorder: dict = {}
-    response = _Response([_RerankResult(0, 0.7), _RerankResult(1, 0.2)])
+    response = _Response(
+        [{"index": 0, "relevance_score": 0.7}, {"index": 1, "relevance_score": 0.2}]
+    )
     monkeypatch.setattr(
         "basic_memory.repository.litellm_rerank_provider._import_litellm",
         lambda: _fake_litellm(response, recorder),
@@ -85,6 +79,42 @@ async def test_incomplete_response_raises(monkeypatch):
     provider = LiteLLMRerankProvider()
     with pytest.raises(RerankProviderContractError, match="covered 1 of 2 documents"):
         await provider.rerank("q", ["dropped", "kept"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_index", [-1, 2])
+async def test_out_of_range_index_raises(monkeypatch, bad_index):
+    """Indices outside [0, len) are a malformed response, not a valid position.
+
+    A negative index would silently overwrite a wrong slot via Python indexing and
+    could even satisfy the coverage check; fail fast instead.
+    """
+    response = _Response(
+        [
+            {"index": bad_index, "relevance_score": 0.8},
+            {"index": 0, "relevance_score": 0.4},
+        ]
+    )
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(response, {}),
+    )
+    provider = LiteLLMRerankProvider()
+    with pytest.raises(RerankProviderContractError, match="out of range"):
+        await provider.rerank("q", ["a", "b"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("results", [None, []])
+async def test_missing_results_raises(monkeypatch, results):
+    """litellm's RerankResponse.results is optional; None/empty is a contract break."""
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(_Response(results), {}),
+    )
+    provider = LiteLLMRerankProvider()
+    with pytest.raises(RerankProviderContractError, match="no results"):
+        await provider.rerank("q", ["a", "b"])
 
 
 @pytest.mark.asyncio
