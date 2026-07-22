@@ -609,7 +609,7 @@ class SearchRepositoryBase(ABC):
             )
         )
 
-    async def delete_project_vector_rows(self) -> None:
+    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
         """Delete this project's vectors through the configured storage adapter.
 
         Core enumerates ownership from the SQL manifest because the adapter
@@ -618,6 +618,8 @@ class SearchRepositoryBase(ABC):
         so stale ready rows cannot become current if the feature is re-enabled.
         Adapter cleanup is best-effort because the manifest remains the search
         authority and an unavailable extension must not block an FTS rebuild.
+        Project deletion opts into strict cleanup so external data ownership is
+        preserved for a retry instead of being discarded after an adapter failure.
         """
         async with db.scoped_session(self.session_maker) as session:
             connection = await session.connection()
@@ -627,6 +629,13 @@ class SearchRepositoryBase(ABC):
             if not manifest_exists:
                 return
 
+            manifest_has_embedding_status = await connection.run_sync(
+                lambda sync_connection: any(
+                    column["name"] == "embedding_status"
+                    for column in inspect(sync_connection).get_columns("search_vector_chunks")
+                )
+            )
+
             result = await session.execute(
                 text(
                     "SELECT DISTINCT entity_id FROM search_vector_chunks "
@@ -635,14 +644,20 @@ class SearchRepositoryBase(ABC):
                 {"project_id": self.project_id},
             )
             entity_ids = [int(entity_id) for entity_id in result.scalars().all()]
-            await session.execute(
-                text(
-                    "UPDATE search_vector_chunks SET embedding_status = 'pending' "
-                    "WHERE project_id = :project_id"
-                ),
-                {"project_id": self.project_id},
-            )
-            await session.commit()
+
+            # Trigger: the manifest predates embedding lifecycle state.
+            # Why: legacy SQLite schemas must reach cleanup before lazy schema repair runs.
+            # Outcome: skip staging only for that obsolete schema; the manifest is still
+            # deleted below, and later semantic initialization recreates the current schema.
+            if manifest_has_embedding_status:
+                await session.execute(
+                    text(
+                        "UPDATE search_vector_chunks SET embedding_status = 'pending' "
+                        "WHERE project_id = :project_id"
+                    ),
+                    {"project_id": self.project_id},
+                )
+                await session.commit()
 
         if hasattr(self, "_semantic_vector_index"):
             try:
@@ -651,17 +666,19 @@ class SearchRepositoryBase(ABC):
                     await self._semantic_vector_index.delete_entity(entity_id)
             except Exception as exc:
                 # Trigger: a configured external adapter cannot initialize or delete.
-                # Why: SQL is the authoritative hydration manifest, so clearing it
-                # prevents stale search results even when external cleanup is unavailable.
-                # Outcome: finish the FTS rebuild and leave a visible warning about
-                # storage that may need later adapter reconciliation.
+                # Why: reindex may discard derived state, but project deletion must
+                # not discard the only ownership manifest for external data.
+                # Outcome: strict callers stop for a retry; reindex logs the adapter
+                # failure and continues with a non-searchable empty manifest.
                 logger.warning(
-                    "Could not clean semantic vector adapter during full reindex: "
+                    "Could not clean semantic vector adapter: "
                     "project_id={project_id} vector_index={vector_index} error={error}",
                     project_id=self.project_id,
                     vector_index=self._semantic_vector_index_name,
                     error=exc,
                 )
+                if strict_adapter_cleanup:
+                    raise
 
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(

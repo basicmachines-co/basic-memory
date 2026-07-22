@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Optional, Sequence
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -42,6 +44,8 @@ from basic_memory.utils import generate_permalink
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.services.file_service import FileService
 
+type ProjectSearchRepositoryFactory = Callable[[int], SearchRepository]
+
 
 class ProjectService:
     """Service for managing Basic Memory projects."""
@@ -53,12 +57,14 @@ class ProjectService:
         repository: ProjectRepository,
         session_maker: async_sessionmaker[AsyncSession],
         file_service: Optional["FileService"] = None,
+        search_repository_factory: ProjectSearchRepositoryFactory | None = None,
     ):
         """Initialize the project service."""
         super().__init__()
         self.repository = repository
         self.session_maker = session_maker
         self.file_service = file_service
+        self._search_repository_factory = search_repository_factory
 
     @property
     def config_manager(self) -> ConfigManager:
@@ -335,6 +341,7 @@ class ProjectService:
             if not project:
                 raise ValueError(f"Project '{name}' not found")  # pragma: no cover
 
+            project_id = project.id
             project_path = project.path
 
             # Check if project is default
@@ -346,6 +353,16 @@ class ProjectService:
             if is_default:
                 raise ValueError(f"Cannot remove the default project '{name}'")  # pragma: no cover
 
+        # Trigger: project deletion can remove the only SQL ownership manifest for
+        # vectors stored by an extension such as Milvus.
+        # Why: external storage has no database cascade and cannot reconcile after
+        # the project manifest disappears.
+        # Outcome: delete adapter-owned vectors while project ownership is still known.
+        if self._search_repository_factory is not None:
+            search_repository = self._search_repository_factory(project_id)
+            await search_repository.delete_project_vector_rows(strict_adapter_cleanup=True)
+
+        async with db.scoped_session(self.session_maker) as session:
             # Remove from config if it exists there (may not exist in cloud mode)
             try:
                 self.config_manager.remove_project(name)
@@ -356,7 +373,7 @@ class ProjectService:
                 )
 
             # Remove from database
-            await self.repository.delete(session, project.id)
+            await self.repository.delete(session, project_id)
 
         logger.info(f"Project '{name}' removed from configuration and database")
 

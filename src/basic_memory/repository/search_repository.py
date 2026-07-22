@@ -97,7 +97,7 @@ class SearchRepository(Protocol):
         """Delete semantic vector chunks and embeddings for one entity."""
         ...
 
-    async def delete_project_vector_rows(self) -> None:
+    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
         """Delete all semantic vector chunks and embeddings for this project."""
         ...
 

@@ -185,6 +185,31 @@ async def test_project_vector_cleanup_clears_disabled_manifest(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_project_vector_cleanup_handles_legacy_manifest_without_status(monkeypatch):
+    """Legacy vector manifests should be removed without querying absent status columns."""
+    repo = _ConcreteRepo()
+    session = AsyncMock()
+    connection = AsyncMock()
+    connection.run_sync.side_effect = [True, False]
+    session.connection.return_value = connection
+    session.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [41])
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo.delete_project_vector_rows()
+
+    statements = [str(call.args[0]) for call in session.execute.await_args_list]
+    assert not any("embedding_status" in statement for statement in statements)
+    assert any(statement.startswith("DELETE FROM search_vector_chunks") for statement in statements)
+
+
+@pytest.mark.asyncio
 async def test_project_vector_cleanup_uses_available_adapter(monkeypatch):
     """An available adapter should receive every manifest-owned entity deletion."""
     repo = _ConcreteRepo()
@@ -249,6 +274,39 @@ async def test_project_vector_cleanup_clears_manifest_after_adapter_failure(monk
     warning.assert_called_once()
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
     assert any(statement.startswith("DELETE FROM search_vector_chunks") for statement in statements)
+
+
+@pytest.mark.asyncio
+async def test_strict_project_vector_cleanup_preserves_manifest_after_adapter_failure(monkeypatch):
+    """Project deletion should retain ownership when its external adapter is unavailable."""
+    repo = _ConcreteRepo()
+    adapter: Any = SimpleNamespace(
+        initialize=AsyncMock(side_effect=RuntimeError("adapter unavailable")),
+        delete_entity=AsyncMock(),
+    )
+    repo._semantic_vector_index = adapter
+    repo._semantic_vector_index_name = "milvus"
+    session = AsyncMock()
+    connection = AsyncMock()
+    connection.run_sync.return_value = True
+    session.connection.return_value = connection
+    session.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [41])
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    with pytest.raises(RuntimeError, match="adapter unavailable"):
+        await repo.delete_project_vector_rows(strict_adapter_cleanup=True)
+
+    statements = [str(call.args[0]) for call in session.execute.await_args_list]
+    assert not any(
+        statement.startswith("DELETE FROM search_vector_chunks") for statement in statements
+    )
 
 
 @pytest.mark.asyncio

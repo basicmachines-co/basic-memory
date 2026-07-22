@@ -42,6 +42,7 @@ from basic_memory.index.local_notes import (
     LocalDirectoryFileDeleteEnqueuer,
 )
 from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.index.local_project import (
     LocalProjectIndexCommand,
     LocalProjectIndexRunner,
@@ -519,7 +520,14 @@ async def get_project_service(
     markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
     file_service = FileService(Path.home(), markdown_processor, app_config=app_config)
     return ProjectService(
-        repository=project_repository, session_maker=session_maker, file_service=file_service
+        repository=project_repository,
+        session_maker=session_maker,
+        file_service=file_service,
+        search_repository_factory=lambda project_id: create_search_repository(
+            session_maker=session_maker,
+            project_id=project_id,
+            app_config=app_config,
+        ),
     )
 
 

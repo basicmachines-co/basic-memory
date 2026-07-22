@@ -3,6 +3,8 @@
 import os
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -73,3 +75,50 @@ async def test_add_project_to_config(project_service: ProjectService, config_man
             # Clean up
             if test_project_name in project_service.projects:
                 config_manager.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_remove_project_cleans_external_vectors_before_database_delete(
+    project_service: ProjectService,
+    monkeypatch,
+):
+    """Project removal must clean adapter storage before deleting SQL ownership."""
+    project_name = f"external-vector-project-{os.urandom(4).hex()}"
+    search_repository = SimpleNamespace(delete_project_vector_rows=AsyncMock())
+    search_repository_factory = Mock(return_value=search_repository)
+    service = ProjectService(
+        repository=project_service.repository,
+        session_maker=project_service.session_maker,
+        file_service=project_service.file_service,
+        search_repository_factory=search_repository_factory,
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        async with db.scoped_session(service.session_maker) as session:
+            project = await service.repository.create(
+                session,
+                {
+                    "name": project_name,
+                    "path": temp_dir,
+                    "permalink": project_name,
+                    "is_active": True,
+                },
+            )
+            project_id = project.id
+
+        original_delete = service.repository.delete
+
+        async def delete_after_vector_cleanup(session, entity_id: int) -> bool:
+            search_repository.delete_project_vector_rows.assert_awaited_once_with(
+                strict_adapter_cleanup=True
+            )
+            return await original_delete(session, entity_id)
+
+        monkeypatch.setattr(service.repository, "delete", delete_after_vector_cleanup)
+
+        await service.remove_project(project_name)
+
+    search_repository_factory.assert_called_once_with(project_id)
+    search_repository.delete_project_vector_rows.assert_awaited_once_with(
+        strict_adapter_cleanup=True
+    )
