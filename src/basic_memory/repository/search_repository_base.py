@@ -31,6 +31,7 @@ from basic_memory.repository.semantic_chunking import (
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
+    SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
@@ -658,6 +659,18 @@ class SearchRepositoryBase(ABC):
                     {"project_id": self.project_id},
                 )
                 await session.commit()
+
+        # Trigger: project deletion requires strict cleanup, but semantic search
+        # was disabled before this repository was composed.
+        # Why: deleting the manifest without an adapter would orphan externally
+        # stored vectors and discard the only durable ownership list.
+        # Outcome: retain the manifest and require the caller to restore the
+        # configured adapter before retrying project deletion.
+        if entity_ids and strict_adapter_cleanup and not hasattr(self, "_semantic_vector_index"):
+            raise SemanticVectorIndexExtensionError(
+                "Cannot delete project vectors because the configured semantic vector "
+                "adapter is unavailable. Enable semantic search and retry project deletion."
+            )
 
         if hasattr(self, "_semantic_vector_index"):
             try:

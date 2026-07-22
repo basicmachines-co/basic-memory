@@ -17,7 +17,10 @@ from basic_memory.repository.search_repository_base import (
     _PreparedEntityVectorSync,
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
+from basic_memory.repository.semantic_errors import (
+    SemanticSearchDisabledError,
+    SemanticVectorIndexExtensionError,
+)
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -301,6 +304,33 @@ async def test_strict_project_vector_cleanup_preserves_manifest_after_adapter_fa
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
     with pytest.raises(RuntimeError, match="adapter unavailable"):
+        await repo.delete_project_vector_rows(strict_adapter_cleanup=True)
+
+    statements = [str(call.args[0]) for call in session.execute.await_args_list]
+    assert not any(
+        statement.startswith("DELETE FROM search_vector_chunks") for statement in statements
+    )
+
+
+@pytest.mark.asyncio
+async def test_strict_project_vector_cleanup_preserves_manifest_without_adapter(monkeypatch):
+    """Disabled semantic search must retain external-vector ownership for retry."""
+    repo = _ConcreteRepo()
+    session = AsyncMock()
+    connection = AsyncMock()
+    connection.run_sync.return_value = True
+    session.connection.return_value = connection
+    session.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [41])
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    with pytest.raises(SemanticVectorIndexExtensionError, match="adapter is unavailable"):
         await repo.delete_project_vector_rows(strict_adapter_cleanup=True)
 
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
