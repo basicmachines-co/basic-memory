@@ -253,7 +253,7 @@ async def test_sqlite_vec_tables_are_created_and_rebuilt(search_repository):
 
 @pytest.mark.asyncio
 async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
-    """Reconciliation removes non-ready local rows without touching another project."""
+    """Reconciliation removes orphan/local stale rows without touching another project."""
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("sqlite-vec reconciliation behavior is local SQLite-only.")
 
@@ -305,7 +305,7 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
                 "INSERT INTO search_vector_embeddings (rowid, embedding) "
                 "VALUES (:rowid, :embedding)"
             ),
-            [{"rowid": rowid, "embedding": "[1,0,0,0]"} for rowid in (901, 902, 903)],
+            [{"rowid": rowid, "embedding": "[1,0,0,0]"} for rowid in (901, 902, 903, 904)],
         )
         await session.commit()
 
@@ -315,7 +315,7 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
         remaining = await session.execute(
             text(
                 "SELECT rowid FROM search_vector_embeddings "
-                "WHERE rowid IN (901, 902, 903) ORDER BY rowid"
+                "WHERE rowid IN (901, 902, 903, 904) ORDER BY rowid"
             )
         )
         assert remaining.scalars().all() == [902, 903]

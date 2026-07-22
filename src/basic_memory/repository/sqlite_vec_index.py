@@ -218,6 +218,27 @@ class SQLiteVecIndex(SemanticVectorIndex):
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
+            # A vec row without any manifest has no remaining project owner.
+            # Remove these globally before the project-scoped stale-state pass;
+            # otherwise they can occupy sqlite-vec's top-k window forever.
+            orphan_result = await session.execute(
+                text(
+                    "SELECT rowid FROM search_vector_embeddings "
+                    "EXCEPT SELECT id FROM search_vector_chunks"
+                )
+            )
+            orphan_rowids = [int(rowid) for rowid in orphan_result.scalars().all()]
+            if orphan_rowids:
+                params = {
+                    f"orphan_rowid_{index}": rowid for index, rowid in enumerate(orphan_rowids)
+                }
+                placeholders = ", ".join(
+                    f":orphan_rowid_{index}" for index in range(len(orphan_rowids))
+                )
+                await session.execute(
+                    text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"),
+                    params,
+                )
             await session.execute(
                 text(
                     "DELETE FROM search_vector_embeddings WHERE rowid IN ("
