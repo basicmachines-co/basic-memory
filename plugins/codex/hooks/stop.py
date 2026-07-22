@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@1cb7a541fbb43c5a4f1b552c0123a1c55beb8dfb",
+#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@c28159d2077158c4f596fb62f351e6e9012b95a5",
 # ]
 # ///
 """Stop hook launcher backed by a pinned Basic Memory revision.
