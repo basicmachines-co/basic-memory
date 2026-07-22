@@ -79,6 +79,14 @@ class LiteLLMRerankProvider(RerankProvider):
                 raise RerankProviderContractError(
                     f"Rerank response index {index} is out of range for {len(documents)} documents."
                 )
+            # A repeated index still leaves `seen` == the full set when every other
+            # index is present, so the coverage check below can't catch it — reject
+            # here to hold the "each index exactly once" contract (a duplicate would
+            # otherwise silently overwrite the earlier score, last-write-wins).
+            if index in seen:
+                raise RerankProviderContractError(
+                    f"Rerank response repeated index {index} for {len(documents)} documents."
+                )
             scores[index] = float(item["relevance_score"])
             seen.add(index)
         if seen != set(range(len(documents))):

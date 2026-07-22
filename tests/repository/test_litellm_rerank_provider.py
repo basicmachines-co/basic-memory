@@ -105,6 +105,30 @@ async def test_out_of_range_index_raises(monkeypatch, bad_index):
 
 
 @pytest.mark.asyncio
+async def test_duplicate_index_raises(monkeypatch):
+    """A repeated index with otherwise-full coverage slips past the coverage check.
+
+    `[0, 1, 0]` for two documents leaves `seen == {0, 1}` — the count check passes —
+    while the second index-0 item silently overwrites the first score. Reject the
+    duplicate so the "each index exactly once" contract holds.
+    """
+    response = _Response(
+        [
+            {"index": 0, "relevance_score": 0.8},
+            {"index": 1, "relevance_score": 0.5},
+            {"index": 0, "relevance_score": 0.1},
+        ]
+    )
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(response, {}),
+    )
+    provider = LiteLLMRerankProvider()
+    with pytest.raises(RerankProviderContractError, match="repeated index 0"):
+        await provider.rerank("q", ["a", "b"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("results", [None, []])
 async def test_missing_results_raises(monkeypatch, results):
     """litellm's RerankResponse.results is optional; None/empty is a contract break."""
