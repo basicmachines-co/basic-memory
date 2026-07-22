@@ -99,6 +99,7 @@ class SQLiteVecIndex(SemanticVectorIndex):
                     )
                 )
                 vector_sql = result.scalar()
+                storage_missing = not vector_sql
                 expected_dimensions = f"float[{self.scope.dimensions}]"
                 dimensions_changed = bool(vector_sql and expected_dimensions not in vector_sql)
                 if dimensions_changed:
@@ -110,7 +111,9 @@ class SQLiteVecIndex(SemanticVectorIndex):
                     await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
 
                 await session.execute(create_sqlite_search_vector_embeddings(self.scope.dimensions))
-                if dimensions_changed:
+                # Missing or dimension-rebuilt vec storage has no vectors, so ready
+                # manifests must become pending before incremental sync inspects them.
+                if storage_missing or dimensions_changed:
                     await session.execute(
                         text(
                             "UPDATE search_vector_chunks SET embedding_status = 'pending' "

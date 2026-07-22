@@ -252,6 +252,44 @@ async def test_sqlite_vec_tables_are_created_and_rebuilt(search_repository):
 
 
 @pytest.mark.asyncio
+async def test_sqlite_vec_recreated_storage_invalidates_ready_manifest(search_repository):
+    """Recreated empty vec storage must force unchanged chunks back to pending."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec storage recovery is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                "905, 905, :project_id, 'entity:905:0', 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
+            ),
+            {
+                "project_id": search_repository.project_id,
+                "embedding_model": search_repository._embedding_model_key(),
+            },
+        )
+        await session.execute(text("DROP TABLE search_vector_embeddings"))
+        await session.commit()
+
+    index.invalidate_initialization()
+    await index.initialize()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        result = await session.execute(
+            text("SELECT embedding_status FROM search_vector_chunks WHERE id = 905")
+        )
+        assert result.scalar_one() == "pending"
+
+
+@pytest.mark.asyncio
 async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
     """Reconciliation removes orphan/local stale rows without touching another project."""
     if not isinstance(search_repository, SQLiteSearchRepository):

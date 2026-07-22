@@ -57,6 +57,7 @@ class PgVectorIndex(SemanticVectorIndex):
                     ) from exc
 
                 existing_dimensions = await self._existing_dimensions(session)
+                storage_missing = existing_dimensions is None
                 dimensions_changed = (
                     existing_dimensions is not None and existing_dimensions != self.scope.dimensions
                 )
@@ -97,11 +98,11 @@ class PgVectorIndex(SemanticVectorIndex):
                     )
                 )
 
-                # Trigger: pgvector's fixed-width column was recreated for a new model.
+                # Trigger: pgvector storage was created or its fixed-width column changed.
                 # Why: SQL manifest rows can otherwise remain `ready` after their vectors
-                # disappeared, causing the incremental sync to skip them forever.
+                # disappeared, causing incremental sync to skip them forever.
                 # Outcome: the normal sync pipeline re-embeds every affected chunk.
-                if dimensions_changed:
+                if storage_missing or dimensions_changed:
                     await session.execute(
                         text(
                             "UPDATE search_vector_chunks SET embedding_status = 'pending' "

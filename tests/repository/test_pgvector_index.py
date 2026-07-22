@@ -110,7 +110,7 @@ def _sql_calls(session: FakeSession) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_initialize_creates_storage_once(monkeypatch) -> None:
+async def test_initialize_creates_storage_once_and_invalidates_manifest(monkeypatch) -> None:
     session = FakeSession()
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
@@ -122,8 +122,21 @@ async def test_initialize_creates_storage_once(monkeypatch) -> None:
     assert sum("CREATE EXTENSION" in sql for sql in sql_calls) == 1
     assert any("embedding vector(4)" in sql for sql in sql_calls)
     assert any("USING hnsw" in sql for sql in sql_calls)
-    assert not any("embedding_status = 'pending'" in sql for sql in sql_calls)
+    assert any("embedding_status = 'pending'" in sql for sql in sql_calls)
     assert session.commit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_initialize_preserves_manifest_when_storage_is_unchanged(monkeypatch) -> None:
+    session = FakeSession(table_exists=True, dimensions=4)
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+
+    await index.initialize()
+
+    sql_calls = _sql_calls(session)
+    assert not any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
+    assert not any("embedding_status = 'pending'" in sql for sql in sql_calls)
 
 
 @pytest.mark.asyncio
