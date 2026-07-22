@@ -21,6 +21,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticSearchDisabledError,
     SemanticVectorIndexExtensionError,
 )
+from basic_memory.repository.semantic_vector_index import VectorKey, VectorMatch
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -87,6 +88,42 @@ class _ConcreteRepo(SearchRepositoryBase):
 
     def _distance_to_similarity(self, distance: float) -> float:
         return 1.0 / (1.0 + max(distance, 0.0))
+
+
+@pytest.mark.asyncio
+async def test_vector_match_hydration_batches_large_adapter_results() -> None:
+    """Deep vector pages must not create an unbounded SQL bind-parameter list."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    matches = [
+        VectorMatch(
+            key=VectorKey(entity_id=entity_id, chunk_key=f"entity:{entity_id}:0"),
+            similarity=0.9,
+        )
+        for entity_id in range(600)
+    ]
+    session = AsyncMock()
+
+    def hydrated_batch(_statement, params):
+        rows = [
+            {
+                "entity_id": value,
+                "chunk_key": params[f"chunk_key_{index}"],
+                "chunk_text": f"chunk {value}",
+            }
+            for index in range((len(params) - 3) // 2)
+            if (value := params[f"entity_id_{index}"]) is not None
+        ]
+        return SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: rows))
+
+    session.execute.side_effect = hydrated_batch
+
+    hydrated = await repo._hydrate_vector_matches(session, matches)
+
+    assert session.execute.await_count == 3
+    assert max(len(call.args[1]) for call in session.execute.await_args_list) == 503
+    assert [row["entity_id"] for row in hydrated] == list(range(600))
 
 
 # --- SQLite SemanticSearchDisabledError ---

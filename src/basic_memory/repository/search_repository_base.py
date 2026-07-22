@@ -53,6 +53,7 @@ from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 # --- Semantic search constants ---
 
 VECTOR_FILTER_SCAN_LIMIT = 50000
+VECTOR_HYDRATION_BATCH_SIZE = 250
 FUSION_BONUS = 0.3
 FTS_GATE_THRESHOLD = 0.0
 TOP_CHUNKS_PER_RESULT = 5
@@ -232,37 +233,45 @@ class SearchRepositoryBase(ABC):
         if not matches:
             return []
 
-        params: dict[str, object] = {
-            "project_id": self.project_id,
-            "vector_index": self._semantic_vector_index_name,
-            "embedding_model": self._embedding_model_key(),
-        }
-        predicates: list[str] = []
-        for index, match in enumerate(matches):
-            params[f"entity_id_{index}"] = match.key.entity_id
-            params[f"chunk_key_{index}"] = match.key.chunk_key
-            predicates.append(
-                f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
-            )
+        chunks_by_key: dict[VectorKey, str] = {}
+        for batch_start in range(0, len(matches), VECTOR_HYDRATION_BATCH_SIZE):
+            batch = matches[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
+            params: dict[str, object] = {
+                "project_id": self.project_id,
+                "vector_index": self._semantic_vector_index_name,
+                "embedding_model": self._embedding_model_key(),
+            }
+            predicates: list[str] = []
+            for index, match in enumerate(batch):
+                params[f"entity_id_{index}"] = match.key.entity_id
+                params[f"chunk_key_{index}"] = match.key.chunk_key
+                predicates.append(
+                    f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
+                )
 
-        result = await session.execute(
-            text(
-                "SELECT entity_id, chunk_key, chunk_text FROM search_vector_chunks "
-                "WHERE project_id = :project_id "
-                "AND vector_index = :vector_index "
-                "AND embedding_model = :embedding_model "
-                "AND embedding_status = 'ready' "
-                "AND (" + " OR ".join(predicates) + ")"
-            ),
-            params,
-        )
-        chunks_by_key = {
-            VectorKey(
-                entity_id=int(row["entity_id"]),
-                chunk_key=str(row["chunk_key"]),
-            ): str(row["chunk_text"])
-            for row in result.mappings().all()
-        }
+            # Constraint: adapters may return thousands of candidates for deep pages.
+            # PostgreSQL and SQLite both cap bind parameters, so hydrate in fixed-size
+            # batches while retaining the adapter's original ranking in the final list.
+            result = await session.execute(
+                text(
+                    "SELECT entity_id, chunk_key, chunk_text FROM search_vector_chunks "
+                    "WHERE project_id = :project_id "
+                    "AND vector_index = :vector_index "
+                    "AND embedding_model = :embedding_model "
+                    "AND embedding_status = 'ready' "
+                    "AND (" + " OR ".join(predicates) + ")"
+                ),
+                params,
+            )
+            chunks_by_key.update(
+                {
+                    VectorKey(
+                        entity_id=int(row["entity_id"]),
+                        chunk_key=str(row["chunk_key"]),
+                    ): str(row["chunk_text"])
+                    for row in result.mappings().all()
+                }
+            )
         return [
             {
                 "entity_id": match.key.entity_id,

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from basic_memory import db
+from basic_memory.services import project_service as project_service_module
 from basic_memory.services.project_service import ProjectService
 
 
@@ -119,6 +120,46 @@ async def test_remove_project_cleans_external_vectors_before_database_delete(
         await service.remove_project(project_name)
 
     search_repository_factory.assert_called_once_with(project_id)
+    search_repository.delete_project_vector_rows.assert_awaited_once_with(
+        strict_adapter_cleanup=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_remove_project_composes_vector_cleanup_without_injected_factory(
+    project_service: ProjectService,
+    monkeypatch,
+):
+    """Legacy service construction must still preserve external vector ownership."""
+    project_name = f"fallback-vector-project-{os.urandom(4).hex()}"
+    search_repository = SimpleNamespace(delete_project_vector_rows=AsyncMock())
+    create_search_repository = Mock(return_value=search_repository)
+    monkeypatch.setattr(
+        project_service_module,
+        "create_search_repository",
+        create_search_repository,
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        async with db.scoped_session(project_service.session_maker) as session:
+            project = await project_service.repository.create(
+                session,
+                {
+                    "name": project_name,
+                    "path": temp_dir,
+                    "permalink": project_name,
+                    "is_active": True,
+                },
+            )
+            project_id = project.id
+
+        await project_service.remove_project(project_name)
+
+    create_search_repository.assert_called_once()
+    assert (
+        create_search_repository.call_args.kwargs["session_maker"] is project_service.session_maker
+    )
+    assert create_search_repository.call_args.kwargs["project_id"] == project_id
     search_repository.delete_project_vector_rows.assert_awaited_once_with(
         strict_adapter_cleanup=True
     )

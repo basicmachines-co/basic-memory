@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
-from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.search_repository import SearchRepository, create_search_repository
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -358,9 +358,15 @@ class ProjectService:
         # Why: external storage has no database cascade and cannot reconcile after
         # the project manifest disappears.
         # Outcome: delete adapter-owned vectors while project ownership is still known.
-        if self._search_repository_factory is not None:
+        if self._search_repository_factory is None:
+            search_repository = create_search_repository(
+                session_maker=self.session_maker,
+                project_id=project_id,
+                app_config=self.config_manager.config,
+            )
+        else:
             search_repository = self._search_repository_factory(project_id)
-            await search_repository.delete_project_vector_rows(strict_adapter_cleanup=True)
+        await search_repository.delete_project_vector_rows(strict_adapter_cleanup=True)
 
         async with db.scoped_session(self.session_maker) as session:
             # Remove from config if it exists there (may not exist in cloud mode)
