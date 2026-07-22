@@ -16,10 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
-from basic_memory.repository.embedding_provider_factory import create_embedding_provider
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+)
 from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
-    semantic_embedding_identity,
 )
 from basic_memory.schemas import (
     ActivityMetrics,
@@ -1045,7 +1046,7 @@ class ProjectService:
 
         is_postgres = config.database_backend == DatabaseBackend.POSTGRES
         vector_index = resolve_semantic_vector_index_name(config, config.database_backend)
-        embedding_identity = semantic_embedding_identity(create_embedding_provider(config))
+        embedding_identity = configured_embedding_provider_identity(config)
 
         # --- Check vector manifest existence ---
         # The SQL manifest is authoritative even when vector values live outside

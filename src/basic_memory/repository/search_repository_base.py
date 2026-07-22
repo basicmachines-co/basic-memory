@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import logfire as logfire
 from loguru import logger
-from sqlalchemy import Executable, Result, text
+from sqlalchemy import Executable, Result, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -614,14 +614,19 @@ class SearchRepositoryBase(ABC):
 
         Core enumerates ownership from the SQL manifest because the adapter
         contract intentionally has no project-wide listing or destructive reset.
-        Each entity deletion uses the same pending-first lifecycle as ordinary
-        sync cleanup, so an external failure remains retryable and fails closed.
+        A full reindex clears the manifest even when semantic search is disabled,
+        so stale ready rows cannot become current if the feature is re-enabled.
+        Adapter cleanup is best-effort because the manifest remains the search
+        authority and an unavailable extension must not block an FTS rebuild.
         """
-        if not self._semantic_enabled:
-            return
-
-        await self._ensure_vector_tables()
         async with db.scoped_session(self.session_maker) as session:
+            connection = await session.connection()
+            manifest_exists = await connection.run_sync(
+                lambda sync_connection: inspect(sync_connection).has_table("search_vector_chunks")
+            )
+            if not manifest_exists:
+                return
+
             result = await session.execute(
                 text(
                     "SELECT DISTINCT entity_id FROM search_vector_chunks "
@@ -630,9 +635,40 @@ class SearchRepositoryBase(ABC):
                 {"project_id": self.project_id},
             )
             entity_ids = [int(entity_id) for entity_id in result.scalars().all()]
+            await session.execute(
+                text(
+                    "UPDATE search_vector_chunks SET embedding_status = 'pending' "
+                    "WHERE project_id = :project_id"
+                ),
+                {"project_id": self.project_id},
+            )
+            await session.commit()
 
-        for entity_id in entity_ids:
-            await self.delete_entity_vector_rows(entity_id)
+        if hasattr(self, "_semantic_vector_index"):
+            try:
+                await self._semantic_vector_index.initialize()
+                for entity_id in entity_ids:
+                    await self._semantic_vector_index.delete_entity(entity_id)
+            except Exception as exc:
+                # Trigger: a configured external adapter cannot initialize or delete.
+                # Why: SQL is the authoritative hydration manifest, so clearing it
+                # prevents stale search results even when external cleanup is unavailable.
+                # Outcome: finish the FTS rebuild and leave a visible warning about
+                # storage that may need later adapter reconciliation.
+                logger.warning(
+                    "Could not clean semantic vector adapter during full reindex: "
+                    "project_id={project_id} vector_index={vector_index} error={error}",
+                    project_id=self.project_id,
+                    vector_index=self._semantic_vector_index_name,
+                    error=exc,
+                )
+
+        async with db.scoped_session(self.session_maker) as session:
+            await session.execute(
+                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                {"project_id": self.project_id},
+            )
+            await session.commit()
 
     async def delete_stale_vector_rows(self) -> None:
         """Delete vectors whose source entity no longer exists.

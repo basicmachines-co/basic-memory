@@ -64,6 +64,28 @@ def _should_forward_dimensions(model_name: str, forward_dimensions: bool | None)
     return "text-embedding-3" in normalized
 
 
+def litellm_embedding_identity(
+    *,
+    model_name: str,
+    dimensions: int,
+    document_input_type: str | None,
+    query_input_type: str | None,
+    forward_dimensions: bool | None,
+) -> str:
+    """Return the LiteLLM request semantics that invalidate stored vectors."""
+    resolved_document_input_type = document_input_type or "-"
+    resolved_query_input_type = query_input_type or "-"
+    resolved_forward_dimensions = str(
+        _should_forward_dimensions(model_name, forward_dimensions)
+    ).lower()
+    return (
+        f"{model_name}:{dimensions}:"
+        f"document_input_type={resolved_document_input_type}:"
+        f"query_input_type={resolved_query_input_type}:"
+        f"forward_dimensions={resolved_forward_dimensions}"
+    )
+
+
 def _import_litellm() -> Any:
     """Import LiteLLM without letting its import-time dotenv hook read cwd secrets."""
     # Constraint: LiteLLM 1.85.0 loads .env files at import time when
@@ -127,18 +149,13 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
 
     def identity_key(self) -> str:
         """Return the embedding semantics that should invalidate stored vectors."""
-        document_input_type = self.document_input_type or "-"
-        query_input_type = self.query_input_type or "-"
-        forward_dimensions = str(
-            _should_forward_dimensions(self.model_name, self.forward_dimensions)
-        ).lower()
-        identity = (
-            f"{self.model_name}:{self.dimensions}:"
-            f"document_input_type={document_input_type}:"
-            f"query_input_type={query_input_type}:"
-            f"forward_dimensions={forward_dimensions}"
+        return litellm_embedding_identity(
+            model_name=self.model_name,
+            dimensions=self.dimensions,
+            document_input_type=self.document_input_type,
+            query_input_type=self.query_input_type,
+            forward_dimensions=self.forward_dimensions,
         )
-        return identity
 
     async def _embed(self, texts: list[str], *, input_type: str | None) -> list[list[float]]:
         if not texts:

@@ -7,7 +7,11 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
-from basic_memory.repository.embedding_provider_factory import create_embedding_provider
+from basic_memory.config import BasicMemoryConfig
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+    create_embedding_provider,
+)
 from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
     semantic_embedding_identity,
@@ -42,6 +46,57 @@ async def test_embedding_status_semantic_disabled(project_service: ProjectServic
     assert status.reindex_recommended is False
     assert status.total_chunks == 0
     assert status.total_embeddings == 0
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        BasicMemoryConfig(),
+        BasicMemoryConfig(
+            semantic_embedding_provider="openai",
+            semantic_embedding_model="text-embedding-3-large",
+            semantic_embedding_dimensions=1024,
+        ),
+        BasicMemoryConfig(
+            semantic_embedding_provider="litellm",
+            semantic_embedding_model="cohere/embed-english-v3.0",
+            semantic_embedding_dimensions=1024,
+            semantic_embedding_document_prefix="passage: ",
+            semantic_embedding_query_prefix="query: ",
+        ),
+    ],
+)
+def test_configured_embedding_identity_matches_runtime_provider(
+    config: BasicMemoryConfig,
+) -> None:
+    """Status identity must exactly match the provider used by vector sync."""
+    assert configured_embedding_provider_identity(config) == semantic_embedding_identity(
+        create_embedding_provider(config)
+    )
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_does_not_construct_provider(
+    project_service: ProjectService,
+    test_project,
+) -> None:
+    """Project status should remain a metadata query, not provider initialization."""
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ),
+        patch(
+            "basic_memory.repository.embedding_provider_factory.create_embedding_provider",
+            side_effect=AssertionError("status must not construct an embedding provider"),
+        ),
+    ):
+        status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.semantic_search_enabled is True
 
 
 @pytest.mark.asyncio
@@ -326,7 +381,7 @@ async def _insert_manifest_chunk(
     """Insert one manifest row with explicit backend and readiness identity."""
     config = _config_manager_with(semantic_search_enabled=True).config
     active_vector_index = resolve_semantic_vector_index_name(config, config.database_backend)
-    active_embedding_identity = semantic_embedding_identity(create_embedding_provider(config))
+    active_embedding_identity = configured_embedding_provider_identity(config)
     await _execute(
         project_service,
         text(
