@@ -366,6 +366,24 @@ async def test_project_vector_cleanup_preserves_mismatched_external_owner(monkey
 
 
 @pytest.mark.asyncio
+async def test_entity_vector_cleanup_preserves_mismatched_external_owner() -> None:
+    """Entity cleanup must fail before staging rows owned by another extension."""
+    repo = _ConcreteRepo()
+    adapter: Any = SimpleNamespace()
+    repo._semantic_vector_index = adapter
+    repo._semantic_vector_index_name = "pgvector"
+    session = AsyncMock()
+    session.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: ["milvus"])
+    )
+
+    with pytest.raises(SemanticVectorIndexExtensionError, match="milvus"):
+        await SearchRepositoryBase._delete_entity_chunks(repo, session, 41)
+
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_strict_project_vector_cleanup_allows_disabled_builtin_owner(monkeypatch):
     """Project deletion should not require the semantic stack for built-in vectors."""
     repo = _ConcreteRepo()

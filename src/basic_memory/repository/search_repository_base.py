@@ -360,6 +360,14 @@ class SearchRepositoryBase(ABC):
         entity_id: int,
     ) -> None:
         """Stage an entity deletion by making its manifest rows non-searchable."""
+        vector_index_result = await session.execute(
+            text(
+                "SELECT DISTINCT vector_index FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": self.project_id, "entity_id": entity_id},
+        )
+        self._assert_manifest_vector_ownership(vector_index_result.scalars().all())
         await session.execute(
             text(
                 "UPDATE search_vector_chunks SET embedding_status = 'pending' "
@@ -379,6 +387,15 @@ class SearchRepositoryBase(ABC):
             return
         params = {f"stale_id_{index}": row_id for index, row_id in enumerate(stale_ids)}
         placeholders = ", ".join(f":stale_id_{index}" for index in range(len(stale_ids)))
+        vector_index_result = await session.execute(
+            text(
+                "SELECT DISTINCT vector_index FROM search_vector_chunks "
+                f"WHERE project_id = :project_id AND entity_id = :entity_id "
+                f"AND id IN ({placeholders})"
+            ),
+            {**params, "project_id": self.project_id, "entity_id": entity_id},
+        )
+        self._assert_manifest_vector_ownership(vector_index_result.scalars().all())
         await session.execute(
             text(
                 "UPDATE search_vector_chunks SET embedding_status = 'pending' "
@@ -404,6 +421,15 @@ class SearchRepositoryBase(ABC):
             return
 
         if prepared.delete_entity_vectors:
+            async with db.scoped_session(self.session_maker) as session:
+                vector_index_result = await session.execute(
+                    text(
+                        "SELECT DISTINCT vector_index FROM search_vector_chunks "
+                        "WHERE project_id = :project_id AND entity_id = :entity_id"
+                    ),
+                    {"project_id": self.project_id, "entity_id": prepared.entity_id},
+                )
+                self._assert_manifest_vector_ownership(vector_index_result.scalars().all())
             await self._semantic_vector_index.delete_entity(prepared.entity_id)
             async with db.scoped_session(self.session_maker) as session:
                 await session.execute(
@@ -422,15 +448,17 @@ class SearchRepositoryBase(ABC):
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(
                 text(
-                    "SELECT entity_id, chunk_key FROM search_vector_chunks "
+                    "SELECT entity_id, chunk_key, vector_index FROM search_vector_chunks "
                     f"WHERE project_id = :project_id AND entity_id = :entity_id "
                     f"AND id IN ({placeholders})"
                 ),
                 {**params, "project_id": self.project_id, "entity_id": prepared.entity_id},
             )
+            rows = result.mappings().all()
+            self._assert_manifest_vector_ownership(row["vector_index"] for row in rows)
             keys = [
                 VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"]))
-                for row in result.mappings().all()
+                for row in rows
             ]
 
         await self._semantic_vector_index.delete(keys)
@@ -637,6 +665,21 @@ class SearchRepositoryBase(ABC):
         for entity_id in entity_ids:
             await self._semantic_vector_index.delete_entity(entity_id)
 
+    def _assert_manifest_vector_ownership(self, vector_index_names: Iterable[object]) -> None:
+        """Reject cleanup that cannot reach every externally owned vector."""
+        recorded_indexes = frozenset(str(name) for name in vector_index_names if str(name))
+        external_indexes = recorded_indexes - _BUILT_IN_VECTOR_INDEX_NAMES
+        configured_index = self._semantic_vector_index_name
+        if external_indexes and (
+            not hasattr(self, "_semantic_vector_index")
+            or external_indexes != frozenset({configured_index})
+        ):
+            raise SemanticVectorIndexExtensionError(
+                "Cannot mutate vector manifests owned by external indexes "
+                f"{sorted(external_indexes)!r} with configured adapter "
+                f"{configured_index!r}. Restore the owning adapter and retry."
+            )
+
     async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
         """Delete this project's vectors through the configured storage adapter.
 
@@ -695,23 +738,11 @@ class SearchRepositoryBase(ABC):
                     int(entity_id) for entity_id in result.scalars().all()
                 ]
 
-            external_vector_indexes = (
-                frozenset(entity_ids_by_vector_index) - _BUILT_IN_VECTOR_INDEX_NAMES
-            )
-
             # Trigger: manifests belong to an external index other than the available adapter.
             # Why: adapter configuration can change after vectors were written, and deleting
             # the manifest would discard the only durable routing information for old vectors.
             # Outcome: fail before touching any adapter or manifest so the owner can be restored.
-            if external_vector_indexes and (
-                not hasattr(self, "_semantic_vector_index")
-                or external_vector_indexes != frozenset({configured_index})
-            ):
-                raise SemanticVectorIndexExtensionError(
-                    "Cannot delete project vectors owned by external indexes "
-                    f"{sorted(external_vector_indexes)!r} with configured adapter "
-                    f"{configured_index!r}. Restore the owning adapter and retry."
-                )
+            self._assert_manifest_vector_ownership(entity_ids_by_vector_index)
 
             # Trigger: the manifest predates embedding lifecycle state.
             # Why: legacy SQLite schemas must reach cleanup before lazy schema repair runs.

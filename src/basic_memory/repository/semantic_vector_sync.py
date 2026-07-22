@@ -985,6 +985,11 @@ async def upsert_scheduled_chunk_records(
     embedding_model: str,
 ) -> list[tuple[int, str]]:
     """Upsert scheduled chunk rows and return embedding jobs."""
+    repository._assert_manifest_vector_ownership(
+        current.vector_index
+        for record in scheduled_records
+        if (current := existing_by_key.get(record["chunk_key"])) is not None
+    )
     timestamp_expr = repository._timestamp_now_expr()
     embedding_jobs: list[tuple[int, str]] = []
     for record in scheduled_records:

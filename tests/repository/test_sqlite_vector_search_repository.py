@@ -18,6 +18,7 @@ from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.repository.semantic_vector_index import (
     VectorIndexScope,
     VectorKey,
@@ -695,8 +696,8 @@ async def test_adapter_matches_hydrate_only_current_ready_manifest_rows(search_r
 
 
 @pytest.mark.asyncio
-async def test_vector_index_switch_reembeds_manifest_rows(search_repository):
-    """Changing the selected adapter identity invalidates otherwise unchanged chunks."""
+async def test_external_vector_index_switch_preserves_manifest_ownership(search_repository):
+    """Changing an external adapter identity must retain the old cleanup route."""
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("Semantic manifest behavior is exercised through local SQLite.")
 
@@ -718,7 +719,8 @@ async def test_vector_index_switch_reembeds_manifest_rows(search_repository):
     await search_repository.sync_entity_vectors(114)
 
     search_repository._semantic_vector_index_name = "recording-b"
-    await search_repository.sync_entity_vectors(114)
+    with pytest.raises(SemanticVectorIndexExtensionError, match="recording-a"):
+        await search_repository.sync_entity_vectors(114)
 
     async with db.scoped_session(search_repository.session_maker) as session:
         state = await session.execute(
@@ -728,9 +730,9 @@ async def test_vector_index_switch_reembeds_manifest_rows(search_repository):
             ),
             {"project_id": search_repository.project_id, "entity_id": 114},
         )
-        assert state.all() == [("recording-b", "ready")]
+        assert state.all() == [("recording-a", "ready")]
 
-    assert len(adapter.upsert_calls) == 2
+    assert len(adapter.upsert_calls) == 1
 
 
 @pytest.mark.asyncio
