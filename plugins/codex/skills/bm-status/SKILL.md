@@ -30,8 +30,7 @@ Gather a concise diagnostic. Do not over-investigate.
 3. Core hook health:
    - with the first available launcher, run
      `basic-memory hook status --harness codex --project-dir <repo-root>`
-   - report the shared inbox path, pending envelopes, archived envelopes,
-     pending checkpoint requests, last
+   - report the shared inbox path, pending envelopes, archived envelopes, last
      flush, settings state, resolved primary project, capture state, capture
      folder, Basic Memory version, and uv version from that command
    - inbox counts are global across supported harnesses; do not attribute a
@@ -75,7 +74,6 @@ Basic Memory for Codex
 - Shared hook inbox: <path or unavailable>
 - Shared pending envelopes: <count or unavailable>
 - Shared archived envelopes: <count or unavailable>
-- Pending checkpoint requests: <count or unavailable>
 - Last flush: <timestamp, never, or unavailable>
 - Hook runtime: basic-memory <version>; uv <version or missing>
 - Recent checkpoints: <count across coding_session and codex_session>

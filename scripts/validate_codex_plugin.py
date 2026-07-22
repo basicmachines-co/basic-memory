@@ -40,7 +40,6 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "hook status --harness codex",
         "pending envelopes",
         "archived envelopes",
-        "Pending checkpoint requests",
         "last flush",
         "type=codex_session",
         "type=coding_session",
@@ -76,13 +75,12 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     ),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "coding-session.md", "decision.md", "task.md")
-REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact", "Stop")
+REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
 # moved into the basic-memory package behind `bm hook` (SPEC-55).
 REQUIRED_HOOK_SCRIPTS = (
     "hooks/session_start.py",
     "hooks/pre_compact.py",
-    "hooks/stop.py",
 )
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {
@@ -204,8 +202,8 @@ def validate_plugin(plugin_dir: Path) -> None:
     readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
     for required_text in (
         "lifecycle trace stays local",
-        "Stop hook",
-        "agent-authored checkpoint",
+        "post-compaction `SessionStart`",
+        "note is agent-authored",
     ):
         if required_text not in readme:
             raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")

@@ -7,7 +7,7 @@ description: Save a deliberate Codex work checkpoint to Basic Memory with change
 
 Create a durable handoff note for current Codex work. Use this when the user asks
 to checkpoint, wrap up, hand off, remember the state of the work, or when the
-Stop hook requests the deliberate handoff after compaction.
+post-compaction SessionStart context requests the deliberate handoff.
 
 ## Gather
 
@@ -49,7 +49,7 @@ Do not claim a test passed unless you ran it or the user supplied the result.
 
 ## Privacy Gate
 
-Apply this gate to deliberate checkpoints and Stop-requested checkpoints alike.
+Apply this gate to deliberate checkpoints and compact-requested checkpoints alike.
 It is mandatory before any `write_note` call:
 
 1. Merge user and project `redactKeys` and `redactPaths` by accumulation. Include
