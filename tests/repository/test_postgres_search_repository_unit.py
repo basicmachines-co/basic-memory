@@ -14,10 +14,14 @@ import basic_memory.repository.search_repository_base as search_repository_base_
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-from basic_memory.repository.search_repository_base import _PreparedEntityVectorSync
+from basic_memory.repository.search_repository_base import (
+    VectorChunkState,
+    _PreparedEntityVectorSync,
+)
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
+    SemanticVectorIndexExtensionError,
 )
 
 
@@ -242,11 +246,14 @@ class TestDeleteStaleChunks:
     async def test_delete_stale_chunks_builds_correct_params(self):
         repo = _make_repo()
         session = AsyncMock()
+        ownership_result = MagicMock()
+        ownership_result.scalars.return_value.all.return_value = []
+        session.execute.side_effect = [ownership_result, MagicMock()]
         stale_ids = [10, 20, 30]
         await repo._delete_stale_chunks(session, stale_ids, entity_id=5)
 
-        session.execute.assert_called_once()
-        call_args = session.execute.call_args
+        assert session.execute.await_count == 2
+        call_args = session.execute.await_args_list[1]
         params = call_args[0][1]
         assert params["stale_id_0"] == 10
         assert params["stale_id_1"] == 20
@@ -265,12 +272,55 @@ class TestDeleteEntityChunks:
     async def test_delete_entity_chunks_executes_sql(self):
         repo = _make_repo()
         session = AsyncMock()
+        ownership_result = MagicMock()
+        ownership_result.scalars.return_value.all.return_value = []
+        session.execute.side_effect = [ownership_result, MagicMock()]
         await repo._delete_entity_chunks(session, entity_id=42)
-        session.execute.assert_called_once()
-        call_args = session.execute.call_args
+        assert session.execute.await_count == 2
+        call_args = session.execute.await_args_list[1]
         params = call_args[0][1]
         assert params["project_id"] == repo.project_id
         assert params["entity_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_postgres_upsert_preserves_external_vector_ownership() -> None:
+    """Postgres must reject an adapter switch before overwriting manifest ownership."""
+    repo = _make_repo(
+        semantic_enabled=True,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    repo._semantic_vector_index_name = "recording-b"
+    session = AsyncMock()
+
+    with pytest.raises(SemanticVectorIndexExtensionError, match="recording-a"):
+        await repo._upsert_scheduled_chunk_records(
+            session,
+            entity_id=42,
+            scheduled_records=[
+                {
+                    "chunk_key": "entity:42:0",
+                    "chunk_text": "changed",
+                    "source_hash": "new-hash",
+                }
+            ],
+            existing_by_key={
+                "entity:42:0": VectorChunkState(
+                    id=7,
+                    chunk_key="entity:42:0",
+                    source_hash="old-hash",
+                    entity_fingerprint="old-fingerprint",
+                    embedding_model="stub:4:document",
+                    has_embedding=True,
+                    vector_index="recording-a",
+                    embedding_status="ready",
+                )
+            },
+            entity_fingerprint="new-fingerprint",
+            embedding_model="stub:4:document",
+        )
+
+    session.execute.assert_not_awaited()
 
 
 class TestBatchPrepareWindow:

@@ -399,6 +399,11 @@ class PostgresSearchRepository(SearchRepositoryBase):
         if not scheduled_records:
             return []
 
+        self._assert_manifest_vector_ownership(
+            current.vector_index
+            for record in scheduled_records
+            if (current := existing_by_key.get(record["chunk_key"])) is not None
+        )
         upsert_params: dict[str, object] = {
             "project_id": self.project_id,
             "entity_id": entity_id,
