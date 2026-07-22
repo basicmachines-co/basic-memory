@@ -199,6 +199,7 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             MagicMock(),
             MagicMock(),
             MagicMock(),
+            MagicMock(),
         ]
 
         await repo._ensure_vector_tables()
