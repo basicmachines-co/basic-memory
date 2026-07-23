@@ -316,7 +316,14 @@ def _format_search_markdown(result: SearchResponse, project: str, query: str | N
     consumption when structured data isn't needed.
     """
     if not result.results:
-        return f"No results found for '{query or ''}' in project '{project}'."
+        # Empty search is usually "no match for this query," not "empty knowledge base," so we
+        # do not repeat the first-note offer here (that would nag established users). Point at
+        # recent_activity, which owns the getting-started guidance when the base is truly empty.
+        return (
+            f"No results found for '{query or ''}' in project '{project}'. "
+            f'Try broader or different terms, or call recent_activity(project="{project}") to '
+            "orient — if the knowledge base is empty it will guide creating a first note."
+        )
 
     parts = []
 
