@@ -25,6 +25,7 @@ REQUIRED_SKILLS = (
 )
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
+        "checkpointOnCompact",
         "captureEvents",
         "user-level",
         "project-level",
@@ -37,6 +38,7 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     ),
     "bm-status": (
         "~/.codex/basic-memory.json",
+        "checkpointOnCompact",
         "hook status --harness codex",
         "pending envelopes",
         "archived envelopes",

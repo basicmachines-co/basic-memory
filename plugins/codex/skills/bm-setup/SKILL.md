@@ -44,6 +44,10 @@ repo, default project, current directory, or previous local state.
 - `rememberFolder`: default `codex-remember`.
 - `placementConventions`: a short note about where decisions, tasks, and research
   notes should land.
+- `checkpointOnCompact`: whether post-compaction SessionStart asks Codex to run
+  `bm-checkpoint`. Default to `false`; enable it only when the user explicitly
+  opts in after hearing that checkpoint notes can include internal repository
+  state and still pass through normal tool approval/security checks.
 - `captureEvents`: whether to record redacted lifecycle-event envelopes in the
   local hook inbox. Default to `true`; an explicit JSON boolean `false` opts out.
 - `redactKeys` and `redactPaths`: optional additions to the built-in redaction
@@ -86,6 +90,7 @@ project-level file:
     "sessionProfile": "<general-or-coding>",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
+    "checkpointOnCompact": false,
     "captureEvents": true,
     "redactKeys": [],
     "redactPaths": [],
@@ -97,12 +102,13 @@ project-level file:
 Omit `captureFolder` to use `codex/<repo-dir>`; persist it only for an explicit
 override. Preserve unrelated keys if the chosen file already exists. Include
 `projectMode` when the user chose cloud, local, or mixed routing. Always persist
-`captureEvents` as a JSON boolean. Empty `redactKeys` and `redactPaths` lists may
-be omitted; when present, they must be JSON arrays of strings. `redactKeys`
-extends payload-key redaction, while `redactPaths` also protects
-working-directory and path-bearing checkpoint content. User and project
-redaction lists accumulate. These files are intentionally Codex-specific; do
-not write `.claude/settings.json`.
+`checkpointOnCompact` and `captureEvents` as JSON booleans. Keep
+`checkpointOnCompact` false unless the user explicitly opts in. Empty
+`redactKeys` and `redactPaths` lists may be omitted; when present, they must be
+JSON arrays of strings. `redactKeys` extends payload-key redaction, while
+`redactPaths` also protects working-directory and path-bearing checkpoint
+content. User and project redaction lists accumulate. These files are
+intentionally Codex-specific; do not write `.claude/settings.json`.
 
 For a user-level coding setup, omit `sessionProfile` from the shared user file and
 keep both the coding profile and confirmed repository identifier in the project
@@ -164,10 +170,11 @@ Before closing, prove the mapping works:
 - Run `basic-memory hook status --harness codex --project-dir <repo-root>` (using
   `bm` or `uvx basic-memory` if needed). Confirm that it finds this repo's
   settings, reports the selected project, session profile, repository, and
-  intended capture state.
+  intended checkpoint-prompt and capture states.
   Its inbox counts are shared across harnesses.
 - If any check errors, fix the project ref or hook launcher before finishing.
 
-Finish with the project mapping, schemas seeded or skipped, capture/redaction
-choices, shared inbox status, and the verification result. Tell the user that
-plugin hooks need to be reviewed and trusted in Codex before they run.
+Finish with the project mapping, schemas seeded or skipped, checkpoint,
+capture/redaction choices, shared inbox status, and the verification result.
+Tell the user that plugin hooks need to be reviewed and trusted in Codex before
+they run.

@@ -84,6 +84,8 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "marketplace file should not" in readme
     assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
     assert "the nearest project file overrides only the keys it declares" in readme
+    assert '"checkpointOnCompact": false' in readme
+    assert "Checkpoint prompting is off by default" in readme
     assert "keep both the profile and checkout-specific repository" in readme
 
 

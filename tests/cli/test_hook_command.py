@@ -483,7 +483,15 @@ def test_codex_compact_session_start_requests_agent_authored_checkpoint(
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
-        json.dumps({"basicMemory": {"primaryProject": "demo", **session_settings}}),
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "demo",
+                    "checkpointOnCompact": True,
+                    **session_settings,
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -503,11 +511,74 @@ def test_codex_compact_session_start_requests_agent_authored_checkpoint(
     assert "Do not write lifecycle telemetry or a transcript dump" in result.stdout
 
 
-def test_codex_startup_does_not_request_checkpoint(bm_home: Path, tmp_path: Path) -> None:
+def test_codex_compact_checkpoint_prompt_defaults_off(bm_home: Path, tmp_path: Path) -> None:
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
         json.dumps({"basicMemory": {"primaryProject": "demo"}}),
+        encoding="utf-8",
+    )
+
+    with patch(
+        "basic_memory.mcp.tools.search_notes",
+        new_callable=AsyncMock,
+        return_value=SEARCH_EMPTY,
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(project, trigger="compact"),
+        )
+
+    assert result.exit_code == 0
+    assert "`codex:bm-checkpoint`" not in result.stdout
+
+
+@pytest.mark.parametrize("gate_value", ["true", 1, "yes", {"on": True}])
+def test_codex_compact_checkpoint_prompt_fails_closed_on_non_boolean(
+    bm_home: Path, tmp_path: Path, gate_value: object
+) -> None:
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "demo",
+                    "checkpointOnCompact": gate_value,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch(
+        "basic_memory.mcp.tools.search_notes",
+        new_callable=AsyncMock,
+        return_value=SEARCH_EMPTY,
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--harness", "codex", "--project-dir", str(project)],
+            input=_payload(project, trigger="compact"),
+        )
+
+    assert result.exit_code == 0
+    assert "`codex:bm-checkpoint`" not in result.stdout
+
+
+def test_codex_startup_does_not_request_enabled_checkpoint(bm_home: Path, tmp_path: Path) -> None:
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "demo",
+                    "checkpointOnCompact": True,
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -532,7 +603,14 @@ def test_codex_compact_checkpoint_prompt_survives_unreachable_memory(
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
-        json.dumps({"basicMemory": {"primaryProject": "demo"}}),
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "demo",
+                    "checkpointOnCompact": True,
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -1095,6 +1173,7 @@ def test_status_reports_inbox_and_settings(
     assert "last flush: 2026-07-15T10:00:00+00:00" in result.stdout
     assert "found" in result.stdout
     assert "primary project: demo" in result.stdout
+    assert "checkpoint on compact: off" in result.stdout
     assert "capture events: on" in result.stdout
     assert "capture folder: sessions" in result.stdout
     assert "basic-memory version:" in result.stdout
@@ -1114,8 +1193,26 @@ def test_status_defaults_when_nothing_configured(
     assert "pending envelopes: 0" in result.stdout
     assert "last flush: never" in result.stdout
     assert "primary project: (not set)" in result.stdout
+    assert "checkpoint on compact: off" in result.stdout
     assert "capture events: off" in result.stdout
     assert "uv: (not found)" in result.stdout
+
+
+def test_codex_status_reports_enabled_checkpoint_prompt(bm_home: Path, tmp_path: Path) -> None:
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"checkpointOnCompact": True}}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["hook", "status", "--harness", "codex", "--project-dir", str(project)],
+    )
+
+    assert result.exit_code == 0
+    assert "checkpoint on compact: on" in result.stdout
 
 
 # --- install / remove ---
@@ -1798,7 +1895,11 @@ def test_codex_settings_broken_file_counts_as_configured(tmp_path: Path) -> None
 
     merged, found = hook_module.load_codex_settings(project)
 
-    assert merged == {"captureEvents": False, "captureFolder": "codex"}
+    assert merged == {
+        "checkpointOnCompact": False,
+        "captureEvents": False,
+        "captureFolder": "codex",
+    }
     assert found is True
 
 
@@ -1823,7 +1924,11 @@ def test_codex_settings_malformed_project_invalidates_user_fallback(tmp_path: Pa
 
     merged, found = hook_module.load_codex_settings(project)
 
-    assert merged == {"captureEvents": False, "captureFolder": "codex"}
+    assert merged == {
+        "checkpointOnCompact": False,
+        "captureEvents": False,
+        "captureFolder": "codex",
+    }
     assert found is True
 
 
@@ -1848,7 +1953,11 @@ def test_codex_settings_malformed_user_blocks_project_fallback(tmp_path: Path) -
 
     merged, found = hook_module.load_codex_settings(project)
 
-    assert merged == {"captureEvents": False, "captureFolder": "codex"}
+    assert merged == {
+        "checkpointOnCompact": False,
+        "captureEvents": False,
+        "captureFolder": "codex",
+    }
     assert found is True
 
 
@@ -1858,7 +1967,11 @@ def test_codex_settings_non_dict_document(tmp_path: Path) -> None:
     (project / ".codex" / "basic-memory.json").write_text("[1]", encoding="utf-8")
 
     assert hook_module.load_codex_settings(project) == (
-        {"captureEvents": False, "captureFolder": "codex"},
+        {
+            "checkpointOnCompact": False,
+            "captureEvents": False,
+            "captureFolder": "codex",
+        },
         True,
     )
 
@@ -1871,7 +1984,11 @@ def test_codex_settings_non_dict_basic_memory_block(tmp_path: Path) -> None:
     )
 
     assert hook_module.load_codex_settings(project) == (
-        {"captureEvents": False, "captureFolder": "codex"},
+        {
+            "checkpointOnCompact": False,
+            "captureEvents": False,
+            "captureFolder": "codex",
+        },
         True,
     )
 
@@ -1881,7 +1998,11 @@ def test_codex_settings_default_on_without_config(tmp_path: Path) -> None:
     project.mkdir()
 
     assert hook_module.load_codex_settings(project) == (
-        {"captureEvents": True, "captureFolder": "codex"},
+        {
+            "checkpointOnCompact": False,
+            "captureEvents": True,
+            "captureFolder": "codex",
+        },
         False,
     )
 
@@ -1924,6 +2045,7 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
     assert found is True
     assert merged["primaryProject"] == "project-level"
     assert merged["recallTimeframe"] == "9d"
+    assert merged["checkpointOnCompact"] is False
     assert merged["captureEvents"] is True
     assert merged["captureFolder"] == "codex/widgets"
     assert merged["redactKeys"] == ["token", "shared-secret", "repo-secret"]
@@ -1955,6 +2077,26 @@ def test_codex_project_settings_override_user_capture_defaults(tmp_path: Path) -
     assert found is True
     assert merged["captureEvents"] is False
     assert merged["captureFolder"] == "private/checkpoints"
+
+
+def test_codex_project_settings_can_disable_user_checkpoint_opt_in(tmp_path: Path) -> None:
+    home = Path.home()
+    (home / ".codex").mkdir(parents=True, exist_ok=True)
+    (home / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"checkpointOnCompact": True}}),
+        encoding="utf-8",
+    )
+    project = tmp_path / "proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"checkpointOnCompact": False}}),
+        encoding="utf-8",
+    )
+
+    merged, found = hook_module.load_codex_settings(project)
+
+    assert found is True
+    assert merged["checkpointOnCompact"] is False
 
 
 def test_string_list_guards_config_types() -> None:

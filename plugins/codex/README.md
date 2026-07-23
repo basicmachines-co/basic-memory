@@ -11,8 +11,8 @@ verification, decision capture, and resumable checkpoints.
 
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
   decisions, and recent Codex checkpoints before substantial work.
-- **Checkpoint work.** The post-compaction `SessionStart` context asks the
-  resumed Codex turn to run `bm-checkpoint`.
+- **Checkpoint work when enabled.** The optional post-compaction `SessionStart`
+  context asks the resumed Codex turn to run `bm-checkpoint`.
   The resulting `codex_session` or `coding_session` note is agent-authored from
   the compacted working context, with repository and pull-request evidence.
 - **Capture decisions.** The `bm-decide` skill records durable engineering
@@ -102,6 +102,7 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
     "focus": "code/dev",
     "rememberFolder": "codex-remember",
     "recallTimeframe": "7d",
+    "checkpointOnCompact": false,
     "captureEvents": true,
     "redactKeys": [],
     "redactPaths": [],
@@ -117,10 +118,14 @@ The lifecycle trace stays local: `basic-memory hook flush` only moves valid
 envelopes into the local retention archive and never creates graph notes. Add
 `redactKeys` and `redactPaths` arrays to extend the built-in redaction floor.
 
-Codex ignores PreCompact stdout. After compaction, Codex runs SessionStart with
-the `compact` trigger; that context directly asks the resumed agent to run
-`bm-checkpoint` from its compacted working context. `sessionProfile` only selects
-whether the skill writes a `codex_session` or `coding_session` note.
+Checkpoint prompting is off by default. Set `checkpointOnCompact` to the JSON
+boolean `true` to opt in. Codex ignores PreCompact stdout; after compaction,
+Codex runs SessionStart with the `compact` trigger. When the setting is enabled,
+that context asks the resumed agent to run `bm-checkpoint` from its compacted
+working context. The resulting note may include internal repository state and
+is written only after the normal tool approval/security checks.
+`sessionProfile` only selects whether the skill writes a `codex_session` or
+`coding_session` note.
 
 When `captureFolder` is omitted, Codex resolves the Git top-level directory and
 writes to `codex/<repo-dir>`. An explicit folder still wins.

@@ -11,6 +11,8 @@ Contracts:
     to stderr and exits 0 — a hook must never disrupt an agent session.
   - The retired stop verb remains a JSON no-op for upgraded installs whose
     existing Codex configuration has not been reinstalled yet.
+  - Codex checkpoint prompting defaults off. Only the JSON boolean ``true``
+    enables it; malformed values and malformed config fail closed.
   - Codex event capture defaults on. An explicit JSON boolean ``false`` turns
     it off, while malformed values and malformed config fail closed.
   - Graph-derived brief content is fenced and labeled as reference data, not
@@ -74,6 +76,7 @@ QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
+CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = False
 CODEX_DEFAULT_CAPTURE_EVENTS = True
 CODEX_CHECKPOINT_PROMPT = (
     "Basic Memory checkpoint required after compaction. Use the "
@@ -142,8 +145,8 @@ PROFILES: dict[Harness, HarnessProfile] = {
         checkpoint_tags=("codex", "auto-capture"),
         setup_nudge=(
             "_This repo is not configured for Basic Memory yet. Run `Use Basic Memory "
-            "for Codex to set up this repo` to map a project, seed schemas, and turn "
-            "on Codex checkpoints._"
+            "for Codex to set up this repo` to map a project, seed schemas, and "
+            "configure optional Codex checkpoints._"
         ),
         status_hint="Run `Use bm-status` to check the Basic Memory project mapping.",
         pin_tip=(
@@ -289,13 +292,15 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
 
     Precedence (lowest to highest): ``~/.codex/basic-memory.json``, then the
     nearest project ``.codex/basic-memory.json``. Redaction lists accumulate so
-    a project cannot weaken user-level privacy rules. Codex capture is enabled
-    when omitted, and its default folder is namespaced by the Git repository
-    directory. Any malformed source counts as configured and fails closed for
-    the whole evaluation so a later source cannot rebuild routing without the
-    missing redaction policy.
+    a project cannot weaken user-level privacy rules. Codex lifecycle capture
+    is enabled when omitted, checkpoint prompting is disabled when omitted, and
+    the default folder is namespaced by the Git repository directory. Any
+    malformed source counts as configured and fails closed for the whole
+    evaluation so a later source cannot rebuild routing without the missing
+    redaction policy.
     """
     defaults: dict = {
+        "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
         "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
         "captureFolder": _codex_default_capture_folder(directory),
     }
@@ -682,7 +687,7 @@ def _build_brief(
         lines += [
             "",
             "## Where to write",
-            f"- Session checkpoints (the PreCompact auto-capture) go to `{capture_folder}/`.",
+            f"- Session checkpoints go to `{capture_folder}/`.",
         ]
         if placement_conventions:
             lines.append(
@@ -1036,7 +1041,12 @@ def _session_start(harness: Harness, project_dir: Optional[Path]) -> None:
     primary = str(cfg.get("primaryProject") or "").strip()
     checkpoint_prompt = (
         CODEX_CHECKPOINT_PROMPT
-        if harness is Harness.codex and event.trigger == "compact" and primary
+        if (
+            harness is Harness.codex
+            and event.trigger == "compact"
+            and primary
+            and cfg.get("checkpointOnCompact") is True
+        )
         else None
     )
     brief = _build_brief(profile, cfg, configured, checkpoint_prompt)
@@ -1491,6 +1501,9 @@ def status(
     typer.echo(f"primary project: {str(cfg.get('primaryProject') or '').strip() or '(not set)'}")
     typer.echo(f"session profile: {str(cfg.get('sessionProfile') or 'general').strip()}")
     typer.echo(f"repository: {str(cfg.get('repository') or '').strip() or '(not set)'}")
+    typer.echo(
+        f"checkpoint on compact: {'on' if cfg.get('checkpointOnCompact') is True else 'off'}"
+    )
     typer.echo(f"capture events: {'on' if cfg.get('captureEvents') is True else 'off'}")
     typer.echo(
         f"capture folder: {str(cfg.get('captureFolder') or profile.default_capture_folder).strip()}"
