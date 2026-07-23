@@ -24,16 +24,18 @@ Gather a concise diagnostic. Do not over-investigate.
      `redactKeys` and `redactPaths` accumulate
    - report the resolved `primaryProject`, `secondaryProjects`, `teamProjects`,
      `captureFolder`, `rememberFolder`, `recallTimeframe`, `focus`,
-     `sessionProfile`, `repository`, `checkpointOnCompact`, `captureEvents`,
-     `redactKeys`, and `redactPaths`
+     `sessionProfile`, `repository`, `checkpointOnCompact`,
+     `checkpointPrivacyReview`, `captureEvents`, `redactKeys`, and `redactPaths`
+   - resolve omitted Codex defaults as `rememberFolder=codex/remember`,
+     `checkpointOnCompact=true`, and `checkpointPrivacyReview=false`
 
 3. Core hook health:
    - with the first available launcher, run
      `basic-memory hook status --harness codex --project-dir <repo-root>`
    - report the shared inbox path, pending envelopes, archived envelopes, last
      flush, settings state, resolved primary project, capture state, capture
-     folder, checkpoint-prompt state, Basic Memory version, and uv version from
-     that command
+     folder, checkpoint-prompt state, checkpoint-privacy-review state, Basic
+     Memory version, and uv version from that command
    - inbox counts are global across supported harnesses; do not attribute a
      backlog solely to Codex
    - treat the command's settings resolution as canonical for hook behavior; if
@@ -70,6 +72,7 @@ Basic Memory for Codex
 - Session profile: <general | coding>
 - Repository: <owner/name or none>
 - Checkpoint on compact: <enabled | disabled>
+- Checkpoint privacy review: <enabled | disabled>
 - Event capture: <enabled | disabled>
 - Redact keys: <configured count or none>
 - Redact paths: <configured count or none>

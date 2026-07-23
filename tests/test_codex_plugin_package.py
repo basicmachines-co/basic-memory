@@ -84,8 +84,12 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "marketplace file should not" in readme
     assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
     assert "the nearest project file overrides only the keys it declares" in readme
-    assert '"checkpointOnCompact": false' in readme
-    assert "Checkpoint prompting is off by default" in readme
+    assert '"checkpointOnCompact": true' in readme
+    assert '"checkpointPrivacyReview": false' in readme
+    assert '"rememberFolder": "codex/remember"' in readme
+    assert "Checkpoint prompting is on by default" in readme
+    assert "additional checkpoint privacy review is off by default" in readme
+    assert "Decision notes default to `codex/decisions`" in readme
     assert "keep both the profile and checkout-specific repository" in readme
 
 
@@ -105,6 +109,18 @@ def test_user_level_coding_profile_stays_with_repository_override() -> None:
     }
     assert "omit `sessionProfile` from the shared user file" in setup
     assert '"sessionProfile": "coding",\n    "repository": "owner/name"' in setup
+
+
+def test_codex_manual_capture_defaults_share_codex_tree() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    setup = (repo_root / "plugins/codex/skills/bm-setup/SKILL.md").read_text(encoding="utf-8")
+    decide = (repo_root / "plugins/codex/skills/bm-decide/SKILL.md").read_text(encoding="utf-8")
+    remember = (repo_root / "plugins/codex/skills/bm-remember/SKILL.md").read_text(encoding="utf-8")
+
+    assert '"rememberFolder": "codex/remember"' in setup
+    assert "Default decisions to `codex/decisions`" in setup
+    assert "otherwise use `codex/decisions`" in decide
+    assert "`rememberFolder`, default `codex/remember`" in remember
 
 
 def test_coding_session_schema_is_shared_across_host_plugins() -> None:
@@ -158,11 +174,14 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
 
-def test_codex_checkpoint_applies_accumulated_redaction_before_write() -> None:
+def test_codex_checkpoint_privacy_review_is_opt_in() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")
 
-    assert "## Privacy Gate" in skill
+    assert "## Optional Privacy Review" in skill
+    assert "`checkpointPrivacyReview` value is the literal JSON boolean `true`" in skill
+    assert "additional privacy review is disabled by default" in skill
+    assert "skip this extra scan" in skill
     assert "`redactKeys` and `redactPaths` accumulate" in skill
     assert "Scrub **every string** passed to `write_note`" in skill
     assert "Do not omit schema-required path fields; use the marker" in skill

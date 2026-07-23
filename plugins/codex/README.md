@@ -11,7 +11,7 @@ verification, decision capture, and resumable checkpoints.
 
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
   decisions, and recent Codex checkpoints before substantial work.
-- **Checkpoint work when enabled.** The optional post-compaction `SessionStart`
+- **Checkpoint work after compaction.** The post-compaction `SessionStart`
   context asks the resumed Codex turn to run `bm-checkpoint`.
   The resulting `codex_session` or `coding_session` note is agent-authored from
   the compacted working context, with repository and pull-request evidence.
@@ -100,13 +100,14 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
     "secondaryProjects": [],
     "teamProjects": {},
     "focus": "code/dev",
-    "rememberFolder": "codex-remember",
+    "rememberFolder": "codex/remember",
     "recallTimeframe": "7d",
-    "checkpointOnCompact": false,
+    "checkpointOnCompact": true,
+    "checkpointPrivacyReview": false,
     "captureEvents": true,
     "redactKeys": [],
     "redactPaths": [],
-    "placementConventions": "Put decisions in decisions/ and work checkpoints in codex/<repo-dir>/."
+    "placementConventions": "Put decisions in codex/decisions/ and work checkpoints in codex/<repo-dir>/."
   }
 }
 ```
@@ -118,17 +119,27 @@ The lifecycle trace stays local: `basic-memory hook flush` only moves valid
 envelopes into the local retention archive and never creates graph notes. Add
 `redactKeys` and `redactPaths` arrays to extend the built-in redaction floor.
 
-Checkpoint prompting is off by default. Set `checkpointOnCompact` to the JSON
-boolean `true` to opt in. Codex ignores PreCompact stdout; after compaction,
+Checkpoint prompting is on by default. Set `checkpointOnCompact` to the JSON
+boolean `false` to opt out. Codex ignores PreCompact stdout; after compaction,
 Codex runs SessionStart with the `compact` trigger. When the setting is enabled,
 that context asks the resumed agent to run `bm-checkpoint` from its compacted
-working context. The resulting note may include internal repository state and
-is written only after the normal tool approval/security checks.
+working context.
+
+The plugin's additional checkpoint privacy review is off by default. Set
+`checkpointPrivacyReview` to the JSON boolean `true` to opt into the strict
+redaction and fail-closed review in `bm-checkpoint`. When it is omitted or
+`false`, the skill does not impose that extra scan and leaves checkpoint content
+to the model's judgment. This setting controls plugin instructions only; it
+cannot disable any separate review or approval enforced by Codex itself.
 `sessionProfile` only selects whether the skill writes a `codex_session` or
 `coding_session` note.
 
 When `captureFolder` is omitted, Codex resolves the Git top-level directory and
 writes to `codex/<repo-dir>`. An explicit folder still wins.
+
+Decision notes default to `codex/decisions`, and lightweight `bm-remember`
+captures default to `codex/remember`. Project placement conventions and an
+explicit `rememberFolder` can override those destinations.
 
 For a coding profile, keep both the profile and checkout-specific repository
 identifier in the project file without duplicating the shared settings:

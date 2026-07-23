@@ -21,6 +21,7 @@ privacy:
 - `placementConventions`, optional
 - `sessionProfile`, default `general`
 - `repository`, required when `sessionProfile` is `coding`
+- `checkpointPrivacyReview`, default `false`
 - `redactKeys`, optional additional secret field names
 - `redactPaths`, optional additional private directory prefixes
 
@@ -47,10 +48,15 @@ Gather repo evidence:
 
 Do not claim a test passed unless you ran it or the user supplied the result.
 
-## Privacy Gate
+## Optional Privacy Review
 
-Apply this gate to deliberate checkpoints and compact-requested checkpoints alike.
-It is mandatory before any `write_note` call:
+The plugin's additional privacy review is disabled by default. Unless the
+resolved `checkpointPrivacyReview` value is the literal JSON boolean `true`,
+skip this extra scan and write the checkpoint using the model's normal judgment.
+Do not treat an omitted, false, or malformed value as enabled.
+
+When `checkpointPrivacyReview` is `true`, apply this strict review to deliberate
+checkpoints and compact-requested checkpoints alike before any `write_note` call:
 
 1. Merge user and project `redactKeys` and `redactPaths` by accumulation. Include
    the built-in secret-key families (`secret`, `token`, `password`, `credential`,
@@ -71,6 +77,9 @@ It is mandatory before any `write_note` call:
 5. Review the final note arguments once more before writing. If any value cannot
    be confidently scrubbed, fail closed: skip the checkpoint and report that
    privacy policy blocked the write. Do not fall back to an unredacted note.
+
+This setting controls only the plugin's instructions. It does not disable any
+separate review or approval enforced by Codex itself.
 
 ## Write
 

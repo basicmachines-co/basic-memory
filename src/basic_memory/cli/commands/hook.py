@@ -11,8 +11,10 @@ Contracts:
     to stderr and exits 0 — a hook must never disrupt an agent session.
   - The retired stop verb remains a JSON no-op for upgraded installs whose
     existing Codex configuration has not been reinstalled yet.
-  - Codex checkpoint prompting defaults off. Only the JSON boolean ``true``
-    enables it; malformed values and malformed config fail closed.
+  - Codex checkpoint prompting defaults on. An explicit JSON boolean ``false``
+    disables it; malformed values and malformed config fail closed.
+  - The Codex checkpoint skill's additional privacy review defaults off. Only
+    the JSON boolean ``true`` opts into that plugin-level review.
   - Codex event capture defaults on. An explicit JSON boolean ``false`` turns
     it off, while malformed values and malformed config fail closed.
   - Graph-derived brief content is fenced and labeled as reference data, not
@@ -76,7 +78,8 @@ QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
-CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = False
+CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
+CODEX_DEFAULT_CHECKPOINT_PRIVACY_REVIEW = False
 CODEX_DEFAULT_CAPTURE_EVENTS = True
 CODEX_CHECKPOINT_PROMPT = (
     "Basic Memory checkpoint required after compaction. Use the "
@@ -293,14 +296,15 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     Precedence (lowest to highest): ``~/.codex/basic-memory.json``, then the
     nearest project ``.codex/basic-memory.json``. Redaction lists accumulate so
     a project cannot weaken user-level privacy rules. Codex lifecycle capture
-    is enabled when omitted, checkpoint prompting is disabled when omitted, and
-    the default folder is namespaced by the Git repository directory. Any
-    malformed source counts as configured and fails closed for the whole
-    evaluation so a later source cannot rebuild routing without the missing
-    redaction policy.
+    and checkpoint prompting are enabled when omitted, while the checkpoint
+    skill's additional privacy review is disabled when omitted. The default
+    folder is namespaced by the Git repository directory. Any malformed source
+    counts as configured and fails closed for the whole evaluation so a later
+    source cannot rebuild routing without the missing redaction policy.
     """
     defaults: dict = {
         "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
+        "checkpointPrivacyReview": CODEX_DEFAULT_CHECKPOINT_PRIVACY_REVIEW,
         "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
         "captureFolder": _codex_default_capture_folder(directory),
     }
@@ -323,7 +327,11 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
             # Why: continuing could combine a later checkpoint route with a
             # missing earlier redaction policy and persist unredacted data.
             # Outcome: discard every route and disable capture for this event.
-            return {**defaults, "captureEvents": False}, True
+            return {
+                **defaults,
+                "checkpointOnCompact": False,
+                "captureEvents": False,
+            }, True
         cumulative_redactions: dict[str, list[str]] = {}
         for key in ("redactKeys", "redactPaths"):
             values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
@@ -1503,6 +1511,10 @@ def status(
     typer.echo(f"repository: {str(cfg.get('repository') or '').strip() or '(not set)'}")
     typer.echo(
         f"checkpoint on compact: {'on' if cfg.get('checkpointOnCompact') is True else 'off'}"
+    )
+    typer.echo(
+        "checkpoint privacy review: "
+        f"{'on' if cfg.get('checkpointPrivacyReview') is True else 'off'}"
     )
     typer.echo(f"capture events: {'on' if cfg.get('captureEvents') is True else 'off'}")
     typer.echo(

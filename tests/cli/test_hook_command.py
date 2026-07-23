@@ -511,7 +511,7 @@ def test_codex_compact_session_start_requests_agent_authored_checkpoint(
     assert "Do not write lifecycle telemetry or a transcript dump" in result.stdout
 
 
-def test_codex_compact_checkpoint_prompt_defaults_off(bm_home: Path, tmp_path: Path) -> None:
+def test_codex_compact_checkpoint_prompt_defaults_on(bm_home: Path, tmp_path: Path) -> None:
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
@@ -531,7 +531,7 @@ def test_codex_compact_checkpoint_prompt_defaults_off(bm_home: Path, tmp_path: P
         )
 
     assert result.exit_code == 0
-    assert "`codex:bm-checkpoint`" not in result.stdout
+    assert "`codex:bm-checkpoint`" in result.stdout
 
 
 @pytest.mark.parametrize("gate_value", ["true", 1, "yes", {"on": True}])
@@ -1174,6 +1174,7 @@ def test_status_reports_inbox_and_settings(
     assert "found" in result.stdout
     assert "primary project: demo" in result.stdout
     assert "checkpoint on compact: off" in result.stdout
+    assert "checkpoint privacy review: off" in result.stdout
     assert "capture events: on" in result.stdout
     assert "capture folder: sessions" in result.stdout
     assert "basic-memory version:" in result.stdout
@@ -1194,6 +1195,7 @@ def test_status_defaults_when_nothing_configured(
     assert "last flush: never" in result.stdout
     assert "primary project: (not set)" in result.stdout
     assert "checkpoint on compact: off" in result.stdout
+    assert "checkpoint privacy review: off" in result.stdout
     assert "capture events: off" in result.stdout
     assert "uv: (not found)" in result.stdout
 
@@ -1213,6 +1215,26 @@ def test_codex_status_reports_enabled_checkpoint_prompt(bm_home: Path, tmp_path:
 
     assert result.exit_code == 0
     assert "checkpoint on compact: on" in result.stdout
+    assert "checkpoint privacy review: off" in result.stdout
+
+
+def test_codex_status_reports_enabled_checkpoint_privacy_review(
+    bm_home: Path, tmp_path: Path
+) -> None:
+    project = tmp_path / "codex-proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"checkpointPrivacyReview": True}}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["hook", "status", "--harness", "codex", "--project-dir", str(project)],
+    )
+
+    assert result.exit_code == 0
+    assert "checkpoint privacy review: on" in result.stdout
 
 
 # --- install / remove ---
@@ -1897,6 +1919,7 @@ def test_codex_settings_broken_file_counts_as_configured(tmp_path: Path) -> None
 
     assert merged == {
         "checkpointOnCompact": False,
+        "checkpointPrivacyReview": False,
         "captureEvents": False,
         "captureFolder": "codex",
     }
@@ -1926,6 +1949,7 @@ def test_codex_settings_malformed_project_invalidates_user_fallback(tmp_path: Pa
 
     assert merged == {
         "checkpointOnCompact": False,
+        "checkpointPrivacyReview": False,
         "captureEvents": False,
         "captureFolder": "codex",
     }
@@ -1955,6 +1979,7 @@ def test_codex_settings_malformed_user_blocks_project_fallback(tmp_path: Path) -
 
     assert merged == {
         "checkpointOnCompact": False,
+        "checkpointPrivacyReview": False,
         "captureEvents": False,
         "captureFolder": "codex",
     }
@@ -1969,6 +1994,7 @@ def test_codex_settings_non_dict_document(tmp_path: Path) -> None:
     assert hook_module.load_codex_settings(project) == (
         {
             "checkpointOnCompact": False,
+            "checkpointPrivacyReview": False,
             "captureEvents": False,
             "captureFolder": "codex",
         },
@@ -1986,6 +2012,7 @@ def test_codex_settings_non_dict_basic_memory_block(tmp_path: Path) -> None:
     assert hook_module.load_codex_settings(project) == (
         {
             "checkpointOnCompact": False,
+            "checkpointPrivacyReview": False,
             "captureEvents": False,
             "captureFolder": "codex",
         },
@@ -1999,7 +2026,8 @@ def test_codex_settings_default_on_without_config(tmp_path: Path) -> None:
 
     assert hook_module.load_codex_settings(project) == (
         {
-            "checkpointOnCompact": False,
+            "checkpointOnCompact": True,
+            "checkpointPrivacyReview": False,
             "captureEvents": True,
             "captureFolder": "codex",
         },
@@ -2045,7 +2073,8 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
     assert found is True
     assert merged["primaryProject"] == "project-level"
     assert merged["recallTimeframe"] == "9d"
-    assert merged["checkpointOnCompact"] is False
+    assert merged["checkpointOnCompact"] is True
+    assert merged["checkpointPrivacyReview"] is False
     assert merged["captureEvents"] is True
     assert merged["captureFolder"] == "codex/widgets"
     assert merged["redactKeys"] == ["token", "shared-secret", "repo-secret"]
@@ -2079,7 +2108,7 @@ def test_codex_project_settings_override_user_capture_defaults(tmp_path: Path) -
     assert merged["captureFolder"] == "private/checkpoints"
 
 
-def test_codex_project_settings_can_disable_user_checkpoint_opt_in(tmp_path: Path) -> None:
+def test_codex_project_settings_can_disable_user_checkpoint_setting(tmp_path: Path) -> None:
     home = Path.home()
     (home / ".codex").mkdir(parents=True, exist_ok=True)
     (home / ".codex" / "basic-memory.json").write_text(
@@ -2097,6 +2126,20 @@ def test_codex_project_settings_can_disable_user_checkpoint_opt_in(tmp_path: Pat
 
     assert found is True
     assert merged["checkpointOnCompact"] is False
+
+
+def test_codex_project_settings_can_enable_checkpoint_privacy_review(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    (project / ".codex").mkdir(parents=True)
+    (project / ".codex" / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"checkpointPrivacyReview": True}}),
+        encoding="utf-8",
+    )
+
+    merged, found = hook_module.load_codex_settings(project)
+
+    assert found is True
+    assert merged["checkpointPrivacyReview"] is True
 
 
 def test_string_list_guards_config_types() -> None:
