@@ -77,13 +77,15 @@ async def test_search_no_results_points_to_recent_activity(client, test_project)
 
 
 def test_search_empty_orientation_routes_like_the_search():
-    """The empty-search orientation call mirrors how the search was routed: bare recent_activity
-    for all-projects, external id when available, display name only as a local fallback."""
+    """The empty-search orientation mirrors how the search was routed: an all-projects miss goes
+    to the enumerator (a bare recent_activity() would narrow to the default project); a scoped
+    search orients by external id, with the display name only as a local fallback."""
     empty = SearchResponse(results=[], current_page=1, page_size=10)
 
+    # all-projects: must not suggest recent_activity() (not force-discovery); enumerate instead.
     all_projects = _format_search_markdown(empty, "all projects", "q")
-    assert "recent_activity()" in all_projects
-    assert 'recent_activity(project="all projects")' not in all_projects
+    assert "list_memory_projects()" in all_projects
+    assert "recent_activity(" not in all_projects
 
     routed = _format_search_markdown(empty, "myproj", "q", project_id="ext-9")
     assert 'recent_activity(project_id="ext-9")' in routed
