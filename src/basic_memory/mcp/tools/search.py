@@ -309,7 +309,9 @@ Error searching for '{query}': {error_message}
 - **Observation categories**: `entity_types=["observation"], categories=["requirement"]`"""
 
 
-def _format_search_markdown(result: SearchResponse, project: str, query: str | None) -> str:
+def _format_search_markdown(
+    result: SearchResponse, project: str, query: str | None, project_id: str | None = None
+) -> str:
     """Format SearchResponse as compact markdown text.
 
     Produces a human-readable markdown representation suitable for LLM
@@ -319,13 +321,15 @@ def _format_search_markdown(result: SearchResponse, project: str, query: str | N
         # Empty search is usually "no match for this query," not "empty knowledge base," so we
         # do not repeat the first-note offer here (that would nag established users). Point at
         # recent_activity, which owns the getting-started guidance when the base is truly empty.
-        # The all-projects path formats project as "all projects" (not a real identifier), so
-        # suggest discovery-mode recent_activity() there rather than a project-scoped call.
-        orient = (
-            "recent_activity()"
-            if project == "all projects"
-            else f'recent_activity(project="{project}")'
-        )
+        # Route the orientation call the same way the search was routed. all-projects search
+        # is not a real project (discovery mode → bare call); otherwise prefer the external id,
+        # since names collide across cloud workspaces, and fall back to the name locally.
+        if project == "all projects":
+            orient = "recent_activity()"
+        elif project_id:
+            orient = f'recent_activity(project_id="{project_id}")'
+        else:
+            orient = f'recent_activity(project="{project}")'
         return (
             f"No results found for '{query or ''}' in project '{project}'. "
             f"Try broader or different terms, or call {orient} to orient — if the knowledge "
@@ -1187,7 +1191,9 @@ async def search_notes(
                 if output_format == "json":
                     return result.model_dump(mode="json", exclude_none=True)
 
-                return _format_search_markdown(result, active_project.name, query)
+                return _format_search_markdown(
+                    result, active_project.name, query, project_id=active_project.external_id
+                )
 
             except Exception as e:
                 logger.error(

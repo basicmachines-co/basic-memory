@@ -70,23 +70,27 @@ async def test_search_no_results_points_to_recent_activity(client, test_project)
 
     assert isinstance(result, str)
     assert "No results found" in result
-    # The orientation call must stay scoped to the searched project.
-    assert f'recent_activity(project="{test_project.name}")' in result
+    # The orientation call stays scoped to the searched project, by collision-safe external id.
+    assert "recent_activity(project_id=" in result
     # It should NOT duplicate the write_note offer here (that would nag established users).
     assert "write_note" not in result
 
 
-def test_search_empty_all_projects_suggests_discovery_recent_activity():
-    """'all projects' is not a real project id, so the all-projects empty case must suggest a
-    bare recent_activity() (discovery mode), not recent_activity(project="all projects")."""
+def test_search_empty_orientation_routes_like_the_search():
+    """The empty-search orientation call mirrors how the search was routed: bare recent_activity
+    for all-projects, external id when available, display name only as a local fallback."""
     empty = SearchResponse(results=[], current_page=1, page_size=10)
 
     all_projects = _format_search_markdown(empty, "all projects", "q")
     assert "recent_activity()" in all_projects
     assert 'recent_activity(project="all projects")' not in all_projects
 
-    scoped = _format_search_markdown(empty, "myproj", "q")
-    assert 'recent_activity(project="myproj")' in scoped
+    routed = _format_search_markdown(empty, "myproj", "q", project_id="ext-9")
+    assert 'recent_activity(project_id="ext-9")' in routed
+    assert 'recent_activity(project="myproj")' not in routed
+
+    local = _format_search_markdown(empty, "myproj", "q")
+    assert 'recent_activity(project="myproj")' in local
 
 
 # --- getting_started prompt (lever 3a) ---
