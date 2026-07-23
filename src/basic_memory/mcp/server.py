@@ -154,8 +154,26 @@ async def lifespan(app: FastMCP):
                 logger.debug("Skipping DB shutdown - engine provided externally")
 
 
+# A newly-connected model only sees the server `instructions` for free — everything else
+# (the ai_assistant_guide resource, tool descriptions) requires it to choose to fetch. Without
+# this, a client that connects to an empty knowledge base has nothing telling it what Basic
+# Memory is or that a first note is worth offering, and it stays idle. The framing is
+# offer-not-act on purpose: orient, then *offer* a first note, but never write one unprompted so
+# power-user / coding sessions stay unobtrusive.
+BASIC_MEMORY_INSTRUCTIONS = (
+    "Basic Memory is the user's personal knowledge base: local markdown notes that persist "
+    "across conversations and that both the user and their AI assistants can read and write.\n\n"
+    "At the start of a session, call `recent_activity` to orient yourself in the user's notes "
+    "before answering from memory. If the knowledge base is empty, briefly explain that Basic "
+    "Memory gives them persistent notes shared between the user and their AI, and offer to save "
+    "something useful from this conversation as their first note with `write_note` — then wait "
+    "for them to agree before writing anything. Do not create notes unprompted.\n\n"
+    "For a fuller guide to the tools, read the `memory://ai_assistant_guide` resource."
+)
+
 mcp = FastMCP(
     name="Basic Memory",
+    instructions=BASIC_MEMORY_INSTRUCTIONS,
     lifespan=lifespan,
 )
 mcp.add_middleware(MCPClientInfoMiddleware())

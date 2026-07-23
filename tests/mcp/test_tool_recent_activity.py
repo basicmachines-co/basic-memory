@@ -256,7 +256,10 @@ def test_recent_activity_format_project_output_no_results():
     out = recent_activity_module._format_project_output(
         project_name="proj", activity_data=empty, timeframe="7d", type_filter="", page=1
     )
-    assert "No recent activity found" in out
+    assert "No recent activity in 'proj' within 7d" in out
+    # Empty orientation call carries the offer-not-act first-note guidance.
+    assert "write_note" in out
+    assert "wait for them to agree" in out
 
 
 def test_recent_activity_format_project_output_renders_all_entities_and_relations():

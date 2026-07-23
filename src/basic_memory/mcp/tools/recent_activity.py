@@ -487,7 +487,26 @@ def _format_project_output(
     lines = [f"## Recent Activity: {project_name} ({timeframe})"]
 
     if not activity_data.results:
-        lines.append(f"\nNo recent activity found in '{project_name}' project.")
+        lines.append(f"\nNo recent activity in '{project_name}' within {timeframe}.")
+        # recent_activity is the orientation call a model makes at session start, so an empty
+        # result is the natural moment to help. Stay offer-not-act, and cover both a brand-new
+        # (empty) knowledge base and an established one that is merely quiet in this window.
+        lines.append("")
+        lines.append(
+            "If the user is just getting started and has no notes yet, briefly explain that "
+            "Basic Memory keeps notes that persist across conversations and are shared between "
+            "the user and their AI, then offer to save something useful from this conversation "
+            "as their first note — wait for them to agree before writing:"
+        )
+        lines.append("```")
+        lines.append(
+            f'write_note(project="{project_name}", title="...", content="...", folder="notes")'
+        )
+        lines.append("```")
+        lines.append(
+            f'Otherwise, widen the window with recent_activity(timeframe="30d") or find a topic '
+            f'with search_notes(project="{project_name}", query="...").'
+        )
         return "\n".join(lines)
 
     # Group results by type
