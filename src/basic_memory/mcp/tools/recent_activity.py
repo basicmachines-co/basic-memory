@@ -331,8 +331,16 @@ async def recent_activity(
             if output_format == "json":
                 return _extract_recent_rows(activity_data)
 
-            # Format project-specific mode output
-            return _format_project_output(active_project.name, activity_data, timeframe, type, page)
+            # Format project-specific mode output. Pass the external id so onboarding examples
+            # route by id, not by a name that can collide across cloud workspaces.
+            return _format_project_output(
+                active_project.name,
+                activity_data,
+                timeframe,
+                type,
+                page,
+                project_id=active_project.external_id,
+            )
 
 
 async def _get_project_activity(
@@ -482,8 +490,14 @@ def _format_project_output(
     timeframe: str,
     type_filter: Union[str, List[str]],
     page: int = 1,
+    project_id: str | None = None,
 ) -> str:
-    """Format project-specific mode output as human-readable text."""
+    """Format project-specific mode output as human-readable text.
+
+    `project_id` is the project's route-safe external id. When present, onboarding examples use
+    it instead of the display name so a model following them cannot land in a different
+    same-named project in another cloud workspace.
+    """
     lines = [f"## Recent Activity: {project_name} ({timeframe})"]
 
     if not activity_data.results:
@@ -491,6 +505,9 @@ def _format_project_output(
         # recent_activity is the orientation call a model makes at session start, so an empty
         # result is the natural moment to help. Stay offer-not-act, and cover both a brand-new
         # (empty) knowledge base and an established one that is merely quiet in this window.
+        # Prefer the external id in examples: names collide across cloud workspaces, project_id
+        # does not.
+        route = f'project_id="{project_id}"' if project_id else f'project="{project_name}"'
         lines.append("")
         lines.append(
             "If the user is just getting started and has no notes yet, briefly explain that "
@@ -499,14 +516,12 @@ def _format_project_output(
             "as their first note — wait for them to agree before writing:"
         )
         lines.append("```")
-        lines.append(
-            f'write_note(project="{project_name}", title="...", content="...", folder="notes")'
-        )
+        lines.append(f'write_note({route}, title="...", content="...", folder="notes")')
         lines.append("```")
         lines.append(
             f"Otherwise, widen the window with "
-            f'recent_activity(project="{project_name}", timeframe="30d") or find a topic '
-            f'with search_notes(project="{project_name}", query="...").'
+            f'recent_activity({route}, timeframe="30d") or find a topic '
+            f'with search_notes({route}, query="...").'
         )
         return "\n".join(lines)
 
