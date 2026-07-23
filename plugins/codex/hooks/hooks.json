@@ -1,5 +1,5 @@
 {
-  "description": "Basic Memory for Codex hooks - orient from the graph, record local lifecycle trace, and prompt for an authored checkpoint after compaction.",
+  "description": "Basic Memory for Codex hooks - orient from the graph, record local lifecycle trace, and request an authored checkpoint after compaction.",
   "hooks": {
     "SessionStart": [
       {
@@ -23,6 +23,18 @@
             "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/pre_compact.py\"",
             "statusMessage": "Checkpointing Codex work to Basic Memory",
             "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/stop.py\"",
+            "statusMessage": "Finishing the Basic Memory checkpoint",
+            "timeout": 30
           }
         ]
       }

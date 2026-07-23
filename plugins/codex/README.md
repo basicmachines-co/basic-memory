@@ -33,9 +33,10 @@ verification, decision capture, and resumable checkpoints.
 | --- | --- |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
-| `hooks/hooks.json` | SessionStart and PreCompact hook registration |
+| `hooks/hooks.json` | SessionStart, PreCompact, and rollout-compatibility Stop registration |
 | `hooks/session_start.py` | uv script: runs `basic-memory hook session-start --harness codex` |
 | `hooks/pre_compact.py` | uv script: runs `basic-memory hook pre-compact --harness codex` |
+| `hooks/stop.py` | uv script: preserves the previous checkpoint handshake during the runtime-pin rollout |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
@@ -44,6 +45,11 @@ lifecycle-event capture all live in the pinned Basic Memory revision behind
 `bm hook`. Each is a self-contained PEP 723 script pinned to a Basic Memory Git
 ref. All refs are updated together with
 `just set-codex-hook-version <sha-or-tag>`.
+
+The Stop shim is a temporary rollout bridge. While these scripts remain pinned
+to the last durable merged runtime, it preserves that runtime's checkpoint
+handshake. The dependency-only follow-up that pins the post-compaction
+`SessionStart` implementation also removes the Stop registration.
 
 ## Requirements
 

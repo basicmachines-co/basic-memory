@@ -73,12 +73,13 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     ),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "coding-session.md", "decision.md", "task.md")
-REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
+REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact", "Stop")
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
 # moved into the basic-memory package behind `bm hook` (SPEC-55).
 REQUIRED_HOOK_SCRIPTS = (
     "hooks/session_start.py",
     "hooks/pre_compact.py",
+    "hooks/stop.py",
 )
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {

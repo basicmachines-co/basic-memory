@@ -38,6 +38,7 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
     for script, verb in (
         ("session_start.py", "session-start"),
         ("pre_compact.py", "pre-compact"),
+        ("stop.py", "stop"),
     ):
         text = (hooks_dir / script).read_text(encoding="utf-8")
         assert "# /// script" in text
@@ -58,7 +59,7 @@ def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:
 
     assert justfile.count('just set-codex-hook-version "{{version}}"') == 2
     assert 'just set-codex-hook-version "$(git rev-parse HEAD)"' not in justfile
-    assert "uv add --script plugins/codex/hooks/stop.py" not in justfile
+    assert "uv add --script plugins/codex/hooks/stop.py" in justfile
 
 
 def test_codex_plugin_marketplace_identity() -> None:

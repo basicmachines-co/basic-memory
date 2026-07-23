@@ -579,6 +579,7 @@ set-version version scope="all":
 set-codex-hook-version ref:
     uv add --script plugins/codex/hooks/session_start.py --raw "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@{{ref}}"
     uv add --script plugins/codex/hooks/pre_compact.py --raw "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@{{ref}}"
+    uv add --script plugins/codex/hooks/stop.py --raw "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@{{ref}}"
 
 # Preview a version update without writing (scope: all | core | packages)
 set-version-dry-run version scope="all":
@@ -664,6 +665,7 @@ release version:
         plugins/codex/.codex-plugin/plugin.json \
         plugins/codex/hooks/session_start.py \
         plugins/codex/hooks/pre_compact.py \
+        plugins/codex/hooks/stop.py \
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
@@ -784,6 +786,7 @@ beta version:
         plugins/codex/.codex-plugin/plugin.json \
         plugins/codex/hooks/session_start.py \
         plugins/codex/hooks/pre_compact.py \
+        plugins/codex/hooks/stop.py \
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
         integrations/openclaw/package.json
