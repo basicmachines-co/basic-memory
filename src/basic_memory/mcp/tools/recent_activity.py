@@ -504,7 +504,8 @@ def _format_project_output(
         )
         lines.append("```")
         lines.append(
-            f'Otherwise, widen the window with recent_activity(timeframe="30d") or find a topic '
+            f"Otherwise, widen the window with "
+            f'recent_activity(project="{project_name}", timeframe="30d") or find a topic '
             f'with search_notes(project="{project_name}", query="...").'
         )
         return "\n".join(lines)

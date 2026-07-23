@@ -49,9 +49,12 @@ async def getting_started(
     # empty-state guidance) and branch its own response, rather than asserting emptiness here.
     activity_text = str(await recent_activity(timeframe="30d", project=project))
 
-    # Keep a first note in the project the prompt actually inspected; omitting project would let
-    # write_note fall back to its default and cross project boundaries.
+    # Every example call keeps the project the prompt actually inspected. Omitting project lets
+    # the tool fall back to its default/discovery path, which would silently move onboarding into
+    # a different project than the one whose activity we just showed. `project_arg` is the leading
+    # keyword form; `project_suffix` trails a positional first argument (read_note).
     project_arg = f'project="{project}", ' if project else ""
+    project_suffix = f', project="{project}"' if project else ""
 
     return dedent(
         f"""
@@ -72,8 +75,10 @@ async def getting_started(
           ```
           write_note({project_arg}title="...", content="...", folder="notes")
           ```
-        - **If they already have notes**, help them keep the loop going: `read_note("permalink")`
-          to open one, `search_notes(query="...")` to find a topic, or `write_note(...)` to
-          capture something new (offer first; don't write unprompted).
+        - **If they already have notes**, help them keep the loop going:
+          `read_note("permalink"{project_suffix})` to open one,
+          `search_notes({project_arg}query="...")` to find a topic, or
+          `write_note({project_arg}...)` to capture something new (offer first; don't write
+          unprompted).
         """
     ).strip()
