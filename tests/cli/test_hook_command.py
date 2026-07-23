@@ -657,11 +657,14 @@ def test_capture_events_true_boolean_writes_envelope(bm_home: Path, claude_proje
     assert envelope["payload"]["capture_folder"] == "sessions"
 
 
-def test_codex_capture_events_defaults_on(bm_home: Path, tmp_path: Path) -> None:
+def test_codex_capture_events_defaults_on_and_preserves_legacy_redaction(
+    bm_home: Path, tmp_path: Path
+) -> None:
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
-        json.dumps({"basicMemory": {"primaryProject": "demo"}}), encoding="utf-8"
+        json.dumps({"basicMemory": {"primaryProject": "demo", "redactKeys": ["trigger"]}}),
+        encoding="utf-8",
     )
     with patch(
         "basic_memory.mcp.tools.search_notes", new_callable=AsyncMock, return_value=SEARCH_EMPTY
@@ -677,6 +680,7 @@ def test_codex_capture_events_defaults_on(bm_home: Path, tmp_path: Path) -> None
     assert len(envelopes) == 1
     assert envelopes[0]["source"] == "codex"
     assert envelopes[0]["payload"]["capture_folder"] == "codex"
+    assert envelopes[0]["payload"]["trigger"] == "[REDACTED]"
 
 
 @pytest.mark.parametrize("gate_value", ["true", "false", 1, "yes", {"on": True}])
@@ -2013,6 +2017,8 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
                     "primaryProject": "user-wide",
                     "recallTimeframe": "9d",
                     "captureEvents": True,
+                    "redactKeys": ["token", "shared-secret"],
+                    "redactPaths": ["/shared/private"],
                 }
             }
         ),
@@ -2026,6 +2032,8 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
             {
                 "basicMemory": {
                     "primaryProject": "project-level",
+                    "redactKeys": ["token", "repo-secret"],
+                    "redactPaths": [],
                 }
             }
         ),
@@ -2040,6 +2048,8 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
     assert merged["checkpointOnCompact"] is True
     assert merged["captureEvents"] is True
     assert merged["captureFolder"] == "codex/widgets"
+    assert merged["redactKeys"] == ["token", "shared-secret", "repo-secret"]
+    assert merged["redactPaths"] == ["/shared/private"]
 
 
 def test_codex_project_settings_override_user_capture_defaults(tmp_path: Path) -> None:
@@ -2089,7 +2099,7 @@ def test_codex_project_settings_can_disable_user_checkpoint_setting(tmp_path: Pa
     assert merged["checkpointOnCompact"] is False
 
 
-def test_codex_settings_ignore_legacy_redaction_options(tmp_path: Path) -> None:
+def test_codex_settings_ignore_legacy_checkpoint_privacy_review(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
@@ -2109,8 +2119,8 @@ def test_codex_settings_ignore_legacy_redaction_options(tmp_path: Path) -> None:
 
     assert found is True
     assert "checkpointPrivacyReview" not in merged
-    assert "redactKeys" not in merged
-    assert "redactPaths" not in merged
+    assert merged["redactKeys"] == ["token"]
+    assert merged["redactPaths"] == ["/private"]
 
 
 def test_string_list_guards_config_types() -> None:

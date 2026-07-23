@@ -295,7 +295,8 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     checkpoint prompting are enabled when omitted. The default folder is
     namespaced by the Git repository directory. Any malformed source counts as
     configured and fails closed for the whole evaluation so a later source
-    cannot rebuild routing from incomplete settings.
+    cannot rebuild routing from incomplete settings. Existing redaction lists
+    continue to accumulate only for local lifecycle-envelope capture.
     """
     defaults: dict = {
         "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
@@ -326,12 +327,18 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
                 "checkpointOnCompact": False,
                 "captureEvents": False,
             }, True
+        cumulative_redactions: dict[str, list[str]] = {}
+        for key in ("redactKeys", "redactPaths"):
+            values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
+            if values:
+                cumulative_redactions[key] = list(dict.fromkeys(values))
         merged.update(block)
+        merged.update(cumulative_redactions)
 
-    # These legacy plugin options used to impose an extra model-authored
-    # checkpoint scan. Ignore them so existing config cannot restore that gate.
-    for key in ("checkpointPrivacyReview", "redactKeys", "redactPaths"):
-        merged.pop(key, None)
+    # This legacy option imposed an extra model-authored checkpoint scan.
+    # Ignore it so existing config cannot restore that gate. Redaction lists
+    # remain available only to the separate lifecycle-envelope capture path.
+    merged.pop("checkpointPrivacyReview", None)
 
     return merged, found
 
