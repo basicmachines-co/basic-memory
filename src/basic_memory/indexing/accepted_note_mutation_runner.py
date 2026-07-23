@@ -613,21 +613,19 @@ async def _run_accepted_note_update(
             # head. The invariant that makes this safe is "the superseded
             # version survives as a storage object version", so a FOREIGN head
             # may only be superseded once it is provably IN storage: 'synced'
-            # (materialization completed) or 'external_change_detected' (the
-            # content originated in storage). A pending/writing/failed foreign
-            # head has no object version yet — superseding it would erase the
-            # only copy, because its queued materialization preflights as stale
-            # and never writes (Codex review, PR #1146). Rejecting keeps the
-            # relay's next store retrying (seconds) until materialization
+            # and nothing else. 'external_change_detected' explicitly means the
+            # accepted DB markdown did NOT materialize (the guard protected an
+            # unexpected external file), and pending/writing/failed heads have
+            # no object version yet — superseding any of them would erase the
+            # only copy, because their queued materialization preflights as
+            # stale and never writes (Codex review, PR #1146). Rejecting keeps
+            # the relay's next store retrying (seconds) until materialization
             # lands. Relay-over-relay stays unconditional: the live Y.Doc is
             # the merge of everything the relay ever persisted, which is what
             # closes the lost-ack wedge (2026-07-23 production incident).
             # Non-relay writers keep the full guarded semantics; the
             # deleted-entity 409 above and the db_version CAS both remain.
-            current_head_in_storage = current_note_content.file_write_status in (
-                "synced",
-                "external_change_detected",
-            )
+            current_head_in_storage = current_note_content.file_write_status == "synced"
             relay_supersede = request.source == NOTE_SOURCE_COLLABORATION_RELAY and (
                 current_note_content.last_source == NOTE_SOURCE_COLLABORATION_RELAY
                 or current_head_in_storage
