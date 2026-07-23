@@ -571,7 +571,11 @@ def _entity(
     )
 
 
-def _note_content(entity: Entity, last_source: str | None = None) -> NoteContent:
+def _note_content(
+    entity: Entity,
+    last_source: str | None = None,
+    file_write_status: str = "pending",
+) -> NoteContent:
     return NoteContent(
         entity_id=entity.id,
         project_id=entity.project_id,
@@ -582,7 +586,7 @@ def _note_content(entity: Entity, last_source: str | None = None) -> NoteContent
         db_checksum="old-checksum",
         file_version=1,
         file_checksum="file-checksum",
-        file_write_status="pending",
+        file_write_status=file_write_status,
         last_source=last_source,
     )
 
@@ -987,7 +991,9 @@ async def test_run_accepted_note_update_relay_supersedes_foreign_head() -> None:
     project = _project()
     prepared = _prepared_replacement()
     entity = _entity(file_path="notes/accepted.md")
-    note_content = _note_content(entity, last_source="mcp")
+    # The foreign head is materialized ('synced'): its object version exists,
+    # so superseding it destroys nothing.
+    note_content = _note_content(entity, last_source="mcp", file_write_status="synced")
     project_repository = _ProjectRepository(project)
     entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
     note_content_lookup_repository = _NoteContentLookupRepository(note_content)
@@ -1020,6 +1026,54 @@ async def test_run_accepted_note_update_relay_supersedes_foreign_head() -> None:
 
     assert change.status_code == 200
     assert note_content_accept_repository.calls[0][1].db_version == 2
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_relay_keeps_rejecting_unmaterialized_foreign_head() -> None:
+    # A pending foreign head has NO storage object version yet: superseding it
+    # would erase the only copy (its queued materialization preflights as
+    # stale and never writes). The 409 holds until materialization lands; the
+    # relay's next store retries seconds later (Codex review, PR #1146).
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity, last_source="mcp", file_write_status="pending")
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_update(
+            cast(AsyncSession, session),
+            request=AcceptedNoteUpdateMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="collaboration_relay",
+                base_checksum="stale-checksum",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+            ),
+        )
+
+    rejection = exc_info.value.rejection
+    assert rejection.kind is AcceptedNoteMutationRejectKind.conflict
+    assert note_content_accept_repository.calls == []
 
 
 @pytest.mark.asyncio

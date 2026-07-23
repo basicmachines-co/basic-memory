@@ -609,16 +609,30 @@ async def _run_accepted_note_update(
             and current_note_content.db_checksum != request.base_checksum
         ):
             # Hot-doc canonical (#1589 Phase G): while a live session exists the
-            # Y.Doc is canonical, so a relay persist is an unconditional
-            # versioned export — it supersedes ANY current head, including a
-            # foreign writer's. Nothing is destroyed: every accepted write is a
-            # Tigris object version, and the collaboration reconciler surfaces
-            # the superseded foreign write as a conflict from the live-update
-            # event (higher db_version + foreign writer). This also subsumes the
-            # relay self-supersede lost-ack case (2026-07-23 production
-            # incident). Non-relay writers keep the full guarded semantics; the
+            # Y.Doc is canonical, so a relay persist supersedes the current
+            # head. The invariant that makes this safe is "the superseded
+            # version survives as a storage object version", so a FOREIGN head
+            # may only be superseded once it is provably IN storage: 'synced'
+            # (materialization completed) or 'external_change_detected' (the
+            # content originated in storage). A pending/writing/failed foreign
+            # head has no object version yet — superseding it would erase the
+            # only copy, because its queued materialization preflights as stale
+            # and never writes (Codex review, PR #1146). Rejecting keeps the
+            # relay's next store retrying (seconds) until materialization
+            # lands. Relay-over-relay stays unconditional: the live Y.Doc is
+            # the merge of everything the relay ever persisted, which is what
+            # closes the lost-ack wedge (2026-07-23 production incident).
+            # Non-relay writers keep the full guarded semantics; the
             # deleted-entity 409 above and the db_version CAS both remain.
-            if request.source != NOTE_SOURCE_COLLABORATION_RELAY:
+            current_head_in_storage = current_note_content.file_write_status in (
+                "synced",
+                "external_change_detected",
+            )
+            relay_supersede = request.source == NOTE_SOURCE_COLLABORATION_RELAY and (
+                current_note_content.last_source == NOTE_SOURCE_COLLABORATION_RELAY
+                or current_head_in_storage
+            )
+            if not relay_supersede:
                 reject_stale_base_checksum(
                     current_db_checksum=current_note_content.db_checksum
                 )
