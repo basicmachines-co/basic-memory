@@ -447,6 +447,13 @@ def plan_index_file_note_live_update(
         actor_name=result.actor_name,
         # Superseded content also withholds the version: like content_checksum
         # above, a stale version must not invite consumers to reconcile to it.
+        # Contract: this is a HINT, not ground truth. Object metadata carries
+        # the version of the write that produced the object, so it can LAG the
+        # accepted row (a content-identical accept bumps db_version without a
+        # new materialization) but can never exceed it. A lagging version on
+        # identical content reads as an echo downstream, which is the correct
+        # skip; consumers must take authoritative reads (which return the DB
+        # row's version) as the decision-grade value (PR #1144 review).
         db_version=None if result.content_superseded else result.db_version,
     )
 
