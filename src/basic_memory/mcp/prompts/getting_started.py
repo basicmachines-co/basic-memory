@@ -31,63 +31,49 @@ async def getting_started(
 ) -> str:
     """Return an onboarding guide for a newly-connected user.
 
-    Checks recent activity so a returning user is welcomed back rather than pitched a first
-    note. The write path is always framed as an offer the user must accept.
+    Embeds current recent activity and lets the model branch its own response on whether notes
+    already exist, rather than asserting emptiness from a timeframe-limited call. The write path
+    is always framed as an offer the user must accept, in the inspected project.
 
     Args:
-        project: Project to inspect for existing notes (optional)
+        project: Project to inspect for existing notes and target for the first note (optional)
 
     Returns:
-        A short onboarding guide tailored to whether the knowledge base has content yet.
+        A short onboarding guide.
     """
     logger.info("Rendering getting_started prompt")
 
-    # Orient against existing content so an established base is welcomed back instead of being
-    # pitched a "first note." recent_activity returns an error/guidance string rather than
-    # raising, so a substring check is sufficient and avoids a second failure surface.
+    # Show current activity, but do NOT decide "empty" from it: recent_activity is
+    # timeframe-limited, so an established base that is simply quiet looks identical to a
+    # brand-new one. Let the model judge from the activity output (which already carries its own
+    # empty-state guidance) and branch its own response, rather than asserting emptiness here.
     activity_text = str(await recent_activity(timeframe="30d", project=project))
-    looks_empty = "No recent activity" in activity_text
 
-    if looks_empty:
-        return dedent(
-            """
-            # Getting started with Basic Memory
-
-            Basic Memory gives the user a personal knowledge base: local markdown notes that
-            persist across conversations, which both the user and their AI assistants can read
-            and write. Anything saved here is available in future chats and in the Basic Memory
-            app.
-
-            It looks like there are no notes yet. Do this now:
-
-            1. Briefly explain that shared-memory loop to the user in your own words.
-            2. Offer to save something useful from this conversation as their first note, and
-               **wait for them to say yes before writing anything**:
-               ```
-               write_note(title="...", content="...", folder="notes")
-               ```
-            3. After it is saved, mention they can find it in the Basic Memory app and that you
-               can read or update it in any future conversation.
-
-            Do not create a note unprompted — offer first.
-            """
-        ).strip()
+    # Keep a first note in the project the prompt actually inspected; omitting project would let
+    # write_note fall back to its default and cross project boundaries.
+    project_arg = f'project="{project}", ' if project else ""
 
     return dedent(
         f"""
         # Getting started with Basic Memory
 
-        This user already has notes in Basic Memory, so help them keep the loop going rather
-        than starting over.
+        Basic Memory gives the user a personal knowledge base: local markdown notes that persist
+        across conversations, which both the user and their AI assistants can read and write.
+        Anything saved here is available in future chats and in the Basic Memory app.
 
-        Recent activity:
+        Here is their recent activity:
 
         {activity_text}
 
-        Good next moves:
-        - `read_note("permalink")` to open a specific note
-        - `search_notes(query="...")` to find something by topic
-        - `write_note(...)` to capture new decisions or insights from this conversation
-          (offer first; don't write unprompted)
+        Based on what you see above:
+        - **If they have no notes yet**, briefly explain that shared-memory loop and offer to
+          save something useful from this conversation as their first note.
+          Wait for them to say yes before writing anything:
+          ```
+          write_note({project_arg}title="...", content="...", folder="notes")
+          ```
+        - **If they already have notes**, help them keep the loop going: `read_note("permalink")`
+          to open one, `search_notes(query="...")` to find a topic, or `write_note(...)` to
+          capture something new (offer first; don't write unprompted).
         """
     ).strip()

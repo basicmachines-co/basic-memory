@@ -82,21 +82,31 @@ async def test_getting_started_prompt_is_registered():
 
 
 @pytest.mark.asyncio
-async def test_getting_started_empty_offers_first_note(client, test_project):
-    """With no notes yet, getting_started walks the model through offering a first note."""
+async def test_getting_started_offers_first_note_conditionally(client, test_project):
+    """The guide offers a first note but conditions it on the user being new, and keeps the
+    'already have notes' path — it must not assert emptiness (a quiet base looks the same)."""
     result = await getting_started(project=test_project.name)  # pyright: ignore[reportGeneralTypeIssues]
 
     assert "Getting started with Basic Memory" in result
-    assert "no notes yet" in result
     assert "write_note" in result
-    assert "wait for them to say yes" in result
+    # Offer-not-act.
+    assert "Wait for them to say yes before writing" in result
+    # Both paths present — the model chooses; the prompt does not decide emptiness for it.
+    assert "If they have no notes yet" in result
+    assert "If they already have notes" in result
 
 
 @pytest.mark.asyncio
-async def test_getting_started_populated_welcomes_back(client, test_project, test_graph):
-    """With existing notes, getting_started should not pitch a first note."""
+async def test_getting_started_keeps_selected_project_in_write_example(client, test_project):
+    """The write_note example must target the inspected project, not write_note's default."""
     result = await getting_started(project=test_project.name)  # pyright: ignore[reportGeneralTypeIssues]
 
-    assert "Getting started with Basic Memory" in result
-    assert "already has notes" in result
-    assert "no notes yet" not in result
+    assert f'write_note(project="{test_project.name}"' in result
+
+
+@pytest.mark.asyncio
+async def test_getting_started_no_project_omits_project_arg(client, test_project):
+    """Without an explicit project, the example omits project and lets write_note resolve it."""
+    result = await getting_started()  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert 'write_note(title="..."' in result
