@@ -41,6 +41,7 @@ from basic_memory.runtime.note_content import (
     plan_accepted_note_write_change,
 )
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
+from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_COLLABORATION_RELAY
 from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectExternalId,
@@ -607,7 +608,23 @@ async def _run_accepted_note_update(
             request.base_checksum is not None
             and current_note_content.db_checksum != request.base_checksum
         ):
-            reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
+            # Relay self-supersede (#1589): when the current accepted version was
+            # itself written by the collaboration relay AND this request is the
+            # relay again, a stale base can only mean a lost ack — a persist that
+            # timed out client-side after committing here. The relay's next
+            # snapshot always supersedes its own prior write (the live Y.Doc is
+            # the merge of everything the relay ever persisted), so rejecting
+            # would wedge every subsequent store against our own committed
+            # version (2026-07-23 production incident). Foreign writers keep the
+            # full guarded semantics.
+            relay_self_supersede = (
+                request.source == NOTE_SOURCE_COLLABORATION_RELAY
+                and current_note_content.last_source == NOTE_SOURCE_COLLABORATION_RELAY
+            )
+            if not relay_self_supersede:
+                reject_stale_base_checksum(
+                    current_db_checksum=current_note_content.db_checksum
+                )
         try:
             prepared_write = await prepare_accepted_note_replace(
                 preparer,

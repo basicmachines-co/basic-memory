@@ -281,6 +281,7 @@ async def test_run_index_file_preserves_current_materialized_note_metadata() -> 
         operation=FileIndexOperation.created,
         actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         live_update_source="mcp",
+        db_version=1,
     )
     assert metadata_source.paths == ["notes/a.md"]
     assert materialized_source.paths == ["notes/a.md"]

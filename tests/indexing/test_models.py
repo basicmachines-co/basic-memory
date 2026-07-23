@@ -775,6 +775,7 @@ def test_plan_current_materialized_note_result_preserves_trusted_live_update_met
             actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
             actor_name="Claude Code",
             live_update_source="mcp",
+            db_version=1,
         ),
         object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
         object_checksum="checksum-1",
@@ -874,6 +875,7 @@ def test_plan_indexed_file_live_update_metadata_preserves_matching_metadata():
         actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
         actor_name="Claude Code",
         live_update_source="mcp",
+        db_version=2,
         operation=FileIndexOperation.updated,
     )
 

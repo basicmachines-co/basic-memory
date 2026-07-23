@@ -237,6 +237,11 @@ class IndexFileJobResult:
     actor_kind: str | None = None
     actor_name: str | None = None
     live_update_source: str | None = None
+    # Accepted DB version mirrored on the trusted object metadata (#1589):
+    # carried into note-level live updates so consumers can decide
+    # echo-vs-out-of-band by version arithmetic. None when the metadata was
+    # absent or failed checksum validation.
+    db_version: int | None = None
     # True when the object carried our own bm-file-checksum metadata that no
     # longer matches what this job indexed: a newer own-stack write landed
     # mid-job, so this result describes superseded content (issue #1445).
@@ -310,6 +315,9 @@ class IndexFileNoteLiveUpdatePlan:
     actor_user_profile_id: str | None = None
     actor_kind: RuntimeNoteActorKind | None = None
     actor_name: RuntimeNoteActorName | None = None
+    # Accepted DB version from trusted object metadata (#1589); None when the
+    # metadata was absent or failed checksum validation.
+    db_version: int | None = None
 
 
 DEFAULT_INDEX_FILE_NOTE_LIVE_UPDATE_SOURCE: RuntimeNoteChangeSource = "s3_webhook"
@@ -359,6 +367,7 @@ def index_file_job_result_from_indexed_file(
         live_update_source=(
             live_update_plan.live_update_source if live_update_plan is not None else None
         ),
+        db_version=live_update_plan.db_version if live_update_plan is not None else None,
         content_superseded=(
             live_update_plan.content_superseded if live_update_plan is not None else False
         ),
@@ -436,6 +445,9 @@ def plan_index_file_note_live_update(
         actor_user_profile_id=result.actor_user_profile_id,
         actor_kind=result.actor_kind,
         actor_name=result.actor_name,
+        # Superseded content also withholds the version: like content_checksum
+        # above, a stale version must not invite consumers to reconcile to it.
+        db_version=None if result.content_superseded else result.db_version,
     )
 
 
@@ -537,6 +549,8 @@ class IndexedFileLiveUpdatePlan:
     actor_user_profile_id: str | None = None
     actor_kind: str | None = None
     actor_name: str | None = None
+    # Trusted-branch only, like the actor fields (#1589).
+    db_version: int | None = None
     live_update_source: RuntimeNoteChangeSource | None = None
     operation: FileIndexOperation | None = None
 
@@ -600,6 +614,7 @@ def plan_current_materialized_note_result(
             actor_kind=provenance.actor_kind,
             actor_name=provenance.actor_name,
             live_update_source=provenance.source,
+            db_version=provenance.db_version,
         ),
         object_checksum_source=plan.object_checksum_source,
         object_checksum=plan.object_checksum,
@@ -658,6 +673,7 @@ def plan_indexed_file_live_update_metadata(
         actor_kind=provenance.actor_kind,
         actor_name=provenance.actor_name,
         live_update_source=provenance.source,
+        db_version=provenance.db_version,
         operation=file_index_operation_from_note_object_metadata(object_metadata),
     )
 

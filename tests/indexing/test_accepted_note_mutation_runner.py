@@ -571,7 +571,7 @@ def _entity(
     )
 
 
-def _note_content(entity: Entity) -> NoteContent:
+def _note_content(entity: Entity, last_source: str | None = None) -> NoteContent:
     return NoteContent(
         entity_id=entity.id,
         project_id=entity.project_id,
@@ -583,7 +583,7 @@ def _note_content(entity: Entity) -> NoteContent:
         file_version=1,
         file_checksum="file-checksum",
         file_write_status="pending",
-        last_source=None,
+        last_source=last_source,
     )
 
 
@@ -925,6 +925,102 @@ async def test_run_accepted_note_update_rejects_stale_base_checksum() -> None:
     assert preparer.replace_calls == []
     assert note_content_accept_repository.calls == []
     assert search_repository.calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_accepts_relay_self_supersede_on_stale_base() -> None:
+    # Lost-ack wedge regression (#1589, 2026-07-23 production incident): a relay
+    # persist timed out client-side AFTER committing, so the accepted row is the
+    # relay's own write while the relay's recorded base is one version behind.
+    # The relay superseding its own prior write is never a real conflict - the
+    # live Y.Doc is the merge of everything the relay ever persisted - so the
+    # stale base must be accepted, not 409-wedged forever.
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity, last_source="collaboration_relay")
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    change = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="collaboration_relay",
+            base_checksum="stale-checksum",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+            preparer_factory=preparer_factory,
+            pending_entity_repository=pending_entity_repository,
+            note_content_accept_repository=note_content_accept_repository,
+            search_repository=search_repository,
+        ),
+    )
+
+    assert change.status_code == 200
+    assert note_content_accept_repository.calls[0][1].db_version == 2
+    assert note_content_accept_repository.calls[0][1].markdown_content == "# Replacement\n"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_relay_stale_base_still_rejects_foreign_writes() -> None:
+    # The self-supersede rule is scoped to relay-over-relay only: when the
+    # current accepted version came from a FOREIGN writer (MCP here), a stale
+    # relay base is a genuine conflict and keeps the full guarded semantics.
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    prepared = _prepared_replacement()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity, last_source="mcp")
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared)
+    preparer_factory = _PreparerFactory(preparer)
+    pending_entity_repository = _PendingEntityRepository(entity)
+    note_content_accept_repository = _NoteContentAcceptRepository(note_content)
+    search_repository = _SearchRepository()
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_update(
+            cast(AsyncSession, session),
+            request=AcceptedNoteUpdateMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                data=schema,
+                actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+                source="collaboration_relay",
+                base_checksum="stale-checksum",
+            ),
+            dependencies=_dependencies(
+                project_repository=project_repository,
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=note_content_lookup_repository,
+                preparer_factory=preparer_factory,
+                pending_entity_repository=pending_entity_repository,
+                note_content_accept_repository=note_content_accept_repository,
+                search_repository=search_repository,
+            ),
+        )
+
+    rejection = exc_info.value.rejection
+    assert rejection.kind is AcceptedNoteMutationRejectKind.conflict
+    assert note_content_accept_repository.calls == []
 
 
 @pytest.mark.asyncio
