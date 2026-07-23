@@ -608,20 +608,17 @@ async def _run_accepted_note_update(
             request.base_checksum is not None
             and current_note_content.db_checksum != request.base_checksum
         ):
-            # Relay self-supersede (#1589): when the current accepted version was
-            # itself written by the collaboration relay AND this request is the
-            # relay again, a stale base can only mean a lost ack — a persist that
-            # timed out client-side after committing here. The relay's next
-            # snapshot always supersedes its own prior write (the live Y.Doc is
-            # the merge of everything the relay ever persisted), so rejecting
-            # would wedge every subsequent store against our own committed
-            # version (2026-07-23 production incident). Foreign writers keep the
-            # full guarded semantics.
-            relay_self_supersede = (
-                request.source == NOTE_SOURCE_COLLABORATION_RELAY
-                and current_note_content.last_source == NOTE_SOURCE_COLLABORATION_RELAY
-            )
-            if not relay_self_supersede:
+            # Hot-doc canonical (#1589 Phase G): while a live session exists the
+            # Y.Doc is canonical, so a relay persist is an unconditional
+            # versioned export — it supersedes ANY current head, including a
+            # foreign writer's. Nothing is destroyed: every accepted write is a
+            # Tigris object version, and the collaboration reconciler surfaces
+            # the superseded foreign write as a conflict from the live-update
+            # event (higher db_version + foreign writer). This also subsumes the
+            # relay self-supersede lost-ack case (2026-07-23 production
+            # incident). Non-relay writers keep the full guarded semantics; the
+            # deleted-entity 409 above and the db_version CAS both remain.
+            if request.source != NOTE_SOURCE_COLLABORATION_RELAY:
                 reject_stale_base_checksum(
                     current_db_checksum=current_note_content.db_checksum
                 )
