@@ -319,10 +319,17 @@ def _format_search_markdown(result: SearchResponse, project: str, query: str | N
         # Empty search is usually "no match for this query," not "empty knowledge base," so we
         # do not repeat the first-note offer here (that would nag established users). Point at
         # recent_activity, which owns the getting-started guidance when the base is truly empty.
+        # The all-projects path formats project as "all projects" (not a real identifier), so
+        # suggest discovery-mode recent_activity() there rather than a project-scoped call.
+        orient = (
+            "recent_activity()"
+            if project == "all projects"
+            else f'recent_activity(project="{project}")'
+        )
         return (
             f"No results found for '{query or ''}' in project '{project}'. "
-            f'Try broader or different terms, or call recent_activity(project="{project}") to '
-            "orient — if the knowledge base is empty it will guide creating a first note."
+            f"Try broader or different terms, or call {orient} to orient — if the knowledge "
+            "base is empty it will guide creating a first note."
         )
 
     parts = []

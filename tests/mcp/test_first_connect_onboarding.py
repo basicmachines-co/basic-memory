@@ -13,6 +13,8 @@ import pytest
 from basic_memory.mcp.prompts.getting_started import getting_started
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import recent_activity, search_notes
+from basic_memory.mcp.tools.search import _format_search_markdown
+from basic_memory.schemas.search import SearchResponse
 
 
 # --- Server instructions (lever 1a) ---
@@ -43,6 +45,8 @@ async def test_recent_activity_empty_project_offers_first_note(client, test_proj
     assert "write_note" in result
     # The offer must be gated on the user agreeing first.
     assert "wait for them to agree" in result
+    # The widened-window suggestion must stay scoped to the same project.
+    assert f'recent_activity(project="{test_project.name}", timeframe="30d")' in result
 
 
 @pytest.mark.asyncio
@@ -65,9 +69,23 @@ async def test_search_no_results_points_to_recent_activity(client, test_project)
 
     assert isinstance(result, str)
     assert "No results found" in result
-    assert "recent_activity" in result
+    # The orientation call must stay scoped to the searched project.
+    assert f'recent_activity(project="{test_project.name}")' in result
     # It should NOT duplicate the write_note offer here (that would nag established users).
     assert "write_note" not in result
+
+
+def test_search_empty_all_projects_suggests_discovery_recent_activity():
+    """'all projects' is not a real project id, so the all-projects empty case must suggest a
+    bare recent_activity() (discovery mode), not recent_activity(project="all projects")."""
+    empty = SearchResponse(results=[], current_page=1, page_size=10)
+
+    all_projects = _format_search_markdown(empty, "all projects", "q")
+    assert "recent_activity()" in all_projects
+    assert 'recent_activity(project="all projects")' not in all_projects
+
+    scoped = _format_search_markdown(empty, "myproj", "q")
+    assert 'recent_activity(project="myproj")' in scoped
 
 
 # --- getting_started prompt (lever 3a) ---
@@ -97,11 +115,15 @@ async def test_getting_started_offers_first_note_conditionally(client, test_proj
 
 
 @pytest.mark.asyncio
-async def test_getting_started_keeps_selected_project_in_write_example(client, test_project):
-    """The write_note example must target the inspected project, not write_note's default."""
+async def test_getting_started_keeps_selected_project_in_all_examples(client, test_project):
+    """Every example call (first-note and continuation) must target the inspected project so
+    onboarding never crosses into write_note's default project."""
     result = await getting_started(project=test_project.name)  # pyright: ignore[reportGeneralTypeIssues]
 
-    assert f'write_note(project="{test_project.name}"' in result
+    name = test_project.name
+    assert f'write_note(project="{name}"' in result
+    assert f'search_notes(project="{name}"' in result
+    assert f'read_note("permalink", project="{name}")' in result
 
 
 @pytest.mark.asyncio
