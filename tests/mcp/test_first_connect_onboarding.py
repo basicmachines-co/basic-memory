@@ -42,11 +42,12 @@ async def test_recent_activity_empty_project_offers_first_note(client, test_proj
 
     assert isinstance(result, str)
     assert "No recent activity" in result
-    assert "write_note" in result
     # The offer must be gated on the user agreeing first.
     assert "wait for them to agree" in result
-    # The widened-window suggestion must stay scoped to the same project.
-    assert f'recent_activity(project="{test_project.name}", timeframe="30d")' in result
+    # Examples route by the collision-safe external id, and the widened call stays scoped.
+    assert "write_note(project_id=" in result
+    assert "recent_activity(project_id=" in result
+    assert 'timeframe="30d"' in result
 
 
 @pytest.mark.asyncio
