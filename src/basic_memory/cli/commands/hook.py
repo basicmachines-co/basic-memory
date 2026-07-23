@@ -13,8 +13,6 @@ Contracts:
     existing Codex configuration has not been reinstalled yet.
   - Codex checkpoint prompting defaults on. An explicit JSON boolean ``false``
     disables it; malformed values and malformed config fail closed.
-  - The Codex checkpoint skill's additional privacy review defaults off. Only
-    the JSON boolean ``true`` opts into that plugin-level review.
   - Codex event capture defaults on. An explicit JSON boolean ``false`` turns
     it off, while malformed values and malformed config fail closed.
   - Graph-derived brief content is fenced and labeled as reference data, not
@@ -79,7 +77,6 @@ QUERY_TIMEOUT_SECONDS = 10.0
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
 CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
-CODEX_DEFAULT_CHECKPOINT_PRIVACY_REVIEW = False
 CODEX_DEFAULT_CAPTURE_EVENTS = True
 CODEX_CHECKPOINT_PROMPT = (
     "Basic Memory checkpoint required after compaction. Use the "
@@ -294,17 +291,14 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     """Merge user and project Codex settings, then resolve checkout defaults.
 
     Precedence (lowest to highest): ``~/.codex/basic-memory.json``, then the
-    nearest project ``.codex/basic-memory.json``. Redaction lists accumulate so
-    a project cannot weaken user-level privacy rules. Codex lifecycle capture
-    and checkpoint prompting are enabled when omitted, while the checkpoint
-    skill's additional privacy review is disabled when omitted. The default
-    folder is namespaced by the Git repository directory. Any malformed source
-    counts as configured and fails closed for the whole evaluation so a later
-    source cannot rebuild routing without the missing redaction policy.
+    nearest project ``.codex/basic-memory.json``. Codex lifecycle capture and
+    checkpoint prompting are enabled when omitted. The default folder is
+    namespaced by the Git repository directory. Any malformed source counts as
+    configured and fails closed for the whole evaluation so a later source
+    cannot rebuild routing from incomplete settings.
     """
     defaults: dict = {
         "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
-        "checkpointPrivacyReview": CODEX_DEFAULT_CHECKPOINT_PRIVACY_REVIEW,
         "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
         "captureFolder": _codex_default_capture_folder(directory),
     }
@@ -324,21 +318,20 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
         found = True
         if block is None:
             # Trigger: any configured source exists but cannot be trusted.
-            # Why: continuing could combine a later checkpoint route with a
-            # missing earlier redaction policy and persist unredacted data.
+            # Why: continuing could combine a later route with incomplete
+            # earlier settings and write to an unintended project.
             # Outcome: discard every route and disable capture for this event.
             return {
                 **defaults,
                 "checkpointOnCompact": False,
                 "captureEvents": False,
             }, True
-        cumulative_redactions: dict[str, list[str]] = {}
-        for key in ("redactKeys", "redactPaths"):
-            values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
-            if values:
-                cumulative_redactions[key] = list(dict.fromkeys(values))
         merged.update(block)
-        merged.update(cumulative_redactions)
+
+    # These legacy plugin options used to impose an extra model-authored
+    # checkpoint scan. Ignore them so existing config cannot restore that gate.
+    for key in ("checkpointPrivacyReview", "redactKeys", "redactPaths"):
+        merged.pop(key, None)
 
     return merged, found
 
@@ -1511,10 +1504,6 @@ def status(
     typer.echo(f"repository: {str(cfg.get('repository') or '').strip() or '(not set)'}")
     typer.echo(
         f"checkpoint on compact: {'on' if cfg.get('checkpointOnCompact') is True else 'off'}"
-    )
-    typer.echo(
-        "checkpoint privacy review: "
-        f"{'on' if cfg.get('checkpointPrivacyReview') is True else 'off'}"
     )
     typer.echo(f"capture events: {'on' if cfg.get('captureEvents') is True else 'off'}")
     typer.echo(

@@ -85,10 +85,8 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
     assert "the nearest project file overrides only the keys it declares" in readme
     assert '"checkpointOnCompact": true' in readme
-    assert '"checkpointPrivacyReview": false' in readme
     assert '"rememberFolder": "codex/remember"' in readme
     assert "Checkpoint prompting is on by default" in readme
-    assert "additional checkpoint privacy review is off by default" in readme
     assert "Decision notes default to `codex/decisions`" in readme
     assert "keep both the profile and checkout-specific repository" in readme
 
@@ -174,21 +172,24 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
 
-def test_codex_checkpoint_privacy_review_is_opt_in() -> None:
+def test_codex_checkpoint_has_no_plugin_redaction_gate() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")
+    plugin_files = (
+        repo_root / "plugins/codex/README.md",
+        repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md",
+        repo_root / "plugins/codex/skills/bm-setup/SKILL.md",
+        repo_root / "plugins/codex/skills/bm-status/SKILL.md",
+    )
 
-    assert "## Optional Privacy Review" in skill
-    assert "`checkpointPrivacyReview` value is the literal JSON boolean `true`" in skill
-    assert "additional privacy review is disabled by default" in skill
-    assert "skip this extra scan" in skill
-    assert "`redactKeys` and `redactPaths` accumulate" in skill
-    assert "Scrub **every string** passed to `write_note`" in skill
-    assert "Do not omit schema-required path fields; use the marker" in skill
-    assert "[REDACTED_PATH]" in skill
-    assert "[REDACTED]" in skill
-    assert "fail closed: skip the checkpoint" in skill
-    assert "Do not fall back to an unredacted note" in skill
+    for path in plugin_files:
+        text = path.read_text(encoding="utf-8")
+        assert "checkpointPrivacyReview" not in text
+        assert "redactKeys" not in text
+        assert "redactPaths" not in text
+
+    checkpoint = plugin_files[1].read_text(encoding="utf-8")
+    assert "## Optional Privacy Review" not in checkpoint
+    assert "Scrub **every string** passed to `write_note`" not in checkpoint
 
 
 def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:

@@ -80,8 +80,7 @@ be moved into the plugin directory.
 
 Configuration can live at user level in `~/.codex/basic-memory.json` or at
 project level in `.codex/basic-memory.json`. User-level settings are the base;
-the nearest project file overrides only the keys it declares. `redactKeys` and
-`redactPaths` are the privacy exception: their user and project lists accumulate.
+the nearest project file overrides only the keys it declares.
 The setup skill asks which scope to use and recommends user-level configuration
 by default.
 
@@ -103,21 +102,17 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
     "rememberFolder": "codex/remember",
     "recallTimeframe": "7d",
     "checkpointOnCompact": true,
-    "checkpointPrivacyReview": false,
     "captureEvents": true,
-    "redactKeys": [],
-    "redactPaths": [],
     "placementConventions": "Put decisions in codex/decisions/ and work checkpoints in codex/<repo-dir>/."
   }
 }
 ```
 
 Codex event capture is on by default. Set the JSON boolean `false` at user or
-project level to opt out; malformed values fail closed. Captured, redacted
+project level to opt out; malformed values fail closed. Captured
 lifecycle-event envelopes land in a local inbox under your Basic Memory home.
 The lifecycle trace stays local: `basic-memory hook flush` only moves valid
-envelopes into the local retention archive and never creates graph notes. Add
-`redactKeys` and `redactPaths` arrays to extend the built-in redaction floor.
+envelopes into the local retention archive and never creates graph notes.
 
 Checkpoint prompting is on by default. Set `checkpointOnCompact` to the JSON
 boolean `false` to opt out. Codex ignores PreCompact stdout; after compaction,
@@ -125,12 +120,6 @@ Codex runs SessionStart with the `compact` trigger. When the setting is enabled,
 that context asks the resumed agent to run `bm-checkpoint` from its compacted
 working context.
 
-The plugin's additional checkpoint privacy review is off by default. Set
-`checkpointPrivacyReview` to the JSON boolean `true` to opt into the strict
-redaction and fail-closed review in `bm-checkpoint`. When it is omitted or
-`false`, the skill does not impose that extra scan and leaves checkpoint content
-to the model's judgment. This setting controls plugin instructions only; it
-cannot disable any separate review or approval enforced by Codex itself.
 `sessionProfile` only selects whether the skill writes a `codex_session` or
 `coding_session` note.
 

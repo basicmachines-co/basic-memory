@@ -26,13 +26,10 @@ REQUIRED_SKILLS = (
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "checkpointOnCompact",
-        "checkpointPrivacyReview",
         "captureEvents",
         "user-level",
         "project-level",
         "codex/<repo-dir>",
-        "redactKeys",
-        "redactPaths",
         "sessionProfile",
         "coding-session.md",
         "hook status --harness codex",
@@ -40,7 +37,6 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-status": (
         "~/.codex/basic-memory.json",
         "checkpointOnCompact",
-        "checkpointPrivacyReview",
         "hook status --harness codex",
         "pending envelopes",
         "archived envelopes",
@@ -56,12 +52,6 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-checkpoint": (
         "Apply the `bm-writing` skill",
         "A checkpoint is a durable handoff, not a status dump",
-        "## Optional Privacy Review",
-        "`checkpointPrivacyReview`",
-        "disabled by default",
-        "`redactKeys` and `redactPaths` accumulate",
-        "[REDACTED_PATH]",
-        "skip the checkpoint",
         "username: <current username>",
         "hostname: <current hostname>",
         "type: coding_session",

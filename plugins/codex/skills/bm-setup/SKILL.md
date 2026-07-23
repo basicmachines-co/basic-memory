@@ -27,8 +27,7 @@ repo, default project, current directory, or previous local state.
 
 - config level: user-level `~/.codex/basic-memory.json` or project-level
   `.codex/basic-memory.json`. Ask explicitly and recommend user level by default.
-  Project settings override user settings key by key, except `redactKeys` and
-  `redactPaths`, which accumulate so project config cannot weaken user privacy.
+  Project settings override user settings key by key.
 - storage mode: cloud, local, or mixed. Prefer the user's stated mode over any
   CLI default.
 - `focus`: code/dev, research, writing, planning, or mixed.
@@ -47,14 +46,8 @@ repo, default project, current directory, or previous local state.
   memory stays under one tree.
 - `checkpointOnCompact`: whether post-compaction SessionStart asks Codex to run
   `bm-checkpoint`. Default to `true`; an explicit JSON boolean `false` opts out.
-- `checkpointPrivacyReview`: whether `bm-checkpoint` applies the plugin's
-  additional strict redaction and fail-closed review. Default to `false`; offer
-  it only when the user wants that extra plugin-level review.
-- `captureEvents`: whether to record redacted lifecycle-event envelopes in the
+- `captureEvents`: whether to record lifecycle-event envelopes in the
   local hook inbox. Default to `true`; an explicit JSON boolean `false` opts out.
-- `redactKeys` and `redactPaths`: optional additions to the built-in redaction
-  floor. Ask for these only when event capture is enabled or the user has
-  repo-specific privacy requirements.
 
 For the `coding` session profile, verify the current directory is inside a Git
 repository. Resolve a stable `repository` identifier such as `owner/name` from
@@ -63,8 +56,8 @@ confirmation. Do not guess when the remote is missing or ambiguous. Explain that
 coding checkpoints store structured repository, branch, SHA, working-directory,
 and optional pull-request metadata in Basic Memory.
 
-Explain the capture tradeoff before asking: enabled capture adds a local,
-redacted event trail that stays queued until `bm hook flush` archives it locally.
+Explain the capture tradeoff before asking: enabled capture adds a local event
+trail that stays queued until `bm hook flush` archives it locally.
 It never creates knowledge-graph notes or writes to team projects. The default is enabled; an explicit JSON boolean
 `false` disables it, and malformed values fail closed.
 
@@ -93,10 +86,7 @@ project-level file:
     "rememberFolder": "codex/remember",
     "recallTimeframe": "7d",
     "checkpointOnCompact": true,
-    "checkpointPrivacyReview": false,
     "captureEvents": true,
-    "redactKeys": [],
-    "redactPaths": [],
     "placementConventions": "Put decisions in codex/decisions/ and work checkpoints in codex/<repo-dir>/."
   }
 }
@@ -105,13 +95,7 @@ project-level file:
 Omit `captureFolder` to use `codex/<repo-dir>`; persist it only for an explicit
 override. Preserve unrelated keys if the chosen file already exists. Include
 `projectMode` when the user chose cloud, local, or mixed routing. Always persist
-`checkpointOnCompact`, `checkpointPrivacyReview`, and `captureEvents` as JSON
-booleans. Keep `checkpointPrivacyReview` false unless the user explicitly opts
-into the plugin's additional strict review. Empty
-`redactKeys` and `redactPaths` lists may be omitted; when present, they must be
-JSON arrays of strings. `redactKeys` extends payload-key redaction, while
-`redactPaths` also protects working-directory and path-bearing checkpoint
-content. User and project redaction lists accumulate. These files are
+`checkpointOnCompact` and `captureEvents` as JSON booleans. These files are
 intentionally Codex-specific; do not write `.claude/settings.json`.
 
 For a user-level coding setup, omit `sessionProfile` from the shared user file and
@@ -174,12 +158,11 @@ Before closing, prove the mapping works:
 - Run `basic-memory hook status --harness codex --project-dir <repo-root>` (using
   `bm` or `uvx basic-memory` if needed). Confirm that it finds this repo's
   settings, reports the selected project, session profile, repository, and
-  intended checkpoint-prompt, checkpoint-privacy-review, and capture states.
+  intended checkpoint-prompt and capture states.
   Its inbox counts are shared across harnesses.
 - If any check errors, fix the project ref or hook launcher before finishing.
 
 Finish with the project mapping, schemas seeded or skipped, checkpoint prompt,
-optional checkpoint privacy review, capture/redaction choices, shared inbox
-status, and the verification result.
+capture choice, shared inbox status, and the verification result.
 Tell the user that plugin hooks need to be reviewed and trusted in Codex before
 they run.
