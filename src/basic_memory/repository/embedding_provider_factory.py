@@ -12,6 +12,7 @@ from basic_memory.repository.prefixing_provider import (
     PrefixingEmbeddingProvider,
     embedding_prefix_digest,
     normalize_embedding_prefix,
+    prefixing_embedding_identity,
 )
 
 # Cache key fields are limited to values that change the *identity* of the loaded
@@ -141,6 +142,69 @@ def reset_embedding_provider_cache() -> None:
     """Clear process-level embedding provider cache (used by tests)."""
     with _EMBEDDING_PROVIDER_CACHE_LOCK:
         _EMBEDDING_PROVIDER_CACHE.clear()
+
+
+def configured_embedding_provider_identity(app_config: BasicMemoryConfig) -> str:
+    """Resolve the persisted embedding identity without constructing a provider."""
+    provider_name = app_config.semantic_embedding_provider.strip().lower()
+    configured_dimensions = app_config.semantic_embedding_dimensions
+
+    if provider_name == "fastembed":
+        provider_type_name = "FastEmbedEmbeddingProvider"
+        model_name = app_config.semantic_embedding_model
+        dimensions = configured_dimensions or 384
+        provider_identity = f"{model_name}:{dimensions}"
+    elif provider_name == "openai":
+        provider_type_name = "OpenAIEmbeddingProvider"
+        model_name = app_config.semantic_embedding_model or "text-embedding-3-small"
+        if model_name == "bge-small-en-v1.5":
+            model_name = "text-embedding-3-small"
+        dimensions = configured_dimensions or 1536
+        provider_identity = f"{model_name}:{dimensions}"
+    elif provider_name == "litellm":
+        from basic_memory.repository.litellm_provider import (
+            _default_input_types,
+            litellm_embedding_identity,
+        )
+
+        provider_type_name = "LiteLLMEmbeddingProvider"
+        model_name = app_config.semantic_embedding_model or "openai/text-embedding-3-small"
+        if model_name == "bge-small-en-v1.5":
+            model_name = "openai/text-embedding-3-small"
+        if configured_dimensions is None and model_name != "openai/text-embedding-3-small":
+            raise ValueError(
+                "semantic_embedding_dimensions must be set when "
+                "semantic_embedding_provider='litellm' uses a non-default model. "
+                f"Configured model: {model_name!r}."
+            )
+        dimensions = configured_dimensions or 1536
+        default_document_input_type, default_query_input_type = _default_input_types(model_name)
+        provider_identity = litellm_embedding_identity(
+            model_name=model_name,
+            dimensions=dimensions,
+            document_input_type=(
+                app_config.semantic_embedding_document_input_type or default_document_input_type
+            ),
+            query_input_type=(
+                app_config.semantic_embedding_query_input_type or default_query_input_type
+            ),
+            forward_dimensions=app_config.semantic_embedding_forward_dimensions,
+        )
+    else:
+        raise ValueError(f"Unsupported semantic embedding provider: {provider_name}")
+
+    document_prefix = normalize_embedding_prefix(app_config.semantic_embedding_document_prefix)
+    query_prefix = normalize_embedding_prefix(app_config.semantic_embedding_query_prefix)
+    if document_prefix is None and query_prefix is None:
+        return f"{provider_type_name}:{provider_identity}"
+
+    prefixed_identity = prefixing_embedding_identity(
+        provider_type_name=provider_type_name,
+        provider_identity=provider_identity,
+        document_prefix=document_prefix,
+        query_prefix=query_prefix,
+    )
+    return f"PrefixingEmbeddingProvider:{prefixed_identity}"
 
 
 def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvider:

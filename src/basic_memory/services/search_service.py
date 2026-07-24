@@ -86,23 +86,13 @@ class SearchService:
 
     async def reindex_all(self, background_tasks: Optional[BackgroundTasks] = None) -> None:
         """Reindex all content from database."""
-        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-
         logger.info("Starting full reindex")
-        # Clear and recreate search index
+        # Trigger: a full search rebuild removes every derived row.
+        # Why: vector storage may live outside SQL, so cleanup must cross the
+        # repository boundary before the full-text table is recreated.
+        # Outcome: built-in and extension indexes follow the same lifecycle.
+        await self.repository.delete_project_vector_rows()
         await self.repository.execute_query(text("DROP TABLE IF EXISTS search_index"), params={})
-        if isinstance(self.repository, SQLiteSearchRepository):
-            await self.repository.drop_vector_tables()
-        else:
-            await self.repository.execute_query(
-                text("DROP TABLE IF EXISTS search_vector_embeddings"), params={}
-            )
-            await self.repository.execute_query(
-                text("DROP TABLE IF EXISTS search_vector_chunks"), params={}
-            )
-            await self.repository.execute_query(
-                text("DROP TABLE IF EXISTS search_vector_index"), params={}
-            )
         await self.init_search_index()
 
         # Reindex all entities
@@ -584,6 +574,7 @@ class SearchService:
             entity_ids,
             progress_callback=progress_callback,
         )
+        await self.repository.reconcile_vector_index()
         stats = {
             "total_entities": batch_result.entities_total,
             "embedded": batch_result.entities_synced,
@@ -605,20 +596,8 @@ class SearchService:
         we need to clear the derived vector state first to force fresh embeddings.
         Outcome: the next batch sync recreates every eligible entity's vectors.
         """
-        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-
         project_id = self.repository.project_id
-        params = {"project_id": project_id}
-
-        # Constraint: sqlite-vec stores embeddings in a separate rowid table with
-        # no cascade delete, so embeddings must be removed before chunk rows.
-        if isinstance(self.repository, SQLiteSearchRepository):
-            await self.repository.delete_project_vector_rows()
-        else:
-            await self.repository.execute_query(
-                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
-                params,
-            )
+        await self.repository.delete_project_vector_rows()
         logger.info("Cleared project vectors for full reindex", project_id=project_id)
 
     async def _purge_stale_search_rows(self) -> None:
@@ -628,9 +607,6 @@ class SearchService:
         Why: stale rows inflate embedding coverage stats in project info
         Outcome: search tables only contain rows for entities that still exist
         """
-        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-        from sqlalchemy import text
-
         project_id = self.repository.project_id
         stale_entity_filter = (
             "entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)"
@@ -645,18 +621,7 @@ class SearchService:
             params,
         )
 
-        # SQLite vec has no CASCADE — must delete embeddings before chunks
-        if isinstance(self.repository, SQLiteSearchRepository):
-            await self.repository.delete_stale_vector_rows()
-        else:
-            # Postgres CASCADE handles embedding deletion automatically
-            await self.repository.execute_query(
-                text(
-                    f"DELETE FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND {stale_entity_filter}"
-                ),
-                params,
-            )
+        await self.repository.delete_stale_vector_rows()
 
         logger.info("Purged stale search rows for deleted entities", project_id=project_id)
 

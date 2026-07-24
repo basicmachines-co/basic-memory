@@ -46,6 +46,9 @@ from basic_memory.indexing.project_index_maintenance import (
     RepositoryProjectIndexMaintenanceStore,
     StoreProjectIndexMaintenanceRunner,
 )
+from basic_memory.repository.accepted_note_vector_cleanup import (
+    ProjectIndexExternalVectorCleaner,
+)
 from basic_memory.runtime.storage import ProjectId
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -169,6 +172,7 @@ def build_default_project_index_runtime(
     vector_sync: VectorSyncExecutor,
     entity_repository: RelationResolutionEntityRepository,
     entity_indexer: RelationResolutionEntityIndexer,
+    external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None,
 ) -> ProjectIndexRuntime:
     """Compose the default repository-backed project-index runtime."""
     vector_entity_source = RepositoryVectorSyncEntitySource(
@@ -178,6 +182,7 @@ def build_default_project_index_runtime(
     maintenance_store = RepositoryProjectIndexMaintenanceStore(
         session_maker=session_maker,
         project_id=project_id,
+        external_vector_cleaner=external_vector_cleaner,
     )
     return ProjectIndexRuntime(
         project_id=project_id,

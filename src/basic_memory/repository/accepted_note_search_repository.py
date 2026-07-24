@@ -9,7 +9,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
-from basic_memory.repository.accepted_note_vector_cleanup import delete_project_index_vector_rows
+from basic_memory.repository.accepted_note_vector_cleanup import (
+    ProjectIndexExternalVectorCleaner,
+    delete_project_index_vector_rows,
+)
 
 type SearchIndexSqlValue = str | int | datetime | None
 type SearchIndexSqlParams = dict[str, SearchIndexSqlValue]
@@ -106,8 +109,14 @@ def accepted_note_search_insert_params(
 class AcceptedNoteSearchRepository:
     """Explicit-session repository for accepted-note hot search refreshes."""
 
-    def __init__(self, *, project_id: int) -> None:
+    def __init__(
+        self,
+        *,
+        project_id: int,
+        external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None,
+    ) -> None:
         self.project_id = project_id
+        self.external_vector_cleaner = external_vector_cleaner
 
     async def refresh_entity(
         self,
@@ -147,8 +156,16 @@ class AcceptedNoteSearchRepository:
         entity_id: int,
     ) -> None:
         """Delete semantic vector rows for one accepted-note entity."""
-        await delete_project_index_vector_rows(
-            session,
-            project_id=self.project_id,
-            entity_ids=(entity_id,),
-        )
+        if self.external_vector_cleaner is None:
+            await delete_project_index_vector_rows(
+                session,
+                project_id=self.project_id,
+                entity_ids=(entity_id,),
+            )
+        else:
+            await delete_project_index_vector_rows(
+                session,
+                project_id=self.project_id,
+                entity_ids=(entity_id,),
+                external_vector_cleaner=self.external_vector_cleaner,
+            )

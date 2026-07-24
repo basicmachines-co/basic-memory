@@ -63,6 +63,9 @@ from basic_memory.repository import (
     ObservationRepository,
     RelationRepository,
 )
+from basic_memory.repository.accepted_note_vector_cleanup import (
+    ProjectIndexExternalVectorCleaner,
+)
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.runtime.storage import ProjectId, RuntimeFilePath
 from basic_memory.services import EntityService, FileService
@@ -206,6 +209,7 @@ class LocalIndexProjectDependencies:
     link_resolver: RelationResolutionLinkResolver
     search_service: LocalIndexSearchService
     entity_service: LocalIndexEntityService
+    external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None
 
 
 class LocalIndexProjectDependencyProvider(Protocol):
@@ -658,4 +662,5 @@ async def build_local_index_project_dependencies(
         link_resolver=link_resolver,
         search_service=search_service,
         entity_service=entity_service,
+        external_vector_cleaner=search_repository,
     )

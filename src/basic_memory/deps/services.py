@@ -42,6 +42,7 @@ from basic_memory.index.local_notes import (
     LocalDirectoryFileDeleteEnqueuer,
 )
 from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.index.local_project import (
     LocalProjectIndexCommand,
     LocalProjectIndexRunner,
@@ -170,7 +171,9 @@ async def get_directory_delete_service(
     return DirectoryDeleteService(
         session_maker=session_maker,
         runtime=DirectoryDeleteRuntime(
-            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            store=RepositoryDirectoryDeleteAcceptanceStore(
+                external_vector_cleaner=search_service.repository
+            ),
             file_delete_enqueuer=LocalDirectoryFileDeleteEnqueuer(file_service=file_service),
             relation_cleanup_refresher=LocalDirectoryDeleteRelationCleanupRefresher(
                 session_maker=session_maker,
@@ -311,7 +314,13 @@ async def get_note_content_mutation_service(
     app_config: AppConfigDep,
 ) -> NoteContentMutationService:
     """Create the local accepted-note mutation facade for API routes."""
-    accepted_note_repositories = AcceptedNoteRepositories()
+    accepted_note_repositories = AcceptedNoteRepositories(
+        external_vector_cleaner_factory=lambda project_id: create_search_repository(
+            session_maker=session_maker,
+            project_id=project_id,
+            app_config=app_config,
+        )
+    )
     return NoteContentMutationService(
         session_maker=session_maker,
         mutation_dependencies=AcceptedNoteMutationDependencies(
@@ -519,7 +528,14 @@ async def get_project_service(
     markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
     file_service = FileService(Path.home(), markdown_processor, app_config=app_config)
     return ProjectService(
-        repository=project_repository, session_maker=session_maker, file_service=file_service
+        repository=project_repository,
+        session_maker=session_maker,
+        file_service=file_service,
+        search_repository_factory=lambda project_id: create_search_repository(
+            session_maker=session_maker,
+            project_id=project_id,
+            app_config=app_config,
+        ),
     )
 
 

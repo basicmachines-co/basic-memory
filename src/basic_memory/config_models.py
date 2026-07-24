@@ -238,6 +238,15 @@ class BasicMemoryConfig(BaseSettings):
         default_factory=_default_semantic_search_enabled,
         description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic dependencies (included by default).",
     )
+    semantic_vector_index: str = Field(
+        default="pgvector",
+        description=(
+            "Semantic vector index backend for Postgres deployments. 'pgvector' is built in; "
+            "other names resolve through the basic_memory.semantic_vector_indexes entry-point "
+            "group. SQLite continues to use sqlite-vec."
+        ),
+        min_length=1,
+    )
     semantic_embedding_provider: str = Field(
         default="fastembed",
         description="Embedding provider for local semantic indexing/search.",

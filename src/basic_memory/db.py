@@ -21,9 +21,6 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
-from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-
 # -----------------------------------------------------------------------------
 # Windows event loop policy
 # -----------------------------------------------------------------------------
@@ -562,17 +559,23 @@ async def run_migrations(
         else:
             session_maker = _session_maker
 
-        # Initialize the search index schema
-        # For SQLite: Create FTS5 virtual table
-        # For Postgres: No-op (tsvector column added by migrations)
-        # The project_id is not used for init_search_index, so we pass a dummy value
-        if (
-            database_type == DatabaseType.POSTGRES
-            or app_config.database_backend == DatabaseBackend.POSTGRES
-        ):
-            await PostgresSearchRepository(session_maker, 1).init_search_index()
-        else:
-            await SQLiteSearchRepository(session_maker, 1).init_search_index()
+        # Import lazily because backend repositories import this module for session
+        # management. Startup must still use the composition factory so configured
+        # semantic-vector extensions are available during index initialization.
+        from basic_memory.repository.search_repository import create_search_repository
+
+        database_backend = (
+            DatabaseBackend.POSTGRES
+            if database_type == DatabaseType.POSTGRES
+            else app_config.database_backend
+        )
+        search_repository = create_search_repository(
+            session_maker=session_maker,
+            project_id=1,
+            app_config=app_config,
+            database_backend=database_backend,
+        )
+        await search_repository.init_search_index()
 
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")

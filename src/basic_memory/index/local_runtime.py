@@ -265,6 +265,7 @@ class LocalWatchEventIndexRuntimeFactory:
         maintenance_store = RepositoryProjectIndexMaintenanceStore(
             session_maker=dependencies.session_maker,
             project_id=dependencies.project_id,
+            external_vector_cleaner=dependencies.external_vector_cleaner,
             move_content_updater=LocalProjectIndexMoveContentUpdater(
                 entity_service=dependencies.entity_service,
                 file_service=dependencies.file_service,

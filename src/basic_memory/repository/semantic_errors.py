@@ -7,3 +7,7 @@ class SemanticSearchDisabledError(RuntimeError):
 
 class SemanticDependenciesMissingError(RuntimeError):
     """Raised when a semantic search dependency is unavailable or misconfigured."""
+
+
+class SemanticVectorIndexExtensionError(SemanticDependenciesMissingError):
+    """Raised when a configured external vector index cannot be loaded safely."""

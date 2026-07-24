@@ -26,6 +26,21 @@ def embedding_prefix_digest(value: str | None) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def prefixing_embedding_identity(
+    *,
+    provider_type_name: str,
+    provider_identity: str,
+    document_prefix: str | None,
+    query_prefix: str | None,
+) -> str:
+    """Return prefix semantics without exposing literal prefix content."""
+    return (
+        f"{provider_type_name}:{provider_identity}:"
+        f"document_prefix_sha256={embedding_prefix_digest(document_prefix)}:"
+        f"query_prefix_sha256={embedding_prefix_digest(query_prefix)}"
+    )
+
+
 class PrefixingEmbeddingProvider(EmbeddingProvider):
     """Apply document/query text prefixes before delegating to an embedding provider."""
 
@@ -74,9 +89,9 @@ class PrefixingEmbeddingProvider(EmbeddingProvider):
 
     def identity_key(self) -> str:
         """Return embedding semantics without exposing literal prefix content."""
-        provider_identity = embedding_provider_identity(self.provider)
-        return (
-            f"{type(self.provider).__name__}:{provider_identity}:"
-            f"document_prefix_sha256={embedding_prefix_digest(self.document_prefix)}:"
-            f"query_prefix_sha256={embedding_prefix_digest(self.query_prefix)}"
+        return prefixing_embedding_identity(
+            provider_type_name=type(self.provider).__name__,
+            provider_identity=embedding_provider_identity(self.provider),
+            document_prefix=self.document_prefix,
+            query_prefix=self.query_prefix,
         )

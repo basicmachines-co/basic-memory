@@ -1,18 +1,12 @@
-"""Integration regression test for get_embedding_status against a real vec0 table.
+"""Integration regression test for manifest-backed status with a real vec0 table.
 
 Regression for #658: after a successful `bm reindex --embeddings`, `bm project info`
 still reported "sqlite-vec is unavailable", "Indexed 0/N", and "Chunks 0", and
 recommended an unnecessary reindex.
 
-Root cause: get_embedding_status() ran the vec0 JOIN count queries on a bare pooled
-ProjectRepository session that never loaded the sqlite-vec extension, so SQLite raised
-"no such module: vec0", which the except block mis-reported as "unavailable".
-
-This test exercises the real failure path: it builds a REAL vec0 virtual table, writes a
-real embedding into it via the search repository, then queries get_embedding_status through
-a ProjectRepository session that did NOT pre-load the extension (mirroring the bug). The
-healthy unit test substitutes a plain regular table for vec0 and therefore does not cover
-this path.
+Status now reads the authoritative SQL manifest instead of reopening backend-specific
+vector storage. This test builds and writes a real vec0 table, then proves a fresh project
+status connection can report the ready manifest without loading sqlite-vec.
 """
 
 import os
@@ -26,6 +20,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.repository.semantic_vector_index import VectorKey, VectorRecord
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.services.project_service import ProjectService
 
@@ -45,12 +40,7 @@ def _unit_vector(dimensions: int) -> list[float]:
 
 @pytest.mark.asyncio
 async def test_embedding_status_reads_real_vec0_table(engine_factory, test_project, config_manager):
-    """get_embedding_status must report a populated real vec0 table as healthy.
-
-    Before the fix, the vec0 JOIN ran on a session without sqlite-vec loaded and
-    raised "no such module: vec0", which the except block mapped to
-    vector_tables_exist=False + reindex_recommended=True.
-    """
+    """A ready vec0-backed manifest remains healthy on a fresh SQL connection."""
     # Trigger: Postgres test matrix executes the same suite.
     # Why: vec0 + per-connection sqlite-vec loading is SQLite-specific.
     # Outcome: keep the regression on the backend that can actually hit this path.
@@ -121,28 +111,42 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
         )
         await session.commit()
 
-    # --- Insert a chunk + a real embedding into the vec0 table ---
-    # _write_embeddings writes the embedding into the vec0 virtual table keyed by
-    # rowid == chunk id, exactly like the reindex path.
+    # --- Insert a pending manifest row, then write the real vec0 value ---
+    # The pending row commits first because the vector adapter owns a separate
+    # transaction and must be able to resolve the stable key.
     async with db.scoped_session(session_maker) as session:
-        await search_repo._ensure_sqlite_vec_loaded(session)
         chunk_result = await session.execute(
             text(
                 "INSERT INTO search_vector_chunks "
                 "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
-                "entity_fingerprint, embedding_model) "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status) "
                 "VALUES (:eid, :pid, 'chunk-1', 'vec content', 'hash', "
-                "'fp-hash', 'bge-small-en-v1.5') "
+                "'fp-hash', :embedding_model, :vector_index, 'pending') "
                 "RETURNING id"
             ),
-            {"eid": entity_id, "pid": project_id},
+            {
+                "eid": entity_id,
+                "pid": project_id,
+                "embedding_model": search_repo._embedding_model_key(),
+                "vector_index": search_repo._semantic_vector_index_name,
+            },
         )
         chunk_id = chunk_result.scalar_one()
+        await session.commit()
 
-        await search_repo._write_embeddings(
-            session,
-            [(chunk_id, "vec content")],
-            [_unit_vector(dimensions)],
+    await search_repo._semantic_vector_index.upsert(
+        [
+            VectorRecord(
+                key=VectorKey(entity_id=entity_id, chunk_key="chunk-1"),
+                values=tuple(_unit_vector(dimensions)),
+            )
+        ]
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("UPDATE search_vector_chunks SET embedding_status = 'ready' WHERE id = :chunk_id"),
+            {"chunk_id": chunk_id},
         )
         await session.commit()
 
@@ -171,7 +175,7 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
         status = await project_service.get_embedding_status(project_id)
 
     assert status.semantic_search_enabled is True
-    # The vec0 JOIN must succeed, so the table is reported as present and healthy.
+    # Status reads the ready manifest, so it never needs to reopen the vec0 table.
     assert status.vector_tables_exist is True
     assert status.reindex_recommended is False
     assert status.reindex_reason is None

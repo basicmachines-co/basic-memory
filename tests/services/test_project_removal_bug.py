@@ -230,9 +230,10 @@ async def test_remove_project_purges_search_rows(project_service: ProjectService
                 text(
                     "INSERT INTO search_vector_chunks "
                     "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
-                    " entity_fingerprint, embedding_model) "
+                    " entity_fingerprint, embedding_model, vector_index, embedding_status) "
                     "VALUES (:entity_id, :project_id, :chunk_key, :chunk_text, "
-                    " :source_hash, :entity_fingerprint, :embedding_model)"
+                    " :source_hash, :entity_fingerprint, :embedding_model, "
+                    " 'sqlite-vec', 'pending')"
                 ),
                 {
                     "entity_id": 999_001,
@@ -331,9 +332,10 @@ async def test_remove_project_purges_vector_embeddings(
                 text(
                     "INSERT INTO search_vector_chunks "
                     "(id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
-                    " entity_fingerprint, embedding_model) "
+                    " entity_fingerprint, embedding_model, vector_index, embedding_status) "
                     "VALUES (:id, :entity_id, :project_id, :chunk_key, :chunk_text, "
-                    " :source_hash, :entity_fingerprint, :embedding_model)"
+                    " :source_hash, :entity_fingerprint, :embedding_model, "
+                    " 'sqlite-vec', 'ready')"
                 ),
                 {
                     "id": 999_201,
