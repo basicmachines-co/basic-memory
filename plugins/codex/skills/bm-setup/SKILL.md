@@ -55,7 +55,8 @@ repo, default project, current directory, or previous local state.
   Do not offer a per-tool or write-only trust profile. Explain that server trust
   changes Codex's approval UX but does not grant Basic Memory access to any new
   workspace, project, or files. Codex still requires approval for tools that
-  advertise a destructive annotation, including Basic Memory's mutating tools.
+  advertise a destructive annotation, including Basic Memory's write, edit, and
+  delete tools.
 
 For the `coding` session profile, verify the current directory is inside a Git
 repository. Resolve a stable `repository` identifier such as `owner/name` from
@@ -163,8 +164,8 @@ edited safely, provide the exact applicable snippet as a pending setup step.
 This server-scoped setting reduces prompts for eligible tools without weakening
 Codex's global approval policy. It cannot suppress Codex's mandatory approval
 for MCP tools that advertise a destructive annotation, so Basic Memory writes,
-edits, moves, and deletes may still prompt. Do not set `approval_policy = "never"`
-or change sandbox settings. Tell the user to start a new Codex thread after the
+edits, and deletes may still prompt. Do not set `approval_policy = "never"` or
+change sandbox settings. Tell the user to start a new Codex thread after the
 config change. Managed organization policy may impose additional approvals.
 
 ## Seed Schemas

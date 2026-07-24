@@ -308,8 +308,8 @@ default_tools_approval_mode = "approve"
 
 This does not disable Codex approvals globally or expand which Basic Memory
 projects the server can access. Codex still requires approval for tools that
-advertise a destructive annotation, including Basic Memory's mutating tools. If
-you installed the Basic Memory Codex plugin, use its
+advertise a destructive annotation, including Basic Memory's writes, edits, and
+deletes. If you installed the Basic Memory Codex plugin, use its
 [plugin-scoped configuration](plugins/codex/README.md#mcp-approvals) instead.
 
 ### Cursor

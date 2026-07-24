@@ -154,9 +154,9 @@ The pre-approval option is scoped to the Basic Memory MCP server. It does not
 disable Codex approvals globally or grant Basic Memory access to new workspaces,
 projects, or files; Basic Memory still uses the projects and credentials the
 user configured. Codex always requires approval for MCP tools that advertise a
-destructive annotation, so Basic Memory writes, edits, moves, and deletes may
-still prompt even with this setting. Do not set `approval_policy = "never"` for
-this purpose. Managed organization policy may impose additional approvals.
+destructive annotation, so Basic Memory writes, edits, and deletes may still
+prompt even with this setting. Do not set `approval_policy = "never"` for this
+purpose. Managed organization policy may impose additional approvals.
 
 Run `bm-setup` to choose the mode interactively. The skill can apply the
 server-scoped setting after confirmation or give you the exact snippet when the

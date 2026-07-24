@@ -39,6 +39,7 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         'default_tools_approval_mode = "approve"',
         "Do not offer a per-tool or write-only trust profile",
         "destructive annotation",
+        "writes,\nedits, and deletes may still prompt",
     ),
     "bm-status": (
         "~/.codex/basic-memory.json",
