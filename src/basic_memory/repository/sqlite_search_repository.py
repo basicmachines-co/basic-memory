@@ -24,6 +24,8 @@ from basic_memory.models.search import (
 )
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
+from basic_memory.repository.rerank_provider import RerankProvider
+from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
@@ -48,6 +50,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         project_id: int,
         app_config: BasicMemoryConfig | None = None,
         embedding_provider: EmbeddingProvider | None = None,
+        rerank_provider: RerankProvider | None = None,
     ):
         super().__init__(session_maker, project_id)
         self._entity_columns: set[str] | None = None
@@ -59,6 +62,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             self._app_config.semantic_embedding_sync_batch_size
         )
         self._embedding_provider = embedding_provider
+        self._rerank_provider = rerank_provider
+        self._reranker_candidates = self._app_config.reranker_candidates
+        self._reranker_max_document_chars = self._app_config.reranker_max_document_chars
         self._sqlite_vec_load_lock = asyncio.Lock()
         self._sqlite_prepare_write_lock = asyncio.Lock()
         self._vector_tables_initialized = False
@@ -69,6 +75,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             # This conversion is correct only for unit-normalized embeddings.
             # Provider implementations must return normalized vectors.
             self._embedding_provider = create_embedding_provider(self._app_config)
+        # create_rerank_provider returns None unless reranking is enabled.
+        if self._semantic_enabled and self._rerank_provider is None:
+            self._rerank_provider = create_rerank_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
 

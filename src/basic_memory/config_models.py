@@ -56,6 +56,12 @@ class DatabaseBackend(str, Enum):
     POSTGRES = "postgres"
 
 
+# Default reranker model — a local fastembed cross-encoder. jina-reranker-v1-tiny-en
+# benchmarks higher recall@5 than ms-marco-MiniLM at equal-or-lower latency (LoCoMo).
+# litellm cannot route this name, so the litellm provider requires an explicit override.
+DEFAULT_FASTEMBED_RERANK_MODEL = "jinaai/jina-reranker-v1-tiny-en"
+
+
 def _default_semantic_search_enabled() -> bool:
     """Enable semantic search by default when required local semantic dependencies exist."""
     required_modules = ("fastembed", "sqlite_vec")
@@ -373,6 +379,47 @@ class BasicMemoryConfig(BaseSettings):
         description="Default search type for search_notes when not specified per-query. "
         "Valid values: text, vector, hybrid. "
         "When unset, defaults to 'hybrid' if semantic search is enabled, otherwise 'text'.",
+    )
+
+    # Reranker configuration (cross-encoder rescoring of the top vector/hybrid candidates)
+    reranker_enabled: bool = Field(
+        default=False,
+        description="Enable cross-encoder reranking of vector/hybrid search candidates. "
+        "Off by default: adds latency and a first-run model download. Requires semantic search.",
+    )
+    reranker_provider: str = Field(
+        default="fastembed",
+        description="Reranker provider: 'fastembed' (local ONNX cross-encoder) or 'litellm' "
+        "(Cohere/Jina/Voyage/etc. via API).",
+    )
+    reranker_model: str = Field(
+        default=DEFAULT_FASTEMBED_RERANK_MODEL,
+        description="Reranker model identifier. For litellm use the 'provider/model' form, "
+        "e.g. 'cohere/rerank-v3.5'.",
+    )
+    reranker_max_document_chars: int = Field(
+        default=0,
+        description="Max characters of each candidate's text passed to the cross-encoder. "
+        "0 (default) sends the full matched text — the model still truncates to its own token "
+        "limit. Set a positive cap (e.g. ~1000) to bound rerank latency on long notes; the "
+        "most-relevant matched chunk leads the text, so a modest cap keeps most of the signal.",
+        ge=0,
+    )
+    reranker_api_base: str | None = Field(
+        default=None,
+        description="Optional custom API base URL for the litellm reranker provider "
+        "(self-hosted OpenAI-compatible rerank endpoints).",
+    )
+    reranker_api_key: str | None = Field(
+        default=None,
+        description="Optional API key passed to the litellm reranker provider. When unset, "
+        "litellm resolves credentials from provider environment variables.",
+    )
+    reranker_candidates: int = Field(
+        default=20,
+        description="Number of top retrieval candidates to rescore with the reranker before "
+        "returning the requested page. Larger widens recall at the cost of latency.",
+        gt=0,
     )
 
     # Database connection pool configuration (Postgres only)
@@ -864,6 +911,34 @@ class BasicMemoryConfig(BaseSettings):
             ProjectConfig(name=name, home=Path(entry.path), mode=entry.mode)
             for name, entry in self.projects.items()
         ]
+
+    @model_validator(mode="after")
+    def validate_reranker_config(self) -> "BasicMemoryConfig":
+        """Fail fast on reranker configs that cannot work.
+
+        - Reranking runs only on vector/hybrid retrieval, so it needs semantic search;
+          accepting reranker_enabled=True without it would silently never rerank.
+        - The default model is a local fastembed cross-encoder that litellm cannot
+          route, so the litellm provider needs an explicit provider/model model id.
+        """
+        if not self.reranker_enabled:
+            return self
+        if not self.semantic_search_enabled:
+            raise ValueError(
+                "reranker_enabled=True requires semantic_search_enabled=True "
+                "(reranking operates on vector/hybrid search results)."
+            )
+        if (
+            self.reranker_provider.strip().lower() == "litellm"
+            and self.reranker_model == DEFAULT_FASTEMBED_RERANK_MODEL
+        ):
+            raise ValueError(
+                "reranker_provider='litellm' requires an explicit reranker_model in "
+                "'provider/model' form (e.g. 'cohere/rerank-v3.5'); the default "
+                f"{DEFAULT_FASTEMBED_RERANK_MODEL!r} is a local fastembed model "
+                "litellm cannot route."
+            )
+        return self
 
     @model_validator(mode="after")
     def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
