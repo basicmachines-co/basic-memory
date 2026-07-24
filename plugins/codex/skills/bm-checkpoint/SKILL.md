@@ -1,13 +1,13 @@
 ---
 name: bm-checkpoint
-description: Save a deliberate Codex work checkpoint to Basic Memory with changed files, verification, decisions, blockers, and the next action.
+description: Create an immutable Codex handoff in Basic Memory and return an exact bm-orient resume command.
 ---
 
 # Checkpoint Codex Work
 
-Create a durable handoff note for current Codex work. Use this when the user asks
-to checkpoint, wrap up, hand off, remember the state of the work, or when the
-post-compaction SessionStart context requests the deliberate handoff.
+Create a durable, immutable handoff note for current Codex work. Use this when
+the user asks to checkpoint, wrap up, hand off, remember the work state, or when
+the post-compaction SessionStart context requests the deliberate handoff.
 
 ## Gather
 
@@ -24,7 +24,9 @@ Apply the `bm-writing` skill before drafting the note.
 
 Gather repo evidence:
 
-- the original problem or goal and why it mattered
+- the original objective that started the thread and why it mattered
+- the latest user intent, including corrections or scope changes that supersede
+  the original objective
 - the approach taken and why it solves the problem
 - the current system state and practical impact
 - tradeoffs, sharp edges, useful simplifications, and intentionally parked work
@@ -41,16 +43,32 @@ Gather repo evidence:
 - next action
 - current username, hostname, and timestamp
 
-Do not claim a test passed unless you ran it or the user supplied the result.
+Use direct, read-only evidence for repository and pull-request state. Do not
+claim a test passed unless you ran it or the user supplied the result.
 
 ## Write
 
 A checkpoint is a durable handoff, not a status dump or commit-by-commit
-changelog. Tell the story for a human or agent returning later.
+changelog. Tell the story for a human or agent returning later. Treat it as a
+snapshot plus pointers to authoritative artifacts, not a replacement for tasks,
+decisions, plans, issues, pull requests, commits, diffs, checked-in docs, or
+source files.
+
+Every invocation creates a new checkpoint. Never edit, replace, or append to an
+earlier checkpoint, even when the topic is unchanged.
+
+Use the title:
+
+`Codex checkpoint - <UTC YYYY-MM-DDTHH-MM-SSZ> - <short topic>`
+
+The UTC timestamp is part of the immutable checkpoint identity and avoids
+filename-unsafe colons. If `write_note` reports a title collision, retry with
+the smallest available numeric suffix such as ` - 2`. Never resolve a collision
+by modifying the existing note.
 
 Write a note to Basic Memory. For the `general` profile:
 
-- `title`: `Codex checkpoint - <short topic>`
+- `title`: the timestamped checkpoint title above
 - `directory`: configured `captureFolder`
 - `tags`: `["codex", "checkpoint"]`
 - frontmatter:
@@ -86,11 +104,27 @@ Begin the body with `# <exact note title>`.
 Use these sections, omitting optional ones that add no value:
 
 - `## Summary`: one concrete sentence that does not merely repeat the title
-- `## Story`: problem -> approach -> current state and impact in substantive prose
+- `## Story`: original objective -> latest user intent -> approach -> current
+  state and impact in substantive prose
+- `## Working State`: separate durable state from machine-local or fragile state
 - `## Changed Files`, when paths are useful for resuming
 - `## Verification`, for checks actually run and their outcomes
 - `## Observations`
 - `## Relations`, when the thread has an obvious graph target
+
+Prefer repository-relative paths in the body. Required absolute `repo_root` and
+`cwd` frontmatter remain machine-local evidence. Label dirty or untracked files,
+ignored files, active processes, dev servers, temporary directories, and local
+tool caches as machine-local or fragile when they matter to resumption. Do not
+present them as durable project state.
+
+Make the note pointer-first:
+
+- name authoritative artifacts and include their stable identifiers or links
+- summarize only the context needed to understand why each pointer matters
+- use a relation for an existing graph note and a normal link or repository
+  path for artifacts outside the graph
+- do not copy large plans, diffs, logs, or source files into the checkpoint
 
 Use observations to distill durable facts for structured recall rather than
 duplicating every narrative sentence:
@@ -98,7 +132,7 @@ duplicating every narrative sentence:
 - `[result]` for concrete outcomes
 - `[decision]` for each decision made or preserved
 - `[blocker]` for each unresolved blocker
-- `[next_step]` for the next concrete action; include at least one
+- `[next_step]` for the one primary next action; include exactly one
 - `[verification]` or `[changed_file]` only when the item is itself important
   project memory, not merely supporting detail
 
@@ -113,4 +147,15 @@ a relation when its target is an existing task, decision, spec, issue, or PR not
 
 ## Confirm
 
-Reply with the permalink and the one next action the checkpoint preserves.
+Reply with:
+
+1. one sentence summarizing what the checkpoint preserves
+2. the exact permalink returned by `write_note`
+3. the one primary next action
+4. exactly one fenced resume command as the final block:
+
+```text
+$bm-orient "<exact returned permalink>"
+```
+
+Use the returned permalink verbatim. Never construct or guess it.

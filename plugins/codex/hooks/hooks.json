@@ -26,18 +26,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/stop.py\"",
-            "statusMessage": "Finishing the Basic Memory checkpoint",
-            "timeout": 30
-          }
-        ]
-      }
     ]
   }
 }

@@ -48,18 +48,27 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "Always query `codex_session`",
         "type=codex_session",
         "type=coding_session",
+        "Choose exactly one route",
+        "read that note directly",
+        "Treat a recovered note as historical context",
+        "Report material drift explicitly",
     ),
     "bm-checkpoint": (
         "Apply the `bm-writing` skill",
         "A checkpoint is a durable handoff, not a status dump",
+        "Every invocation creates a new checkpoint",
+        "UTC YYYY-MM-DDTHH-MM-SSZ",
+        "snapshot plus pointers",
         "username: <current username>",
         "hostname: <current hostname>",
         "type: coding_session",
         "pull_request_number",
         "- `[decision]` for each decision made or preserved",
+        "include exactly one",
         "## Relations",
         "- relates_to [[Exact existing note title]]",
         "Never write `[relates_to]`",
+        '$bm-orient "<exact returned permalink>"',
     ),
     "bm-decide": ("codex/decisions",),
     "bm-remember": ("codex/remember",),
@@ -73,13 +82,12 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     ),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "coding-session.md", "decision.md", "task.md")
-REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact", "Stop")
+REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
 # moved into the basic-memory package behind `bm hook` (SPEC-55).
 REQUIRED_HOOK_SCRIPTS = (
     "hooks/session_start.py",
     "hooks/pre_compact.py",
-    "hooks/stop.py",
 )
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {
