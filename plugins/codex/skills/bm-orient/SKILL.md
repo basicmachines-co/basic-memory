@@ -25,8 +25,13 @@ Choose exactly one route from the invocation.
 ### Exact checkpoint
 
 When the user supplies an exact Basic Memory identifier or permalink, read that note directly.
-Do not search for alternatives or silently substitute a newer checkpoint. The
-exact pointer is the user's chosen cursor.
+When `primaryProject` is configured, call `read_note` with both the exact
+identifier and `project=<configured primaryProject>`. The explicit project is
+required even when the identifier is a permalink, file path, or title. If setup
+is missing, use the default project and say that the project scope could not be
+verified. Do not retry the identifier against secondary or other projects, search
+for alternatives, or silently substitute a newer checkpoint. The exact pointer
+and project are the user's chosen cursor.
 
 ### Topic discovery
 

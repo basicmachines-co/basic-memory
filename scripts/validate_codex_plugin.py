@@ -50,6 +50,8 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "type=coding_session",
         "Choose exactly one route",
         "read that note directly",
+        "`project=<configured primaryProject>`",
+        "Do not retry the identifier against secondary or other projects",
         "Run the `coding_session` topic search separately",
         'metadata_filters={"repository": "<configured repository>"}',
         "omit `coding_session` results",

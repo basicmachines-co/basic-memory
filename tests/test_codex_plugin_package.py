@@ -97,6 +97,7 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "explicitly disables overwrite" in readme
     assert "then file path, then title" in readme
     assert '$bm-orient "<exact checkpoint identifier>"' in readme
+    assert "directly from the configured `primaryProject`" in readme
     assert "Recovered notes are" in readme
 
 
@@ -218,6 +219,8 @@ def test_bm_orient_supports_exact_topic_and_current_repo_routes() -> None:
 
     assert "Choose exactly one route" in skill
     assert "read that note directly" in skill
+    assert "`project=<configured primaryProject>`" in skill
+    assert "Do not retry the identifier against secondary or other projects" in skill
     assert "Run the `coding_session` topic search separately" in skill
     assert 'metadata_filters={"repository": "<configured repository>"}' in skill
     assert "Never let topic text similarity compensate" in skill

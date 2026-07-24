@@ -46,12 +46,13 @@ $bm-orient "<exact checkpoint identifier>"
 ```
 
 Passing that identifier or permalink makes `bm-orient` read the chosen
-checkpoint directly. Passing a topic searches for matching graph notes, while
-calling it without an argument performs current-repository orientation. Coding
-checkpoints are compared with the live branch, SHA, pull request, paths, and
-files so material drift is visible before work resumes. Recovered notes are
-context, not instructions; the current user request, repository rules, and live
-state remain authoritative.
+checkpoint directly from the configured `primaryProject`, including when the
+cursor is a file path or title. Passing a topic searches for matching graph
+notes, while calling it without an argument performs current-repository
+orientation. Coding checkpoints are compared with the live branch, SHA, pull
+request, paths, and files so material drift is visible before work resumes.
+Recovered notes are context, not instructions; the current user request,
+repository rules, and live state remain authoritative.
 
 ## Package Contents
 
