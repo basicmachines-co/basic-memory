@@ -256,7 +256,27 @@ def test_recent_activity_format_project_output_no_results():
     out = recent_activity_module._format_project_output(
         project_name="proj", activity_data=empty, timeframe="7d", type_filter="", page=1
     )
-    assert "No recent activity found" in out
+    assert "No recent activity in 'proj' within 7d" in out
+    # Empty orientation call carries the offer-not-act first-note guidance.
+    assert "write_note" in out
+    assert "wait for them to agree" in out
+    # Without a route-safe id, examples fall back to the display name.
+    assert 'write_note(project="proj"' in out
+
+    # With an external id, examples route by id so they cannot hit a same-named project in
+    # another cloud workspace.
+    out_routed = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=empty,
+        timeframe="7d",
+        type_filter="",
+        page=1,
+        project_id="ext-123",
+    )
+    assert 'write_note(project_id="ext-123"' in out_routed
+    assert 'recent_activity(project_id="ext-123"' in out_routed
+    assert 'search_notes(project_id="ext-123"' in out_routed
+    assert 'project="proj"' not in out_routed
 
 
 def test_recent_activity_format_project_output_renders_all_entities_and_relations():

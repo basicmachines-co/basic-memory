@@ -309,14 +309,39 @@ Error searching for '{query}': {error_message}
 - **Observation categories**: `entity_types=["observation"], categories=["requirement"]`"""
 
 
-def _format_search_markdown(result: SearchResponse, project: str, query: str | None) -> str:
+def _format_search_markdown(
+    result: SearchResponse, project: str, query: str | None, project_id: str | None = None
+) -> str:
     """Format SearchResponse as compact markdown text.
 
     Produces a human-readable markdown representation suitable for LLM
     consumption when structured data isn't needed.
     """
     if not result.results:
-        return f"No results found for '{query or ''}' in project '{project}'."
+        # Empty search is usually "no match for this query," not "empty knowledge base," so we
+        # do not repeat the first-note offer here (that would nag established users). Point at
+        # recent_activity, which owns the getting-started guidance when the base is truly empty.
+        if project == "all projects":
+            # A bare recent_activity() is NOT force-discovery: with a configured default/cached
+            # project it resolves to that one project. So for an all-projects miss, point at the
+            # enumerator instead — suggesting recent_activity() could silently narrow to the
+            # default project and miss activity elsewhere.
+            suggestion = "call list_memory_projects() to see what exists across your projects"
+        elif project_id:
+            # Names collide across cloud workspaces; route the orientation call by external id.
+            suggestion = (
+                f'call recent_activity(project_id="{project_id}") to orient — if the project is '
+                "empty it will guide creating a first note"
+            )
+        else:
+            suggestion = (
+                f'call recent_activity(project="{project}") to orient — if the project is empty '
+                "it will guide creating a first note"
+            )
+        return (
+            f"No results found for '{query or ''}' in project '{project}'. "
+            f"Try broader or different terms, or {suggestion}."
+        )
 
     parts = []
 
@@ -1173,7 +1198,9 @@ async def search_notes(
                 if output_format == "json":
                     return result.model_dump(mode="json", exclude_none=True)
 
-                return _format_search_markdown(result, active_project.name, query)
+                return _format_search_markdown(
+                    result, active_project.name, query, project_id=active_project.external_id
+                )
 
             except Exception as e:
                 logger.error(
