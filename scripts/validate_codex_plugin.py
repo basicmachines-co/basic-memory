@@ -34,9 +34,11 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "coding-session.md",
         "hook status --harness codex",
         "Keep Codex's default approval behavior",
+        "Pre-approve eligible tools",
         '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
         'default_tools_approval_mode = "approve"',
         "Do not offer a per-tool or write-only trust profile",
+        "destructive annotation",
     ),
     "bm-status": (
         "~/.codex/basic-memory.json",

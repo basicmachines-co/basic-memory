@@ -141,6 +141,7 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "directly from the configured `primaryProject`" in readme
     assert "Recovered notes are" in readme
     assert "There are two supported approval choices" in readme
+    assert "Pre-approve eligible Basic Memory MCP tools" in readme
     assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in readme
     assert "[mcp_servers.basic-memory]" in readme
     assert 'default_tools_approval_mode = "approve"' in readme
@@ -173,8 +174,9 @@ def test_bm_setup_offers_default_or_server_wide_mcp_trust() -> None:
 
     assert "ask the user to choose exactly one of these two modes" in setup
     assert "Keep Codex's default approval behavior" in setup
-    assert "Trust all tools from the Basic Memory MCP server" in setup
+    assert "Pre-approve eligible tools from the Basic Memory MCP server" in setup
     assert "Do not offer a per-tool or write-only trust profile" in setup
+    assert "destructive annotation" in setup
     assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in setup
     assert "[mcp_servers.basic-memory]" in setup
     assert 'default_tools_approval_mode = "approve"' in setup

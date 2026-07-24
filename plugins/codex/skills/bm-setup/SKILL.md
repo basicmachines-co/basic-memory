@@ -50,11 +50,12 @@ repo, default project, current directory, or previous local state.
   local hook inbox. Default to `true`; an explicit JSON boolean `false` opts out.
 - MCP approvals: ask the user to choose exactly one of these two modes:
   1. Keep Codex's default approval behavior. This requires no Codex config change.
-  2. Trust all tools from the Basic Memory MCP server, including reads and writes.
-     This sets `default_tools_approval_mode = "approve"` only for Basic Memory.
+  2. Pre-approve eligible tools from the Basic Memory MCP server. This sets
+     `default_tools_approval_mode = "approve"` only for Basic Memory.
   Do not offer a per-tool or write-only trust profile. Explain that server trust
   changes Codex's approval UX but does not grant Basic Memory access to any new
-  workspace, project, or files.
+  workspace, project, or files. Codex still requires approval for tools that
+  advertise a destructive annotation, including Basic Memory's mutating tools.
 
 For the `coding` session profile, verify the current directory is inside a Git
 repository. Resolve a stable `repository` identifier such as `owner/name` from
@@ -135,8 +136,9 @@ The approval choice belongs in `~/.codex/config.toml`, not
 If the user keeps Codex's default approval behavior, do not change
 `~/.codex/config.toml`.
 
-If the user chooses to trust all Basic Memory tools, inspect the existing Codex
-configuration and identify which Basic Memory server entry is active:
+If the user chooses to pre-approve eligible Basic Memory tools, inspect the
+existing Codex configuration and identify which Basic Memory server entry is
+active:
 
 - For the marketplace plugin, use:
 
@@ -158,10 +160,12 @@ configuration, show the exact change and get explicit confirmation. Preserve all
 unrelated TOML keys and never create a duplicate table. If the file cannot be
 edited safely, provide the exact applicable snippet as a pending setup step.
 
-This server-scoped setting covers reads and writes without weakening Codex's
-global approval policy. Do not set `approval_policy = "never"` or change sandbox
-settings. Tell the user to start a new Codex thread after the config change.
-Managed organization policy may still require approvals.
+This server-scoped setting reduces prompts for eligible tools without weakening
+Codex's global approval policy. It cannot suppress Codex's mandatory approval
+for MCP tools that advertise a destructive annotation, so Basic Memory writes,
+edits, moves, and deletes may still prompt. Do not set `approval_policy = "never"`
+or change sandbox settings. Tell the user to start a new Codex thread after the
+config change. Managed organization policy may impose additional approvals.
 
 ## Seed Schemas
 
