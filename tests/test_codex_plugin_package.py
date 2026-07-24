@@ -62,7 +62,7 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
 def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
 
-    for case in ("retired-event", "wrong-script", "duplicate-command"):
+    for case in ("retired-event", "wrong-script", "duplicate-command", "retired-script"):
         plugin_dir = tmp_path / case
         shutil.copytree(repo_root / "plugins/codex", plugin_dir)
         hooks_path = plugin_dir / "hooks" / "hooks.json"
@@ -73,9 +73,11 @@ def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) 
         elif case == "wrong-script":
             command_hook = payload["hooks"]["PreCompact"][0]["hooks"][0]
             command_hook["command"] = command_hook["command"].replace("pre_compact.py", "stop.py")
-        else:
+        elif case == "duplicate-command":
             command_hooks = payload["hooks"]["PreCompact"][0]["hooks"]
             command_hooks.append(command_hooks[0].copy())
+        else:
+            (plugin_dir / "hooks" / "stop.py").write_text("# retired hook\n", encoding="utf-8")
         hooks_path.write_text(json.dumps(payload), encoding="utf-8")
 
         result = subprocess.run(
@@ -91,7 +93,7 @@ def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) 
         )
 
         assert result.returncode != 0
-        assert "hooks/hooks.json:" in result.stderr
+        assert "hooks/" in result.stderr
 
 
 def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:

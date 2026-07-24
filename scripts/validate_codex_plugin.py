@@ -182,9 +182,25 @@ def validate_plugin(plugin_dir: Path) -> None:
         command_hooks = matcher_group.get("hooks") if isinstance(matcher_group, dict) else None
         if not isinstance(command_hooks, list) or len(command_hooks) != 1:
             raise SystemExit(f"hooks/hooks.json: {event} must define exactly one command hook")
-        script_refs = HOOK_SCRIPT_PATH_RE.findall(json.dumps(command_hooks[0]))
+        command_hook = command_hooks[0]
+        if not isinstance(command_hook, dict) or command_hook.get("type") != "command":
+            raise SystemExit(f"hooks/hooks.json: {event} hook must have type=command")
+        command = command_hook.get("command")
+        if not isinstance(command, str):
+            raise SystemExit(f"hooks/hooks.json: {event} hook must define a command")
+        script_refs = HOOK_SCRIPT_PATH_RE.findall(command)
         if script_refs != [expected_script]:
             raise SystemExit(f"hooks/hooks.json: {event} must reference exactly {expected_script}")
+    hook_files = {
+        f"hooks/{path.name}"
+        for path in (plugin_dir / "hooks").iterdir()
+        if path.is_file() and path.name != "hooks.json" and not path.name.startswith("test_")
+    }
+    if hook_files != set(REQUIRED_HOOK_SCRIPTS):
+        raise SystemExit(
+            "hooks/: expected exactly these non-test hook scripts: "
+            + ", ".join(REQUIRED_HOOK_SCRIPTS)
+        )
     dependency_refs: set[str] = set()
     for rel in REQUIRED_HOOK_SCRIPTS:
         script = plugin_dir / rel
