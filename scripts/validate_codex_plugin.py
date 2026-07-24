@@ -94,18 +94,20 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     ),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "coding-session.md", "decision.md", "task.md")
-REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact")
+REQUIRED_HOOKS = {
+    "SessionStart": "hooks/session_start.py",
+    "PreCompact": "hooks/pre_compact.py",
+}
+REQUIRED_HOOK_EVENTS = tuple(REQUIRED_HOOKS)
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
 # moved into the basic-memory package behind `bm hook` (SPEC-55).
-REQUIRED_HOOK_SCRIPTS = (
-    "hooks/session_start.py",
-    "hooks/pre_compact.py",
-)
+REQUIRED_HOOK_SCRIPTS = tuple(REQUIRED_HOOKS.values())
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {
     "composerIcon": "assets/app-icon.png",
     "logo": "assets/logo.png",
 }
+HOOK_SCRIPT_PATH_RE = re.compile(r"\$\{PLUGIN_ROOT\}/(hooks/[A-Za-z0-9_./-]+\.py)")
 HOOK_DEPENDENCY_RE = re.compile(
     r'"basic-memory @ git\+https://github\.com/'
     r'basicmachines-co/basic-memory@([^"]+)"'
@@ -167,9 +169,15 @@ def validate_plugin(plugin_dir: Path) -> None:
     hooks = hooks_json.get("hooks")
     if not isinstance(hooks, dict):
         raise SystemExit("hooks/hooks.json: expected hooks object")
-    for event in REQUIRED_HOOK_EVENTS:
-        if event not in hooks:
-            raise SystemExit(f"hooks/hooks.json: missing {event}")
+    if set(hooks) != set(REQUIRED_HOOK_EVENTS):
+        raise SystemExit(
+            "hooks/hooks.json: expected exactly these hook events: "
+            + ", ".join(REQUIRED_HOOK_EVENTS)
+        )
+    for event, expected_script in REQUIRED_HOOKS.items():
+        script_refs = set(HOOK_SCRIPT_PATH_RE.findall(json.dumps(hooks[event])))
+        if script_refs != {expected_script}:
+            raise SystemExit(f"hooks/hooks.json: {event} must reference exactly {expected_script}")
     dependency_refs: set[str] = set()
     for rel in REQUIRED_HOOK_SCRIPTS:
         script = plugin_dir / rel

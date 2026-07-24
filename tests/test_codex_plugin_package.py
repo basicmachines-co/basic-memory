@@ -1,6 +1,8 @@
 import json
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -55,6 +57,38 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
 
     hooks = json.loads((hooks_dir / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     assert set(hooks) == {"SessionStart", "PreCompact"}
+
+
+def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    for case in ("retired-event", "wrong-script"):
+        plugin_dir = tmp_path / case
+        shutil.copytree(repo_root / "plugins/codex", plugin_dir)
+        hooks_path = plugin_dir / "hooks" / "hooks.json"
+        payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+
+        if case == "retired-event":
+            payload["hooks"]["Stop"] = payload["hooks"]["PreCompact"]
+        else:
+            command_hook = payload["hooks"]["PreCompact"][0]["hooks"][0]
+            command_hook["command"] = command_hook["command"].replace("pre_compact.py", "stop.py")
+        hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repo_root / "scripts" / "validate_codex_plugin.py"),
+                str(plugin_dir),
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "hooks/hooks.json:" in result.stderr
 
 
 def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:
