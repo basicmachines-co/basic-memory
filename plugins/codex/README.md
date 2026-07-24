@@ -116,6 +116,40 @@ To customize how Codex writes memory, edit `skills/bm-writing/SKILL.md` in the
 plugin source. `bm-checkpoint`, `bm-decide`, and `bm-remember` all apply that
 shared skill while retaining their own schemas and evidence requirements.
 
+## MCP Approvals
+
+There are two supported approval choices:
+
+1. Keep Codex's default approval behavior. No additional configuration is
+   required.
+2. Trust all Basic Memory MCP tools, including reads and writes. Add this to
+   `~/.codex/config.toml` when Basic Memory is loaded from the marketplace
+   plugin:
+
+   ```toml
+   [plugins."codex@basic-memory".mcp_servers.basic-memory]
+   default_tools_approval_mode = "approve"
+   ```
+
+For a standalone Basic Memory server instead of the plugin-provided server, add
+the setting to its existing table:
+
+```toml
+[mcp_servers.basic-memory]
+default_tools_approval_mode = "approve"
+```
+
+The trust option is scoped to the Basic Memory MCP server. It does not disable
+Codex approvals globally or grant Basic Memory access to new workspaces,
+projects, or files; Basic Memory still uses the projects and credentials the
+user configured. Do not set `approval_policy = "never"` for this purpose.
+Managed organization policy may still require approvals.
+
+Run `bm-setup` to choose the mode interactively. The skill can apply the
+server-scoped setting after confirmation or give you the exact snippet when the
+active server configuration is ambiguous. Start a new Codex thread after
+changing `~/.codex/config.toml`.
+
 ## Configuration
 
 Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:

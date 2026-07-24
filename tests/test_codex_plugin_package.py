@@ -118,6 +118,7 @@ def test_codex_plugin_marketplace_identity() -> None:
 def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     readme = (repo_root / "plugins/codex/README.md").read_text(encoding="utf-8")
+    root_readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
     assert "## Install" in readme
     assert 'codex plugin marketplace add "$(git rev-parse --show-toplevel)"' in readme
@@ -139,6 +140,13 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert '$bm-orient "<exact checkpoint identifier>"' in readme
     assert "directly from the configured `primaryProject`" in readme
     assert "Recovered notes are" in readme
+    assert "There are two supported approval choices" in readme
+    assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in readme
+    assert "[mcp_servers.basic-memory]" in readme
+    assert 'default_tools_approval_mode = "approve"' in readme
+    assert 'approval_policy = "never"' in readme
+    assert 'default_tools_approval_mode = "approve"' in root_readme
+    assert "plugin-scoped configuration" in root_readme
 
 
 def test_user_level_coding_profile_stays_with_repository_override() -> None:
@@ -157,6 +165,20 @@ def test_user_level_coding_profile_stays_with_repository_override() -> None:
     }
     assert "omit `sessionProfile` from the shared user file" in setup
     assert '"sessionProfile": "coding",\n    "repository": "owner/name"' in setup
+
+
+def test_bm_setup_offers_default_or_server_wide_mcp_trust() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    setup = (repo_root / "plugins/codex/skills/bm-setup/SKILL.md").read_text(encoding="utf-8")
+
+    assert "ask the user to choose exactly one of these two modes" in setup
+    assert "Keep Codex's default approval behavior" in setup
+    assert "Trust all tools from the Basic Memory MCP server" in setup
+    assert "Do not offer a per-tool or write-only trust profile" in setup
+    assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in setup
+    assert "[mcp_servers.basic-memory]" in setup
+    assert 'default_tools_approval_mode = "approve"' in setup
+    assert 'Do not set `approval_policy = "never"`' in setup
 
 
 def test_codex_manual_capture_defaults_share_codex_tree() -> None:

@@ -33,6 +33,10 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "sessionProfile",
         "coding-session.md",
         "hook status --harness codex",
+        "Keep Codex's default approval behavior",
+        '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
+        'default_tools_approval_mode = "approve"',
+        "Do not offer a per-tool or write-only trust profile",
     ),
     "bm-status": (
         "~/.codex/basic-memory.json",
@@ -254,6 +258,9 @@ def validate_plugin(plugin_dir: Path) -> None:
         "lifecycle trace stays local",
         "post-compaction `SessionStart`",
         "note is agent-authored",
+        '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
+        "[mcp_servers.basic-memory]",
+        'default_tools_approval_mode = "approve"',
     ):
         if required_text not in readme:
             raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")

@@ -296,6 +296,22 @@ command = "uvx"
 args = ["basic-memory", "mcp"]
 ```
 
+Codex can keep its default MCP approval behavior, or you can trust all Basic
+Memory tools—including reads and writes—by adding this server-scoped setting to
+the same table:
+
+```toml
+[mcp_servers.basic-memory]
+command = "uvx"
+args = ["basic-memory", "mcp"]
+default_tools_approval_mode = "approve"
+```
+
+This does not disable Codex approvals globally or expand which Basic Memory
+projects the server can access. If you installed the Basic Memory Codex plugin,
+use its [plugin-scoped configuration](plugins/codex/README.md#mcp-approvals)
+instead.
+
 ### Cursor
 
 Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
