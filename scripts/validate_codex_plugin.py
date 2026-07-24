@@ -73,6 +73,8 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "## Relations",
         "- relates_to [[Exact existing note title]]",
         "Never write `[relates_to]`",
+        "`project=<configured primaryProject>`",
+        "frontmatter `project` field is descriptive",
         "overwrite=False",
         'output_format="json"',
         "`write_note_overwrite_default` setting is true",

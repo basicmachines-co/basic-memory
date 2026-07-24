@@ -66,8 +66,12 @@ filename-unsafe colons. If `write_note` reports a title collision, retry with
 the smallest available numeric suffix such as ` - 2`. Never resolve a collision
 by modifying the existing note.
 
-Call `write_note` with `overwrite=False` and `output_format="json"` on every
-attempt. The explicit non-overwrite flag must win even when the user's
+Call `write_note` with `project=<configured primaryProject>`,
+`overwrite=False`, and `output_format="json"` on every attempt. When
+`primaryProject` is omitted, leave the project argument unset so Basic Memory
+uses its default project. The frontmatter `project` field is descriptive
+metadata and does not replace the tool's project argument. The explicit
+non-overwrite flag must win even when the user's
 `write_note_overwrite_default` setting is true. Only accept a successful result
 with `action: created`; treat `action: conflict` or `NOTE_ALREADY_EXISTS` as the
 title collision above, and stop on any other action or error.

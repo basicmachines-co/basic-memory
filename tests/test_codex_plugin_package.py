@@ -94,7 +94,8 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "Decision notes default to `codex/decisions`" in readme
     assert "keep both the profile and checkout-specific repository" in readme
     assert "## Checkpoint and Resume" in readme
-    assert "explicitly disables overwrite" in readme
+    assert "targets the configured `primaryProject`" in readme
+    assert "disables overwrite" in readme
     assert "then file path, then title" in readme
     assert '$bm-orient "<exact checkpoint identifier>"' in readme
     assert "directly from the configured `primaryProject`" in readme
@@ -177,6 +178,8 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "include exactly one" in skill
     assert "- relates_to [[Exact existing note title]]" in skill
     assert "Never write `[relates_to]` or a bare `memory://` URL as an observation" in skill
+    assert "`project=<configured primaryProject>`" in skill
+    assert "frontmatter `project` field is descriptive" in skill
     assert "overwrite=False" in skill
     assert 'output_format="json"' in skill
     assert "`write_note_overwrite_default` setting is true" in skill
