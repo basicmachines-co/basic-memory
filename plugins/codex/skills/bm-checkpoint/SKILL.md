@@ -66,6 +66,12 @@ filename-unsafe colons. If `write_note` reports a title collision, retry with
 the smallest available numeric suffix such as ` - 2`. Never resolve a collision
 by modifying the existing note.
 
+Call `write_note` with `overwrite=False` and `output_format="json"` on every
+attempt. The explicit non-overwrite flag must win even when the user's
+`write_note_overwrite_default` setting is true. Only accept a successful result
+with `action: created`; treat `action: conflict` or `NOTE_ALREADY_EXISTS` as the
+title collision above, and stop on any other action or error.
+
 Write a note to Basic Memory. For the `general` profile:
 
 - `title`: the timestamped checkpoint title above
@@ -150,12 +156,15 @@ a relation when its target is an existing task, decision, spec, issue, or PR not
 Reply with:
 
 1. one sentence summarizing what the checkpoint preserves
-2. the exact permalink returned by `write_note`
+2. the exact resume identifier selected from the successful JSON result
 3. the one primary next action
 4. exactly one fenced resume command as the final block:
 
 ```text
-$bm-orient "<exact returned permalink>"
+$bm-orient "<exact returned resume identifier>"
 ```
 
-Use the returned permalink verbatim. Never construct or guess it.
+Choose the first non-empty returned value in this order: `permalink`,
+`file_path`, then `title`. This preserves a direct resume cursor when the Basic
+Memory project has permalinks disabled. Use the returned value verbatim; never
+construct or guess a permalink or file path.

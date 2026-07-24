@@ -36,11 +36,13 @@ decisions, plans, issues, commits, diffs, docs, and source files. Machine-local
 state such as absolute paths, dirty files, active dev servers, and temporary
 directories is labeled explicitly instead of being presented as durable state.
 
-The response ends with an exact command built from the permalink returned by
-Basic Memory:
+The checkpoint write explicitly disables overwrite, regardless of the user's
+global write default. Its response ends with an exact command built from the
+successful Basic Memory result, preferring the returned permalink, then file path, then title
+when permalinks are disabled:
 
 ```text
-$bm-orient "<exact checkpoint permalink>"
+$bm-orient "<exact checkpoint identifier>"
 ```
 
 Passing that identifier or permalink makes `bm-orient` read the chosen
