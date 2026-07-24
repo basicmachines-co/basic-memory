@@ -85,6 +85,10 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "marketplace file should not" in readme
     assert "Configuration can live at user level in `~/.codex/basic-memory.json`" in readme
     assert "the nearest project file overrides only the keys it declares" in readme
+    assert '"checkpointOnCompact": true' in readme
+    assert '"rememberFolder": "codex/remember"' in readme
+    assert "Checkpoint prompting is on by default" in readme
+    assert "Decision notes default to `codex/decisions`" in readme
     assert "keep both the profile and checkout-specific repository" in readme
 
 
@@ -104,6 +108,18 @@ def test_user_level_coding_profile_stays_with_repository_override() -> None:
     }
     assert "omit `sessionProfile` from the shared user file" in setup
     assert '"sessionProfile": "coding",\n    "repository": "owner/name"' in setup
+
+
+def test_codex_manual_capture_defaults_share_codex_tree() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    setup = (repo_root / "plugins/codex/skills/bm-setup/SKILL.md").read_text(encoding="utf-8")
+    decide = (repo_root / "plugins/codex/skills/bm-decide/SKILL.md").read_text(encoding="utf-8")
+    remember = (repo_root / "plugins/codex/skills/bm-remember/SKILL.md").read_text(encoding="utf-8")
+
+    assert '"rememberFolder": "codex/remember"' in setup
+    assert "Default decisions to `codex/decisions`" in setup
+    assert "otherwise use `codex/decisions`" in decide
+    assert "`rememberFolder`, default `codex/remember`" in remember
 
 
 def test_coding_session_schema_is_shared_across_host_plugins() -> None:
@@ -157,18 +173,24 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
 
-def test_codex_checkpoint_applies_accumulated_redaction_before_write() -> None:
+def test_codex_checkpoint_has_no_plugin_redaction_gate() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    skill = (repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md").read_text(encoding="utf-8")
+    plugin_files = (
+        repo_root / "plugins/codex/README.md",
+        repo_root / "plugins/codex/skills/bm-checkpoint/SKILL.md",
+        repo_root / "plugins/codex/skills/bm-setup/SKILL.md",
+        repo_root / "plugins/codex/skills/bm-status/SKILL.md",
+    )
 
-    assert "## Privacy Gate" in skill
-    assert "`redactKeys` and `redactPaths` accumulate" in skill
-    assert "Scrub **every string** passed to `write_note`" in skill
-    assert "Do not omit schema-required path fields; use the marker" in skill
-    assert "[REDACTED_PATH]" in skill
-    assert "[REDACTED]" in skill
-    assert "fail closed: skip the checkpoint" in skill
-    assert "Do not fall back to an unredacted note" in skill
+    for path in plugin_files:
+        text = path.read_text(encoding="utf-8")
+        assert "checkpointPrivacyReview" not in text
+        assert "redactKeys" not in text
+        assert "redactPaths" not in text
+
+    checkpoint = plugin_files[1].read_text(encoding="utf-8")
+    assert "## Optional Privacy Review" not in checkpoint
+    assert "Scrub **every string** passed to `write_note`" not in checkpoint
 
 
 def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:

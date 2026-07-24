@@ -11,8 +11,8 @@ verification, decision capture, and resumable checkpoints.
 
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
   decisions, and recent Codex checkpoints before substantial work.
-- **Checkpoint work.** `PreCompact` records a private request and the `Stop`
-  hook asks the active Codex turn to run `bm-checkpoint` once after compaction.
+- **Checkpoint work after compaction.** The post-compaction `SessionStart`
+  context asks the resumed Codex turn to run `bm-checkpoint`.
   The resulting `codex_session` or `coding_session` note is agent-authored from
   the compacted working context, with repository and pull-request evidence.
 - **Capture decisions.** The `bm-decide` skill records durable engineering
@@ -33,18 +33,23 @@ verification, decision capture, and resumable checkpoints.
 | --- | --- |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
-| `hooks/hooks.json` | SessionStart, PreCompact, and Stop hook registration |
+| `hooks/hooks.json` | SessionStart, PreCompact, and rollout-compatibility Stop registration |
 | `hooks/session_start.py` | uv script: runs `basic-memory hook session-start --harness codex` |
 | `hooks/pre_compact.py` | uv script: runs `basic-memory hook pre-compact --harness codex` |
-| `hooks/stop.py` | uv script: runs `basic-memory hook stop --harness codex` |
+| `hooks/stop.py` | uv script: preserves the previous checkpoint handshake during the runtime-pin rollout |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
-The hook scripts carry no logic: the brief, checkpoint coordination, and
+The hook scripts carry no logic: the brief, checkpoint prompting, and
 lifecycle-event capture all live in the pinned Basic Memory revision behind
 `bm hook`. Each is a self-contained PEP 723 script pinned to a Basic Memory Git
 ref. All refs are updated together with
 `just set-codex-hook-version <sha-or-tag>`.
+
+The Stop shim is a temporary rollout bridge. While these scripts remain pinned
+to the last durable merged runtime, it preserves that runtime's checkpoint
+handshake. The dependency-only follow-up that pins the post-compaction
+`SessionStart` implementation also removes the Stop registration.
 
 ## Requirements
 
@@ -81,8 +86,7 @@ be moved into the plugin directory.
 
 Configuration can live at user level in `~/.codex/basic-memory.json` or at
 project level in `.codex/basic-memory.json`. User-level settings are the base;
-the nearest project file overrides only the keys it declares. `redactKeys` and
-`redactPaths` are the privacy exception: their user and project lists accumulate.
+the nearest project file overrides only the keys it declares.
 The setup skill asks which scope to use and recommends user-level configuration
 by default.
 
@@ -101,31 +105,36 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
     "secondaryProjects": [],
     "teamProjects": {},
     "focus": "code/dev",
-    "rememberFolder": "codex-remember",
+    "rememberFolder": "codex/remember",
     "recallTimeframe": "7d",
+    "checkpointOnCompact": true,
     "captureEvents": true,
-    "redactKeys": [],
-    "redactPaths": [],
-    "placementConventions": "Put decisions in decisions/ and work checkpoints in codex/<repo-dir>/."
+    "placementConventions": "Put decisions in codex/decisions/ and work checkpoints in codex/<repo-dir>/."
   }
 }
 ```
 
 Codex event capture is on by default. Set the JSON boolean `false` at user or
-project level to opt out; malformed values fail closed. Captured, redacted
+project level to opt out; malformed values fail closed. Captured
 lifecycle-event envelopes land in a local inbox under your Basic Memory home.
 The lifecycle trace stays local: `basic-memory hook flush` only moves valid
-envelopes into the local retention archive and never creates graph notes. Add
-`redactKeys` and `redactPaths` arrays to extend the built-in redaction floor.
+envelopes into the local retention archive and never creates graph notes.
 
-Codex ignores PreCompact stdout, so PreCompact cannot ask the model to write a
-note directly. It leaves a private request for the Stop hook. Stop then blocks
-the turn once with a request to run `bm-checkpoint`; the active model writes an
-agent-authored checkpoint from its compacted context, and the next Stop is a
-no-op to prevent loops.
+Checkpoint prompting is on by default. Set `checkpointOnCompact` to the JSON
+boolean `false` to opt out. Codex ignores PreCompact stdout; after compaction,
+Codex runs SessionStart with the `compact` trigger. When the setting is enabled,
+that context asks the resumed agent to run `bm-checkpoint` from its compacted
+working context.
+
+`sessionProfile` only selects whether the skill writes a `codex_session` or
+`coding_session` note.
 
 When `captureFolder` is omitted, Codex resolves the Git top-level directory and
 writes to `codex/<repo-dir>`. An explicit folder still wins.
+
+Decision notes default to `codex/decisions`, and lightweight `bm-remember`
+captures default to `codex/remember`. Project placement conventions and an
+explicit `rememberFolder` can override those destinations.
 
 For a coding profile, keep both the profile and checkout-specific repository
 identifier in the project file without duplicating the shared settings:

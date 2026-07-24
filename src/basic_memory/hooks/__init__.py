@@ -15,5 +15,4 @@ Modules:
   - ``archive``   idempotent local audit-archive sweep
   - ``projector`` compatibility imports for the retired graph projector
   - ``project_ref`` project-name / project-id routing helpers
-  - ``checkpoint_requests`` private PreCompact -> Stop handoff state for Codex
 """

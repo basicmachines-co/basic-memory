@@ -25,22 +25,21 @@ REQUIRED_SKILLS = (
 )
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
+        "checkpointOnCompact",
         "captureEvents",
         "user-level",
         "project-level",
         "codex/<repo-dir>",
-        "redactKeys",
-        "redactPaths",
         "sessionProfile",
         "coding-session.md",
         "hook status --harness codex",
     ),
     "bm-status": (
         "~/.codex/basic-memory.json",
+        "checkpointOnCompact",
         "hook status --harness codex",
         "pending envelopes",
         "archived envelopes",
-        "Pending checkpoint requests",
         "last flush",
         "type=codex_session",
         "type=coding_session",
@@ -53,10 +52,6 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-checkpoint": (
         "Apply the `bm-writing` skill",
         "A checkpoint is a durable handoff, not a status dump",
-        "## Privacy Gate",
-        "`redactKeys` and `redactPaths` accumulate",
-        "[REDACTED_PATH]",
-        "skip the checkpoint",
         "username: <current username>",
         "hostname: <current hostname>",
         "type: coding_session",
@@ -66,6 +61,8 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "- relates_to [[Exact existing note title]]",
         "Never write `[relates_to]`",
     ),
+    "bm-decide": ("codex/decisions",),
+    "bm-remember": ("codex/remember",),
     "bm-writing": (
         "intentionally user-customizable",
         "problem -> approach -> current state and impact",
@@ -204,8 +201,8 @@ def validate_plugin(plugin_dir: Path) -> None:
     readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
     for required_text in (
         "lifecycle trace stays local",
-        "Stop hook",
-        "agent-authored checkpoint",
+        "post-compaction `SessionStart`",
+        "note is agent-authored",
     ):
         if required_text not in readme:
             raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")

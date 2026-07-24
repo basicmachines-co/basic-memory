@@ -3,12 +3,16 @@
 Harness plugins reduce to manifests plus one-line shims that exec
 ``bm hook <event> --harness claude|codex`` with the hook JSON on stdin. All
 logic lives here: per-harness stdin adapters, the session-start context brief,
-checkpoint coordination, lifecycle-event capture into the inbox WAL, and the
+checkpoint prompting, lifecycle-event capture into the inbox WAL, and the
 flush/status operator surface.
 
 Contracts:
-  - Harness verbs (session-start, pre-compact, stop) are fail-open: any error logs
+  - Active harness verbs (session-start, pre-compact) are fail-open: any error logs
     to stderr and exits 0 — a hook must never disrupt an agent session.
+  - The retired stop verb remains a JSON no-op for upgraded installs whose
+    existing Codex configuration has not been reinstalled yet.
+  - Codex checkpoint prompting defaults on. An explicit JSON boolean ``false``
+    disables it; malformed values and malformed config fail closed.
   - Codex event capture defaults on. An explicit JSON boolean ``false`` turns
     it off, while malformed values and malformed config fail closed.
   - Graph-derived brief content is fenced and labeled as reference data, not
@@ -72,8 +76,9 @@ QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
+CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
 CODEX_DEFAULT_CAPTURE_EVENTS = True
-CODEX_CHECKPOINT_REASON = (
+CODEX_CHECKPOINT_PROMPT = (
     "Basic Memory checkpoint required after compaction. Use the "
     "`codex:bm-checkpoint` skill now to write one deliberate, durable handoff "
     "for the work completed in this turn. Capture the problem, approach, actual "
@@ -140,8 +145,8 @@ PROFILES: dict[Harness, HarnessProfile] = {
         checkpoint_tags=("codex", "auto-capture"),
         setup_nudge=(
             "_This repo is not configured for Basic Memory yet. Run `Use Basic Memory "
-            "for Codex to set up this repo` to map a project, seed schemas, and turn "
-            "on Codex checkpoints._"
+            "for Codex to set up this repo` to map a project, seed schemas, and "
+            "configure optional Codex checkpoints._"
         ),
         status_hint="Run `Use bm-status` to check the Basic Memory project mapping.",
         pin_tip=(
@@ -286,14 +291,15 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     """Merge user and project Codex settings, then resolve checkout defaults.
 
     Precedence (lowest to highest): ``~/.codex/basic-memory.json``, then the
-    nearest project ``.codex/basic-memory.json``. Redaction lists accumulate so
-    a project cannot weaken user-level privacy rules. Codex capture is enabled
-    when omitted, and its default folder is namespaced by the Git repository
-    directory. Any malformed source counts as configured and fails closed for
-    the whole evaluation so a later source cannot rebuild routing without the
-    missing redaction policy.
+    nearest project ``.codex/basic-memory.json``. Codex lifecycle capture and
+    checkpoint prompting are enabled when omitted. The default folder is
+    namespaced by the Git repository directory. Any malformed source counts as
+    configured and fails closed for the whole evaluation so a later source
+    cannot rebuild routing from incomplete settings. Existing redaction lists
+    continue to accumulate only for local lifecycle-envelope capture.
     """
     defaults: dict = {
+        "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
         "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
         "captureFolder": _codex_default_capture_folder(directory),
     }
@@ -313,10 +319,14 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
         found = True
         if block is None:
             # Trigger: any configured source exists but cannot be trusted.
-            # Why: continuing could combine a later checkpoint route with a
-            # missing earlier redaction policy and persist unredacted data.
+            # Why: continuing could combine a later route with incomplete
+            # earlier settings and write to an unintended project.
             # Outcome: discard every route and disable capture for this event.
-            return {**defaults, "captureEvents": False}, True
+            return {
+                **defaults,
+                "checkpointOnCompact": False,
+                "captureEvents": False,
+            }, True
         cumulative_redactions: dict[str, list[str]] = {}
         for key in ("redactKeys", "redactPaths"):
             values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
@@ -324,6 +334,11 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
                 cumulative_redactions[key] = list(dict.fromkeys(values))
         merged.update(block)
         merged.update(cumulative_redactions)
+
+    # This legacy option imposed an extra model-authored checkpoint scan.
+    # Ignore it so existing config cannot restore that gate. Redaction lists
+    # remain available only to the separate lifecycle-envelope capture path.
+    merged.pop("checkpointPrivacyReview", None)
 
     return merged, found
 
@@ -565,8 +580,10 @@ def _build_brief(
     profile: HarnessProfile,
     cfg: dict,
     configured: bool,
+    checkpoint_prompt: str | None = None,
 ) -> str:
     """Assemble the session-start context brief (ported from the hook scripts)."""
+    prompt_prefix = f"{checkpoint_prompt}\n\n---\n\n" if checkpoint_prompt else ""
     primary = str(cfg.get("primaryProject") or "").strip()
     timeframe = str(cfg.get("recallTimeframe") or profile.default_recall_timeframe)
     recall_prompt = str(cfg.get("recallPrompt") or profile.default_recall_prompt)
@@ -580,7 +597,7 @@ def _build_brief(
     if cfg.get("sessionProfile") == CODING_SESSION_PROFILE:
         configured_repository = cfg.get("repository")
         if not isinstance(configured_repository, str) or not configured_repository.strip():
-            return (
+            return prompt_prefix + (
                 "# Basic Memory\n\n"
                 "_Coding session setup is incomplete: `basicMemory.repository` is missing. "
                 f"Rerun Basic Memory setup before recalling repository work. {profile.status_hint}_"
@@ -597,9 +614,9 @@ def _build_brief(
     # Outcome: first-run → setup nudge; configured-but-broken → one-line signal.
     if context.tasks is None and context.decisions is None and context.sessions is None:
         if not configured:
-            return f"# Basic Memory\n\n{profile.setup_nudge}"
+            return prompt_prefix + f"# Basic Memory\n\n{profile.setup_nudge}"
         project_name = primary or "the default project"
-        return (
+        return prompt_prefix + (
             "# Basic Memory\n\n"
             f"_Couldn't read from `{project_name}` — it may be misnamed or unreachable. "
             f"{profile.status_hint}_"
@@ -666,11 +683,11 @@ def _build_brief(
     # a visible notice INSIDE the fence, and guidance is emitted after `closing`,
     # so the caller's slice can only ever trim guidance — never reopen the fence.
     notice = "\n… [truncated]"
-    room = MAX_BRIEF_CHARS - len(opening) - len(closing)
+    room = MAX_BRIEF_CHARS - len(prompt_prefix) - len(opening) - len(closing)
     data_text = "\n".join(data_lines)
     if len(data_text) > room:
         data_text = data_text[: max(0, room - len(notice))].rstrip() + notice
-    lines = [opening + data_text + closing]
+    lines = [prompt_prefix + opening + data_text + closing]
 
     # Placement guidance — surfaced so the "follow the project's stored placement
     # conventions" reflex has something concrete to follow.
@@ -678,7 +695,7 @@ def _build_brief(
         lines += [
             "",
             "## Where to write",
-            f"- Session checkpoints (the PreCompact auto-capture) go to `{capture_folder}/`.",
+            f"- Session checkpoints go to `{capture_folder}/`.",
         ]
         if placement_conventions:
             lines.append(
@@ -1029,7 +1046,18 @@ def _session_start(harness: Harness, project_dir: Optional[Path]) -> None:
 
     _capture_envelope(profile, event, SESSION_STARTED, cfg, mapping_dir, capture_folder)
 
-    brief = _build_brief(profile, cfg, configured)
+    primary = str(cfg.get("primaryProject") or "").strip()
+    checkpoint_prompt = (
+        CODEX_CHECKPOINT_PROMPT
+        if (
+            harness is Harness.codex
+            and event.trigger == "compact"
+            and primary
+            and cfg.get("checkpointOnCompact") is True
+        )
+        else None
+    )
+    brief = _build_brief(profile, cfg, configured, checkpoint_prompt)
     print(brief[:MAX_BRIEF_CHARS])
 
 
@@ -1053,15 +1081,9 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
         return
 
     if harness is Harness.codex:
-        # PreCompact stdout is ignored by Codex, so this hook cannot ask the
-        # active model to author memory directly. Persist a private request; the
-        # Stop hook turns it into a one-time continuation prompt after Codex has
-        # compacted the same turn and still has its summarized working context.
-        if not event.session_id:
-            return
-        from basic_memory.hooks import checkpoint_requests
-
-        checkpoint_requests.create(event.session_id, event.turn_id)
+        # Codex ignores PreCompact stdout. SessionStart runs again with the
+        # `compact` trigger after compaction and asks the resumed agent to write
+        # the checkpoint from its summarized working context.
         return
 
     conversation = _transcript_turns(event.transcript_path, harness)
@@ -1110,55 +1132,6 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
         print(f"bm hook pre-compact: checkpoint write failed: {result['error']}", file=sys.stderr)
 
 
-def _codex_stop_response(payload: dict[str, Any]) -> dict[str, Any]:
-    """Resolve one Codex Stop event against its pending checkpoint request."""
-    session_id = str(payload.get("session_id") or "")
-    if not session_id:
-        return {"continue": True}
-
-    from basic_memory.hooks import checkpoint_requests
-
-    request = checkpoint_requests.read(session_id)
-    if request is None:
-        return {"continue": True}
-
-    current_turn_id = payload.get("turn_id")
-    # Trigger: the saved request belongs to an earlier Codex turn, or the
-    # current Stop cannot prove it belongs to the requesting turn.
-    # Why: an interrupted continuation can leave the request behind; blocking
-    # a later turn would author a checkpoint from the wrong working context.
-    # Outcome: abandon the stale handshake and let the current turn end.
-    if request.source_turn_id is not None and current_turn_id != request.source_turn_id:
-        checkpoint_requests.clear(session_id)
-        return {"continue": True}
-
-    # Trigger: Codex says this Stop is already a continuation. Why: blocking
-    # again would create a Stop-hook loop. Outcome: clear the local handshake
-    # and allow the turn to end. Until Codex confirms that continuation state,
-    # leave the request pending so a failed hook response cannot lose it.
-    if payload.get("stop_hook_active") is True:
-        checkpoint_requests.clear(session_id)
-        return {"continue": True}
-
-    return {"decision": "block", "reason": CODEX_CHECKPOINT_REASON}
-
-
-def _stop(harness: Harness) -> None:
-    payload = _read_stdin_payload()
-    response = _codex_stop_response(payload) if harness is Harness.codex else {"continue": True}
-    print(json.dumps(response, separators=(",", ":")))
-
-
-def _run_json_fail_open(verb: str, run: Callable[[], None]) -> None:
-    """Run a JSON-output hook and always leave Codex with a valid response."""
-    try:
-        run()
-    except (Exception, SystemExit) as exc:
-        logger.exception(f"bm hook {verb} failed")
-        print(f"bm hook {verb}: {exc}", file=sys.stderr)
-        print('{"continue":true}')
-
-
 # --- Typer verbs ---
 
 HARNESS_OPTION = typer.Option(Harness.claude, "--harness", help="Which harness fired the hook")
@@ -1189,8 +1162,9 @@ def pre_compact(
 
 @hook_app.command("stop")
 def stop(harness: Harness = HARNESS_OPTION) -> None:
-    """Request one agent-authored Codex checkpoint after compaction."""
-    _run_json_fail_open("stop", lambda: _stop(harness))
+    """Allow stale pre-upgrade Stop hooks to finish without blocking Codex."""
+    del harness
+    print('{"continue":true}')
 
 
 @hook_app.command("flush")
@@ -1227,6 +1201,8 @@ def flush(
 # ``hook <verb> --harness <harness>`` suffix (rather than the launcher prefix)
 # matches every launcher form we may write — ``basic-memory``, ``bm``, and the
 # ``uvx "basic-memory>=X"`` fallback — while staying distinctive to our CLI.
+# Keep the retired ``stop`` verb in the pattern so reinstall/remove cleans up
+# entries written by older releases.
 OWNED_HOOK_COMMAND_RE = re.compile(
     r"\bhook\s+(?:session-start|pre-compact|stop)\s+--harness\s+(?:claude|codex)\b"
 )
@@ -1315,7 +1291,6 @@ def _owned_hook_groups(harness: Harness) -> dict[str, dict[str, Any]]:
     return {
         "SessionStart": group("session-start", 30, "startup|resume|compact"),
         "PreCompact": group("pre-compact", 60, "manual|auto"),
-        "Stop": group("stop", 30, None),
     }
 
 
@@ -1416,7 +1391,8 @@ def install(harness: Harness = HARNESS_OPTION) -> None:
         typer.echo(f"error: {config_path}: 'hooks' is not an object; fix it and retry", err=True)
         raise typer.Exit(1)
 
-    for event, group in _owned_hook_groups(harness).items():
+    desired_groups = _owned_hook_groups(harness)
+    for event, group in desired_groups.items():
         existing = hooks.get(event)
         if existing is not None and not isinstance(existing, list):
             typer.echo(
@@ -1428,6 +1404,23 @@ def install(harness: Harness = HARNESS_OPTION) -> None:
         groups = _strip_owned_hooks(existing or [])
         groups.append(group)
         hooks[event] = groups
+
+    # Older Codex installs included a Stop hook. It is no longer part of the
+    # checkpoint flow, so reinstall removes only our retired entry while
+    # preserving any user-authored hooks in the same event.
+    for event in list(hooks):
+        if event in desired_groups:
+            continue
+        groups = hooks[event]
+        if not isinstance(groups, list):
+            continue
+        stripped = _strip_owned_hooks(groups)
+        if stripped == groups:
+            continue
+        if stripped:
+            hooks[event] = stripped
+        else:
+            del hooks[event]
 
     _write_hook_config(config_path, data)
     typer.echo(f"installed {harness.value} hooks in {config_path}")
@@ -1498,7 +1491,7 @@ def status(
 ) -> None:
     """Show inbox depth, last flush, settings summary, and tool versions."""
     import basic_memory
-    from basic_memory.hooks import checkpoint_requests, inbox
+    from basic_memory.hooks import inbox
 
     pending = len(inbox.list_envelopes())
     processed = len(list(inbox.processed_dir().glob("*.json")))
@@ -1509,7 +1502,6 @@ def status(
     typer.echo(f"inbox: {inbox.inbox_dir()}")
     typer.echo(f"pending envelopes: {pending}")
     typer.echo(f"archived envelopes: {processed}")
-    typer.echo(f"pending checkpoint requests: {checkpoint_requests.pending_count()}")
     typer.echo(f"last flush: {inbox.last_flush() or 'never'}")
     typer.echo(
         f"settings ({harness.value}, {mapping_dir}): {'found' if configured else 'not found'}"
@@ -1517,6 +1509,9 @@ def status(
     typer.echo(f"primary project: {str(cfg.get('primaryProject') or '').strip() or '(not set)'}")
     typer.echo(f"session profile: {str(cfg.get('sessionProfile') or 'general').strip()}")
     typer.echo(f"repository: {str(cfg.get('repository') or '').strip() or '(not set)'}")
+    typer.echo(
+        f"checkpoint on compact: {'on' if cfg.get('checkpointOnCompact') is True else 'off'}"
+    )
     typer.echo(f"capture events: {'on' if cfg.get('captureEvents') is True else 'off'}")
     typer.echo(
         f"capture folder: {str(cfg.get('captureFolder') or profile.default_capture_folder).strip()}"

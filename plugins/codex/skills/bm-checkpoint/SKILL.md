@@ -7,22 +7,18 @@ description: Save a deliberate Codex work checkpoint to Basic Memory with change
 
 Create a durable handoff note for current Codex work. Use this when the user asks
 to checkpoint, wrap up, hand off, remember the state of the work, or when the
-Stop hook requests the deliberate handoff after compaction.
+post-compaction SessionStart context requests the deliberate handoff.
 
 ## Gather
 
 Read `~/.codex/basic-memory.json`, then the nearest project
-`.codex/basic-memory.json`; project keys override user keys except that
-`redactKeys` and `redactPaths` accumulate so project config cannot weaken user
-privacy:
+`.codex/basic-memory.json`; project keys override user keys:
 
 - `primaryProject`, default omitted
 - `captureFolder`, default `codex/<git top-level directory name>`
 - `placementConventions`, optional
 - `sessionProfile`, default `general`
 - `repository`, required when `sessionProfile` is `coding`
-- `redactKeys`, optional additional secret field names
-- `redactPaths`, optional additional private directory prefixes
 
 Apply the `bm-writing` skill before drafting the note.
 
@@ -46,31 +42,6 @@ Gather repo evidence:
 - current username, hostname, and timestamp
 
 Do not claim a test passed unless you ran it or the user supplied the result.
-
-## Privacy Gate
-
-Apply this gate to deliberate checkpoints and Stop-requested checkpoints alike.
-It is mandatory before any `write_note` call:
-
-1. Merge user and project `redactKeys` and `redactPaths` by accumulation. Include
-   the built-in secret-key families (`secret`, `token`, `password`, `credential`,
-   `auth`, API/access/private keys) and private roots (`~/.ssh`, `~/.aws`, and
-   `~/.gnupg`). Never copy the redaction rules themselves into the note.
-2. Expand `~` for comparison and normalize both slash styles. A denied path
-   matches its exact directory or a descendant, not a sibling that merely shares
-   its text prefix.
-3. Scrub **every string** passed to `write_note`: title, directory, tags,
-   frontmatter, body, observations, relations, changed-file paths, command
-   output, repository evidence, and pull-request evidence. Replace a whole path
-   value under a denied root, or an embedded denied-path token, with
-   `[REDACTED_PATH]`. Do not omit schema-required path fields; use the marker.
-4. When gathered structured evidence has a key matching a built-in or configured
-   `redactKeys` entry, replace its entire value with `[REDACTED]`. Never reproduce
-   credentials, tokens, or private-key material from config, environment, tool
-   output, or compacted conversation context.
-5. Review the final note arguments once more before writing. If any value cannot
-   be confidently scrubbed, fail closed: skip the checkpoint and report that
-   privacy policy blocked the write. Do not fall back to an unredacted note.
 
 ## Write
 
