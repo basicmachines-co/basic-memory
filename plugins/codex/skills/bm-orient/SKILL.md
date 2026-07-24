@@ -31,9 +31,14 @@ exact pointer is the user's chosen cursor.
 ### Topic discovery
 
 When the user supplies a topic rather than an exact identifier, search the
-primary project for matching `task`, `decision`, `codex_session`, and
-`coding_session` notes. Prefer structured repository metadata before text
-similarity when the coding profile is configured.
+primary project for matching `task`, `decision`, and `codex_session` notes.
+
+Run the `coding_session` topic search separately and include it only when
+`sessionProfile=coding` and the configured `repository` is present. Apply
+`metadata_filters={"repository": "<configured repository>"}` using the exact
+configured value. Never let topic text similarity compensate for a missing or
+mismatched repository. If the coding profile has no configured repository,
+omit `coding_session` results and report that setup is incomplete.
 
 - no credible match: report that no checkpoint was found and do not invent one
 - one clear match: read it automatically

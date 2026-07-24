@@ -218,6 +218,10 @@ def test_bm_orient_supports_exact_topic_and_current_repo_routes() -> None:
 
     assert "Choose exactly one route" in skill
     assert "read that note directly" in skill
+    assert "Run the `coding_session` topic search separately" in skill
+    assert 'metadata_filters={"repository": "<configured repository>"}' in skill
+    assert "Never let topic text similarity compensate" in skill
+    assert "omit `coding_session` results" in skill
     assert "show at most three" in skill
     assert "When the invocation has no argument" in skill
     assert "Do not ingest an arbitrary filesystem path" in skill
