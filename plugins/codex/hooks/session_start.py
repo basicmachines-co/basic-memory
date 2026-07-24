@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@5d444f0974476645f904c1446998c0a938a6e7f7",
+#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@2f58b81b5e00cf4cecf12ce595ec6b500d6575a8",
 # ]
 # ///
 """SessionStart hook launcher backed by a pinned Basic Memory revision.
