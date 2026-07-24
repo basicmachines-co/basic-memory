@@ -175,8 +175,15 @@ def validate_plugin(plugin_dir: Path) -> None:
             + ", ".join(REQUIRED_HOOK_EVENTS)
         )
     for event, expected_script in REQUIRED_HOOKS.items():
-        script_refs = set(HOOK_SCRIPT_PATH_RE.findall(json.dumps(hooks[event])))
-        if script_refs != {expected_script}:
+        matcher_groups = hooks[event]
+        if not isinstance(matcher_groups, list) or len(matcher_groups) != 1:
+            raise SystemExit(f"hooks/hooks.json: {event} must define exactly one matcher group")
+        matcher_group = matcher_groups[0]
+        command_hooks = matcher_group.get("hooks") if isinstance(matcher_group, dict) else None
+        if not isinstance(command_hooks, list) or len(command_hooks) != 1:
+            raise SystemExit(f"hooks/hooks.json: {event} must define exactly one command hook")
+        script_refs = HOOK_SCRIPT_PATH_RE.findall(json.dumps(command_hooks[0]))
+        if script_refs != [expected_script]:
             raise SystemExit(f"hooks/hooks.json: {event} must reference exactly {expected_script}")
     dependency_refs: set[str] = set()
     for rel in REQUIRED_HOOK_SCRIPTS:
