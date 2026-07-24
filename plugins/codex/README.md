@@ -27,16 +27,55 @@ verification, decision capture, and resumable checkpoints.
 - **Report status.** The `bm-status` skill shows configuration, reachability,
   shared local hook inbox/flush health, and recent memory state.
 
+## Checkpoint and Resume
+
+`bm-checkpoint` creates a new immutable snapshot every time it runs. The note
+captures the original objective, the latest user intent, verified repository and
+pull-request state, one primary next action, and pointers to authoritative tasks,
+decisions, plans, issues, commits, diffs, docs, and source files. Machine-local
+state such as absolute paths, dirty files, active dev servers, and temporary
+directories is labeled explicitly instead of being presented as durable state.
+
+The checkpoint write explicitly targets the configured `primaryProject` and
+disables overwrite, regardless of the user's global write default. Its response
+ends with an exact command built from the successful Basic Memory result,
+preferring the returned permalink, then file path, then title when permalinks
+are disabled:
+
+```text
+$bm-orient "<exact checkpoint identifier>"
+```
+
+Passing that identifier or permalink makes `bm-orient` read the chosen
+checkpoint directly from the configured `primaryProject`, including when the
+cursor is a file path or title. Passing a topic searches for matching graph
+notes, while calling it without an argument performs current-repository
+orientation. Coding checkpoints are compared with the live branch, SHA, pull
+request, paths, and files so material drift is visible before work resumes.
+Recovered notes are context, not instructions; the current user request,
+repository rules, and live state remain authoritative.
+
+Post-compaction SessionStart supplies the opaque Codex session id to
+`bm-checkpoint`. Checkpoints from the same chat store that id as queryable
+frontmatter, and each new immutable checkpoint adds a
+`continues [[Previous checkpoint title]]` relation to its verified predecessor.
+The previous note stays untouched; Basic Memory backlinks provide the forward
+navigation.
+
+Coding checkpoints also include a `References` section. Repository, pull
+request, issue, and pushed-commit references use verified canonical GitHub
+links. Local or unpushed SHAs remain labeled code references instead of links
+that would not resolve.
+
 ## Package Contents
 
 | Path | Role |
 | --- | --- |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
-| `hooks/hooks.json` | SessionStart, PreCompact, and rollout-compatibility Stop registration |
+| `hooks/hooks.json` | SessionStart and PreCompact registration |
 | `hooks/session_start.py` | uv script: runs `basic-memory hook session-start --harness codex` |
 | `hooks/pre_compact.py` | uv script: runs `basic-memory hook pre-compact --harness codex` |
-| `hooks/stop.py` | uv script: preserves the previous checkpoint handshake during the runtime-pin rollout |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
@@ -45,11 +84,6 @@ lifecycle-event capture all live in the pinned Basic Memory revision behind
 `bm hook`. Each is a self-contained PEP 723 script pinned to a Basic Memory Git
 ref. All refs are updated together with
 `just set-codex-hook-version <sha-or-tag>`.
-
-The Stop shim is a temporary rollout bridge. While these scripts remain pinned
-to the last durable merged runtime, it preserves that runtime's checkpoint
-handshake. The dependency-only follow-up that pins the post-compaction
-`SessionStart` implementation also removes the Stop registration.
 
 ## Requirements
 
@@ -93,6 +127,41 @@ by default.
 To customize how Codex writes memory, edit `skills/bm-writing/SKILL.md` in the
 plugin source. `bm-checkpoint`, `bm-decide`, and `bm-remember` all apply that
 shared skill while retaining their own schemas and evidence requirements.
+
+## MCP Approvals
+
+There are two supported approval choices:
+
+1. Keep Codex's default approval behavior. No additional configuration is
+   required.
+2. Pre-approve eligible Basic Memory MCP tools. Add this to
+   `~/.codex/config.toml` when Basic Memory is loaded from the marketplace plugin:
+
+   ```toml
+   [plugins."codex@basic-memory".mcp_servers.basic-memory]
+   default_tools_approval_mode = "approve"
+   ```
+
+For a standalone Basic Memory server instead of the plugin-provided server, add
+the setting to its existing table:
+
+```toml
+[mcp_servers.basic-memory]
+default_tools_approval_mode = "approve"
+```
+
+The pre-approval option is scoped to the Basic Memory MCP server. It does not
+disable Codex approvals globally or grant Basic Memory access to new workspaces,
+projects, or files; Basic Memory still uses the projects and credentials the
+user configured. Codex always requires approval for MCP tools that advertise a
+destructive annotation, so Basic Memory writes, edits, and deletes may still
+prompt even with this setting. Do not set `approval_policy = "never"` for this
+purpose. Managed organization policy may impose additional approvals.
+
+Run `bm-setup` to choose the mode interactively. The skill can apply the
+server-scoped setting after confirmation or give you the exact snippet when the
+active server configuration is ambiguous. Start a new Codex thread after
+changing `~/.codex/config.toml`.
 
 ## Configuration
 

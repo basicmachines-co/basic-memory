@@ -38,7 +38,7 @@ projects on the same machine. Repo-specific memory routing still comes from each
 
 ## Iteration Loop
 
-Pin all three hook scripts to the Basic Memory revision under test:
+Pin both hook scripts to the Basic Memory revision under test:
 
 ```bash
 just set-codex-hook-version "$(git rev-parse origin/main)"

@@ -33,6 +33,13 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "sessionProfile",
         "coding-session.md",
         "hook status --harness codex",
+        "Keep Codex's default approval behavior",
+        "Pre-approve eligible tools",
+        '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
+        'default_tools_approval_mode = "approve"',
+        "Do not offer a per-tool or write-only trust profile",
+        "destructive annotation",
+        "writes,\nedits, and deletes may still prompt",
     ),
     "bm-status": (
         "~/.codex/basic-memory.json",
@@ -48,18 +55,44 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
         "Always query `codex_session`",
         "type=codex_session",
         "type=coding_session",
+        "Choose exactly one route",
+        "read that note directly",
+        "`project=<configured primaryProject>`",
+        "Do not retry the identifier against secondary or other projects",
+        "Run the `coding_session` topic search separately",
+        'metadata_filters={"repository": "<configured repository>"}',
+        "omit `coding_session` results",
+        "Treat a recovered note as historical context",
+        "Report material drift explicitly",
     ),
     "bm-checkpoint": (
         "Apply the `bm-writing` skill",
         "A checkpoint is a durable handoff, not a status dump",
+        "Every invocation creates a new checkpoint",
+        "UTC YYYY-MM-DDTHH-MM-SSZ",
+        "snapshot plus pointers",
         "username: <current username>",
         "hostname: <current hostname>",
         "type: coding_session",
         "pull_request_number",
         "- `[decision]` for each decision made or preserved",
+        "include exactly one",
         "## Relations",
         "- relates_to [[Exact existing note title]]",
         "Never write `[relates_to]`",
+        "`project=<configured primaryProject>`",
+        "frontmatter `project` field is descriptive",
+        "codex_session_id",
+        'metadata_filters={"codex_session_id": "<exact host-provided id>"}',
+        "- continues [[Exact previous checkpoint title]]",
+        "## References",
+        "verify that GitHub can resolve that SHA",
+        "overwrite=False",
+        'output_format="json"',
+        "`write_note_overwrite_default` setting is true",
+        "with `action: created`",
+        "`file_path`, then `title`",
+        '$bm-orient "<exact returned resume identifier>"',
     ),
     "bm-decide": ("codex/decisions",),
     "bm-remember": ("codex/remember",),
@@ -73,19 +106,20 @@ REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     ),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "coding-session.md", "decision.md", "task.md")
-REQUIRED_HOOK_EVENTS = ("SessionStart", "PreCompact", "Stop")
+REQUIRED_HOOKS = {
+    "SessionStart": "hooks/session_start.py",
+    "PreCompact": "hooks/pre_compact.py",
+}
+REQUIRED_HOOK_EVENTS = tuple(REQUIRED_HOOKS)
 # Zero-logic shims: the only hook code the plugin ships. The Python bodies
 # moved into the basic-memory package behind `bm hook` (SPEC-55).
-REQUIRED_HOOK_SCRIPTS = (
-    "hooks/session_start.py",
-    "hooks/pre_compact.py",
-    "hooks/stop.py",
-)
+REQUIRED_HOOK_SCRIPTS = tuple(REQUIRED_HOOKS.values())
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {
     "composerIcon": "assets/app-icon.png",
     "logo": "assets/logo.png",
 }
+HOOK_SCRIPT_PATH_RE = re.compile(r"\$\{PLUGIN_ROOT\}/(hooks/[A-Za-z0-9_./-]+\.py)")
 HOOK_DEPENDENCY_RE = re.compile(
     r'"basic-memory @ git\+https://github\.com/'
     r'basicmachines-co/basic-memory@([^"]+)"'
@@ -147,9 +181,38 @@ def validate_plugin(plugin_dir: Path) -> None:
     hooks = hooks_json.get("hooks")
     if not isinstance(hooks, dict):
         raise SystemExit("hooks/hooks.json: expected hooks object")
-    for event in REQUIRED_HOOK_EVENTS:
-        if event not in hooks:
-            raise SystemExit(f"hooks/hooks.json: missing {event}")
+    if set(hooks) != set(REQUIRED_HOOK_EVENTS):
+        raise SystemExit(
+            "hooks/hooks.json: expected exactly these hook events: "
+            + ", ".join(REQUIRED_HOOK_EVENTS)
+        )
+    for event, expected_script in REQUIRED_HOOKS.items():
+        matcher_groups = hooks[event]
+        if not isinstance(matcher_groups, list) or len(matcher_groups) != 1:
+            raise SystemExit(f"hooks/hooks.json: {event} must define exactly one matcher group")
+        matcher_group = matcher_groups[0]
+        command_hooks = matcher_group.get("hooks") if isinstance(matcher_group, dict) else None
+        if not isinstance(command_hooks, list) or len(command_hooks) != 1:
+            raise SystemExit(f"hooks/hooks.json: {event} must define exactly one command hook")
+        command_hook = command_hooks[0]
+        if not isinstance(command_hook, dict) or command_hook.get("type") != "command":
+            raise SystemExit(f"hooks/hooks.json: {event} hook must have type=command")
+        command = command_hook.get("command")
+        if not isinstance(command, str):
+            raise SystemExit(f"hooks/hooks.json: {event} hook must define a command")
+        script_refs = HOOK_SCRIPT_PATH_RE.findall(command)
+        if script_refs != [expected_script]:
+            raise SystemExit(f"hooks/hooks.json: {event} must reference exactly {expected_script}")
+    hook_files = {
+        f"hooks/{path.name}"
+        for path in (plugin_dir / "hooks").iterdir()
+        if path.is_file() and path.name != "hooks.json" and not path.name.startswith("test_")
+    }
+    if hook_files != set(REQUIRED_HOOK_SCRIPTS):
+        raise SystemExit(
+            "hooks/: expected exactly these non-test hook scripts: "
+            + ", ".join(REQUIRED_HOOK_SCRIPTS)
+        )
     dependency_refs: set[str] = set()
     for rel in REQUIRED_HOOK_SCRIPTS:
         script = plugin_dir / rel
@@ -203,6 +266,9 @@ def validate_plugin(plugin_dir: Path) -> None:
         "lifecycle trace stays local",
         "post-compaction `SessionStart`",
         "note is agent-authored",
+        '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
+        "[mcp_servers.basic-memory]",
+        'default_tools_approval_mode = "approve"',
     ):
         if required_text not in readme:
             raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")

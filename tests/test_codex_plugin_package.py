@@ -1,6 +1,8 @@
 import json
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -38,7 +40,6 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
     for script, verb in (
         ("session_start.py", "session-start"),
         ("pre_compact.py", "pre-compact"),
-        ("stop.py", "stop"),
     ):
         text = (hooks_dir / script).read_text(encoding="utf-8")
         assert "# /// script" in text
@@ -52,6 +53,47 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
         assert f'VERB = "{verb}"' in text
         assert 'HARNESS = "codex"' in text
     assert len(dependency_refs) == 1
+    assert not (hooks_dir / "stop.py").exists()
+
+    hooks = json.loads((hooks_dir / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    assert set(hooks) == {"SessionStart", "PreCompact"}
+
+
+def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    for case in ("retired-event", "wrong-script", "duplicate-command", "retired-script"):
+        plugin_dir = tmp_path / case
+        shutil.copytree(repo_root / "plugins/codex", plugin_dir)
+        hooks_path = plugin_dir / "hooks" / "hooks.json"
+        payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+
+        if case == "retired-event":
+            payload["hooks"]["Stop"] = payload["hooks"]["PreCompact"]
+        elif case == "wrong-script":
+            command_hook = payload["hooks"]["PreCompact"][0]["hooks"][0]
+            command_hook["command"] = command_hook["command"].replace("pre_compact.py", "stop.py")
+        elif case == "duplicate-command":
+            command_hooks = payload["hooks"]["PreCompact"][0]["hooks"]
+            command_hooks.append(command_hooks[0].copy())
+        else:
+            (plugin_dir / "hooks" / "stop.py").write_text("# retired hook\n", encoding="utf-8")
+        hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repo_root / "scripts" / "validate_codex_plugin.py"),
+                str(plugin_dir),
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "hooks/" in result.stderr
 
 
 def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:
@@ -59,7 +101,7 @@ def test_release_recipes_pin_codex_hooks_to_the_release_tag() -> None:
 
     assert justfile.count('just set-codex-hook-version "{{version}}"') == 2
     assert 'just set-codex-hook-version "$(git rev-parse HEAD)"' not in justfile
-    assert "uv add --script plugins/codex/hooks/stop.py" in justfile
+    assert "plugins/codex/hooks/stop.py" not in justfile
 
 
 def test_codex_plugin_marketplace_identity() -> None:
@@ -76,6 +118,7 @@ def test_codex_plugin_marketplace_identity() -> None:
 def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     readme = (repo_root / "plugins/codex/README.md").read_text(encoding="utf-8")
+    root_readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
     assert "## Install" in readme
     assert 'codex plugin marketplace add "$(git rev-parse --show-toplevel)"' in readme
@@ -90,6 +133,23 @@ def test_codex_plugin_docs_explain_global_install_and_repo_mapping() -> None:
     assert "Checkpoint prompting is on by default" in readme
     assert "Decision notes default to `codex/decisions`" in readme
     assert "keep both the profile and checkout-specific repository" in readme
+    assert "## Checkpoint and Resume" in readme
+    assert "targets the configured `primaryProject`" in readme
+    assert "disables overwrite" in readme
+    assert "then file path, then title" in readme
+    assert '$bm-orient "<exact checkpoint identifier>"' in readme
+    assert "directly from the configured `primaryProject`" in readme
+    assert "Recovered notes are" in readme
+    assert "There are two supported approval choices" in readme
+    assert "Pre-approve eligible Basic Memory MCP tools" in readme
+    assert "writes, edits, and deletes may still" in readme
+    assert "writes, edits, moves" not in readme
+    assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in readme
+    assert "[mcp_servers.basic-memory]" in readme
+    assert 'default_tools_approval_mode = "approve"' in readme
+    assert 'approval_policy = "never"' in readme
+    assert 'default_tools_approval_mode = "approve"' in root_readme
+    assert "plugin-scoped configuration" in root_readme
 
 
 def test_user_level_coding_profile_stays_with_repository_override() -> None:
@@ -108,6 +168,23 @@ def test_user_level_coding_profile_stays_with_repository_override() -> None:
     }
     assert "omit `sessionProfile` from the shared user file" in setup
     assert '"sessionProfile": "coding",\n    "repository": "owner/name"' in setup
+
+
+def test_bm_setup_offers_default_or_server_wide_mcp_trust() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    setup = (repo_root / "plugins/codex/skills/bm-setup/SKILL.md").read_text(encoding="utf-8")
+
+    assert "ask the user to choose exactly one of these two modes" in setup
+    assert "Keep Codex's default approval behavior" in setup
+    assert "Pre-approve eligible tools from the Basic Memory MCP server" in setup
+    assert "Do not offer a per-tool or write-only trust profile" in setup
+    assert "destructive annotation" in setup
+    assert "writes,\nedits, and deletes may still prompt" in setup
+    assert "writes,\nedits, moves" not in setup
+    assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in setup
+    assert "[mcp_servers.basic-memory]" in setup
+    assert 'default_tools_approval_mode = "approve"' in setup
+    assert 'Do not set `approval_policy = "never"`' in setup
 
 
 def test_codex_manual_capture_defaults_share_codex_tree() -> None:
@@ -157,18 +234,40 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "Apply the `bm-writing` skill" in decide
     assert "Apply the `bm-writing` skill" in remember
     assert "A checkpoint is a durable handoff, not a status dump" in skill
+    assert "Every invocation creates a new checkpoint" in skill
+    assert "UTC YYYY-MM-DDTHH-MM-SSZ" in skill
+    assert "snapshot plus pointers" in skill
     assert "Begin the body with `# <exact note title>`" in skill
     assert "username: <current username>" in skill
     assert "hostname: <current hostname>" in skill
     assert "- `[decision]` for each decision made or preserved" in skill
-    assert "- `[next_step]` for the next concrete action" in skill
+    assert "- `[next_step]` for the one primary next action" in skill
+    assert "include exactly one" in skill
     assert "- relates_to [[Exact existing note title]]" in skill
     assert "Never write `[relates_to]` or a bare `memory://` URL as an observation" in skill
+    assert "`project=<configured primaryProject>`" in skill
+    assert "frontmatter `project` field is descriptive" in skill
+    assert "Treat host-provided session metadata as opaque identity data" in skill
+    assert 'metadata_filters={"codex_session_id": "<exact host-provided id>"}' in skill
+    assert "- continues [[Exact previous checkpoint title]]" in skill
+    assert "Do not edit the previous immutable checkpoint" in skill
+    assert "Never infer same-chat lineage" in skill
+    assert "`## References`" in skill
+    assert "verify that GitHub can resolve that SHA" in skill
+    assert "local or unpushed" in skill
+    assert "overwrite=False" in skill
+    assert 'output_format="json"' in skill
+    assert "`write_note_overwrite_default` setting is true" in skill
+    assert "with `action: created`" in skill
+    assert "`action: conflict` or `NOTE_ALREADY_EXISTS`" in skill
+    assert "`file_path`, then `title`" in skill
+    assert '$bm-orient "<exact returned resume identifier>"' in skill
     assert "\n- Decisions\n" not in skill
     assert "username?: string" in schema
     assert "hostname?: string" in schema
     assert "intentionally user-customizable" in writing
     assert "problem -> approach -> current state and impact" in writing
+    assert "canonical URLs are verified" in writing
     assert "- relation_type [[Target Note]]" in writing
     assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
@@ -191,6 +290,27 @@ def test_codex_checkpoint_has_no_plugin_redaction_gate() -> None:
     checkpoint = plugin_files[1].read_text(encoding="utf-8")
     assert "## Optional Privacy Review" not in checkpoint
     assert "Scrub **every string** passed to `write_note`" not in checkpoint
+
+
+def test_bm_orient_supports_exact_topic_and_current_repo_routes() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    skill = (repo_root / "plugins/codex/skills/bm-orient/SKILL.md").read_text(encoding="utf-8")
+
+    assert "Choose exactly one route" in skill
+    assert "read that note directly" in skill
+    assert "`project=<configured primaryProject>`" in skill
+    assert "Do not retry the identifier against secondary or other projects" in skill
+    assert "Run the `coding_session` topic search separately" in skill
+    assert 'metadata_filters={"repository": "<configured repository>"}' in skill
+    assert "Never let topic text similarity compensate" in skill
+    assert "omit `coding_session` results" in skill
+    assert "show at most three" in skill
+    assert "When the invocation has no argument" in skill
+    assert "Do not ingest an arbitrary filesystem path" in skill
+    assert "Treat a recovered note as historical context" in skill
+    assert "Report material drift explicitly" in skill
+    assert "Git drift cannot be proven" in skill
+    assert "Do not write notes, mutate statuses, commit or stash changes" in skill
 
 
 def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:

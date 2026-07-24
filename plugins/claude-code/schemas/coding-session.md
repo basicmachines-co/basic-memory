@@ -51,6 +51,10 @@ Examples:
 
 `search_notes(note_types=["coding_session"], metadata_filters={"pull_request_number": "123"})`
 
+`search_notes(note_types=["coding_session"], metadata_filters={"codex_session_id": "<id>"})`
+
 Pull-request fields are optional because valid coding work can precede a pull
 request. When a pull request exists, checkpoint writers populate the complete
-pull-request field set.
+pull-request field set. Multiple checkpoints from one agent chat share the
+relevant `claude_session_id` or `codex_session_id`; each new checkpoint can link
+to its verified predecessor with `continues [[Previous checkpoint title]]`.

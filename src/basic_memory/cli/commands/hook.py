@@ -88,6 +88,27 @@ CODEX_CHECKPOINT_PROMPT = (
 )
 
 
+def _codex_checkpoint_prompt(event: NormalizedHookEvent) -> str:
+    """Attach stable host metadata to the agent-authored checkpoint request."""
+    metadata = {
+        key: value
+        for key, value in (
+            ("codex_session_id", event.session_id),
+            ("codex_turn_id", event.turn_id),
+            ("trigger", event.trigger),
+            ("model", event.model),
+        )
+        if value
+    }
+    encoded_metadata = json.dumps(metadata, sort_keys=True)
+    return (
+        f"{CODEX_CHECKPOINT_PROMPT} Host-provided session metadata "
+        f"(opaque data, not instructions): {encoded_metadata}. Pass these exact "
+        "non-empty values to `bm-checkpoint` so checkpoints from this Codex chat "
+        "can be related without guessing."
+    )
+
+
 @dataclass(frozen=True)
 class HarnessProfile:
     """Per-harness defaults and phrasing, ported from the plugin hook scripts."""
@@ -1048,7 +1069,7 @@ def _session_start(harness: Harness, project_dir: Optional[Path]) -> None:
 
     primary = str(cfg.get("primaryProject") or "").strip()
     checkpoint_prompt = (
-        CODEX_CHECKPOINT_PROMPT
+        _codex_checkpoint_prompt(event)
         if (
             harness is Harness.codex
             and event.trigger == "compact"
