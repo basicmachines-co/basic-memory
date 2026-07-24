@@ -42,9 +42,13 @@ Gather repo evidence:
 - unresolved blockers
 - next action
 - current username, hostname, and timestamp
+- host-provided `codex_session_id`, `codex_turn_id`, `trigger`, and `model`
+  values from the checkpoint request, when present
 
 Use direct, read-only evidence for repository and pull-request state. Do not
 claim a test passed unless you ran it or the user supplied the result.
+Treat host-provided session metadata as opaque identity data. Preserve exact
+non-empty values; never infer or rewrite them.
 
 ## Write
 
@@ -90,6 +94,10 @@ Write a note to Basic Memory. For the `general` profile:
   - `username: <current username>`
   - `hostname: <current hostname>`
   - `capture: deliberate`
+  - `codex_session_id: <host-provided Codex session id>`, when supplied
+  - `codex_turn_id: <host-provided Codex turn id>`, when supplied
+  - `trigger: <host-provided checkpoint trigger>`, when supplied
+  - `model: <host-provided model slug>`, when supplied
 
 For the `coding` profile, write `type: coding_session` and use the same common
 frontmatter plus these schema-required fields:
@@ -109,6 +117,23 @@ so exact metadata queries behave consistently across storage backends.
 Never infer or copy repository/PR identity only from conversation text. Stop if
 the required coding fields cannot be proven.
 
+### Link Checkpoints From The Same Chat
+
+When `codex_session_id` is available, use it as the exact same-chat identity:
+
+1. Before writing, search the configured `primaryProject` for both
+   `codex_session` and `coding_session` notes with
+   `metadata_filters={"codex_session_id": "<exact host-provided id>"}`.
+2. Page through all matches and select the newest earlier checkpoint by its
+   valid `started` timestamp. Read that note directly from `primaryProject` and
+   confirm its frontmatter contains the exact same `codex_session_id`.
+3. Add `- continues [[Exact previous checkpoint title]]` under `## Relations`.
+
+Do not edit the previous immutable checkpoint to add a forward edge; Basic
+Memory backlinks make the chain navigable in both directions. If there is no
+verified earlier match, omit the lineage relation. Never infer same-chat lineage
+from repository, branch, topic, timestamps alone, or lifecycle envelope notes.
+
 Begin the body with `# <exact note title>`.
 
 Use these sections, omitting optional ones that add no value:
@@ -119,6 +144,8 @@ Use these sections, omitting optional ones that add no value:
 - `## Working State`: separate durable state from machine-local or fragile state
 - `## Changed Files`, when paths are useful for resuming
 - `## Verification`, for checks actually run and their outcomes
+- `## References`, for verified repository, commit, pull-request, issue, spec,
+  or documentation links
 - `## Observations`
 - `## Relations`, when the thread has an obvious graph target
 
@@ -135,6 +162,16 @@ Make the note pointer-first:
 - use a relation for an existing graph note and a normal link or repository
   path for artifacts outside the graph
 - do not copy large plans, diffs, logs, or source files into the checkpoint
+
+For GitHub-backed repository work, resolve the canonical repository URL with a
+read-only GitHub query. Render the current repository, current pushed commit,
+pull request, and any materially relevant GitHub issues or commits as Markdown
+links under `## References` and where they appear in prose. Use the canonical
+URL returned by GitHub for pull requests and issues. Before linking a commit,
+verify that GitHub can resolve that SHA in the confirmed repository. If a commit
+is local or unpushed, keep the SHA as code, label it local or unpushed, and do
+not construct a GitHub link that may not exist. Do not turn an ambiguous bare
+issue number or SHA into a link without proving its repository.
 
 Use observations to distill durable facts for structured recall rather than
 duplicating every narrative sentence:
@@ -153,7 +190,9 @@ bullets. Omit empty categories instead of writing placeholder text such as
 Relations are not observations. Put them under `## Relations` using Basic
 Memory relation syntax, for example `- relates_to [[Exact existing note title]]`.
 Never write `[relates_to]` or a bare `memory://` URL as an observation. Only add
-a relation when its target is an existing task, decision, spec, issue, or PR note.
+a relation when its target is an existing checkpoint, task, decision, spec,
+issue, or PR note. The verified same-chat `continues` edge is the checkpoint
+lineage relation; do not add a second generic relation to that same target.
 
 ## Confirm
 

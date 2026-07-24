@@ -241,6 +241,14 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "Never write `[relates_to]` or a bare `memory://` URL as an observation" in skill
     assert "`project=<configured primaryProject>`" in skill
     assert "frontmatter `project` field is descriptive" in skill
+    assert "Treat host-provided session metadata as opaque identity data" in skill
+    assert 'metadata_filters={"codex_session_id": "<exact host-provided id>"}' in skill
+    assert "- continues [[Exact previous checkpoint title]]" in skill
+    assert "Do not edit the previous immutable checkpoint" in skill
+    assert "Never infer same-chat lineage" in skill
+    assert "`## References`" in skill
+    assert "verify that GitHub can resolve that SHA" in skill
+    assert "local or unpushed" in skill
     assert "overwrite=False" in skill
     assert 'output_format="json"' in skill
     assert "`write_note_overwrite_default` setting is true" in skill
@@ -253,6 +261,7 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "hostname?: string" in schema
     assert "intentionally user-customizable" in writing
     assert "problem -> approach -> current state and impact" in writing
+    assert "canonical URLs are verified" in writing
     assert "- relation_type [[Target Note]]" in writing
     assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 

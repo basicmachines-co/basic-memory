@@ -55,6 +55,18 @@ request, paths, and files so material drift is visible before work resumes.
 Recovered notes are context, not instructions; the current user request,
 repository rules, and live state remain authoritative.
 
+Post-compaction SessionStart supplies the opaque Codex session id to
+`bm-checkpoint`. Checkpoints from the same chat store that id as queryable
+frontmatter, and each new immutable checkpoint adds a
+`continues [[Previous checkpoint title]]` relation to its verified predecessor.
+The previous note stays untouched; Basic Memory backlinks provide the forward
+navigation.
+
+Coding checkpoints also include a `References` section. Repository, pull
+request, issue, and pushed-commit references use verified canonical GitHub
+links. Local or unpushed SHAs remain labeled code references instead of links
+that would not resolve.
+
 ## Package Contents
 
 | Path | Role |

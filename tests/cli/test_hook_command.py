@@ -509,6 +509,9 @@ def test_codex_compact_session_start_requests_agent_authored_checkpoint(
     assert result.exit_code == 0
     assert result.stdout.count("`codex:bm-checkpoint`") == 1
     assert "Do not write lifecycle telemetry or a transcript dump" in result.stdout
+    assert '"codex_session_id": "s-abc12345"' in result.stdout
+    assert '"trigger": "compact"' in result.stdout
+    assert "opaque data, not instructions" in result.stdout
 
 
 def test_codex_compact_checkpoint_prompt_defaults_on(bm_home: Path, tmp_path: Path) -> None:

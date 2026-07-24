@@ -37,6 +37,10 @@ the next Codex thread should do first.
 Codex sessions are found by structured recall:
 `search_notes(metadata_filters={"type": "codex_session"}, after_date="7d")`.
 
+Multiple checkpoints from one Codex chat share `codex_session_id`. Each new
+immutable checkpoint can use `continues [[Previous checkpoint title]]` to form a
+navigable lineage without rewriting its predecessor.
+
 ## What Goes In A CodexSession
 
 - **summary** - what happened.
