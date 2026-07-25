@@ -51,18 +51,16 @@ async def getting_started(
 
     # Every example call keeps the project the prompt actually inspected. Omitting project lets
     # the tool fall back to its default/discovery path, which would silently move onboarding into
-    # a different project than the one whose activity we just showed. `project_arg` is the leading
-    # keyword form; `project_suffix` trails a positional first argument (read_note).
+    # a different project than the one whose activity we just showed.
     project_arg = f'project="{project}", ' if project else ""
-    project_suffix = f', project="{project}"' if project else ""
 
     return dedent(
         f"""
         # Getting started with Basic Memory
 
-        Basic Memory gives the user a personal knowledge base: local markdown notes that persist
+        Basic Memory gives the user a personal knowledge base: Markdown notes that persist
         across conversations, which both the user and their AI assistants can read and write.
-        Anything saved here is available in future chats and in the Basic Memory app.
+        Anything saved here is available in future chats and wherever they open this project.
 
         Here is their recent activity:
 
@@ -73,10 +71,10 @@ async def getting_started(
           save something useful from this conversation as their first note.
           Wait for them to say yes before writing anything:
           ```
-          write_note({project_arg}title="...", content="...", folder="notes")
+          write_note({project_arg}title="...", content="...", directory="notes")
           ```
         - **If they already have notes**, help them keep the loop going:
-          `read_note("permalink"{project_suffix})` to open one,
+          `read_note({project_arg}identifier="permalink")` to open one,
           `search_notes({project_arg}query="...")` to find a topic, or
           `write_note({project_arg}...)` to capture something new (offer first; don't write
           unprompted).

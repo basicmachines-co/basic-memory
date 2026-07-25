@@ -17,8 +17,6 @@ from basic_memory.mcp.tools.read_note import read_note
 # from basic_memory.mcp.tools.ui_sdk import read_note_ui, search_notes_ui
 from basic_memory.mcp.tools.view_note import view_note
 from basic_memory.mcp.tools.write_note import write_note
-from basic_memory.mcp.tools.cloud_info import cloud_info
-from basic_memory.mcp.tools.release_notes import release_notes
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.list_directory import list_directory
 from basic_memory.mcp.tools.edit_note import edit_note
@@ -39,7 +37,6 @@ from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_
 __all__ = [
     "basic_memory_diagnostics",
     "build_context",
-    "cloud_info",
     "create_memory_project",
     "delete_note",
     "delete_project",
@@ -51,7 +48,6 @@ __all__ = [
     "move_note",
     "read_content",
     "read_note",
-    "release_notes",
     # "read_note_ui",
     "recent_activity",
     "schema_diff",

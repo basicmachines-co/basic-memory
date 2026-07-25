@@ -514,7 +514,7 @@ def _format_project_output(
             "as their first note — wait for them to agree before writing:"
         )
         lines.append("```")
-        lines.append(f'write_note({route}, title="...", content="...", folder="notes")')
+        lines.append(f'write_note({route}, title="...", content="...", directory="notes")')
         lines.append("```")
         lines.append(
             f"Otherwise, widen the window with "

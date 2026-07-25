@@ -161,14 +161,16 @@ async def lifespan(app: FastMCP):
 # offer-not-act on purpose: orient, then *offer* a first note, but never write one unprompted so
 # power-user / coding sessions stay unobtrusive.
 BASIC_MEMORY_INSTRUCTIONS = (
-    "Basic Memory is the user's personal knowledge base: local markdown notes that persist "
+    "Basic Memory is the user's personal knowledge base: Markdown notes that persist "
     "across conversations and that both the user and their AI assistants can read and write.\n\n"
     "At the start of a session, call `recent_activity` to orient yourself in the user's notes "
     "before answering from memory. If the knowledge base is empty, briefly explain that Basic "
     "Memory gives them persistent notes shared between the user and their AI, and offer to save "
     "something useful from this conversation as their first note with `write_note` — then wait "
     "for them to agree before writing anything. Do not create notes unprompted.\n\n"
-    "For a fuller guide to the tools, read the `memory://ai_assistant_guide` resource."
+    "For a fuller guide, read the `memory://ai_assistant_guide` resource. If you have a web or "
+    "fetch tool and need current documentation, fetch `https://docs.basicmemory.com/llms.txt` "
+    "first, then fetch only the relevant linked `/raw/...md` page."
 )
 
 mcp = FastMCP(

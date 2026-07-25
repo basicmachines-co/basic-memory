@@ -28,6 +28,8 @@ def test_server_sets_first_connect_instructions():
     assert "Basic Memory" in instructions
     assert "recent_activity" in instructions
     assert "write_note" in instructions
+    assert "https://docs.basicmemory.com/llms.txt" in instructions
+    assert "/raw/...md" in instructions
     # Offer-not-act: the model must be told not to write unprompted.
     assert "unprompted" in instructions
 
@@ -46,6 +48,7 @@ async def test_recent_activity_empty_project_offers_first_note(client, test_proj
     assert "wait for them to agree" in result
     # Examples route by the collision-safe external id, and the widened call stays scoped.
     assert "write_note(project_id=" in result
+    assert 'directory="notes"' in result
     assert "recent_activity(project_id=" in result
     assert 'timeframe="30d"' in result
 
@@ -130,7 +133,8 @@ async def test_getting_started_keeps_selected_project_in_all_examples(client, te
     name = test_project.name
     assert f'write_note(project="{name}"' in result
     assert f'search_notes(project="{name}"' in result
-    assert f'read_note("permalink", project="{name}")' in result
+    assert f'read_note(project="{name}", identifier="permalink")' in result
+    assert 'directory="notes"' in result
 
 
 @pytest.mark.asyncio
