@@ -23,19 +23,6 @@ from basic_memory.utils import (
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 
-def _is_permalink_shaped(identifier: str) -> bool:
-    """Return True when the identifier is already in permalink/slug form.
-
-    An identifier equal to its own ``generate_permalink`` output was supplied as a permalink, not a
-    title/display string (which would still be changed by slugification). Only such a
-    caller-supplied exact permalink may bypass the strict duplicate-title guard (issue #1148): a
-    title like ``"Core Service"`` slugifies to ``core-service`` and must not silently resolve to
-    whichever duplicate owns that title-derived permalink.
-    """
-    stripped = identifier.strip().strip("/")
-    return bool(stripped) and stripped == generate_permalink(stripped).strip("/")
-
-
 def is_workspace_qualified_plain_identifier(identifier: str) -> bool:
     """Return True for plain ``<workspace>/<project>/<path>`` identifiers."""
     stripped = identifier.strip()
@@ -387,7 +374,12 @@ class LinkResolver:
             else None
         )
         strict_ambiguous_title = strict_title_matches is not None and len(strict_title_matches) > 1
-        caller_supplied_exact_permalink = _is_permalink_shaped(clean_text)
+        # The caller supplied an exact permalink when their verbatim (project-normalized) identifier
+        # matches a stored permalink. That is the first, un-slugified candidate the builder emits,
+        # so it also accepts explicit custom permalinks (e.g. "API_V2") that are not slug-shaped —
+        # inferring exactness from slug shape would wrongly reject them. Only this bypasses the
+        # duplicate-title guard below (#1148).
+        exact_identifier = normalize_project_reference(clean_text).strip("/")
 
         # 1. Try exact permalink match first (most efficient)
         for candidate_permalink in permalink_candidates:
@@ -397,9 +389,9 @@ class LinkResolver:
                 load_relations=load_relations,
             )
             if entity:
-                # Only a caller-supplied exact permalink may bypass the duplicate-title guard; the
-                # slugified form of a shared title must not silently win for a destructive op.
-                if strict_ambiguous_title and not caller_supplied_exact_permalink:
+                # The slugified form of a shared title must not silently win for a destructive op;
+                # only the caller's exact (verbatim) permalink candidate may bypass the guard.
+                if strict_ambiguous_title and candidate_permalink != exact_identifier:
                     break
                 logger.debug(f"Found exact permalink match: {entity.permalink}")
                 return entity

@@ -686,6 +686,51 @@ async def test_ambiguous_title_not_bypassed_via_title_derived_permalink_in_stric
 
 
 @pytest.mark.asyncio
+async def test_exact_custom_permalink_resolves_despite_ambiguous_title_in_strict_mode(
+    entity_repository, session_maker, link_resolver
+):
+    """An explicit non-slug permalink is accepted verbatim even when the title is shared (#1148).
+
+    Custom frontmatter permalinks (e.g. "API_V2") are not slug-shaped, so exactness must come from
+    the raw candidate that matched, not from slug shape. A caller passing that exact permalink must
+    resolve to its entity — otherwise the ambiguity error would name a permalink the resolver then
+    refuses to accept.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="API_V2",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="API_V2.md",
+                permalink="API_V2",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="API_V2",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="archive/API_V2.md",
+                permalink="api-v2-1",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    result = await link_resolver.resolve_link("API_V2", strict=True)
+    assert result is not None
+    assert result.permalink == "API_V2"
+
+
+@pytest.mark.asyncio
 async def test_cross_project_link_resolution(
     session_maker, entity_repository, search_service, tmp_path, app_config
 ):
