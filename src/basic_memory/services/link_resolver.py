@@ -11,6 +11,7 @@ from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
@@ -79,6 +80,11 @@ class LinkResolver:
     3. Try exact file path match
     4. Try file path with .md extension (for folder/title patterns)
     5. Fall back to search for fuzzy matching
+
+    When ``strict`` is set (the destructive edit/move paths) and a title matches more than one
+    note, resolution raises ``AmbiguousIdentifierError`` instead of guessing — the caller must pass
+    an exact permalink or external_id (issue #1148). Non-strict resolution keeps its shortest-path
+    preference.
     """
 
     def __init__(
@@ -371,7 +377,16 @@ class LinkResolver:
             load_relations=load_relations,
         )
         if found:
-            # Return first match (shortest path) if no source context
+            # Fail fast when a destructive (strict) resolve would otherwise guess between several
+            # same-title notes — e.g. an original plus a `-1` duplicate. Silently picking the
+            # shortest path here is how edit/move landed on the wrong entity (issue #1148). A
+            # source-qualified caller was handled above by proximity; non-strict resolution
+            # (wiki links, reads) keeps the shortest-path preference and does not raise.
+            if strict and len(found) > 1:
+                raise AmbiguousIdentifierError(
+                    clean_text,
+                    [(entity.permalink, entity.file_path) for entity in found],
+                )
             entity = found[0]
             logger.debug(f"Found title match: {entity.title}")
             return entity

@@ -486,10 +486,11 @@ async def test_exact_match_types_in_strict_mode(link_resolver, test_entities, pr
     assert result is not None
     assert result.permalink == f"{project_prefix}/components/core-service"
 
-    # 2. Exact title match
-    result = await link_resolver.resolve_link("Core Service", strict=True)
+    # 2. Exact title match (unique title — an ambiguous title is covered separately by
+    #    test_duplicate_title_raises_ambiguous_in_strict_mode).
+    result = await link_resolver.resolve_link("Auth Service", strict=True)
     assert result is not None
-    assert result.permalink == f"{project_prefix}/components/core-service"
+    assert result.permalink == f"{project_prefix}/components/auth-service"
 
     # 3. Exact file path match
     result = await link_resolver.resolve_link("components/Core Service.md", strict=True)
@@ -530,11 +531,13 @@ async def test_fuzzy_matching_blocked_in_strict_mode(link_resolver, test_entitie
 async def test_link_normalization_with_strict_mode(link_resolver, test_entities, project_prefix):
     """Test that link normalization still works in strict mode."""
 
-    # Test bracket removal and alias handling in strict mode
+    # Test bracket removal and alias handling in strict mode. Use a unique title so this
+    # exercises normalization, not duplicate-title resolution (ambiguity is covered by
+    # test_duplicate_title_raises_ambiguous_in_strict_mode).
     queries_and_expected = [
-        ("[[Core Service]]", f"{project_prefix}/components/core-service"),
-        ("[[Core Service|Main]]", f"{project_prefix}/components/core-service"),
-        ("  [[  Core Service  ]]  ", f"{project_prefix}/components/core-service"),
+        ("[[Auth Service]]", f"{project_prefix}/components/auth-service"),
+        ("[[Auth Service|Main]]", f"{project_prefix}/components/auth-service"),
+        ("  [[  Auth Service  ]]  ", f"{project_prefix}/components/auth-service"),
     ]
 
     for query, expected_permalink in queries_and_expected:
@@ -544,19 +547,44 @@ async def test_link_normalization_with_strict_mode(link_resolver, test_entities,
 
 
 @pytest.mark.asyncio
-async def test_duplicate_title_handling_in_strict_mode(
+async def test_duplicate_title_raises_ambiguous_in_strict_mode(
     link_resolver, test_entities, project_prefix
 ):
-    """Test how duplicate titles are handled in strict mode."""
+    """Strict resolution refuses to guess between same-title notes (#1148).
 
-    # "Core Service" appears twice in test data (components/core-service and components2/core-service)
-    # In strict mode, if there are multiple exact title matches, it should still return the first one
-    # (same behavior as normal mode for exact matches)
+    "Core Service" appears twice (components/core-service and components2/core-service). A
+    destructive (strict) resolve — edit_note / move_note — must fail loud instead of silently
+    picking the shortest path, which is how those tools landed on the wrong entity when an
+    original and a `-1` duplicate coexisted.
+    """
+    from basic_memory.services.exceptions import AmbiguousIdentifierError
 
-    result = await link_resolver.resolve_link("Core Service", strict=True)
+    with pytest.raises(AmbiguousIdentifierError) as exc_info:
+        await link_resolver.resolve_link("Core Service", strict=True)
+
+    message = str(exc_info.value)
+    assert "Core Service" in message
+    assert f"{project_prefix}/components/core-service" in message
+    assert f"{project_prefix}/components2/core-service" in message
+    assert "exact permalink or external_id" in message
+    # Both candidates are exposed for programmatic handling.
+    assert len(exc_info.value.candidates) == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_title_non_strict_keeps_shortest_path(link_resolver, project_prefix):
+    """Non-strict resolution (wiki links, reads) still picks shortest path and never raises."""
+    result = await link_resolver.resolve_link("Core Service", strict=False)
     assert result is not None
-    # Should return the first match (components/core-service based on test fixture order)
     assert result.permalink == f"{project_prefix}/components/core-service"
+
+
+@pytest.mark.asyncio
+async def test_unique_title_still_resolves_in_strict_mode(link_resolver, project_prefix):
+    """A title with a single match is unaffected — strict resolution returns it, no error."""
+    result = await link_resolver.resolve_link("Auth Service", strict=True)
+    assert result is not None
+    assert result.permalink == f"{project_prefix}/components/auth-service"
 
 
 @pytest.mark.asyncio
