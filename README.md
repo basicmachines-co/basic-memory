@@ -505,13 +505,13 @@ agents can pick the right one without trial-and-error:
 
 - **Content:** `write_note`, `read_note`, `edit_note`, `move_note`,
   `delete_note`, `read_content`, `view_note`
-- **Search & discovery:** `search`, `search_notes`, `recent_activity`,
-  `list_directory`
+- **Search & discovery:** `search_notes`, `recent_activity`, `list_directory`
 - **Knowledge graph:** `build_context` (navigates `memory://` URLs)
-- **Projects:** `list_memory_projects`, `create_memory_project`,
-  `get_current_project`, `sync_status`
+- **Projects:** `list_memory_projects`, `list_workspaces`,
+  `create_memory_project`, `delete_project`
 - **Schema:** `schema_infer`, `schema_validate`, `schema_diff`
-- **Cloud:** `cloud_info`, `release_notes`
+- **Compatibility & diagnostics:** `search`, `fetch`,
+  `basic_memory_diagnostics`
 
 All MCP tools default to text output; pass `output_format="json"` for
 structured responses. Full tool reference in the
