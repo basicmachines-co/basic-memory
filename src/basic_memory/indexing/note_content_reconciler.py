@@ -22,6 +22,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentPromoted,
     NoteContentReconciliationAnchor,
     NoteContentReconciliationDeferred,
+    NoteContentReconciliationOutcome,
     NoteContentState,
     NoteContentSource,
     NoteContentWriteStatus,
@@ -293,8 +294,11 @@ class NoteContentReconciler:
         self._note_content_repository = note_content_repository
         self._session_maker = session_maker
 
-    async def capture_anchor(self, entity_id: int) -> NoteContentReconciliationAnchor:
+    async def capture_anchor(self, entity_id: int | None) -> NoteContentReconciliationAnchor:
         """Capture the accepted state before storage bytes enter the index pipeline."""
+        if entity_id is None:
+            return NoteContentReconciliationAnchor(entity_id=None, state=None)
+
         async with db.scoped_session(self._session_maker) as session:
             note_content = await self._note_content_repository.get_by_entity_id(
                 session,
@@ -313,7 +317,7 @@ class NoteContentReconciler:
         observed_at: datetime | None,
         source: NoteContentSource,
         anchor: NoteContentReconciliationAnchor | None = None,
-    ) -> None:
+    ) -> NoteContentReconciliationOutcome:
         """Apply the shared file-vs-DB rule for one markdown entity."""
         observed_checksum = await file_utils.compute_checksum(markdown_content)
         observed_timestamp = observed_at or datetime.now(tz=UTC)
@@ -333,7 +337,7 @@ class NoteContentReconciler:
                 note_content_state_from_model(note_content) if note_content is not None else None
             )
             if anchor is not None:
-                if anchor.entity_id != entity.id:
+                if anchor.entity_id is not None and anchor.entity_id != entity.id:
                     raise ValueError(
                         "Note-content reconciliation anchor belongs to another entity."
                     )
@@ -343,7 +347,7 @@ class NoteContentReconciler:
                         "accepted state changed during indexing",
                         entity.id,
                     )
-                    return
+                    return "stale"
 
             if note_content is None:
                 plan = plan_note_content_reconciliation(None, observed)
@@ -355,7 +359,7 @@ class NoteContentReconciler:
                         session,
                         note_content_from_bootstrap(entity.id, plan),
                     )
-                    return
+                    return "current"
                 except IntegrityError:
                     # Concurrent repair/index workers can both observe a missing row before
                     # one wins the insert. Reload the winner and let normal reconciliation
@@ -367,6 +371,15 @@ class NoteContentReconciler:
                     )
                     if note_content is None:
                         raise
+                    if anchor is not None and anchor.state != note_content_state_from_model(
+                        note_content
+                    ):
+                        logger.debug(
+                            "Skipped stale note_content bootstrap for entity {}: "
+                            "accepted state was created during indexing",
+                            entity.id,
+                        )
+                        return "stale"
 
             # The plan is computed from the row read above; guard the write on
             # that db_version so a concurrent accepted API mutation that advanced
@@ -388,7 +401,7 @@ class NoteContentReconciler:
                     current_state.file_version,
                     current_state.file_write_status,
                 )
-                return
+                return "current"
 
             applied = await apply_note_content_update_plan(
                 self._note_content_repository,
@@ -404,6 +417,9 @@ class NoteContentReconciler:
                     expected_db_version,
                     entity.id,
                 )
+                return "stale"
+
+            return "current"
 
 
 async def reconcile_note_content_for_entity(

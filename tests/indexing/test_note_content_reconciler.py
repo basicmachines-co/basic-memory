@@ -94,7 +94,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
             "basic_memory.indexing.note_content_reconciler.db.scoped_session",
             fake_scoped_session,
         )
-        await NoteContentReconciler(
+        outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
         ).reconcile(
@@ -105,6 +105,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         )
 
     repository.create.assert_awaited_once()
+    assert outcome == "current"
     assert session.rollback_count == 1
     assert repository.get_by_entity_id.await_count == 2
     repository.update_state_fields.assert_awaited_once_with(
@@ -157,7 +158,7 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
             fake_scoped_session,
         )
         # Must not raise even though the guarded write was skipped.
-        await NoteContentReconciler(
+        outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
         ).reconcile(
@@ -168,6 +169,7 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
         )
 
     repository.create.assert_not_awaited()
+    assert outcome == "stale"
     assert repository.update_state_fields.await_count == 1
     _, kwargs = repository.update_state_fields.await_args
     assert kwargs["expected_db_version"] == 3
@@ -212,7 +214,7 @@ async def test_reconciler_skips_observation_when_anchor_changed_during_indexing(
             "basic_memory.indexing.note_content_reconciler.db.scoped_session",
             fake_scoped_session,
         )
-        await NoteContentReconciler(
+        outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
         ).reconcile(
@@ -223,6 +225,51 @@ async def test_reconciler_skips_observation_when_anchor_changed_during_indexing(
             anchor=anchor,
         )
 
+    repository.create.assert_not_awaited()
+    repository.update_state_fields.assert_not_awaited()
+    assert outcome == "stale"
+
+
+@pytest.mark.asyncio
+async def test_reconciler_treats_initial_absence_as_stale_when_content_appears() -> None:
+    """An accepted write that creates note_content during indexing must win."""
+    accepted_checksum = await file_utils.compute_checksum("# Accepted write\n")
+    repository = SimpleNamespace(
+        get_by_entity_id=AsyncMock(
+            return_value=SimpleNamespace(
+                db_version=1,
+                db_checksum=accepted_checksum,
+                file_version=1,
+                file_checksum=accepted_checksum,
+                file_write_status="synced",
+            )
+        ),
+        create=AsyncMock(),
+        update_state_fields=AsyncMock(),
+    )
+    entity = cast(Entity, SimpleNamespace(id=42))
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker: object):
+        yield FakeSession()
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_content_reconciler.db.scoped_session",
+            fake_scoped_session,
+        )
+        outcome = await NoteContentReconciler(
+            note_content_repository=cast(Any, repository),
+            session_maker=cast(Any, object()),
+        ).reconcile(
+            entity=entity,
+            markdown_content="# Stale initial file\n",
+            observed_at=datetime(2026, 4, 13, 15, 0, tzinfo=UTC),
+            source="file_indexer",
+            anchor=NoteContentReconciliationAnchor(entity_id=None, state=None),
+        )
+
+    assert outcome == "stale"
     repository.create.assert_not_awaited()
     repository.update_state_fields.assert_not_awaited()
 
@@ -256,7 +303,7 @@ async def test_reconciler_defers_unrelated_file_while_materialization_is_pending
             "basic_memory.indexing.note_content_reconciler.db.scoped_session",
             fake_scoped_session,
         )
-        await NoteContentReconciler(
+        outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
         ).reconcile(
@@ -268,6 +315,7 @@ async def test_reconciler_defers_unrelated_file_while_materialization_is_pending
 
     repository.create.assert_not_awaited()
     repository.update_state_fields.assert_not_awaited()
+    assert outcome == "current"
 
 
 @pytest.mark.asyncio

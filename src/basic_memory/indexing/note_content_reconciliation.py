@@ -8,6 +8,7 @@ from typing import Literal
 
 type NoteContentChecksum = str
 type NoteContentSource = str
+type NoteContentReconciliationOutcome = Literal["current", "stale"]
 type NoteContentWriteStatus = Literal[
     "pending",
     "writing",
@@ -42,7 +43,7 @@ class NoteContentState:
 class NoteContentReconciliationAnchor:
     """note_content state captured before an observed file is indexed."""
 
-    entity_id: int
+    entity_id: int | None
     state: NoteContentState | None
 
 
