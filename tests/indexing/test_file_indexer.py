@@ -15,6 +15,10 @@ from basic_memory.indexing.file_indexer import (
     build_default_file_indexer,
 )
 from basic_memory.indexing.models import FileIndexOperation, FileIndexResult, SyncedMarkdownFile
+from basic_memory.indexing.note_content_reconciliation import (
+    NoteContentReconciliationAnchor,
+    NoteContentState,
+)
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 
 CHECKSUM = "abc123"
@@ -92,6 +96,18 @@ def _file_indexer(
 
     note_content_reconciler = Mock()
     note_content_reconciler.reconcile = AsyncMock()
+    note_content_reconciler.capture_anchor = AsyncMock(
+        return_value=NoteContentReconciliationAnchor(
+            entity_id=existing_entity.id if existing_entity is not None else 42,
+            state=NoteContentState(
+                db_version=3,
+                db_checksum="old-checksum",
+                file_version=3,
+                file_checksum="old-checksum",
+                file_write_status="synced",
+            ),
+        )
+    )
 
     return (
         FileIndexer(
@@ -160,11 +176,13 @@ async def test_file_indexer_indexes_new_markdown_file() -> None:
         resolve_relations=False,
         refresh_unchanged_derived_state=False,
     )
+    note_content_reconciler.capture_anchor.assert_not_awaited()
     note_content_reconciler.reconcile.assert_awaited_once_with(
         entity=synced_file.entity,
         markdown_content=CANONICAL_MARKDOWN,
         observed_at=OBSERVED_AT,
         source="s3_webhook",
+        anchor=None,
     )
     assert result.file_path == "notes/note.md"
     assert result.entity_id == 42
@@ -179,18 +197,29 @@ async def test_file_indexer_indexes_existing_markdown_file() -> None:
     When the per-file indexer processes that file
     Then it asks the markdown indexer to persist it as an update.
     """
-    file_indexer, markdown_indexer, _note_content_reconciler = _file_indexer(
-        existing_entity=_entity(entity_id=7),
+    existing_entity = _entity(entity_id=7)
+    synced_file = _synced_file(entity=existing_entity)
+    file_indexer, markdown_indexer, note_content_reconciler = _file_indexer(
+        existing_entity=existing_entity,
+        synced_file=synced_file,
     )
 
     result = await file_indexer.index_markdown_file("notes/note.md")
 
+    note_content_reconciler.capture_anchor.assert_awaited_once_with(7)
     markdown_indexer.index_current_markdown_file.assert_awaited_once_with(
         "notes/note.md",
         new=False,
         index_search=True,
         resolve_relations=False,
         refresh_unchanged_derived_state=True,
+    )
+    note_content_reconciler.reconcile.assert_awaited_once_with(
+        entity=synced_file.entity,
+        markdown_content=CANONICAL_MARKDOWN,
+        observed_at=OBSERVED_AT,
+        source="index",
+        anchor=note_content_reconciler.capture_anchor.return_value,
     )
     assert result.operation == FileIndexOperation.updated
 

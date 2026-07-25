@@ -12,6 +12,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentMaterializedStale,
     NoteContentMaterializationStatusUpdate,
     NoteContentPromoted,
+    NoteContentReconciliationDeferred,
     NoteContentState,
     ObservedNoteContent,
     plan_note_content_materialization_publish,
@@ -87,13 +88,29 @@ def test_plan_refreshes_file_observation_when_db_is_ahead() -> None:
     )
 
 
-def test_plan_promotes_external_file_change_after_latest_known_version() -> None:
+def test_plan_defers_external_file_change_while_file_state_is_not_synced() -> None:
     plan = plan_note_content_reconciliation(
         NoteContentState(
             db_version=3,
             db_checksum="db-checksum",
             file_version=5,
             file_checksum="materialized-file-checksum",
+            file_write_status="pending",
+        ),
+        _observed("external-change-checksum"),
+    )
+
+    assert plan == NoteContentReconciliationDeferred()
+
+
+def test_plan_promotes_external_file_change_from_synced_state() -> None:
+    plan = plan_note_content_reconciliation(
+        NoteContentState(
+            db_version=5,
+            db_checksum="db-checksum",
+            file_version=5,
+            file_checksum="db-checksum",
+            file_write_status="synced",
         ),
         _observed("external-change-checksum"),
     )

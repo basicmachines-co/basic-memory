@@ -287,6 +287,11 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
 
+        anchor = (
+            await self.note_content_reconciler.capture_anchor(existing.id)
+            if existing is not None
+            else None
+        )
         synced = await self.index_current_markdown_file(
             file_path,
             new=existing is None,
@@ -299,6 +304,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             markdown_content=synced.markdown_content,
             observed_at=synced.updated_at,
             source=source,
+            anchor=anchor,
         )
 
         logger.info(

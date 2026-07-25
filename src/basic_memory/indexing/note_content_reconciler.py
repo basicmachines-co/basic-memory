@@ -20,8 +20,11 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentMaterializedCurrent,
     NoteContentMaterializedStale,
     NoteContentPromoted,
+    NoteContentReconciliationAnchor,
+    NoteContentReconciliationDeferred,
     NoteContentState,
     NoteContentSource,
+    NoteContentWriteStatus,
     ObservedNoteContent,
     plan_note_content_reconciliation,
 )
@@ -152,6 +155,15 @@ class RepositoryNoteMaterializationFailureMarker:
                 )
 
 
+def note_content_write_status(value: str) -> NoteContentWriteStatus:
+    """Validate the persisted write status before using it in pure planning."""
+    match value:
+        case "pending" | "writing" | "synced" | "failed" | "external_change_detected":
+            return value
+        case _:
+            raise ValueError(f"Unsupported note_content file_write_status: {value}")
+
+
 def note_content_state_from_model(note_content: NoteContent) -> NoteContentState:
     """Map the ORM row into the portable reconciliation state."""
     return NoteContentState(
@@ -163,6 +175,7 @@ def note_content_state_from_model(note_content: NoteContent) -> NoteContentState
         file_checksum=str(note_content.file_checksum)
         if note_content.file_checksum is not None
         else None,
+        file_write_status=note_content_write_status(note_content.file_write_status),
     )
 
 
@@ -280,6 +293,18 @@ class NoteContentReconciler:
         self._note_content_repository = note_content_repository
         self._session_maker = session_maker
 
+    async def capture_anchor(self, entity_id: int) -> NoteContentReconciliationAnchor:
+        """Capture the accepted state before storage bytes enter the index pipeline."""
+        async with db.scoped_session(self._session_maker) as session:
+            note_content = await self._note_content_repository.get_by_entity_id(
+                session,
+                entity_id,
+            )
+        return NoteContentReconciliationAnchor(
+            entity_id=entity_id,
+            state=note_content_state_from_model(note_content) if note_content else None,
+        )
+
     async def reconcile(
         self,
         *,
@@ -287,6 +312,7 @@ class NoteContentReconciler:
         markdown_content: str,
         observed_at: datetime | None,
         source: NoteContentSource,
+        anchor: NoteContentReconciliationAnchor | None = None,
     ) -> None:
         """Apply the shared file-vs-DB rule for one markdown entity."""
         observed_checksum = await file_utils.compute_checksum(markdown_content)
@@ -302,6 +328,22 @@ class NoteContentReconciler:
                 session,
                 entity.id,
             )
+
+            current_state = (
+                note_content_state_from_model(note_content) if note_content is not None else None
+            )
+            if anchor is not None:
+                if anchor.entity_id != entity.id:
+                    raise ValueError(
+                        "Note-content reconciliation anchor belongs to another entity."
+                    )
+                if anchor.state != current_state:
+                    logger.debug(
+                        "Skipped stale note_content observation for entity {}: "
+                        "accepted state changed during indexing",
+                        entity.id,
+                    )
+                    return
 
             if note_content is None:
                 plan = plan_note_content_reconciliation(None, observed)
@@ -330,12 +372,23 @@ class NoteContentReconciler:
             # that db_version so a concurrent accepted API mutation that advanced
             # the row between our read and write is not silently reverted.
             expected_db_version = int(note_content.db_version)
+            current_state = note_content_state_from_model(note_content)
             plan = plan_note_content_reconciliation(
-                note_content_state_from_model(note_content),
+                current_state,
                 observed,
             )
             if isinstance(plan, NoteContentBootstrap):
                 raise RuntimeError("Existing note_content cannot bootstrap reconciliation")
+            if isinstance(plan, NoteContentReconciliationDeferred):
+                logger.debug(
+                    "Deferred note_content file promotion for entity {}: "
+                    "db_version={}, file_version={}, file_write_status={}",
+                    entity.id,
+                    current_state.db_version,
+                    current_state.file_version,
+                    current_state.file_write_status,
+                )
+                return
 
             applied = await apply_note_content_update_plan(
                 self._note_content_repository,
