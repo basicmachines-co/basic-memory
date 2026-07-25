@@ -254,7 +254,7 @@ def test_recent_activity_format_project_output_no_results():
     )
 
     out = recent_activity_module._format_project_output(
-        project_name="proj", activity_data=empty, timeframe="7d", type_filter="", page=1
+        project_name="proj", activity_data=empty, timeframe="7d", page=1
     )
     assert "No recent activity found" in out
 
@@ -321,7 +321,6 @@ def test_recent_activity_format_project_output_renders_all_entities_and_relation
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter=["entity", "relation"],
         page=1,
     )
 
@@ -367,7 +366,6 @@ def test_recent_activity_format_project_output_includes_observation_truncation()
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter="observation",
         page=1,
     )
     assert "Recent Observations" in out
@@ -568,7 +566,6 @@ def test_format_project_output_has_more_pagination_guidance():
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter="entity",
         page=1,
     )
     assert "Use page=2 to see more" in out
@@ -606,7 +603,6 @@ def test_format_project_output_no_more_pages():
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter="entity",
         page=1,
     )
     assert "1 items found." in out

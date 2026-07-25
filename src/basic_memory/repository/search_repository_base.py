@@ -25,7 +25,6 @@ from basic_memory.repository.semantic_chunking import (
     VectorChunkRecord,
     build_entity_fingerprint,
     build_vector_chunk_records,
-    compose_row_source_text,
     split_text_into_chunks,
 )
 from basic_memory.repository.semantic_errors import (
@@ -424,15 +423,6 @@ class SearchRepositoryBase(ABC):
                 "and set semantic_search_enabled=true."
             )
 
-    def _compose_row_source_text(self, row: SemanticSourceRow) -> str:
-        """Build the text blob that will be chunked and embedded for one search_index row.
-
-        For entity rows we use title, permalink, and content_snippet (the actual
-        human-readable content).  content_stems is an FTS-optimised variant that
-        includes word-boundary expansions and would dilute embedding quality.
-        """
-        return compose_row_source_text(row)
-
     def _build_chunk_records(self, rows: Iterable[SemanticSourceRow]) -> list[VectorChunkRecord]:
         chunk_build = build_vector_chunk_records(rows)
         if chunk_build.duplicate_chunk_keys:
@@ -582,28 +572,6 @@ class SearchRepositoryBase(ABC):
         return await semantic_vector_sync.prepare_entity_vector_jobs_window(
             self,
             entity_ids,
-        )
-
-    async def _prepare_entity_vector_jobs(
-        self,
-        entity_id: int,
-    ) -> _PreparedEntityVectorSync:
-        """Prepare chunk mutations and embedding jobs for one entity."""
-        return await semantic_vector_sync.prepare_entity_vector_jobs(self, entity_id)
-
-    async def _prepare_entity_vector_jobs_prefetched(
-        self,
-        *,
-        entity_id: int,
-        source_rows: list[Any],
-        existing_rows: list[VectorChunkState],
-    ) -> _PreparedEntityVectorSync:
-        """Prepare one entity using prefetched window rows."""
-        return await semantic_vector_sync.prepare_entity_vector_jobs_prefetched(
-            self,
-            entity_id=entity_id,
-            source_rows=source_rows,
-            existing_rows=existing_rows,
         )
 
     async def _upsert_scheduled_chunk_records(
@@ -1010,32 +978,6 @@ class SearchRepositoryBase(ABC):
         hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
         _log_vector_summary()
         return ranked_rows[offset : offset + limit]
-
-    async def _fetch_entity_rows_by_ids(self, entity_ids: list[int]) -> dict[int, SearchIndexRow]:
-        """Fetch entity-type search_index rows by their entity_id values."""
-        placeholders = ",".join(f":id_{idx}" for idx in range(len(entity_ids)))
-        params: dict[str, Any] = {
-            **{f"id_{idx}": eid for idx, eid in enumerate(entity_ids)},
-            "project_id": self.project_id,
-            "item_type": SearchItemType.ENTITY.value,
-        }
-        sql = f"""
-            SELECT
-                project_id, id, title, permalink, file_path, type, metadata,
-                from_id, to_id, relation_type, entity_id, content_snippet,
-                category, created_at, updated_at, 0 as score
-            FROM search_index
-            WHERE project_id = :project_id
-              AND type = :item_type
-              AND entity_id IN ({placeholders})
-        """
-        result: dict[int, SearchIndexRow] = {}
-        async with db.scoped_session(self.session_maker) as session:
-            row_result = await session.execute(text(sql), params)
-            for row in row_result.fetchall():
-                search_row = SearchIndexRow.from_mapping(row._asdict())
-                result[row.entity_id] = search_row
-        return result
 
     async def _fetch_search_index_rows_by_ids(
         self, row_ids: list[int]

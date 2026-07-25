@@ -148,49 +148,6 @@ def _format_cross_project_error_response(
         """).strip()
 
 
-def _format_potential_cross_project_guidance(
-    identifier: str, destination_path: str, current_project: str, available_projects: list[str]
-) -> str:
-    """Format guidance for potentially cross-project moves."""
-    other_projects = ", ".join(available_projects[:3])  # Show first 3 projects  # pragma: no cover
-    if len(available_projects) > 3:  # pragma: no cover
-        other_projects += f" (and {len(available_projects) - 3} others)"  # pragma: no cover
-
-    return (  # pragma: no cover
-        dedent(f"""
-        # Move Failed - Check Project Context
-        
-        Cannot move '{identifier}' to '{destination_path}' within the current project '{current_project}'.
-        
-        ## If you intended to move within the current project:
-        The destination path should be relative to the project root:
-        ```
-        move_note("{identifier}", "folder/filename.md")
-        ```
-        
-        ## If you intended to move to a different project:
-        Cross-project moves require switching projects first. Available projects: {other_projects}
-        
-        ### To move to another project:
-        ```
-        # 1. Read the content
-        read_note("{identifier}")
-        
-        # 2. Create note in target project
-        write_note("Title", "content", "folder", project="target-project-name")
-
-        # 3. Delete original if desired
-        delete_note("{identifier}", project="{current_project}")
-        ```
-        
-        ### To see all projects:
-        ```
-        list_memory_projects()
-        ```
-        """).strip()
-    )
-
-
 def _format_move_error_response(error_message: str, identifier: str, destination_path: str) -> str:
     """Format helpful error responses for move failures that guide users to successful moves."""
 

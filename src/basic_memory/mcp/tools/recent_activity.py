@@ -332,7 +332,12 @@ async def recent_activity(
                 return _extract_recent_rows(activity_data)
 
             # Format project-specific mode output
-            return _format_project_output(active_project.name, activity_data, timeframe, type, page)
+            return _format_project_output(
+                active_project.name,
+                activity_data,
+                timeframe,
+                page=page,
+            )
 
 
 async def _get_project_activity(
@@ -480,7 +485,6 @@ def _format_project_output(
     project_name: str,
     activity_data: GraphContext,
     timeframe: str,
-    type_filter: Union[str, List[str]],
     page: int = 1,
 ) -> str:
     """Format project-specific mode output as human-readable text."""
