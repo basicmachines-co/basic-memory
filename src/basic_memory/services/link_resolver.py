@@ -23,6 +23,19 @@ from basic_memory.utils import (
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 
+def _is_permalink_shaped(identifier: str) -> bool:
+    """Return True when the identifier is already in permalink/slug form.
+
+    An identifier equal to its own ``generate_permalink`` output was supplied as a permalink, not a
+    title/display string (which would still be changed by slugification). Only such a
+    caller-supplied exact permalink may bypass the strict duplicate-title guard (issue #1148): a
+    title like ``"Core Service"`` slugifies to ``core-service`` and must not silently resolve to
+    whichever duplicate owns that title-derived permalink.
+    """
+    stripped = identifier.strip().strip("/")
+    return bool(stripped) and stripped == generate_permalink(stripped).strip("/")
+
+
 def is_workspace_qualified_plain_identifier(identifier: str) -> bool:
     """Return True for plain ``<workspace>/<project>/<path>`` identifiers."""
     stripped = identifier.strip()
@@ -358,7 +371,24 @@ class LinkResolver:
                     # Multiple candidates - pick closest to source
                     return self._find_closest_entity(candidates, source_path)
 
-        # Standard resolution (no source context): permalink first, then title
+        # Standard resolution (no source context): permalink first, then title.
+        #
+        # A destructive (strict) resolve must not silently guess between several same-title notes
+        # — e.g. an original plus a `-1` duplicate — which is how edit/move landed on the wrong
+        # entity (issue #1148). The trap is that the permalink step also matches the *slug* of the
+        # title (`build_permalink_resolution_candidates` slugifies the input), so a duplicated title
+        # whose original owns the title-derived permalink would still resolve silently. Pre-read the
+        # title matches so the permalink loop can tell a caller-supplied exact permalink (input is
+        # already in slug form) from the slug of a shared title. Non-strict resolution keeps the
+        # fast path — the title is read only if the permalink loop misses.
+        strict_title_matches = (
+            await entity_repository.get_by_title(session, clean_text, load_relations=load_relations)
+            if strict
+            else None
+        )
+        strict_ambiguous_title = strict_title_matches is not None and len(strict_title_matches) > 1
+        caller_supplied_exact_permalink = _is_permalink_shaped(clean_text)
+
         # 1. Try exact permalink match first (most efficient)
         for candidate_permalink in permalink_candidates:
             entity = await entity_repository.get_by_permalink(
@@ -367,21 +397,22 @@ class LinkResolver:
                 load_relations=load_relations,
             )
             if entity:
+                # Only a caller-supplied exact permalink may bypass the duplicate-title guard; the
+                # slugified form of a shared title must not silently win for a destructive op.
+                if strict_ambiguous_title and not caller_supplied_exact_permalink:
+                    break
                 logger.debug(f"Found exact permalink match: {entity.permalink}")
                 return entity
 
-        # 2. Try exact title match
-        found = await entity_repository.get_by_title(
-            session,
-            clean_text,
-            load_relations=load_relations,
+        # 2. Try exact title match. An exact file-path match below is more precise than a title and
+        # can still disambiguate, so defer any ambiguity rejection until the path lookups have run.
+        found = (
+            strict_title_matches
+            if strict
+            else await entity_repository.get_by_title(
+                session, clean_text, load_relations=load_relations
+            )
         )
-        # A destructive (strict) resolve must not silently guess between several same-title notes
-        # — e.g. an original plus a `-1` duplicate — which is how edit/move landed on the wrong
-        # entity (issue #1148). But an exact file-path match below is more precise than the title
-        # and can still disambiguate, so defer the rejection until the path lookups have run. A
-        # source-qualified caller was handled above by proximity; non-strict resolution (wiki
-        # links, reads) keeps the shortest-path preference and never raises.
         ambiguous_title_candidates: list[Entity] = []
         if found:
             if strict and len(found) > 1:

@@ -634,6 +634,58 @@ async def test_exact_file_path_wins_over_ambiguous_title_in_strict_mode(
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_title_not_bypassed_via_title_derived_permalink_in_strict_mode(
+    entity_repository, session_maker, link_resolver
+):
+    """A duplicated title must not resolve via its own slug under a strict op (#1148, P1 follow-up).
+
+    The original owns the title-derived permalink ("widget"); a duplicate got "widget-1".
+    build_permalink_resolution_candidates slugifies "Widget" to "widget", so without the guard the
+    permalink step would silently return the original for edit/move. A strict resolve of the bare
+    (ambiguous) title must raise; an exact permalink still resolves precisely.
+    """
+    from basic_memory.services.exceptions import AmbiguousIdentifierError
+
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Widget",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="Widget.md",
+                permalink="widget",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Widget",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="archive/Widget.md",
+                permalink="widget-1",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    # Bare, ambiguous title raises even though a title-derived permalink ("widget") exists.
+    with pytest.raises(AmbiguousIdentifierError):
+        await link_resolver.resolve_link("Widget", strict=True)
+
+    # An exact permalink is a precise pointer and still resolves.
+    result = await link_resolver.resolve_link("widget", strict=True)
+    assert result is not None
+    assert result.permalink == "widget"
+
+
+@pytest.mark.asyncio
 async def test_cross_project_link_resolution(
     session_maker, entity_repository, search_service, tmp_path, app_config
 ):
