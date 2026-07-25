@@ -376,20 +376,20 @@ class LinkResolver:
             clean_text,
             load_relations=load_relations,
         )
+        # A destructive (strict) resolve must not silently guess between several same-title notes
+        # — e.g. an original plus a `-1` duplicate — which is how edit/move landed on the wrong
+        # entity (issue #1148). But an exact file-path match below is more precise than the title
+        # and can still disambiguate, so defer the rejection until the path lookups have run. A
+        # source-qualified caller was handled above by proximity; non-strict resolution (wiki
+        # links, reads) keeps the shortest-path preference and never raises.
+        ambiguous_title_candidates: list[Entity] = []
         if found:
-            # Fail fast when a destructive (strict) resolve would otherwise guess between several
-            # same-title notes — e.g. an original plus a `-1` duplicate. Silently picking the
-            # shortest path here is how edit/move landed on the wrong entity (issue #1148). A
-            # source-qualified caller was handled above by proximity; non-strict resolution
-            # (wiki links, reads) keeps the shortest-path preference and does not raise.
             if strict and len(found) > 1:
-                raise AmbiguousIdentifierError(
-                    clean_text,
-                    [(entity.permalink, entity.file_path) for entity in found],
-                )
-            entity = found[0]
-            logger.debug(f"Found title match: {entity.title}")
-            return entity
+                ambiguous_title_candidates = list(found)
+            else:
+                entity = found[0]
+                logger.debug(f"Found title match: {entity.title}")
+                return entity
 
         # 3. Try file path
         found_path = await entity_repository.get_by_file_path(
@@ -412,6 +412,14 @@ class LinkResolver:
             if found_path_md:
                 logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
                 return found_path_md
+
+        # No exact permalink or file path matched. If the only thing that matched was a title
+        # shared by several notes under a strict resolve, refuse to guess (#1148).
+        if ambiguous_title_candidates:
+            raise AmbiguousIdentifierError(
+                clean_text,
+                [(entity.permalink, entity.file_path) for entity in ambiguous_title_candidates],
+            )
 
         # In strict mode, don't try fuzzy search - return None if no exact match found
         if strict:

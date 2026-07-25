@@ -588,6 +588,52 @@ async def test_unique_title_still_resolves_in_strict_mode(link_resolver, project
 
 
 @pytest.mark.asyncio
+async def test_exact_file_path_wins_over_ambiguous_title_in_strict_mode(
+    entity_repository, session_maker, link_resolver
+):
+    """An exact, unique file path disambiguates even when the title is shared (#1148, P2).
+
+    Two notes share the title "Diagram.png"; only one has file_path equal to the identifier.
+    File paths are part of the resolver contract and more precise than a title, so strict
+    resolution must return the exact-path match rather than raising AmbiguousIdentifierError.
+    Permalinks here are non-derived so the permalink step does not short-circuit first.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Diagram.png",
+                note_type="file",
+                content_type="image/png",
+                file_path="Diagram.png",
+                permalink="diagram-root",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Diagram.png",
+                note_type="file",
+                content_type="image/png",
+                file_path="archive/old-diagram.png",
+                permalink="diagram-archive",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    result = await link_resolver.resolve_link("Diagram.png", strict=True)
+    assert result is not None
+    assert result.file_path == "Diagram.png"
+    assert result.permalink == "diagram-root"
+
+
+@pytest.mark.asyncio
 async def test_cross_project_link_resolution(
     session_maker, entity_repository, search_service, tmp_path, app_config
 ):

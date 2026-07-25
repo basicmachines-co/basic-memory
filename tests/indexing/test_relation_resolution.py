@@ -495,3 +495,64 @@ async def test_repository_runtime_batches_resolution_and_entity_refresh_sessions
         )
     ]
     assert FakeSession.created_count == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_relations_skips_ambiguous_target_without_aborting_pass() -> None:
+    """An ambiguous relation target is left unresolved; other relations still resolve (#1148).
+
+    strict resolution now raises AmbiguousIdentifierError when a target title matches several
+    notes. The repair pass must treat that as an unresolved forward reference rather than let the
+    exception abort the whole batch and strand other resolvable relations.
+    """
+    from basic_memory.services.exceptions import AmbiguousIdentifierError
+
+    class AmbiguousStubLinkResolver(StubLinkResolver):
+        def __init__(
+            self,
+            targets: dict[str, FakeResolvedEntity],
+            ambiguous: set[str],
+        ) -> None:
+            super().__init__(targets)
+            self.ambiguous = ambiguous
+
+        async def resolve_link(
+            self,
+            link_text: str,
+            *,
+            strict: bool,
+            session: AsyncSession,
+        ) -> FakeResolvedEntity | None:
+            assert isinstance(session, FakeSession)
+            self.calls.append((link_text, strict))
+            if link_text in self.ambiguous:
+                raise AmbiguousIdentifierError(
+                    link_text, [("dup-a", "a.md"), ("dup-b", "b.md")]
+                )
+            return self.targets.get(link_text)
+
+    repo = StubRelationRepository(
+        [
+            [
+                FakeRelation(id=1, from_id=10, to_name="Ambiguous Title"),
+                FakeRelation(id=2, from_id=11, to_name="Clear Target"),
+            ]
+        ]
+    )
+    link_resolver = AmbiguousStubLinkResolver(
+        targets={"Clear Target": FakeResolvedEntity(id=20, title="Clear Target")},
+        ambiguous={"Ambiguous Title"},
+    )
+    entity_indexer = StubEntityIndexer()
+    runtime = build_repository_runtime(repo, link_resolver, entity_indexer)
+
+    # The pass completes (no exception propagates) ...
+    affected = await runtime.resolve_relations()
+
+    # ... resolving only the unambiguous relation; the ambiguous one stays a forward reference.
+    assert affected == {11}
+    assert len(repo.write_batches) == 1
+    writes = repo.write_batches[0]
+    assert [write.relation_id for write in writes] == [2]
+    assert writes[0].target_id == 20
+    assert ("Ambiguous Title", True) in link_resolver.calls
