@@ -136,12 +136,12 @@ async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.semantic
 @pytest.mark.benchmark
-async def test_postgres_hybrid_applies_rerank_candidate_limit_once(
+async def test_postgres_hybrid_preserves_candidate_windows(
     postgres_engine_factory,
     tmp_path,
     monkeypatch,
 ):
-    """Exercise composed hybrid and vector candidate sizing through real Postgres queries."""
+    """Exercise baseline and reranked hybrid candidate sizing through real Postgres queries."""
     skip_if_needed(PG_FASTEMBED)
     if postgres_engine_factory is None:
         pytest.skip("Postgres engine not available")
@@ -153,8 +153,8 @@ async def test_postgres_hybrid_applies_rerank_candidate_limit_once(
     await seed_benchmark_notes(search_service, note_count=20)
 
     repo = cast(Any, search_service.repository)
-    reranker = _RecordingReranker()
-    repo._rerank_provider = reranker
+    repo._rerank_provider = None
+    repo._semantic_vector_k = 100
     repo._reranker_candidates = 100
 
     candidate_limits: list[int] = []
@@ -170,7 +170,22 @@ async def test_postgres_hybrid_applies_rerank_candidate_limit_once(
 
     monkeypatch.setattr(repo, "_run_vector_query", record_vector_query)
 
-    results = await search_service.search(
+    baseline_results = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+        ),
+        limit=10,
+    )
+
+    assert baseline_results
+    assert candidate_limits == [1000]
+
+    candidate_limits.clear()
+    reranker = _RecordingReranker()
+    repo._rerank_provider = reranker
+    reranked_results = await search_service.search(
         SearchQuery(
             text="database migration schema",
             retrieval_mode=SearchRetrievalMode.HYBRID,
@@ -179,7 +194,7 @@ async def test_postgres_hybrid_applies_rerank_candidate_limit_once(
         limit=11,
     )
 
-    assert results
+    assert reranked_results
     assert reranker.calls == 1
     assert candidate_limits == [400]
 

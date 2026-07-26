@@ -1253,6 +1253,7 @@ class SearchRepositoryBase(ABC):
         """
         self._assert_semantic_available()
         query_text = search_text.strip()
+        rerank_enabled = self._should_rerank(query_text)
         query_start = time.perf_counter()
         candidate_limit = self._candidate_limit(limit, offset, query_text)
         fts_start = time.perf_counter()
@@ -1289,7 +1290,11 @@ class SearchRepositoryBase(ABC):
             min_similarity=min_similarity,
             limit=candidate_limit,
             offset=0,
-            candidate_limit=candidate_limit,
+            # Trigger: reranking owns a bounded candidate window shared by both legs.
+            # Why: the disabled path historically expands the vector leg again to
+            # preserve recall when many vector chunks collapse into a few search rows.
+            # Outcome: avoid double expansion only when reranking is actually active.
+            candidate_limit=candidate_limit if rerank_enabled else None,
             _emit_observability_log=False,
             _apply_rerank=False,
         )
@@ -1354,7 +1359,7 @@ class SearchRepositoryBase(ABC):
         # we materialize the whole candidate list (cheap next to a cross-encoder call)
         # and hand it to the shared paginate helper; the disabled path stays cheap by
         # materializing only the requested page.
-        if self._should_rerank(query_text):
+        if rerank_enabled:
             candidates = [_materialize(entry) for entry in ranked]
             output = await self._rerank_and_paginate(
                 query_text, candidates, offset=offset, limit=limit

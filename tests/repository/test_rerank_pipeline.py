@@ -482,11 +482,11 @@ async def test_hybrid_search_reranks_once(search_repository):
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_applies_rerank_candidate_limit_once(
+async def test_hybrid_search_preserves_candidate_windows(
     search_repository,
     monkeypatch,
 ):
-    """Hybrid reuses its resolved candidate pool when it enters the vector leg."""
+    """Hybrid preserves legacy recall unless reranking owns the shared candidate pool."""
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
 
@@ -494,7 +494,7 @@ async def test_hybrid_search_applies_rerank_candidate_limit_once(
     await _index_two_auth_notes(search_repository)
     search_repository._semantic_vector_k = 100
     search_repository._reranker_candidates = 100
-    search_repository._rerank_provider = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    search_repository._rerank_provider = None
 
     candidate_limits: list[int] = []
     run_vector_query = search_repository._run_vector_query
@@ -509,13 +509,24 @@ async def test_hybrid_search_applies_rerank_candidate_limit_once(
 
     monkeypatch.setattr(search_repository, "_run_vector_query", record_vector_query)
 
-    results = await search_repository.search(
+    baseline_results = await search_repository.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.HYBRID,
+        limit=10,
+    )
+
+    assert baseline_results
+    assert candidate_limits == [1000]
+
+    candidate_limits.clear()
+    search_repository._rerank_provider = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    reranked_results = await search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=11,
     )
 
-    assert results
+    assert reranked_results
     assert candidate_limits == [400]
 
 
