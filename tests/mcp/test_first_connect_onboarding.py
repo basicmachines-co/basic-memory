@@ -128,9 +128,28 @@ async def test_getting_started_offers_first_note_conditionally(client, test_proj
 async def test_getting_started_preserves_markdown_around_multiline_activity(monkeypatch):
     """Embedded activity must not turn the surrounding prompt into an indented code block."""
 
-    async def fake_recent_activity(**_kwargs):
+    async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
+        return {
+            "projects": [
+                {
+                    "name": "research",
+                    "qualified_name": "personal/research",
+                    "external_id": "project-1",
+                    "is_default": True,
+                    "workspace_is_default": True,
+                }
+            ],
+            "default_project": "research",
+            "constrained_project": None,
+        }
+
+    async def fake_recent_activity(**_kwargs: object) -> str:
         return "# Recent activity\n\n- Updated [[Project Plan]]"
 
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.list_memory_projects",
+        fake_list_memory_projects,
+    )
     monkeypatch.setattr(
         "basic_memory.mcp.prompts.getting_started.recent_activity",
         fake_recent_activity,
@@ -151,16 +170,108 @@ async def test_getting_started_keeps_selected_project_in_all_examples(client, te
     onboarding never crosses into write_note's default project."""
     result = await getting_started(project=test_project.name)  # pyright: ignore[reportGeneralTypeIssues]
 
-    name = test_project.name
-    assert f'write_note(project="{name}"' in result
-    assert f'search_notes(project="{name}"' in result
-    assert f'read_note(project="{name}", identifier="permalink")' in result
+    project_id = test_project.external_id
+    assert f'write_note(project_id="{project_id}"' in result
+    assert f'search_notes(project_id="{project_id}"' in result
+    assert f'read_note(project_id="{project_id}", identifier="permalink")' in result
     assert 'directory="notes"' in result
 
 
 @pytest.mark.asyncio
-async def test_getting_started_no_project_omits_project_arg(client, test_project):
-    """Without an explicit project, the example omits project and lets write_note resolve it."""
+async def test_getting_started_no_project_uses_concrete_default_project(client, test_project):
+    """Without an explicit project, onboarding resolves the default to its external id."""
     result = await getting_started()  # pyright: ignore[reportGeneralTypeIssues]
 
-    assert 'write_note(title="..."' in result
+    assert f'write_note(project_id="{test_project.external_id}"' in result
+    assert 'write_note(title="..."' not in result
+
+
+@pytest.mark.asyncio
+async def test_getting_started_without_projects_stops_before_note_actions(monkeypatch):
+    """A fresh installation must establish a project before advertising note operations."""
+
+    async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
+        return {
+            "projects": [],
+            "default_project": None,
+            "constrained_project": None,
+        }
+
+    async def fail_recent_activity(**_kwargs: object) -> str:
+        raise AssertionError("recent_activity requires a selected project")
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.list_memory_projects",
+        fake_list_memory_projects,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.recent_activity",
+        fail_recent_activity,
+    )
+
+    result = await getting_started()  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert "No Basic Memory projects are available yet" in result
+    assert "list_memory_projects()" in result
+    assert "write_note(" not in result
+    assert "read_note(" not in result
+    assert "search_notes(" not in result
+
+
+@pytest.mark.asyncio
+async def test_getting_started_requires_qualified_duplicate_project_selection(monkeypatch):
+    """Duplicate cloud names pause onboarding, then the qualified choice routes by id."""
+
+    async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
+        return {
+            "projects": [
+                {
+                    "name": "notes",
+                    "qualified_name": "personal/notes",
+                    "external_id": "project-personal",
+                    "is_default": False,
+                    "workspace_is_default": True,
+                },
+                {
+                    "name": "notes",
+                    "qualified_name": "team/notes",
+                    "external_id": "project-team",
+                    "is_default": False,
+                    "workspace_is_default": False,
+                },
+            ],
+            "default_project": None,
+            "constrained_project": None,
+        }
+
+    activity_calls: list[dict[str, object]] = []
+
+    async def fake_recent_activity(**kwargs: object) -> str:
+        activity_calls.append(kwargs)
+        return "# Recent activity\n\nNo recent activity"
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.list_memory_projects",
+        fake_list_memory_projects,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.recent_activity",
+        fake_recent_activity,
+    )
+
+    result = await getting_started(project="notes")  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert 'requested project "notes" did not identify one unique project' in result
+    assert "`personal/notes`" in result
+    assert "`team/notes`" in result
+    assert "write_note(" not in result
+    assert "read_note(" not in result
+    assert "search_notes(" not in result
+    assert activity_calls == []
+
+    selected_result = await getting_started(  # pyright: ignore[reportGeneralTypeIssues]
+        project="team/notes"
+    )
+
+    assert activity_calls == [{"timeframe": "30d", "project_id": "project-team"}]
+    assert 'write_note(project_id="project-team"' in selected_result

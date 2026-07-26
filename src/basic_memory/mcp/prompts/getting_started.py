@@ -16,7 +16,121 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tools.project_management import list_memory_projects
 from basic_memory.mcp.tools.recent_activity import recent_activity
+
+
+type ProjectMetadata = dict[str, object]
+
+
+def _project_string(project: ProjectMetadata, field: str) -> str | None:
+    """Return a non-empty string field from structured project metadata."""
+    value = project.get(field)
+    return value if isinstance(value, str) and value else None
+
+
+def _select_project(
+    projects: list[ProjectMetadata],
+    *,
+    requested_project: str | None,
+    default_project: str | None,
+    constrained_project: str | None,
+) -> ProjectMetadata | None:
+    """Select a project only when the listing identifies one unambiguous target."""
+    eligible = [project for project in projects if _project_string(project, "external_id")]
+    requested_identifier = requested_project or constrained_project
+
+    if requested_identifier:
+        exact_matches = [
+            project
+            for project in eligible
+            if requested_identifier
+            in {
+                _project_string(project, "external_id"),
+                _project_string(project, "qualified_name"),
+            }
+        ]
+        if len(exact_matches) == 1:
+            return exact_matches[0]
+
+        name_matches = [
+            project
+            for project in eligible
+            if _project_string(project, "name") == requested_identifier
+        ]
+        return name_matches[0] if len(name_matches) == 1 else None
+
+    default_matches = [
+        project
+        for project in eligible
+        if project.get("is_default") is True
+        and (default_project is None or _project_string(project, "name") == default_project)
+    ]
+    if len(default_matches) == 1:
+        return default_matches[0]
+
+    # Multiple workspaces can each mark a project as their default. The default
+    # workspace is the only collision-safe implicit choice across those workspaces.
+    workspace_defaults = [
+        project for project in default_matches if project.get("workspace_is_default") is True
+    ]
+    if len(workspace_defaults) == 1:
+        return workspace_defaults[0]
+
+    return eligible[0] if len(eligible) == 1 else None
+
+
+def _selection_guide(
+    projects: list[ProjectMetadata],
+    *,
+    requested_project: str | None,
+) -> str:
+    """Guide the assistant to establish project scope before suggesting note actions."""
+    introduction = dedent(
+        """
+        # Choose a Basic Memory project
+
+        Basic Memory gives the user a personal knowledge base: Markdown notes that persist
+        across conversations, which both the user and their AI assistants can read and write.
+        """
+    ).strip()
+
+    if not projects:
+        next_step = dedent(
+            """
+            No Basic Memory projects are available yet. Ask the user to create or connect a
+            project first. Then call `list_memory_projects()` and invoke this getting-started
+            prompt with the selected project.
+
+            Do not read, search, or write notes until a concrete project has been selected.
+            """
+        ).strip()
+        return f"{introduction}\n\n{next_step}"
+
+    requested_message = (
+        f'The requested project "{requested_project}" did not identify one unique project.\n\n'
+        if requested_project
+        else "No single default project could be selected.\n\n"
+    )
+    options = []
+    for project in projects:
+        name = _project_string(project, "qualified_name") or _project_string(project, "name")
+        project_id = _project_string(project, "external_id")
+        if name and project_id:
+            options.append(f'- `{name}` (`project_id="{project_id}"`)')
+
+    project_options = "\n".join(options) if options else "- Call `list_memory_projects()`"
+    next_step = dedent(
+        """
+        Ask the user which project to use. Once they choose, invoke this getting-started prompt
+        again with that qualified project name. Do not read, search, or write notes until one
+        concrete project has been selected.
+        """
+    ).strip()
+    return (
+        f"{introduction}\n\n{requested_message}Available projects:\n"
+        f"{project_options}\n\n{next_step}"
+    )
 
 
 @mcp.prompt(
@@ -33,7 +147,7 @@ async def getting_started(
 
     Embeds current recent activity and lets the model branch its own response on whether notes
     already exist, rather than asserting emptiness from a timeframe-limited call. The write path
-    is always framed as an offer the user must accept, in the inspected project.
+    is always framed as an offer the user must accept, in a concretely resolved project.
 
     Args:
         project: Project to inspect for existing notes and target for the first note (optional)
@@ -43,16 +157,39 @@ async def getting_started(
     """
     logger.info("Rendering getting_started prompt")
 
+    project_listing = await list_memory_projects(output_format="json")
+    if not isinstance(project_listing, dict):
+        raise TypeError("Structured project listing returned text")
+
+    project_rows = project_listing.get("projects")
+    if not isinstance(project_rows, list):
+        raise TypeError("Structured project listing is missing projects")
+
+    projects = [item for item in project_rows if isinstance(item, dict)]
+    default_project = project_listing.get("default_project")
+    constrained_project = project_listing.get("constrained_project")
+    selected_project = _select_project(
+        projects,
+        requested_project=project,
+        default_project=default_project if isinstance(default_project, str) else None,
+        constrained_project=(constrained_project if isinstance(constrained_project, str) else None),
+    )
+    if selected_project is None:
+        return _selection_guide(projects, requested_project=project)
+
+    project_id = _project_string(selected_project, "external_id")
+    if project_id is None:
+        raise ValueError("Selected project is missing external_id")
+
     # Show current activity, but do NOT decide "empty" from it: recent_activity is
     # timeframe-limited, so an established base that is simply quiet looks identical to a
     # brand-new one. Let the model judge from the activity output (which already carries its own
     # empty-state guidance) and branch its own response, rather than asserting emptiness here.
-    activity_text = str(await recent_activity(timeframe="30d", project=project)).strip()
+    activity_text = str(await recent_activity(timeframe="30d", project_id=project_id)).strip()
 
-    # Every example call keeps the project the prompt actually inspected. Omitting project lets
-    # the tool fall back to its default/discovery path, which would silently move onboarding into
-    # a different project than the one whose activity we just showed.
-    project_arg = f'project="{project}", ' if project else ""
+    # Every example call keeps the exact project the prompt inspected. Names can collide across
+    # cloud workspaces, while the external id remains a stable routing authority.
+    project_arg = f'project_id="{project_id}", '
 
     introduction = dedent(
         """
