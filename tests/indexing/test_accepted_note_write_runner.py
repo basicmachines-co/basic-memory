@@ -964,7 +964,9 @@ async def test_persist_accepted_note_snapshot_persists_content_search_and_graph(
     assert result.previous_file_delete.project_id == entity.project_id
     assert result.previous_file_delete.entity_id == entity.id
     assert result.previous_file_delete.file_path == "notes/old.md"
-    assert result.previous_file_delete.file_checksum == "old-file-checksum"
+    # The accepted DB version is ahead of the published file version, so the old file checksum is
+    # stale. Cleanup follows the accepted checksum that may already have reached storage.
+    assert result.previous_file_delete.file_checksum == "db-checksum"
     assert content_repository.calls == [
         (
             session,

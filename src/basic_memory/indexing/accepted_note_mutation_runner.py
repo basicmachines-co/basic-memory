@@ -40,6 +40,7 @@ from basic_memory.runtime.note_content import (
     accepted_note_file_path_conflicts,
     classify_accepted_note_write_conflict,
     plan_accepted_note_write_change,
+    select_accepted_note_source_checksum,
 )
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_COLLABORATION_RELAY
@@ -603,9 +604,7 @@ async def _run_accepted_note_update(
         # cleanup cannot let a later project index recreate the old path as a ghost.
         vacated_source = (
             entity.file_path,
-            current_note_content.file_checksum
-            if current_note_content.file_checksum is not None
-            else current_note_content.db_checksum,
+            select_accepted_note_source_checksum(current_note_content),
         )
         # Optimistic-concurrency precondition: the caller sent the db_checksum it
         # last synced; if the accepted row has advanced to a different write,
@@ -772,11 +771,7 @@ async def _run_accepted_note_move(
     # Capture the source checksum before persisting the move mutates note_content to the
     # destination version. When materialization has not published a file checksum yet, the
     # accepted DB checksum still identifies the exact Markdown bytes the source write produced.
-    vacated_source_checksum = (
-        current_note_content.file_checksum
-        if current_note_content.file_checksum is not None
-        else current_note_content.db_checksum
-    )
+    vacated_source_checksum = select_accepted_note_source_checksum(current_note_content)
     # Same-path moves fail fast everywhere by decision (2026-07-14): cloud's
     # pre-unification route returned a 200 no-op, local rejected — the unified
     # runner keeps the rejection so a mistaken identity move surfaces instead

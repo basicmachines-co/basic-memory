@@ -20,7 +20,9 @@ class _NoteContentState:
     db_version: int | str
     db_checksum: str
     last_source: str | None
+    file_version: int | None = None
     file_checksum: str | None = None
+    file_write_status: str = "pending"
 
 
 def test_plan_pending_note_materialization_uses_fallback_source_when_missing() -> None:
@@ -162,7 +164,9 @@ def test_plan_accepted_note_content_write_advances_and_cleans_moved_materialized
             db_version=4,
             db_checksum="db-checksum",
             last_source="api",
+            file_version=4,
             file_checksum="old-file-checksum",
+            file_write_status="synced",
         ),
     )
 
@@ -204,6 +208,27 @@ def test_plan_accepted_note_content_write_uses_db_checksum_for_unpublished_file_
             live_file_path="notes/new.md",
         ),
     )
+
+
+def test_plan_accepted_note_content_write_ignores_stale_published_checksum() -> None:
+    """A pending accepted version uses its DB checksum even when older file state remains."""
+    plan = plan_accepted_note_content_write(
+        project_id=7,
+        entity_id=42,
+        existing_file_path="notes/old.md",
+        accepted_file_path="notes/new.md",
+        current_note_content=_NoteContentState(
+            db_version=4,
+            db_checksum="accepted-checksum",
+            last_source="api",
+            file_version=3,
+            file_checksum="previous-file-checksum",
+            file_write_status="writing",
+        ),
+    )
+
+    assert plan.previous_file_delete is not None
+    assert plan.previous_file_delete.file_checksum == "accepted-checksum"
 
 
 def test_plan_accepted_note_materialization_change_wraps_response_and_marker() -> None:

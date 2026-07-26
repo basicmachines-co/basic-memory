@@ -361,6 +361,10 @@ async def test_move_retires_vacate_marker_after_source_replacement(
     assert markers == {}
 
 
+@pytest.mark.parametrize(
+    "publication_state",
+    ["synced", "published-checksum-stale"],
+)
 @pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
 @pytest.mark.asyncio
 async def test_put_rename_lingering_source_is_not_reindexed(
@@ -371,11 +375,13 @@ async def test_put_rename_lingering_source_is_not_reindexed(
     engine_factory,
     monkeypatch,
     force_full: bool,
+    publication_state: str,
 ):
-    """A PUT rename records its vacated path so delayed cleanup cannot mint a ghost."""
+    """A PUT rename records current accepted bytes despite stale publication fields."""
     del app
     _, session_maker = engine_factory
     entity_repository = EntityRepository(project_id=test_project.id)
+    note_content_repository = NoteContentRepository(project_id=test_project.id)
     vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
     project_url = f"/v2/projects/{test_project.external_id}"
 
@@ -391,7 +397,28 @@ async def test_put_rename_lingering_source_is_not_reindexed(
     created = create_response.json()
     source_relative = created["file_path"]
     source_path = project_config.home / source_relative
-    source_checksum = sha256(source_path.read_bytes()).hexdigest()
+    materialized_checksum = sha256(source_path.read_bytes()).hexdigest()
+    source_checksum = materialized_checksum
+
+    if publication_state == "published-checksum-stale":
+        pending_markdown = (
+            source_path.read_text(encoding="utf-8").rstrip()
+            + "\n\nThese accepted bytes reached storage before publication.\n"
+        )
+        source_path.write_text(pending_markdown, encoding="utf-8")
+        source_checksum = sha256(source_path.read_bytes()).hexdigest()
+        async with db.scoped_session(session_maker) as session:
+            entity = await entity_repository.get_by_file_path(session, source_relative)
+            assert entity is not None
+            note_content = await note_content_repository.get_by_entity_id(session, entity.id)
+            assert note_content is not None
+            note_content.markdown_content = pending_markdown
+            note_content.db_version += 1
+            note_content.db_checksum = source_checksum
+            note_content.file_write_status = "writing"
+            assert note_content.file_version is not None
+            assert note_content.file_version < note_content.db_version
+            assert note_content.file_checksum == materialized_checksum
 
     async def leave_source_cleanup_pending(
         self: InlineNoteFileDeleteEnqueuer,

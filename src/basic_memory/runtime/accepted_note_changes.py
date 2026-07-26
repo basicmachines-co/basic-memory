@@ -70,6 +70,12 @@ class RuntimeAcceptedNoteContentWriteSource(
     def db_checksum(self) -> RuntimeFileChecksum:
         """Return the accepted checksum that identifies the source bytes."""
 
+    @property
+    def file_version(self) -> RuntimeNoteContentVersion | None: ...
+
+    @property
+    def file_write_status(self) -> str: ...
+
 
 class RuntimeAcceptedNoteWriteContentSource(
     RuntimeNoteContentStateSource,
@@ -86,6 +92,26 @@ def next_runtime_note_content_version(
     if current_note_content is None:
         return 1
     return int(current_note_content.db_version) + 1
+
+
+def select_accepted_note_source_checksum(
+    current_note_content: RuntimeAcceptedNoteContentWriteSource,
+) -> RuntimeFileChecksum:
+    """Select the checksum for source bytes vacated by an accepted path change.
+
+    ``accept_write`` deliberately preserves the previously published file fields while the next
+    DB version is pending. Only a synchronized file version proves ``file_checksum`` belongs to
+    the current accepted source; otherwise ``db_checksum`` is the identity of the bytes that a
+    publication may already have written without recording its result.
+    """
+    file_version_is_current = (
+        current_note_content.file_write_status == "synced"
+        and current_note_content.file_version is not None
+        and int(current_note_content.file_version) == int(current_note_content.db_version)
+    )
+    if file_version_is_current and current_note_content.file_checksum is not None:
+        return current_note_content.file_checksum
+    return current_note_content.db_checksum
 
 
 def accepted_note_file_path_conflicts(
@@ -137,15 +163,7 @@ def plan_accepted_note_content_write(
     """Plan accepted DB versioning and old-file cleanup for a note_content write."""
     source_checksum = None
     if current_note_content is not None:
-        # A source write can reach storage before its publisher records file_checksum. The
-        # accepted DB checksum still identifies those exact bytes, so enqueue guarded cleanup
-        # with it; an absent source then retires the move-vacate marker instead of leaving it
-        # capable of suppressing a future legitimate note.
-        source_checksum = (
-            current_note_content.file_checksum
-            if current_note_content.file_checksum is not None
-            else current_note_content.db_checksum
-        )
+        source_checksum = select_accepted_note_source_checksum(current_note_content)
     return RuntimeAcceptedNoteContentWritePlan(
         db_version=next_runtime_note_content_version(current_note_content),
         previous_file_delete=plan_previous_note_file_delete(

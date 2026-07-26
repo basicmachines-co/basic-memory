@@ -20,6 +20,7 @@ from basic_memory.runtime.accepted_note_changes import (
     plan_accepted_note_materialization_change,
     plan_accepted_note_response_change,
     plan_accepted_note_write_change,
+    select_accepted_note_source_checksum,
 )
 from basic_memory.runtime.note_content_deletes import (
     RuntimeDeletedNoteEntityChecksumSource,
@@ -150,5 +151,6 @@ __all__ = [
     "runtime_file_conflict",
     "runtime_note_content_payload_as_dict",
     "runtime_note_content_payload_as_json_bytes",
+    "select_accepted_note_source_checksum",
     "select_deleted_note_file_checksum",
 ]

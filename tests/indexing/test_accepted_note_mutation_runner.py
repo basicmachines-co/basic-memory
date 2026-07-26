@@ -41,6 +41,7 @@ from basic_memory.markdown.schemas import (
     Relation as MarkdownRelation,
 )
 from basic_memory.models import Entity, NoteContent, Project
+from basic_memory.models.knowledge import NoteFileVacate
 from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
@@ -1482,9 +1483,17 @@ async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("file_checksum", ["file-checksum", None])
+@pytest.mark.parametrize(
+    ("publication_state", "expected_source_checksum"),
+    [
+        ("synced", "file-checksum"),
+        ("checksum-missing", "old-checksum"),
+        ("published-checksum-stale", "accepted-checksum"),
+    ],
+)
 async def test_run_accepted_note_move_carries_previous_path_and_materialized_cleanup(
-    file_checksum: str | None,
+    publication_state: str,
+    expected_source_checksum: str,
     persistence_calls: tuple[AsyncMock, AsyncMock],
 ) -> None:
     session = _MutationSession()
@@ -1493,7 +1502,15 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     prepared_move = _prepared_move()
     entity = _entity(file_path="notes/accepted.md")
     note_content = _note_content(entity)
-    note_content.file_checksum = file_checksum
+    if publication_state == "synced":
+        note_content.file_write_status = "synced"
+    elif publication_state == "checksum-missing":
+        note_content.file_version = None
+        note_content.file_checksum = None
+    else:
+        note_content.db_version = 2
+        note_content.db_checksum = "accepted-checksum"
+        note_content.file_write_status = "writing"
     project_repository = _ProjectRepository(project)
     entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
     note_content_lookup_repository = _NoteContentLookupRepository(note_content)
@@ -1544,9 +1561,10 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     cleanup = change.materialization.cleanup_after_write
     assert cleanup is not None
     assert cleanup.file_path == "notes/accepted.md"
-    assert cleanup.file_checksum == (
-        "file-checksum" if file_checksum is not None else "old-checksum"
-    )
+    assert cleanup.file_checksum == expected_source_checksum
+    marker = next(value for value in session.added if isinstance(value, NoteFileVacate))
+    assert marker.file_path == "notes/accepted.md"
+    assert marker.file_checksum == expected_source_checksum
     assert persistence_calls[0].await_count == 0
     assert persistence_calls[1].await_count == 1
 
