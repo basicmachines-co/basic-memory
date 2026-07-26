@@ -128,16 +128,16 @@ async def test_run_note_file_delete_clears_vacate_marker_on_delete() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_note_file_delete_does_not_clear_marker_on_skip() -> None:
-    """A guarded skip (the source changed before cleanup) leaves the marker in place."""
+async def test_run_note_file_delete_clears_marker_after_source_replacement() -> None:
+    """A guarded replacement proves the moved source object no longer needs suppression."""
     storage = FakeNoteFileStorage(checksum="changed-on-disk")  # != request checksum -> skip
     clearer = FakeVacateClearer()
 
     result = await run_note_file_delete(delete_request(), storage=storage, vacate_clearer=clearer)
 
-    assert result.status != RuntimeDeleteStatus.deleted
+    assert result.status == RuntimeDeleteStatus.skipped
     assert storage.delete_calls == []
-    assert clearer.cleared == []
+    assert clearer.cleared == [(101, "notes/a.md", "file-sum")]
 
 
 @pytest.mark.asyncio

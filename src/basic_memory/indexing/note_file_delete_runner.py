@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import (
-    RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
     RuntimeNoteFileDeleteJobRequest,
     plan_note_file_delete_cleanup,
@@ -86,14 +85,10 @@ async def run_note_file_delete(
     )
     if delete_plan.should_delete_file:
         await storage.delete_file(request.file_path)
-    # The source object is gone whether we deleted it now or it was already absent (missing), so
-    # clear the move-vacate marker either way — a stale marker must not survive a delete that then
-    # failed to clear, or a source that vanished on its own (#1601). A guarded skip (the source
-    # changed before cleanup) keeps the marker. Checksum-guarded inside the clear.
-    if vacate_clearer is not None and delete_plan.result.status in (
-        RuntimeDeleteStatus.deleted,
-        RuntimeDeleteStatus.missing,
-    ):
+    # Every guarded outcome proves the moved source object is no longer pending: it was deleted,
+    # was already missing, or was replaced by different content. Retire only the marker for this
+    # accepted checksum; a newer move that refreshed the path marker remains protected.
+    if vacate_clearer is not None:
         await vacate_clearer.clear_move_vacate(
             project_id=request.project_id,
             file_path=request.file_path,

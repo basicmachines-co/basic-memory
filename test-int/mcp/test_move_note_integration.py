@@ -235,6 +235,132 @@ async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
     assert markers == {}
 
 
+@pytest.mark.asyncio
+async def test_move_retires_vacate_marker_after_source_replacement(
+    mcp_server,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+):
+    """A cleanup checksum mismatch retires stale move evidence before future path reuse."""
+    del app
+    source_relative = "source/Move Replacement Lifecycle.md"
+    destination_relative = "archive/move-replacement-lifecycle.md"
+    source_path = project_config.home / source_relative
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    original_cleanup = InlineNoteFileDeleteEnqueuer.enqueue_note_file_delete
+    pending_cleanup: (
+        tuple[
+            InlineNoteFileDeleteEnqueuer,
+            RuntimeNoteFileDeleteJobRequest,
+        ]
+        | None
+    ) = None
+
+    async def capture_source_cleanup(
+        self: InlineNoteFileDeleteEnqueuer,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> None:
+        nonlocal pending_cleanup
+        pending_cleanup = (self, request)
+
+    monkeypatch.setattr(
+        InlineNoteFileDeleteEnqueuer,
+        "enqueue_note_file_delete",
+        capture_source_cleanup,
+    )
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Move Replacement Lifecycle",
+                "directory": "source",
+                "content": (
+                    "# Move Replacement Lifecycle\n\n"
+                    "This content may later be copied back legitimately."
+                ),
+            },
+        )
+        original_source = source_path.read_bytes()
+        source_checksum = sha256(original_source).hexdigest()
+
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Move Replacement Lifecycle",
+                "destination_path": destination_relative,
+            },
+        )
+        assert "✅ Note moved successfully" in move_result.content[0].text
+        assert pending_cleanup is not None
+
+        cleanup_enqueuer, cleanup_request = pending_cleanup
+        source_path.write_text(
+            "# Source Replacement\n\nThis independent file replaced the moved source.",
+            encoding="utf-8",
+        )
+        await original_cleanup(cleanup_enqueuer, cleanup_request)
+
+        # Restore normal inline cleanup before deleting the indexed replacement below.
+        monkeypatch.setattr(
+            InlineNoteFileDeleteEnqueuer,
+            "enqueue_note_file_delete",
+            original_cleanup,
+        )
+
+        async with db.scoped_session(session_maker) as session:
+            markers = await vacate_repository.load_vacate_markers(session, [source_relative])
+        assert markers == {}
+
+        await run_local_project_index_for_project(
+            test_project,
+            runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+            force_full=True,
+        )
+        async with db.scoped_session(session_maker) as session:
+            replacement = await entity_repository.get_by_file_path(session, source_relative)
+            moved = await entity_repository.get_by_file_path(session, destination_relative)
+        assert replacement is not None
+        assert moved is not None
+        assert replacement.id != moved.id
+        replacement_external_id = replacement.external_id
+        moved_entity_id = moved.id
+
+        delete_result = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": source_relative,
+            },
+        )
+        assert "true" in delete_result.content[0].text.lower()
+        assert not source_path.exists()
+
+        source_path.write_bytes(original_source)
+        assert sha256(source_path.read_bytes()).hexdigest() == source_checksum
+        await run_local_project_index_for_project(
+            test_project,
+            runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+            force_full=True,
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        legitimate_copy = await entity_repository.get_by_file_path(session, source_relative)
+        markers = await vacate_repository.load_vacate_markers(session, [source_relative])
+
+    assert legitimate_copy is not None
+    assert legitimate_copy.id != moved_entity_id
+    assert legitimate_copy.external_id != replacement_external_id
+    assert markers == {}
+
+
 @pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
 @pytest.mark.asyncio
 async def test_put_rename_lingering_source_is_not_reindexed(
