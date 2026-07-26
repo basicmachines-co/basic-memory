@@ -156,6 +156,8 @@ _initial_index_tasks: set[asyncio.Task[None]] = set()
 async def initialize_file_indexing(
     app_config: BasicMemoryConfig,
     quiet: bool = True,
+    *,
+    recovery_complete: asyncio.Event | None = None,
 ) -> None:
     """Initialize file indexing services.
 
@@ -164,6 +166,7 @@ async def initialize_file_indexing(
     Args:
         app_config: The Basic Memory project configuration
         quiet: Whether to suppress Rich console output (True for MCP, False for CLI watch)
+        recovery_complete: Optional startup barrier set after durable recovery finishes.
 
     Returns:
         The watch service task that's monitoring file changes
@@ -173,6 +176,8 @@ async def initialize_file_indexing(
     # Skip file indexing in test environments to avoid interference with tests
     if app_config.is_test_env:
         logger.info("Test environment detected - skipping file indexing initialization")
+        if recovery_complete is not None:
+            recovery_complete.set()
         return None
 
     # delay import
@@ -230,6 +235,13 @@ async def initialize_file_indexing(
     # converge before the initial project index scans them.
     for project in active_projects:
         await recover_project_materializations(project, session_maker)
+
+    # Trigger: the API/MCP lifespan is waiting for durable startup recovery.
+    # Why: serving accepted writes while recovery holds cached vacate work can
+    # delete a path that a concurrent move has just made live again.
+    # Outcome: release startup before background indexing and watching begin.
+    if recovery_complete is not None:
+        recovery_complete.set()
 
     # Start indexing for all projects as background tasks (non-blocking)
     async def index_project_background(project: Project):

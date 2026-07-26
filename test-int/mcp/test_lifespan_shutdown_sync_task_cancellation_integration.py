@@ -53,7 +53,14 @@ def test_lifespan_shutdown_awaits_watch_task_cancellation(app, monkeypatch):
 
     # Make the watch task long-lived so it must be cancelled on shutdown.
     # Patch at the source module where WatchCoordinator imports it.
-    async def _fake_initialize_file_indexing(_app_config, quiet=True):  # noqa: ANN001, FBT002
+    async def _fake_initialize_file_indexing(  # noqa: ANN001, FBT002
+        _app_config,
+        quiet=True,
+        *,
+        recovery_complete=None,
+    ):
+        assert recovery_complete is not None
+        recovery_complete.set()
         await asyncio.Event().wait()
 
     monkeypatch.setattr(init_module, "initialize_file_indexing", _fake_initialize_file_indexing)

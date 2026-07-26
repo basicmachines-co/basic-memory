@@ -227,6 +227,33 @@ async def test_initialize_file_indexing_no_constraint_when_env_unset(
 
 
 @pytest.mark.asyncio
+async def test_initialize_file_indexing_releases_startup_after_recovery(
+    app_config: BasicMemoryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The watch coordinator barrier is released before long-lived watching starts."""
+    _disable_test_env_short_circuit(monkeypatch)
+    recovery_complete = asyncio.Event()
+
+    class RecoveryAwareWatchService(_FakeWatchService):
+        async def run(self) -> None:
+            assert recovery_complete.is_set()
+
+    monkeypatch.setattr(
+        "basic_memory.index.watch_service.WatchService",
+        RecoveryAwareWatchService,
+    )
+
+    await initialize_file_indexing(
+        app_config,
+        quiet=True,
+        recovery_complete=recovery_complete,
+    )
+
+    assert recovery_complete.is_set()
+
+
+@pytest.mark.asyncio
 async def test_initialize_file_indexing_wires_event_index_runtime_by_default(
     app_config: BasicMemoryConfig, monkeypatch
 ):

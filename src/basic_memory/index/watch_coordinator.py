@@ -64,9 +64,15 @@ class WatchCoordinator:
             # depends on basic_memory.index, whose __init__ imports this module.
             from basic_memory.services.initialization import initialize_file_indexing
 
+            recovery_complete = asyncio.Event()
+
             async def _watch_runner() -> None:  # pragma: no cover
                 try:
-                    await initialize_file_indexing(self.config, quiet=self.quiet)
+                    await initialize_file_indexing(
+                        self.config,
+                        quiet=self.quiet,
+                        recovery_complete=recovery_complete,
+                    )
                 except asyncio.CancelledError:
                     logger.debug("Local event-index watcher cancelled")
                     raise
@@ -74,8 +80,15 @@ class WatchCoordinator:
                     logger.error(f"Error in local event-index watcher: {exc}")
                     self._status = WatchStatus.ERROR
                     raise
+                finally:
+                    # A startup failure must unblock start() so it can propagate
+                    # the watcher exception instead of waiting indefinitely.
+                    recovery_complete.set()
 
             self._watch_task = asyncio.create_task(_watch_runner())
+            await recovery_complete.wait()
+            if self._status is WatchStatus.ERROR or self._watch_task.done():
+                await self._watch_task
             self._status = WatchStatus.RUNNING
             logger.info("Watch coordinator started successfully")
 

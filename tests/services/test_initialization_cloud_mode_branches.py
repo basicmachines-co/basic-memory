@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from basic_memory.config import DatabaseBackend
@@ -103,4 +105,8 @@ def test_ensure_initialization_runs_for_local_postgres(app_config, monkeypatch):
 async def test_initialize_file_indexing_skips_in_test_env(app_config):
     # app_config fixture uses env="test"
     assert app_config.is_test_env is True
-    await initialize_file_indexing(app_config)
+    recovery_complete = asyncio.Event()
+
+    await initialize_file_indexing(app_config, recovery_complete=recovery_complete)
+
+    assert recovery_complete.is_set()
