@@ -278,6 +278,53 @@ def test_recent_activity_format_project_output_no_results():
     assert 'project="proj"' not in out_routed
 
 
+def test_recent_activity_format_project_output_filtered_no_results():
+    import importlib
+
+    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
+
+    empty = GraphContext(
+        results=[],
+        metadata=MemoryMetadata(depth=1, generated_at=datetime.now(timezone.utc)),
+    )
+
+    out = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=empty,
+        timeframe="7d",
+        page=1,
+        type_filter_applied=True,
+    )
+
+    assert "No recent activity matched the requested type filter" in out
+    assert "omit `type`" in out
+    assert "write_note" not in out
+    assert "wait for them to agree" not in out
+
+
+def test_recent_activity_format_project_output_later_page_no_results():
+    import importlib
+
+    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
+
+    empty = GraphContext(
+        results=[],
+        metadata=MemoryMetadata(depth=1, generated_at=datetime.now(timezone.utc)),
+    )
+
+    out = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=empty,
+        timeframe="7d",
+        page=3,
+    )
+
+    assert "No recent activity was found on page 3" in out
+    assert "Try page=2 or return to page=1" in out
+    assert "write_note" not in out
+    assert "wait for them to agree" not in out
+
+
 def test_recent_activity_format_project_output_renders_all_entities_and_relations():
     """Regression for #784: the formatter must render every row the API returned.
     Previously the body was hardcoded to `[:5]` while the heading reported the

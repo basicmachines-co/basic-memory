@@ -339,6 +339,7 @@ async def recent_activity(
                 timeframe,
                 page=page,
                 project_id=active_project.external_id,
+                type_filter_applied=bool(type),
             )
 
 
@@ -489,6 +490,7 @@ def _format_project_output(
     timeframe: str,
     page: int = 1,
     project_id: str | None = None,
+    type_filter_applied: bool = False,
 ) -> str:
     """Format project-specific mode output as human-readable text.
 
@@ -499,6 +501,25 @@ def _format_project_output(
     lines = [f"## Recent Activity: {project_name} ({timeframe})"]
 
     if not activity_data.results:
+        # Trigger: the requested activity page contains no rows.
+        # Why: filtered and later-page misses do not establish that the project has no notes.
+        # Outcome: only an unfiltered first-page orientation offers first-note onboarding.
+        if page > 1:
+            lines.append(
+                f"\nNo recent activity was found on page {page} for "
+                f"'{project_name}' within {timeframe}."
+            )
+            lines.append(f"Try page={page - 1} or return to page=1.")
+            return "\n".join(lines)
+
+        if type_filter_applied:
+            lines.append(
+                f"\nNo recent activity matched the requested type filter in "
+                f"'{project_name}' within {timeframe}."
+            )
+            lines.append("Try another type or omit `type` to see recent notes and documents.")
+            return "\n".join(lines)
+
         lines.append(f"\nNo recent activity in '{project_name}' within {timeframe}.")
         # recent_activity is the orientation call a model makes at session start, so an empty
         # result is the natural moment to help. Stay offer-not-act, and cover both a brand-new

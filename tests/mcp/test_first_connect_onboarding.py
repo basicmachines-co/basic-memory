@@ -12,7 +12,7 @@ import pytest
 
 from basic_memory.mcp.prompts.getting_started import getting_started
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools import recent_activity, search_notes
+from basic_memory.mcp.tools import recent_activity, search_notes, write_note
 from basic_memory.mcp.tools.search import _format_search_markdown
 from basic_memory.schemas.search import SearchResponse
 
@@ -61,6 +61,46 @@ async def test_recent_activity_populated_project_has_no_first_note_offer(
     result = await recent_activity(project=test_project.name, timeframe="1w")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert "wait for them to agree" not in result
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_filtered_empty_result_has_no_first_note_offer(client, test_project):
+    """A type-filter miss does not mean an established project has no notes."""
+    await write_note(
+        project=test_project.name,
+        title="Existing note",
+        content="This project already contains useful context.",
+        directory="notes",
+    )
+
+    result = await recent_activity(
+        project=test_project.name,
+        type="relation",
+        timeframe="7d",
+    )
+
+    assert isinstance(result, str)
+    assert "No recent activity matched the requested type filter" in result
+    assert "wait for them to agree" not in result
+    assert "write_note(" not in result
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_out_of_range_page_has_no_first_note_offer(
+    client, test_project, test_graph
+):
+    """An empty later page should direct the agent back through pagination."""
+    result = await recent_activity(
+        project=test_project.name,
+        timeframe="7d",
+        page=100,
+    )
+
+    assert isinstance(result, str)
+    assert "No recent activity was found on page 100" in result
+    assert "Try page=99 or return to page=1" in result
+    assert "wait for them to agree" not in result
+    assert "write_note(" not in result
 
 
 # --- search empty-state (lever 1b, delegates to recent_activity) ---
