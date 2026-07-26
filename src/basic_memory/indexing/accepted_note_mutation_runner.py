@@ -357,8 +357,8 @@ async def resolve_accepted_note_source_checksum(
     file_path: RuntimeFilePath,
     current_note_content: NoteContent,
     preparer_factory: AcceptedNoteMutationPreparerFactory,
-) -> RuntimeFileChecksum:
-    """Resolve the exact source bytes when an in-flight publication is ambiguous."""
+) -> RuntimeFileChecksum | None:
+    """Resolve source bytes only when storage or synchronized state proves ownership."""
     observed_file_checksum = None
     if current_note_content.file_write_status in {"pending", "writing", "failed"}:
         observed_file_checksum = await preparer_factory.load_current_file_checksum(
@@ -562,7 +562,7 @@ async def _run_accepted_note_update(
     )
     created = entity is None
     existing_file_path = entity.file_path if entity is not None else None
-    vacated_source: tuple[RuntimeFilePath, str] | None = None
+    vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None
 
     await reject_conflicting_accepted_note_file_path(
         session,
@@ -702,7 +702,11 @@ async def _run_accepted_note_update(
         source_file_checksum=vacated_source[1] if vacated_source is not None else None,
         repositories=dependencies.write_repositories,
     )
-    if vacated_source is not None and entity.file_path != vacated_source[0]:
+    if (
+        vacated_source is not None
+        and vacated_source[1] is not None
+        and entity.file_path != vacated_source[0]
+    ):
         await NoteFileVacateRepository(project.id).record_vacate(
             session,
             entity_id=entity.id,
@@ -866,18 +870,17 @@ async def _run_accepted_note_move(
         source_file_checksum=vacated_source_checksum,
         repositories=dependencies.write_repositories,
     )
-    # Record that this move vacated the source path, atomically with the move. A later index of the
-    # still-present source object then recognizes it as this move's leftover rather than a new note
-    # and skips it (basic-memory-cloud#1601). In-flight publication states use one observed source
-    # checksum, closing both sides of the before-write/written-before-publish ambiguity. The
-    # repository is pure per-tenant DB logic, identical for local and cloud, so it is built inline
-    # on the move's own session rather than injected.
-    await NoteFileVacateRepository(project.id).record_vacate(
-        session,
-        entity_id=entity.id,
-        file_path=existing_file_path,
-        file_checksum=vacated_source_checksum,
-    )
+    # Trigger: storage confirms which source bytes this move vacated.
+    # Why: an absent source is not evidence that the accepted DB checksum owns that path; recording
+    # it could let delayed cleanup delete a legitimate byte-identical file created there later.
+    # Outcome: only confirmed source objects receive the durable orphan gate and guarded cleanup.
+    if vacated_source_checksum is not None:
+        await NoteFileVacateRepository(project.id).record_vacate(
+            session,
+            entity_id=entity.id,
+            file_path=existing_file_path,
+            file_checksum=vacated_source_checksum,
+        )
     return plan_accepted_note_write_change(
         status_code=200,
         entity=entity,

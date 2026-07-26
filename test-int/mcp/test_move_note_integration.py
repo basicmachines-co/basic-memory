@@ -258,14 +258,14 @@ async def test_startup_recovery_retries_lost_move_source_cleanup(
 
 
 @pytest.mark.asyncio
-async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
+async def test_move_preserves_recreated_source_when_unpublished_source_is_absent(
     mcp_server,
     app,
     test_project,
     project_config,
     engine_factory,
 ):
-    """Accepted DB checksum schedules cleanup even when no file checksum was published."""
+    """An absent source does not authorize delayed deletion of a later identical file."""
     del app
     source_relative = "source/Absent Before Move.md"
     destination_relative = "archive/absent-before-move.md"
@@ -287,7 +287,8 @@ async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
             },
         )
 
-        source_checksum = sha256(source_path.read_bytes()).hexdigest()
+        source_bytes = source_path.read_bytes()
+        source_checksum = sha256(source_bytes).hexdigest()
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_file_path(session, source_relative)
             assert entity is not None
@@ -297,8 +298,8 @@ async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
             entity.checksum = None
             note_content.file_checksum = None
 
-        # Reproduce the no-materialized-source side of the publisher race. The accepted checksum
-        # still drives a cleanup job, which observes the missing source and clears the marker.
+        # Reproduce the no-materialized-source side of the publisher race. Absence must remain
+        # absence rather than borrowing the DB checksum as authority to delete this path later.
         source_path.unlink()
         move_result = await client.call_tool(
             "move_note",
@@ -312,6 +313,19 @@ async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
     assert "✅ Note moved successfully" in move_result.content[0].text
     assert not source_path.exists()
     assert destination_path.exists()
+
+    # A user may legitimately reuse the vacated path after the move. Even byte-identical content
+    # must survive because no source object existed when the move claimed its cleanup work.
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(source_bytes)
+    recovered = await recover_move_vacates(
+        session_maker=session_maker,
+        file_service=FileService(project_config.home),
+        project_id=test_project.id,
+    )
+
+    assert recovered == 0
+    assert source_path.read_bytes() == source_bytes
     async with db.scoped_session(session_maker) as session:
         markers = await vacate_repository.load_vacate_markers(session, [source_relative])
     assert markers == {}

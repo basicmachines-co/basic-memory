@@ -1498,7 +1498,7 @@ async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
     ("publication_state", "current_file_checksum", "expected_source_checksum"),
     [
         ("synced", None, "file-checksum"),
-        ("checksum-missing", None, "old-checksum"),
+        ("checksum-missing", None, None),
         ("pending-before-write", "file-checksum", "file-checksum"),
         ("failed-before-write", "file-checksum", "file-checksum"),
         ("published-checksum-stale", "accepted-checksum", "accepted-checksum"),
@@ -1507,7 +1507,7 @@ async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
 async def test_run_accepted_note_move_carries_previous_path_and_materialized_cleanup(
     publication_state: str,
     current_file_checksum: str | None,
-    expected_source_checksum: str,
+    expected_source_checksum: str | None,
     persistence_calls: tuple[AsyncMock, AsyncMock],
 ) -> None:
     session = _MutationSession()
@@ -1584,9 +1584,12 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert change.materialization is not None
     assert change.materialization.previous_file_path == "notes/accepted.md"
     cleanup = change.materialization.cleanup_after_write
-    assert cleanup is not None
-    assert cleanup.file_path == "notes/accepted.md"
-    assert cleanup.file_checksum == expected_source_checksum
+    if expected_source_checksum is None:
+        assert cleanup is None
+    else:
+        assert cleanup is not None
+        assert cleanup.file_path == "notes/accepted.md"
+        assert cleanup.file_checksum == expected_source_checksum
     assert preparer_factory.checksum_calls == (
         [] if publication_state == "synced" else [(project, "notes/accepted.md")]
     )

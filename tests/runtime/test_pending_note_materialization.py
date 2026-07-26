@@ -184,7 +184,7 @@ def test_plan_accepted_note_content_write_advances_and_cleans_moved_materialized
     )
 
 
-def test_plan_accepted_note_content_write_uses_db_checksum_for_unpublished_file_cleanup() -> None:
+def test_plan_accepted_note_content_write_omits_cleanup_when_unpublished_source_is_absent() -> None:
     plan = plan_accepted_note_content_write(
         project_id=7,
         entity_id=42,
@@ -198,20 +198,11 @@ def test_plan_accepted_note_content_write_uses_db_checksum_for_unpublished_file_
         ),
     )
 
-    assert plan == RuntimeAcceptedNoteContentWritePlan(
-        db_version=5,
-        previous_file_delete=RuntimePendingNoteFileDelete(
-            project_id=7,
-            entity_id=42,
-            file_path="notes/old.md",
-            file_checksum="db-checksum",
-            live_file_path="notes/new.md",
-        ),
-    )
+    assert plan == RuntimeAcceptedNoteContentWritePlan(db_version=5)
 
 
 def test_plan_accepted_note_content_write_ignores_stale_published_checksum() -> None:
-    """A pending accepted version uses its DB checksum even when older file state remains."""
+    """A pending accepted version uses observed DB bytes instead of stale published state."""
     plan = plan_accepted_note_content_write(
         project_id=7,
         entity_id=42,
@@ -225,6 +216,7 @@ def test_plan_accepted_note_content_write_ignores_stale_published_checksum() -> 
             file_checksum="previous-file-checksum",
             file_write_status="writing",
         ),
+        source_file_checksum="accepted-checksum",
     )
 
     assert plan.previous_file_delete is not None
