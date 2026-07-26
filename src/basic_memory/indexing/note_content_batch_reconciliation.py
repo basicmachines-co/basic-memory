@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.indexing.file_index_planning import FileIndexPath
 from basic_memory.indexing.models import IndexedEntity
+from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationOutcome
 from basic_memory.indexing.note_content_reconciler import NoteContentReconcileFileReader
 
 
@@ -71,7 +72,7 @@ class IndexedNoteContentReconciler(Protocol[EntityT]):
         markdown_content: str,
         observed_at: datetime | None,
         source: str,
-    ) -> None:
+    ) -> NoteContentReconciliationOutcome | None:
         """Apply the note_content state change for one markdown entity."""
 
 

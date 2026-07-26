@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
 from basic_memory import db
+from basic_memory.indexing.note_content_reconciliation import (
+    NoteContentReconciliationAnchor,
+    NoteContentReconciliationOutcome,
+)
 from basic_memory.indexing.models import (
     FileIndexOperation,
     FileIndexResult,
@@ -95,6 +99,9 @@ class IndexCurrentMarkdownFileIndexer(Protocol):
 class IndexMarkdownNoteContentReconciler(Protocol):
     """Note-content capability needed after canonical markdown sync succeeds."""
 
+    async def capture_anchor(self, entity_id: int | None) -> NoteContentReconciliationAnchor:
+        """Capture accepted state before the file observation is indexed."""
+
     async def reconcile(
         self,
         *,
@@ -102,7 +109,15 @@ class IndexMarkdownNoteContentReconciler(Protocol):
         markdown_content: str,
         observed_at: datetime | None,
         source: str,
-    ) -> None: ...
+        anchor: NoteContentReconciliationAnchor | None = None,
+    ) -> NoteContentReconciliationOutcome: ...
+
+
+class NoteContentChangedDuringIndexError(RuntimeError):
+    """Raised when repeated concurrent writes prevent a current derived-state index."""
+
+
+MAX_NOTE_CONTENT_INDEX_ATTEMPTS = 2
 
 
 class FileIndexer:
@@ -155,20 +170,46 @@ class FileIndexer:
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
 
-        synced = await self.markdown_indexer.index_current_markdown_file(
-            file_path,
-            new=existing is None,
-            index_search=True,
-            resolve_relations=False,
-            refresh_unchanged_derived_state=existing is not None,
-        )
+        for attempt in range(MAX_NOTE_CONTENT_INDEX_ATTEMPTS):
+            if attempt > 0:
+                async with db.scoped_session(self.markdown_indexer.session_maker) as session:
+                    existing = await self.markdown_indexer.entity_repository.get_by_file_path(
+                        session,
+                        file_path,
+                        load_relations=False,
+                    )
 
-        await self.note_content_reconciler.reconcile(
-            entity=synced.entity,
-            markdown_content=synced.markdown_content,
-            observed_at=synced.updated_at,
-            source=source,
-        )
+            anchor = await self.note_content_reconciler.capture_anchor(
+                existing.id if existing is not None else None
+            )
+            synced = await self.markdown_indexer.index_current_markdown_file(
+                file_path,
+                new=existing is None,
+                index_search=True,
+                resolve_relations=False,
+                refresh_unchanged_derived_state=existing is not None,
+            )
+
+            outcome = await self.note_content_reconciler.reconcile(
+                entity=synced.entity,
+                markdown_content=synced.markdown_content,
+                observed_at=synced.updated_at,
+                source=source,
+                anchor=anchor,
+            )
+            if outcome == "current":
+                break
+
+            log.info(
+                "Retrying markdown index after concurrent accepted note write: {}",
+                file_path,
+                entity_id=synced.entity.id,
+                attempt=attempt + 1,
+            )
+        else:
+            raise NoteContentChangedDuringIndexError(
+                f"Note content changed repeatedly while indexing {file_path}"
+            )
 
         log.info(
             f"Indexed markdown file: {file_path}",

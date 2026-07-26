@@ -11,6 +11,7 @@ from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
@@ -79,6 +80,11 @@ class LinkResolver:
     3. Try exact file path match
     4. Try file path with .md extension (for folder/title patterns)
     5. Fall back to search for fuzzy matching
+
+    When ``strict`` is set (the destructive edit/move paths) and a title matches more than one
+    note, resolution raises ``AmbiguousIdentifierError`` instead of guessing — the caller must pass
+    an exact permalink or external_id (issue #1148). Non-strict resolution keeps its shortest-path
+    preference.
     """
 
     def __init__(
@@ -352,7 +358,29 @@ class LinkResolver:
                     # Multiple candidates - pick closest to source
                     return self._find_closest_entity(candidates, source_path)
 
-        # Standard resolution (no source context): permalink first, then title
+        # Standard resolution (no source context): permalink first, then title.
+        #
+        # A destructive (strict) resolve must not silently guess between several same-title notes
+        # — e.g. an original plus a `-1` duplicate — which is how edit/move landed on the wrong
+        # entity (issue #1148). The trap is that the permalink step also matches the *slug* of the
+        # title (`build_permalink_resolution_candidates` slugifies the input), so a duplicated title
+        # whose original owns the title-derived permalink would still resolve silently. Pre-read the
+        # title matches so the permalink loop can tell a caller-supplied exact permalink (input is
+        # already in slug form) from the slug of a shared title. Non-strict resolution keeps the
+        # fast path — the title is read only if the permalink loop misses.
+        strict_title_matches = (
+            await entity_repository.get_by_title(session, clean_text, load_relations=load_relations)
+            if strict
+            else None
+        )
+        strict_ambiguous_title = strict_title_matches is not None and len(strict_title_matches) > 1
+        # The caller supplied an exact permalink when their verbatim (project-normalized) identifier
+        # matches a stored permalink. That is the first, un-slugified candidate the builder emits,
+        # so it also accepts explicit custom permalinks (e.g. "API_V2") that are not slug-shaped —
+        # inferring exactness from slug shape would wrongly reject them. Only this bypasses the
+        # duplicate-title guard below (#1148).
+        exact_identifier = normalize_project_reference(clean_text).strip("/")
+
         # 1. Try exact permalink match first (most efficient)
         for candidate_permalink in permalink_candidates:
             entity = await entity_repository.get_by_permalink(
@@ -361,20 +389,30 @@ class LinkResolver:
                 load_relations=load_relations,
             )
             if entity:
+                # The slugified form of a shared title must not silently win for a destructive op;
+                # only the caller's exact (verbatim) permalink candidate may bypass the guard.
+                if strict_ambiguous_title and candidate_permalink != exact_identifier:
+                    break
                 logger.debug(f"Found exact permalink match: {entity.permalink}")
                 return entity
 
-        # 2. Try exact title match
-        found = await entity_repository.get_by_title(
-            session,
-            clean_text,
-            load_relations=load_relations,
+        # 2. Try exact title match. An exact file-path match below is more precise than a title and
+        # can still disambiguate, so defer any ambiguity rejection until the path lookups have run.
+        found = (
+            strict_title_matches
+            if strict
+            else await entity_repository.get_by_title(
+                session, clean_text, load_relations=load_relations
+            )
         )
+        ambiguous_title_candidates: list[Entity] = []
         if found:
-            # Return first match (shortest path) if no source context
-            entity = found[0]
-            logger.debug(f"Found title match: {entity.title}")
-            return entity
+            if strict and len(found) > 1:
+                ambiguous_title_candidates = list(found)
+            else:
+                entity = found[0]
+                logger.debug(f"Found title match: {entity.title}")
+                return entity
 
         # 3. Try file path
         found_path = await entity_repository.get_by_file_path(
@@ -397,6 +435,14 @@ class LinkResolver:
             if found_path_md:
                 logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
                 return found_path_md
+
+        # No exact permalink or file path matched. If the only thing that matched was a title
+        # shared by several notes under a strict resolve, refuse to guess (#1148).
+        if ambiguous_title_candidates:
+            raise AmbiguousIdentifierError(
+                clean_text,
+                [(entity.permalink, entity.file_path) for entity in ambiguous_title_candidates],
+            )
 
         # In strict mode, don't try fuzzy search - return None if no exact match found
         if strict:

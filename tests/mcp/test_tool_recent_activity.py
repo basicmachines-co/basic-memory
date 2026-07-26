@@ -254,9 +254,75 @@ def test_recent_activity_format_project_output_no_results():
     )
 
     out = recent_activity_module._format_project_output(
-        project_name="proj", activity_data=empty, timeframe="7d", type_filter="", page=1
+        project_name="proj", activity_data=empty, timeframe="7d", page=1
     )
-    assert "No recent activity found" in out
+    assert "No recent activity in 'proj' within 7d" in out
+    # Empty orientation call carries the offer-not-act first-note guidance.
+    assert "write_note" in out
+    assert "wait for them to agree" in out
+    # Without a route-safe id, examples fall back to the display name.
+    assert 'write_note(project="proj"' in out
+
+    # With an external id, examples route by id so they cannot hit a same-named project in
+    # another cloud workspace.
+    out_routed = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=empty,
+        timeframe="7d",
+        page=1,
+        project_id="ext-123",
+    )
+    assert 'write_note(project_id="ext-123"' in out_routed
+    assert 'recent_activity(project_id="ext-123"' in out_routed
+    assert 'search_notes(project_id="ext-123"' in out_routed
+    assert 'project="proj"' not in out_routed
+
+
+def test_recent_activity_format_project_output_filtered_no_results():
+    import importlib
+
+    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
+
+    empty = GraphContext(
+        results=[],
+        metadata=MemoryMetadata(depth=1, generated_at=datetime.now(timezone.utc)),
+    )
+
+    out = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=empty,
+        timeframe="7d",
+        page=1,
+        type_filter_applied=True,
+    )
+
+    assert "No recent activity matched the requested type filter" in out
+    assert "omit `type`" in out
+    assert "write_note" not in out
+    assert "wait for them to agree" not in out
+
+
+def test_recent_activity_format_project_output_later_page_no_results():
+    import importlib
+
+    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
+
+    empty = GraphContext(
+        results=[],
+        metadata=MemoryMetadata(depth=1, generated_at=datetime.now(timezone.utc)),
+    )
+
+    out = recent_activity_module._format_project_output(
+        project_name="proj",
+        activity_data=empty,
+        timeframe="7d",
+        page=3,
+    )
+
+    assert "No recent activity was found on page 3" in out
+    assert "Try page=2 or return to page=1" in out
+    assert "write_note" not in out
+    assert "wait for them to agree" not in out
 
 
 def test_recent_activity_format_project_output_renders_all_entities_and_relations():
@@ -321,7 +387,6 @@ def test_recent_activity_format_project_output_renders_all_entities_and_relation
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter=["entity", "relation"],
         page=1,
     )
 
@@ -367,7 +432,6 @@ def test_recent_activity_format_project_output_includes_observation_truncation()
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter="observation",
         page=1,
     )
     assert "Recent Observations" in out
@@ -568,7 +632,6 @@ def test_format_project_output_has_more_pagination_guidance():
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter="entity",
         page=1,
     )
     assert "Use page=2 to see more" in out
@@ -606,7 +669,6 @@ def test_format_project_output_no_more_pages():
         project_name="proj",
         activity_data=activity,
         timeframe="7d",
-        type_filter="entity",
         page=1,
     )
     assert "1 items found." in out

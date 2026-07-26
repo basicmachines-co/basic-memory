@@ -1119,6 +1119,7 @@ class TestRuntimeContracts:
                 NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
                 NOTE_OBJECT_ACTOR_NAME_METADATA: " Pat\t\n<script>! ",
                 NOTE_OBJECT_SOURCE_METADATA: "mcp",
+                NOTE_OBJECT_DB_VERSION_METADATA: "7",
             }
         )
 
@@ -1127,6 +1128,7 @@ class TestRuntimeContracts:
             actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
             actor_name="Pat script",
             source="mcp",
+            db_version=7,
         )
 
         untrusted_actor_name = RuntimeNoteObjectProvenance.from_object_metadata(

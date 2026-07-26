@@ -38,6 +38,23 @@ from semantic.corpus import (
 PG_FASTEMBED = SearchCombo("postgres-fastembed", DatabaseBackend.POSTGRES, "fastembed", 384)
 
 
+class _RecordingReranker:
+    """Deterministic reranker that records whether hybrid applies the stage once."""
+
+    model_name = "recording-reranker"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def rerank(self, query: str, documents: list[str]) -> list[float]:
+        self.calls += 1
+        document_count = len(documents)
+        return [(document_count - index) / document_count for index in range(document_count)]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.semantic
 @pytest.mark.benchmark
@@ -114,6 +131,150 @@ async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
     assert any((r.permalink or "").startswith("bench/database-") for r in results[:5]), (
         "Hybrid search should rank database notes highly"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.semantic
+@pytest.mark.benchmark
+async def test_postgres_hybrid_preserves_candidate_windows(
+    postgres_engine_factory,
+    tmp_path,
+    monkeypatch,
+):
+    """Exercise baseline and reranked hybrid candidate sizing through real Postgres queries."""
+    skip_if_needed(PG_FASTEMBED)
+    if postgres_engine_factory is None:
+        pytest.skip("Postgres engine not available")
+
+    provider = _create_fastembed_provider()
+    search_service = await create_search_service(
+        postgres_engine_factory, PG_FASTEMBED, tmp_path, embedding_provider=provider
+    )
+    await seed_benchmark_notes(search_service, note_count=120)
+
+    repo = cast(Any, search_service.repository)
+    repo._rerank_provider = None
+    repo._semantic_vector_k = 100
+    repo._reranker_candidates = 100
+
+    candidate_limits: list[int] = []
+    run_vector_query = repo._run_vector_query
+
+    async def record_vector_query(
+        session: Any,
+        query_embedding: list[float],
+        candidate_limit: int,
+    ) -> list[dict[str, Any]]:
+        candidate_limits.append(candidate_limit)
+        return await run_vector_query(session, query_embedding, candidate_limit)
+
+    monkeypatch.setattr(repo, "_run_vector_query", record_vector_query)
+
+    baseline_results = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+        ),
+        limit=10,
+    )
+
+    assert baseline_results
+    assert candidate_limits == [1000]
+
+    candidate_limits.clear()
+    repo._semantic_vector_k = 5
+    repo._reranker_candidates = 20
+    reranker = _RecordingReranker()
+    repo._rerank_provider = reranker
+    reranked_results = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+        ),
+        limit=11,
+    )
+
+    assert reranked_results
+    assert candidate_limits == [80]
+
+    candidate_limits.clear()
+    growing_prefix_results = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+        ),
+        limit=21,
+    )
+
+    assert growing_prefix_results
+    assert reranker.calls == 2
+    assert candidate_limits == [90, 80]
+
+    candidate_limits.clear()
+    large_page_with_probe = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=101,
+    )
+
+    assert len(large_page_with_probe) == 101
+    assert reranker.calls == 3
+    assert candidate_limits == [890, 80]
+
+    # A larger retrieval window must extend the same sequence rather than
+    # reordering rows already exposed by an earlier deep page.
+    reranker.calls = 0
+    candidate_limits.clear()
+    stable_window = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=40,
+    )
+
+    assert len(stable_window) == 40
+    assert candidate_limits == [280, 80]
+
+    candidate_limits.clear()
+    third_page = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=10,
+        offset=20,
+    )
+    assert candidate_limits == [180, 80]
+
+    candidate_limits.clear()
+    fourth_page = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=10,
+        offset=30,
+    )
+    assert candidate_limits == [280, 80]
+
+    assert [row.permalink for row in third_page] == [row.permalink for row in stable_window[20:30]]
+    assert [row.permalink for row in fourth_page] == [row.permalink for row in stable_window[30:40]]
+    assert reranker.calls == 3
+    assert all(row.score is not None and row.score < 0.05 for row in third_page + fourth_page)
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from loguru import logger
 
 import logfire
 from basic_memory import db
+from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.services.directory_deletes import DirectoryDeleteServiceError
 from basic_memory.services.note_content_writes import NoteContentMutationServiceError
 from basic_memory.ignore_utils import (
@@ -276,12 +277,20 @@ async def resolve_identifier(
         resolution_method = "external_id" if entity else "search"
 
         if not entity:
-            entity = await link_resolver.resolve_link(
-                data.identifier,
-                source_path=data.source_path,
-                strict=data.strict,
-                session=session,
-            )
+            try:
+                entity = await link_resolver.resolve_link(
+                    data.identifier,
+                    source_path=data.source_path,
+                    strict=data.strict,
+                    session=session,
+                )
+            except AmbiguousIdentifierError as exc:
+                # A strict resolve refused to guess between several same-title notes (#1148).
+                # Surface it as 409 so edit/move report the ambiguity and ask for an exact id.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
             if entity:
                 if entity.permalink == data.identifier:
                     resolution_method = "permalink"

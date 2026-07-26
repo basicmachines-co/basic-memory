@@ -6,6 +6,7 @@ from typing import Annotated, List, Optional, Dict, Any, Literal, cast
 from uuid import UUID
 
 import logfire
+from httpx import HTTPStatusError
 from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
@@ -38,6 +39,8 @@ from basic_memory.schemas.search import (
     SearchRetrievalMode,
 )
 
+_SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
+
 
 def _default_search_type() -> str:
     """Pick default search mode from config, falling back to auto-detection.
@@ -53,6 +56,31 @@ def _default_search_type() -> str:
         return config.default_search_type
 
     return "hybrid" if config.semantic_search_enabled else "text"
+
+
+def _is_service_unavailable_error(error: BaseException) -> bool:
+    """Return whether an explicit HTTP cause marks a retryable service outage."""
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, HTTPStatusError):
+            return current.response.status_code == 503
+        current = current.__cause__
+    return False
+
+
+def _format_service_unavailable_response(project: str, error_message: str, query: str) -> str:
+    """Keep retryable outages distinct so fan-out never turns them into partial success."""
+    return dedent(f"""
+        {_SERVICE_UNAVAILABLE_HEADING}
+
+        Search for '{query}' in project '{project}' could not complete: {error_message}
+
+        No partial results were returned because retrying with a changing project set
+        could duplicate or skip results across pages.
+
+        ## Next step
+        Retry the same search after the service recovers.
+        """).strip()
 
 
 def _format_search_error_response(
@@ -309,14 +337,39 @@ Error searching for '{query}': {error_message}
 - **Observation categories**: `entity_types=["observation"], categories=["requirement"]`"""
 
 
-def _format_search_markdown(result: SearchResponse, project: str, query: str | None) -> str:
+def _format_search_markdown(
+    result: SearchResponse, project: str, query: str | None, project_id: str | None = None
+) -> str:
     """Format SearchResponse as compact markdown text.
 
     Produces a human-readable markdown representation suitable for LLM
     consumption when structured data isn't needed.
     """
     if not result.results:
-        return f"No results found for '{query or ''}' in project '{project}'."
+        # Empty search is usually "no match for this query," not "empty knowledge base," so we
+        # do not repeat the first-note offer here (that would nag established users). Point at
+        # recent_activity, which owns the getting-started guidance when the base is truly empty.
+        if project == "all projects":
+            # A bare recent_activity() is NOT force-discovery: with a configured default/cached
+            # project it resolves to that one project. So for an all-projects miss, point at the
+            # enumerator instead — suggesting recent_activity() could silently narrow to the
+            # default project and miss activity elsewhere.
+            suggestion = "call list_memory_projects() to see what exists across your projects"
+        elif project_id:
+            # Names collide across cloud workspaces; route the orientation call by external id.
+            suggestion = (
+                f'call recent_activity(project_id="{project_id}") to orient — if the project is '
+                "empty it will guide creating a first note"
+            )
+        else:
+            suggestion = (
+                f'call recent_activity(project="{project}") to orient — if the project is empty '
+                "it will guide creating a first note"
+            )
+        return (
+            f"No results found for '{query or ''}' in project '{project}'. "
+            f"Try broader or different terms, or {suggestion}."
+        )
 
     parts = []
 
@@ -593,6 +646,8 @@ async def _search_all_projects(
             continue
 
         if isinstance(results, str):
+            if results.startswith(_SERVICE_UNAVAILABLE_HEADING):
+                return results
             if not results.startswith("# Search Failed"):
                 return results
             logger.warning(
@@ -608,6 +663,9 @@ async def _search_all_projects(
         any_project_has_more = any_project_has_more or results.get("has_more") is True
         merged_results.extend(_qualify_results_for_project(raw_results, project_ref))
 
+    # Each project owns retrieval and optional reranking behind its typed API client.
+    # The MCP process only merges returned scores; it must not instantiate repository
+    # providers with local credentials for content fetched through another route.
     sorted_results = sorted(merged_results, key=_result_score, reverse=True)
     start = (requested_page - 1) * requested_page_size
     end = start + requested_page_size
@@ -1173,12 +1231,18 @@ async def search_notes(
                 if output_format == "json":
                     return result.model_dump(mode="json", exclude_none=True)
 
-                return _format_search_markdown(result, active_project.name, query)
+                return _format_search_markdown(
+                    result, active_project.name, query, project_id=active_project.external_id
+                )
 
             except Exception as e:
                 logger.error(
                     f"Search failed for query '{query or ''}': {e}, project: {active_project.name}"
                 )
+                if _is_service_unavailable_error(e):
+                    return _format_service_unavailable_response(
+                        active_project.name, str(e), query or ""
+                    )
                 # Return formatted error message as string for better user experience
                 return _format_search_error_response(
                     active_project.name, str(e), query or "", effective_search_type

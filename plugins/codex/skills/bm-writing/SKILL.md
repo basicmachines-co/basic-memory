@@ -45,6 +45,9 @@ and workflow. This skill shapes the note; it never overrides factual constraints
   when a specific commit matters.
 - Put anchors the note's schema defines in frontmatter; record the rest as
   observations, e.g. `- [branch] feat/bm-writing` or `- [pr] #1123`.
+- Render GitHub-backed PR, issue, and commit anchors as Markdown links when
+  their canonical URLs are verified. Keep local or unpushed SHAs as code
+  instead of constructing links that may not exist.
 - Only anchor what is relevant. A remembered fact with no repo context needs no
   git anchors at all.
 

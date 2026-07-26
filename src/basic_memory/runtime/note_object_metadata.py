@@ -43,6 +43,9 @@ VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
 VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
     {"api", "collaboration_relay", "mcp", "s3_webhook", "web_v2"}
 )
+# Named because the accepted-note write path special-cases relay writes: the
+# relay superseding its own prior write is never a real conflict (#1589).
+NOTE_SOURCE_COLLABORATION_RELAY: RuntimeNoteChangeSource = "collaboration_relay"
 _SAFE_ACTOR_NAME_CHARS = re.compile(r"[^A-Za-z0-9 ._()+/:-]+")
 _WHITESPACE = re.compile(r"\s+")
 _MAX_ACTOR_NAME_LENGTH = 120
@@ -227,6 +230,10 @@ class RuntimeNoteObjectProvenance:
     actor_kind: RuntimeNoteActorKind | None = None
     actor_name: RuntimeNoteActorName | None = None
     source: RuntimeNoteChangeSource | None = None
+    # The accepted DB version mirrored onto the object (#1589): lets index-path
+    # live updates carry the monotonic version so consumers can decide
+    # echo-vs-out-of-band by arithmetic instead of checksum comparison.
+    db_version: RuntimeNoteContentVersion | None = None
 
     @classmethod
     def from_object_metadata(cls, metadata: RuntimeNoteObjectMetadataMap | None) -> Self:
@@ -237,6 +244,7 @@ class RuntimeNoteObjectProvenance:
             actor_kind=actor_kind,
             actor_name=actor_name,
             source=source_from_object_metadata(metadata),
+            db_version=db_version_from_object_metadata(metadata),
         )
 
 

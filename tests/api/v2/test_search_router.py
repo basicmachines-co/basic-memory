@@ -11,6 +11,8 @@ from basic_memory.deps.services import get_search_service_v2_external
 from basic_memory.models import Project
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
@@ -434,6 +436,58 @@ async def test_search_router_returns_400_for_semantic_missing_deps(
 
     assert response.status_code == 400
     assert "Semantic dependencies are missing" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_search_router_returns_503_for_transient_reranker_failure(
+    client: AsyncClient, app, v2_project_url
+):
+    """A transient reranker outage should be retryable, not silently reorder results."""
+
+    class RaisingSearchService:
+        async def search(self, *args, **kwargs):
+            raise RerankTransientError("Reranker is temporarily unavailable.")
+
+        async def count(self, *args, **kwargs):
+            raise RerankTransientError("Reranker is temporarily unavailable.")
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"text": "semantic query", "retrieval_mode": "hybrid"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 503
+    assert "temporarily unavailable" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_search_router_returns_502_for_reranker_contract_failure(
+    client: AsyncClient, app, v2_project_url
+):
+    """A malformed upstream reranker response should map to a provider 502."""
+
+    class RaisingSearchService:
+        async def search(self, *args, **kwargs):
+            raise RerankProviderContractError("Reranker returned malformed scores.")
+
+        async def count(self, *args, **kwargs):
+            raise RerankProviderContractError("Reranker returned malformed scores.")
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"text": "semantic query", "retrieval_mode": "hybrid"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Reranker returned malformed scores."
 
 
 @pytest.mark.asyncio

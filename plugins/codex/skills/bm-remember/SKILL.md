@@ -13,7 +13,7 @@ a small fact that should survive the current thread.
 1. Read `~/.codex/basic-memory.json`, then the nearest project
    `.codex/basic-memory.json`; project keys override user keys:
    - `primaryProject`, default omitted
-   - `rememberFolder`, default `codex-remember`
+   - `rememberFolder`, default `codex/remember`
 
    Apply the `bm-writing` skill before drafting the note. Match its depth to this
    lightweight capture; do not pad a small fact into an essay.

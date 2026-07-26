@@ -25,7 +25,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "max_related",
         "output_format",
     ],
-    "cloud_info": [],
     "create_memory_project": [
         "project_name",
         "project_path",
@@ -81,7 +80,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
         "include_frontmatter",
     ],
-    "release_notes": [],
     "recent_activity": [
         "type",
         "depth",
@@ -137,7 +135,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "basic_memory_diagnostics": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
-    "cloud_info": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
     "list_directory": {"readOnlyHint": True, "destructiveHint": False},
     "list_memory_projects": {"readOnlyHint": True, "destructiveHint": False},
@@ -145,7 +142,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "read_content": {"readOnlyHint": True, "destructiveHint": False},
     "read_note": {"readOnlyHint": True, "destructiveHint": False},
     "recent_activity": {"readOnlyHint": True, "destructiveHint": False},
-    "release_notes": {"readOnlyHint": True, "destructiveHint": False},
     "schema_diff": {"readOnlyHint": True, "destructiveHint": False},
     "schema_infer": {"readOnlyHint": True, "destructiveHint": False},
     "schema_validate": {"readOnlyHint": True, "destructiveHint": False},
@@ -188,7 +184,6 @@ EXPECTED_EDIT_NOTE_OPERATIONS = [
 TOOL_FUNCTIONS: dict[str, object] = {
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
-    "cloud_info": tools.cloud_info,
     "create_memory_project": tools.create_memory_project,
     "delete_note": tools.delete_note,
     "delete_project": tools.delete_project,
@@ -200,7 +195,6 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "move_note": tools.move_note,
     "read_content": tools.read_content,
     "read_note": tools.read_note,
-    "release_notes": tools.release_notes,
     "recent_activity": tools.recent_activity,
     "schema_diff": tools.schema_diff,
     "schema_infer": tools.schema_infer,

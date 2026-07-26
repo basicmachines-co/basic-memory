@@ -3,6 +3,8 @@
 from contextlib import asynccontextmanager
 import importlib
 
+from httpx import HTTPStatusError, Request, Response
+from mcp.server.fastmcp.exceptions import ToolError
 import pytest
 
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
@@ -287,6 +289,86 @@ async def test_search_notes_search_all_projects_continues_after_project_failure(
     assert result["total_is_exact"] is False
     assert any("team-paul/main" in warning for warning in warnings)
     assert any("team index unavailable" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+async def test_search_notes_search_all_projects_propagates_retryable_service_outage(
+    monkeypatch, cloud_routing
+):
+    """A retryable project outage must fail the merged page instead of returning a partial one."""
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    project_refs = [
+        {
+            "project": "personal/main",
+            "project_id": "11111111-1111-1111-1111-111111111111",
+        },
+        {
+            "project": "team-paul/main",
+            "project_id": "22222222-2222-2222-2222-222222222222",
+        },
+    ]
+
+    async def fake_load_search_project_refs(context=None):
+        return project_refs
+
+    class StubProject:
+        def __init__(self, name: str | None, external_id: str | None):
+            self.name = name or "main"
+            self.external_id = external_id or "local-main"
+
+    @asynccontextmanager
+    async def fake_get_project_client(project=None, context=None, project_id=None):
+        yield object(), StubProject(project, project_id)
+
+    async def fake_resolve_project_and_path(client, identifier, project=None, context=None):
+        return StubProject(project, None), identifier, False
+
+    class MockSearchClient:
+        def __init__(self, client, project_id):
+            self.project_id = project_id
+
+        async def search(self, payload, page, page_size):
+            if self.project_id == "22222222-2222-2222-2222-222222222222":
+                request = Request("POST", "https://api.example/search")
+                response = Response(
+                    503,
+                    request=request,
+                    json={"detail": "Reranker temporarily unavailable"},
+                )
+                try:
+                    response.raise_for_status()
+                except HTTPStatusError as exc:
+                    raise ToolError("Reranker temporarily unavailable") from exc
+            return SearchResponse(
+                results=[
+                    SearchResult(
+                        title="Personal result",
+                        permalink="main/personal-result",
+                        content="MCP content",
+                        type=SearchItemType.ENTITY,
+                        score=0.5,
+                        file_path="/main/personal-result.md",
+                    )
+                ],
+                current_page=page,
+                page_size=page_size,
+                total=1,
+            )
+
+    monkeypatch.setattr(search_mod, "_load_search_project_refs", fake_load_search_project_refs)
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    result = await search_mod.search_notes(
+        query="MCP Test Note",
+        search_all_projects=True,
+        output_format="json",
+    )
+
+    assert isinstance(result, str)
+    assert result.startswith("# Search Failed - Service Temporarily Unavailable")
 
 
 @pytest.mark.asyncio

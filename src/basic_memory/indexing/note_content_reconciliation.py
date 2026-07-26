@@ -8,6 +8,7 @@ from typing import Literal
 
 type NoteContentChecksum = str
 type NoteContentSource = str
+type NoteContentReconciliationOutcome = Literal["current", "stale"]
 type NoteContentWriteStatus = Literal[
     "pending",
     "writing",
@@ -35,6 +36,15 @@ class NoteContentState:
     db_checksum: NoteContentChecksum
     file_version: int | None = None
     file_checksum: NoteContentChecksum | None = None
+    file_write_status: NoteContentWriteStatus = "synced"
+
+
+@dataclass(frozen=True, slots=True)
+class NoteContentReconciliationAnchor:
+    """note_content state captured before an observed file is indexed."""
+
+    entity_id: int | None
+    state: NoteContentState | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +140,11 @@ class NoteContentMaterializationStatusUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class NoteContentReconciliationDeferred:
+    """No-op when an observed file did not start from stable canonical state."""
+
+
+@dataclass(frozen=True, slots=True)
 class NoteContentPromoted:
     """Update when an external file change becomes the newest accepted content."""
 
@@ -147,7 +162,11 @@ class NoteContentPromoted:
 
 
 type NoteContentReconciliationPlan = (
-    NoteContentBootstrap | NoteContentFileSynced | NoteContentFileObserved | NoteContentPromoted
+    NoteContentBootstrap
+    | NoteContentFileSynced
+    | NoteContentFileObserved
+    | NoteContentReconciliationDeferred
+    | NoteContentPromoted
 )
 type NoteContentMaterializationPublishPlan = (
     NoteContentMaterializedCurrent | NoteContentMaterializedStale
@@ -172,7 +191,8 @@ def plan_note_content_reconciliation(
     The same rule must apply everywhere:
     - observed checksum == DB checksum: the file now matches accepted DB content
     - observed checksum == previous file checksum while versions differ: DB stays ahead
-    - otherwise: the observed file wins the next DB/file version
+    - an unrelated observation can advance DB only from fully synchronized state
+    - otherwise: defer until the accepted DB/file lineage is stable
     """
     if current is None:
         return NoteContentBootstrap(
@@ -211,6 +231,14 @@ def plan_note_content_reconciliation(
             file_checksum=current.file_checksum,
             file_updated_at=observed.observed_at,
         )
+
+    file_state_is_stable = (
+        current.file_write_status == "synced"
+        and current.file_version == current.db_version
+        and current.file_checksum == current.db_checksum
+    )
+    if not file_state_is_stable:
+        return NoteContentReconciliationDeferred()
 
     next_version = max(current.db_version, current.file_version or 0) + 1
     return NoteContentPromoted(

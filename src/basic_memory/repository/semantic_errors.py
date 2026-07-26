@@ -11,3 +11,16 @@ class SemanticDependenciesMissingError(RuntimeError):
 
 class SemanticVectorIndexExtensionError(SemanticDependenciesMissingError):
     """Raised when a configured external vector index cannot be loaded safely."""
+
+
+class RerankProviderContractError(RuntimeError):
+    """Raised when a reranker provider violates its response contract.
+
+    A distinct type so the search pipeline can surface this permanent fault (a
+    provider/config bug) instead of degrading it to un-reranked results the way it
+    handles transient reranker failures.
+    """
+
+
+class RerankTransientError(RuntimeError):
+    """Raised when a reranker is temporarily unavailable and the request should be retried."""

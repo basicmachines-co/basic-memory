@@ -20,20 +20,20 @@ Gather a concise diagnostic. Do not over-investigate.
 
 2. Plugin config:
    - read `~/.codex/basic-memory.json`, then the nearest project
-     `.codex/basic-memory.json`; project keys override user keys, while
-     `redactKeys` and `redactPaths` accumulate
+     `.codex/basic-memory.json`; project keys override user keys
    - report the resolved `primaryProject`, `secondaryProjects`, `teamProjects`,
      `captureFolder`, `rememberFolder`, `recallTimeframe`, `focus`,
-     `sessionProfile`, `repository`, `captureEvents`, `redactKeys`, and
-     `redactPaths`
+     `sessionProfile`, `repository`, `checkpointOnCompact`, and `captureEvents`
+   - resolve omitted Codex defaults as `rememberFolder=codex/remember`,
+     and `checkpointOnCompact=true`
 
 3. Core hook health:
    - with the first available launcher, run
      `basic-memory hook status --harness codex --project-dir <repo-root>`
-   - report the shared inbox path, pending envelopes, archived envelopes,
-     pending checkpoint requests, last
+   - report the shared inbox path, pending envelopes, archived envelopes, last
      flush, settings state, resolved primary project, capture state, capture
-     folder, Basic Memory version, and uv version from that command
+     folder, checkpoint-prompt state, Basic Memory version, and uv version from
+     that command
    - inbox counts are global across supported harnesses; do not attribute a
      backlog solely to Codex
    - treat the command's settings resolution as canonical for hook behavior; if
@@ -69,13 +69,11 @@ Basic Memory for Codex
 - Recall timeframe: <recallTimeframe>
 - Session profile: <general | coding>
 - Repository: <owner/name or none>
+- Checkpoint on compact: <enabled | disabled>
 - Event capture: <enabled | disabled>
-- Redact keys: <configured count or none>
-- Redact paths: <configured count or none>
 - Shared hook inbox: <path or unavailable>
 - Shared pending envelopes: <count or unavailable>
 - Shared archived envelopes: <count or unavailable>
-- Pending checkpoint requests: <count or unavailable>
 - Last flush: <timestamp, never, or unavailable>
 - Hook runtime: basic-memory <version>; uv <version or missing>
 - Recent checkpoints: <count across coding_session and codex_session>

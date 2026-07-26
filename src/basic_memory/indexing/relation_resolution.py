@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.models import IndexFileJobStatus
+from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.models import Entity
 from basic_memory.repository.relation_repository import (
     ResolvedRelationWrite,
@@ -167,13 +168,19 @@ class RepositoryRelationResolutionRuntime:
                     f"to_name={relation.to_name}"
                 )
                 if relation.to_name not in resolved_targets_by_link_text:
-                    resolved_targets_by_link_text[
-                        relation.to_name
-                    ] = await self.link_resolver.resolve_link(
-                        relation.to_name,
-                        strict=True,
-                        session=session,
-                    )
+                    try:
+                        resolved_targets_by_link_text[
+                            relation.to_name
+                        ] = await self.link_resolver.resolve_link(
+                            relation.to_name,
+                            strict=True,
+                            session=session,
+                        )
+                    except AmbiguousIdentifierError:
+                        # The target title is shared by several notes; we can't safely pick one,
+                        # so leave this relation a forward reference (as if unresolved) instead of
+                        # aborting the whole pass and stranding other resolvable relations (#1148).
+                        resolved_targets_by_link_text[relation.to_name] = None
                 resolved_entity = resolved_targets_by_link_text[relation.to_name]
                 if resolved_entity is None or resolved_entity.id == relation.from_id:
                     continue

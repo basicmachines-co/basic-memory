@@ -55,6 +55,26 @@ async def load_project_for_delete_acceptance(
     return result.scalars().one_or_none()
 
 
+async def select_replacement_default(
+    session: AsyncSession,
+    *,
+    deleted_project_id: int,
+) -> Project | None:
+    """Pick the active project that should inherit the default flag.
+
+    Deleting the default project can't simply drop the flag: a workspace must
+    always resolve a default for project-less writes. The oldest remaining
+    active project wins so the promotion is deterministic.
+    """
+    result = await session.execute(
+        select(Project)
+        .where(Project.is_active.is_(True), Project.id != deleted_project_id)
+        .order_by(Project.created_at.asc(), Project.id.asc())
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
 async def reactivate_accepted_project(
     session_maker: async_sessionmaker[AsyncSession],
     *,
@@ -90,12 +110,24 @@ class ProjectDeleteAcceptanceService:
                     404,
                     f"Project with external_id '{request.project_external_id}' not found",
                 )
+            # A workspace must always resolve a default project for project-less
+            # writes, so the flag can't just vanish on delete. Cloud team
+            # workspaces hide the "set default" control (basic-memory-cloud
+            # #968), which previously left the default project undeletable there.
+            # Promote another active project instead of refusing; only block when
+            # nothing remains to inherit the flag.
+            replacement_default: Project | None = None
             if project.is_default:
-                raise ProjectDeleteAcceptanceError(
-                    400,
-                    f"Cannot delete default project '{project.name}'. "
-                    "Set another project as default first.",
+                replacement_default = await select_replacement_default(
+                    session,
+                    deleted_project_id=project.id,
                 )
+                if replacement_default is None:
+                    raise ProjectDeleteAcceptanceError(
+                        400,
+                        f"Cannot delete '{project.name}' because it is the only "
+                        "project in the workspace.",
+                    )
 
             runtime_request = RuntimeProjectDeleteJobRequest(
                 project_id=project.id,
@@ -112,6 +144,11 @@ class ProjectDeleteAcceptanceService:
                 is_default=project.is_default or False,
             )
             project.is_active = False
+            # Hand the default flag to the promoted project in the same
+            # transaction so exactly one active default always exists.
+            if replacement_default is not None:
+                project.is_default = None
+                replacement_default.is_default = True
             await session.commit()
 
         try:

@@ -23,8 +23,10 @@ from basic_memory.indexing.file_index_checking import (
     IndexedFileChecksumRow,
 )
 from basic_memory.indexing.file_indexer import (
+    MAX_NOTE_CONTENT_INDEX_ATTEMPTS,
     IndexMarkdownEntityRepository,
     IndexMarkdownNoteContentReconciler,
+    NoteContentChangedDuringIndexError,
 )
 from basic_memory.indexing.index_batch_runtime import (
     IndexBatchRuntime,
@@ -291,19 +293,45 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
 
-        synced = await self.index_current_markdown_file(
-            file_path,
-            new=existing is None,
-            index_search=True,
-            resolve_relations=True,
-            refresh_unchanged_derived_state=existing is not None,
-        )
-        await self.note_content_reconciler.reconcile(
-            entity=synced.entity,
-            markdown_content=synced.markdown_content,
-            observed_at=synced.updated_at,
-            source=source,
-        )
+        for attempt in range(MAX_NOTE_CONTENT_INDEX_ATTEMPTS):
+            if attempt > 0:
+                async with db.scoped_session(self.session_maker) as session:
+                    existing = await self.entity_repository.get_by_file_path(
+                        session,
+                        file_path,
+                        load_relations=False,
+                    )
+
+            anchor = await self.note_content_reconciler.capture_anchor(
+                existing.id if existing is not None else None
+            )
+            synced = await self.index_current_markdown_file(
+                file_path,
+                new=existing is None,
+                index_search=True,
+                resolve_relations=True,
+                refresh_unchanged_derived_state=existing is not None,
+            )
+            outcome = await self.note_content_reconciler.reconcile(
+                entity=synced.entity,
+                markdown_content=synced.markdown_content,
+                observed_at=synced.updated_at,
+                source=source,
+                anchor=anchor,
+            )
+            if outcome == "current":
+                break
+
+            logger.info(
+                "Retrying markdown index after concurrent accepted note write: {}",
+                file_path,
+                entity_id=synced.entity.id,
+                attempt=attempt + 1,
+            )
+        else:
+            raise NoteContentChangedDuringIndexError(
+                f"Note content changed repeatedly while indexing {file_path}"
+            )
 
         logger.info(
             f"Indexed markdown file: {file_path}",

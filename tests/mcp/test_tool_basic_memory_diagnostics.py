@@ -45,6 +45,18 @@ def test_redact_config_removes_semantic_embedding_api_key():
     assert result["semantic_embedding_api_base"] == "https://embeddings.example.com/v1"
 
 
+def test_redact_config_removes_reranker_api_key():
+    raw = {
+        "reranker_api_key": "reranker-secret",
+        "reranker_api_base": "https://reranker.example.com/v1",
+    }
+
+    result = _redact_config(raw)
+
+    assert "reranker_api_key" not in result
+    assert result["reranker_api_base"] == "https://reranker.example.com/v1"
+
+
 def test_redact_config_scrubs_semantic_embedding_api_base_credentials():
     raw = {
         "semantic_embedding_api_base": (
@@ -57,6 +69,21 @@ def test_redact_config_scrubs_semantic_embedding_api_base_credentials():
 
     assert result["semantic_embedding_api_base"] == (
         "https://***@embeddings.example.com/v1?api_key=%2A%2A%2A&timeout=30"
+    )
+
+
+def test_redact_config_scrubs_reranker_api_base_credentials():
+    raw = {
+        "reranker_api_base": (
+            "https://provider-user:provider-password@reranker.example.com/v1"
+            "?api_key=query-secret&timeout=30"
+        ),
+    }
+
+    result = _redact_config(raw)
+
+    assert result["reranker_api_base"] == (
+        "https://***@reranker.example.com/v1?api_key=%2A%2A%2A&timeout=30"
     )
 
 
@@ -162,6 +189,33 @@ def test_diagnostics_redacts_semantic_embedding_api_key(tmp_path):
     assert "query-secret" not in result
     assert "semantic_embedding_api_key" not in result
     assert "embeddings.example.com" in result
+    assert "timeout=30" in result
+
+
+def test_diagnostics_redacts_reranker_credentials(tmp_path):
+    """Reranker credentials must never appear in diagnostic output."""
+    config_data = {
+        "reranker_api_key": "reranker-super-secret",
+        "reranker_api_base": (
+            "https://provider-user:provider-password@reranker.example.com/v1"
+            "?api_key=query-secret&timeout=30"
+        ),
+        "projects": {},
+    }
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
+
+    result = basic_memory_diagnostics()
+
+    for secret in (
+        "reranker-super-secret",
+        "provider-user",
+        "provider-password",
+        "query-secret",
+    ):
+        assert secret not in result
+    assert "reranker_api_key" not in result
+    assert "reranker.example.com" in result
     assert "timeout=30" in result
 
 

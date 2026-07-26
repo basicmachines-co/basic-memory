@@ -486,10 +486,11 @@ async def test_exact_match_types_in_strict_mode(link_resolver, test_entities, pr
     assert result is not None
     assert result.permalink == f"{project_prefix}/components/core-service"
 
-    # 2. Exact title match
-    result = await link_resolver.resolve_link("Core Service", strict=True)
+    # 2. Exact title match (unique title — an ambiguous title is covered separately by
+    #    test_duplicate_title_raises_ambiguous_in_strict_mode).
+    result = await link_resolver.resolve_link("Auth Service", strict=True)
     assert result is not None
-    assert result.permalink == f"{project_prefix}/components/core-service"
+    assert result.permalink == f"{project_prefix}/components/auth-service"
 
     # 3. Exact file path match
     result = await link_resolver.resolve_link("components/Core Service.md", strict=True)
@@ -530,11 +531,13 @@ async def test_fuzzy_matching_blocked_in_strict_mode(link_resolver, test_entitie
 async def test_link_normalization_with_strict_mode(link_resolver, test_entities, project_prefix):
     """Test that link normalization still works in strict mode."""
 
-    # Test bracket removal and alias handling in strict mode
+    # Test bracket removal and alias handling in strict mode. Use a unique title so this
+    # exercises normalization, not duplicate-title resolution (ambiguity is covered by
+    # test_duplicate_title_raises_ambiguous_in_strict_mode).
     queries_and_expected = [
-        ("[[Core Service]]", f"{project_prefix}/components/core-service"),
-        ("[[Core Service|Main]]", f"{project_prefix}/components/core-service"),
-        ("  [[  Core Service  ]]  ", f"{project_prefix}/components/core-service"),
+        ("[[Auth Service]]", f"{project_prefix}/components/auth-service"),
+        ("[[Auth Service|Main]]", f"{project_prefix}/components/auth-service"),
+        ("  [[  Auth Service  ]]  ", f"{project_prefix}/components/auth-service"),
     ]
 
     for query, expected_permalink in queries_and_expected:
@@ -544,19 +547,187 @@ async def test_link_normalization_with_strict_mode(link_resolver, test_entities,
 
 
 @pytest.mark.asyncio
-async def test_duplicate_title_handling_in_strict_mode(
+async def test_duplicate_title_raises_ambiguous_in_strict_mode(
     link_resolver, test_entities, project_prefix
 ):
-    """Test how duplicate titles are handled in strict mode."""
+    """Strict resolution refuses to guess between same-title notes (#1148).
 
-    # "Core Service" appears twice in test data (components/core-service and components2/core-service)
-    # In strict mode, if there are multiple exact title matches, it should still return the first one
-    # (same behavior as normal mode for exact matches)
+    "Core Service" appears twice (components/core-service and components2/core-service). A
+    destructive (strict) resolve — edit_note / move_note — must fail loud instead of silently
+    picking the shortest path, which is how those tools landed on the wrong entity when an
+    original and a `-1` duplicate coexisted.
+    """
+    from basic_memory.services.exceptions import AmbiguousIdentifierError
 
-    result = await link_resolver.resolve_link("Core Service", strict=True)
+    with pytest.raises(AmbiguousIdentifierError) as exc_info:
+        await link_resolver.resolve_link("Core Service", strict=True)
+
+    message = str(exc_info.value)
+    assert "Core Service" in message
+    assert f"{project_prefix}/components/core-service" in message
+    assert f"{project_prefix}/components2/core-service" in message
+    assert "exact permalink or external_id" in message
+    # Both candidates are exposed for programmatic handling.
+    assert len(exc_info.value.candidates) == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_title_non_strict_keeps_shortest_path(link_resolver, project_prefix):
+    """Non-strict resolution (wiki links, reads) still picks shortest path and never raises."""
+    result = await link_resolver.resolve_link("Core Service", strict=False)
     assert result is not None
-    # Should return the first match (components/core-service based on test fixture order)
     assert result.permalink == f"{project_prefix}/components/core-service"
+
+
+@pytest.mark.asyncio
+async def test_unique_title_still_resolves_in_strict_mode(link_resolver, project_prefix):
+    """A title with a single match is unaffected — strict resolution returns it, no error."""
+    result = await link_resolver.resolve_link("Auth Service", strict=True)
+    assert result is not None
+    assert result.permalink == f"{project_prefix}/components/auth-service"
+
+
+@pytest.mark.asyncio
+async def test_exact_file_path_wins_over_ambiguous_title_in_strict_mode(
+    entity_repository, session_maker, link_resolver
+):
+    """An exact, unique file path disambiguates even when the title is shared (#1148, P2).
+
+    Two notes share the title "Diagram.png"; only one has file_path equal to the identifier.
+    File paths are part of the resolver contract and more precise than a title, so strict
+    resolution must return the exact-path match rather than raising AmbiguousIdentifierError.
+    Permalinks here are non-derived so the permalink step does not short-circuit first.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Diagram.png",
+                note_type="file",
+                content_type="image/png",
+                file_path="Diagram.png",
+                permalink="diagram-root",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Diagram.png",
+                note_type="file",
+                content_type="image/png",
+                file_path="archive/old-diagram.png",
+                permalink="diagram-archive",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    result = await link_resolver.resolve_link("Diagram.png", strict=True)
+    assert result is not None
+    assert result.file_path == "Diagram.png"
+    assert result.permalink == "diagram-root"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_title_not_bypassed_via_title_derived_permalink_in_strict_mode(
+    entity_repository, session_maker, link_resolver
+):
+    """A duplicated title must not resolve via its own slug under a strict op (#1148, P1 follow-up).
+
+    The original owns the title-derived permalink ("widget"); a duplicate got "widget-1".
+    build_permalink_resolution_candidates slugifies "Widget" to "widget", so without the guard the
+    permalink step would silently return the original for edit/move. A strict resolve of the bare
+    (ambiguous) title must raise; an exact permalink still resolves precisely.
+    """
+    from basic_memory.services.exceptions import AmbiguousIdentifierError
+
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Widget",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="Widget.md",
+                permalink="widget",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Widget",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="archive/Widget.md",
+                permalink="widget-1",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    # Bare, ambiguous title raises even though a title-derived permalink ("widget") exists.
+    with pytest.raises(AmbiguousIdentifierError):
+        await link_resolver.resolve_link("Widget", strict=True)
+
+    # An exact permalink is a precise pointer and still resolves.
+    result = await link_resolver.resolve_link("widget", strict=True)
+    assert result is not None
+    assert result.permalink == "widget"
+
+
+@pytest.mark.asyncio
+async def test_exact_custom_permalink_resolves_despite_ambiguous_title_in_strict_mode(
+    entity_repository, session_maker, link_resolver
+):
+    """An explicit non-slug permalink is accepted verbatim even when the title is shared (#1148).
+
+    Custom frontmatter permalinks (e.g. "API_V2") are not slug-shaped, so exactness must come from
+    the raw candidate that matched, not from slug shape. A caller passing that exact permalink must
+    resolve to its entity — otherwise the ambiguity error would name a permalink the resolver then
+    refuses to accept.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="API_V2",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="API_V2.md",
+                permalink="API_V2",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="API_V2",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="archive/API_V2.md",
+                permalink="api-v2-1",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    result = await link_resolver.resolve_link("API_V2", strict=True)
+    assert result is not None
+    assert result.permalink == "API_V2"
 
 
 @pytest.mark.asyncio

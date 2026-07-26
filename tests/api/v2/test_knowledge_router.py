@@ -136,6 +136,34 @@ async def test_resolve_identifier_not_found(client: AsyncClient, v2_project_url)
 
 
 @pytest.mark.asyncio
+async def test_resolve_identifier_ambiguous_title_returns_409(
+    client: AsyncClient, v2_project_url
+):
+    """A strict resolve of a title shared by multiple notes returns 409 (#1148).
+
+    Covers the router's AmbiguousIdentifierError -> 409 transport contract: the resolver raising
+    is not enough, edit/move rely on this handler surfacing the disambiguation message.
+    """
+    for directory in ("reports", "archive"):
+        create = await client.post(
+            f"{v2_project_url}/knowledge/entities",
+            json={"title": "Duplicate Report", "directory": directory, "content": "body"},
+        )
+        assert create.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/resolve",
+        json={"identifier": "Duplicate Report", "strict": True},
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "Ambiguous identifier 'Duplicate Report'" in detail
+    assert "matches 2 notes" in detail
+    assert "exact permalink or external_id" in detail
+
+
+@pytest.mark.asyncio
 async def test_resolve_identifier_no_fuzzy_match(client: AsyncClient, v2_project_url):
     """Test that resolve uses strict mode - no fuzzy search fallback.
 

@@ -1,27 +1,28 @@
-"""Project info tool for Basic Memory MCP server."""
+"""Project info resource for Basic Memory MCP server."""
 
-from typing import Optional
-
-from loguru import logger
 from fastmcp import Context
+from loguru import logger
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.project_context_identifiers import canonicalize_project_name
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas import ProjectInfoResponse
 
 
 @mcp.resource(
-    uri="memory://{project}/info",
-    description="Get information and statistics about the current Basic Memory project.",
+    uri="memory://{workspace}/{project}/info",
+    description="Get information and statistics about a Basic Memory workspace project.",
 )
 async def project_info(
-    project: Optional[str] = None, context: Context | None = None
+    workspace: str,
+    project: str,
+    context: Context | None = None,
 ) -> ProjectInfoResponse:
-    """Get comprehensive information about the current Basic Memory project.
+    """Get comprehensive information about a workspace-qualified Basic Memory project.
 
-    This tool provides detailed statistics and status information about your
+    This resource provides detailed statistics and status information about a
     Basic Memory project, including:
 
     - Project configuration
@@ -30,41 +31,32 @@ async def project_info(
     - Recent activity and growth over time
     - System status (database, watch service, version)
 
-    Use this tool to:
-    - Verify your Basic Memory installation is working correctly
-    - Get insights into your knowledge base structure
-    - Monitor growth and activity over time
-    - Identify potential issues like unresolved relations
-
     Args:
-        project: Optional project name. If not provided, uses default_project
-                from config or CLI constraint. If unknown, use
-                list_memory_projects() to discover available projects.
+        workspace: Workspace permalink from the resource URI. Use ``local`` for
+            a configured local project.
+        project: Project permalink from the resource URI.
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        Detailed project information and statistics
-
-    Examples:
-        # Get information about the current/default project
-        info = await project_info()
-
-        # Get information about a specific project
-        info = await project_info(project="my-project")
-
-        # Check entity counts
-        print(f"Total entities: {info.statistics.total_entities}")
-
-        # Check system status
-        print(f"Basic Memory version: {info.system.version}")
+        Detailed project information and statistics.
     """
     logger.info("Getting project info")
 
-    async with get_client() as client:
-        project_config = await get_active_project(client, project, context)
+    project_route = f"{workspace}/{project}"
+    config = ConfigManager().config
+    configured_project = canonicalize_project_name(project, config)
 
-        # Call the API endpoint
-        response = await call_get(client, f"/v2/projects/{project_config.external_id}/info")
+    # Trigger: the canonical resource URI uses the `local` workspace sentinel.
+    # Why: local projects have no workspace route, but every project-info URI now
+    #   has the same workspace/project shape.
+    # Outcome: remove only that sentinel before the shared router resolves the project.
+    if (
+        workspace == "local"
+        and configured_project is not None
+        and config.get_project_mode(configured_project) is ProjectMode.LOCAL
+    ):
+        project_route = configured_project
 
-        # Convert response to ProjectInfoResponse
+    async with get_project_client(project_route, context) as (client, active_project):
+        response = await call_get(client, f"/v2/projects/{active_project.external_id}/info")
         return ProjectInfoResponse.model_validate(response.json())

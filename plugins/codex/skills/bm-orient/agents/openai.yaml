@@ -1,7 +1,7 @@
 interface:
   display_name: "Orient"
-  short_description: "Load repo context from Basic Memory"
+  short_description: "Resume from a Basic Memory checkpoint"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-orient to load Basic Memory context before changing this repo."
+  default_prompt: "Use $bm-orient to resume from a checkpoint or load current Basic Memory context before changing this repo."
