@@ -7,6 +7,7 @@ from typing import cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.file_utils import FileError
 from basic_memory.indexing.file_index_checking import (
     CurrentFileMetadataSource,
     FileIndexChecker,
@@ -293,6 +294,17 @@ async def test_storage_current_file_checksum_source_treats_file_errors_as_missin
     class VanishingMetadataSource:
         async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
             raise FileOperationError(f"file vanished: {file_path}")
+
+    source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
+
+    assert await source.load_current_file_checksum("vanished.md") is None
+
+
+@pytest.mark.asyncio
+async def test_storage_current_file_checksum_source_treats_checksum_race_as_missing() -> None:
+    class VanishingMetadataSource:
+        async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
+            raise FileError(f"checksum target vanished: {file_path}")
 
     source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
 

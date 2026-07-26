@@ -8,6 +8,7 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.file_utils import FileError
 from basic_memory.indexing.file_index_planning import (
     FileIndexChecksum,
     FileIndexDecision,
@@ -196,7 +197,7 @@ class StorageCurrentFileChecksumSource:
         """Return the current storage checksum for one file."""
         try:
             current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
-        except FileOperationError:
+        except (FileError, FileOperationError):
             return None
         return current_metadata.checksum if current_metadata is not None else None
 

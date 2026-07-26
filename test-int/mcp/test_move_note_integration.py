@@ -9,6 +9,7 @@ from hashlib import sha256
 
 import pytest
 from fastmcp import Client
+from httpx import AsyncClient
 
 from basic_memory import db
 from basic_memory.index.local_project import (
@@ -172,6 +173,84 @@ async def test_move_note_lingering_source_is_not_reindexed(
         assert ghost is None
         assert moved is not None
         assert moved.id == moved_entity_id
+
+
+@pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
+@pytest.mark.asyncio
+async def test_put_rename_lingering_source_is_not_reindexed(
+    client: AsyncClient,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+    force_full: bool,
+):
+    """A PUT rename records its vacated path so delayed cleanup cannot mint a ghost."""
+    del app
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    project_url = f"/v2/projects/{test_project.external_id}"
+
+    create_response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "PUT Rename Race",
+            "directory": "source",
+            "content": "This source object must remain represented only by its renamed entity.",
+        },
+    )
+    assert create_response.status_code == 202
+    created = create_response.json()
+    source_relative = created["file_path"]
+    source_path = project_config.home / source_relative
+    source_checksum = sha256(source_path.read_bytes()).hexdigest()
+
+    async def leave_source_cleanup_pending(
+        self: InlineNoteFileDeleteEnqueuer,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> None:
+        del self, request
+
+    monkeypatch.setattr(
+        InlineNoteFileDeleteEnqueuer,
+        "enqueue_note_file_delete",
+        leave_source_cleanup_pending,
+    )
+
+    update_response = await client.put(
+        f"{project_url}/knowledge/entities/{created['external_id']}",
+        json={
+            "title": "PUT Rename Race",
+            "directory": "archive",
+            "content": "The renamed destination also carries updated content.",
+        },
+    )
+    assert update_response.status_code == 202
+    updated = update_response.json()
+    destination_relative = updated["file_path"]
+    assert destination_relative != source_relative
+    assert source_path.exists()
+
+    async with db.scoped_session(session_maker) as session:
+        markers = await vacate_repository.load_vacate_markers(session, [source_relative])
+    assert markers[source_relative].entity_id == created["id"]
+    assert markers[source_relative].file_checksum == source_checksum
+
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=force_full,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        ghost = await entity_repository.get_by_file_path(session, source_relative)
+        renamed = await entity_repository.get_by_file_path(session, destination_relative)
+
+    assert ghost is None
+    assert renamed is not None
+    assert renamed.id == created["id"]
 
 
 @pytest.mark.asyncio

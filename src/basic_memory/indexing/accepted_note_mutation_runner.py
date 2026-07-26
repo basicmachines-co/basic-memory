@@ -534,6 +534,7 @@ async def _run_accepted_note_update(
     )
     created = entity is None
     existing_file_path = entity.file_path if entity is not None else None
+    vacated_source: tuple[RuntimeFilePath, str] | None = None
 
     await reject_conflicting_accepted_note_file_path(
         session,
@@ -597,6 +598,15 @@ async def _run_accepted_note_update(
             dependencies=dependencies,
             missing_kind=AcceptedNoteMutationRejectKind.conflict,
         )
+        # A PUT replacement may also rename the note. Capture the accepted source bytes before
+        # persistence mutates the entity and note_content to the destination version so delayed
+        # cleanup cannot let a later project index recreate the old path as a ghost.
+        vacated_source = (
+            entity.file_path,
+            current_note_content.file_checksum
+            if current_note_content.file_checksum is not None
+            else current_note_content.db_checksum,
+        )
         # Optimistic-concurrency precondition: the caller sent the db_checksum it
         # last synced; if the accepted row has advanced to a different write,
         # reject with the current checksum so the client rebases instead of
@@ -659,6 +669,13 @@ async def _run_accepted_note_update(
         accepted_file_path=entity.file_path,
         repositories=dependencies.write_repositories,
     )
+    if vacated_source is not None and entity.file_path != vacated_source[0]:
+        await NoteFileVacateRepository(project.id).record_vacate(
+            session,
+            entity_id=entity.id,
+            file_path=vacated_source[0],
+            file_checksum=vacated_source[1],
+        )
     return plan_accepted_note_write_change(
         status_code=201 if created else 200,
         entity=entity,
