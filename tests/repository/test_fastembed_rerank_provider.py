@@ -1,7 +1,9 @@
 """Tests for FastEmbedRerankProvider."""
 
+import asyncio
 import builtins
 import sys
+import threading
 
 import pytest
 from requests import Response, exceptions as requests_exceptions
@@ -57,6 +59,58 @@ async def test_lazy_loads_once_and_reuses_model(monkeypatch):
 
     assert _StubCrossEncoder.init_count == 1
     assert provider._model is not None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_first_waiter_does_not_start_a_second_model_load(monkeypatch):
+    """Later searches join the worker thread left running by a cancelled request."""
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    loop = asyncio.get_running_loop()
+    load_started = asyncio.Event()
+    release_load = threading.Event()
+    model = object()
+    load_count = 0
+
+    def create_model():
+        nonlocal load_count
+        load_count += 1
+        loop.call_soon_threadsafe(load_started.set)
+        assert release_load.wait(timeout=5)
+        return model
+
+    monkeypatch.setattr(provider, "_create_model", create_model)
+
+    first_waiter = asyncio.create_task(provider._load_model())
+    await load_started.wait()
+    first_waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_waiter
+
+    second_waiter = asyncio.create_task(provider._load_model())
+    for _ in range(100):
+        if load_count > 1:
+            break
+        await asyncio.sleep(0.001)
+    release_load.set()
+
+    assert await second_waiter is model
+    assert load_count == 1
+
+
+@pytest.mark.asyncio
+async def test_waiter_reuses_model_loaded_before_it_acquires_the_lock(monkeypatch):
+    """The in-lock double check wins if another load finishes while a caller waits."""
+    _install_stub(monkeypatch)
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    model = provider._create_model()
+    await provider._model_lock.acquire()
+    waiter = asyncio.create_task(provider._load_model())
+    await asyncio.sleep(0)
+
+    provider._model = model
+    provider._model_lock.release()
+
+    assert await waiter is model
 
 
 @pytest.mark.asyncio

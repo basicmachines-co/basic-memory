@@ -25,6 +25,12 @@ _TRANSIENT_DOWNLOAD_STATUS_CODES = frozenset({408, 425, 429})
 _TRUE_ENV_VALUES = frozenset({"1", "ON", "YES", "TRUE"})
 
 
+def _consume_model_load_exception(task: asyncio.Task["TextCrossEncoder"]) -> None:
+    """Retrieve background load failures when the request that started them was cancelled."""
+    if not task.cancelled():
+        task.exception()
+
+
 def _is_transient_model_load_error(
     exc: requests_exceptions.RequestException | ValueError,
     model_name: str,
@@ -71,6 +77,7 @@ class FastEmbedRerankProvider(RerankProvider):
         self.cache_dir = cache_dir
         self.threads = threads
         self._model: TextCrossEncoder | None = None
+        self._model_load_task: asyncio.Task[TextCrossEncoder] | None = None
         # Serialize the one-time model load; concurrent first queries must not each
         # construct (and download) the ONNX model.
         self._model_lock = asyncio.Lock()
@@ -94,21 +101,42 @@ class FastEmbedRerankProvider(RerankProvider):
             model_kwargs["threads"] = self.threads
         return TextCrossEncoder(**model_kwargs)
 
+    async def _load_model_once(self) -> "TextCrossEncoder":
+        """Own one model construction independently of any requesting task."""
+        try:
+            try:
+                model = await asyncio.to_thread(self._create_model)
+            except (requests_exceptions.RequestException, ValueError) as exc:
+                if not _is_transient_model_load_error(exc, self.model_name):
+                    raise
+                raise RerankTransientError(
+                    f"FastEmbed reranker model download failed temporarily: {self.model_name}"
+                ) from exc
+            self._model = model
+            logger.info("FastEmbed reranker loaded: model_name={model}", model=self.model_name)
+            return model
+        finally:
+            # The worker owns cleanup, so cancellation of the request awaiting it
+            # cannot erase the in-flight state and trigger a duplicate construction.
+            if self._model_load_task is asyncio.current_task():
+                self._model_load_task = None
+
     async def _load_model(self) -> "TextCrossEncoder":
         if self._model is not None:
             return self._model
         async with self._model_lock:
-            if self._model is None:
-                try:
-                    self._model = await asyncio.to_thread(self._create_model)
-                except (requests_exceptions.RequestException, ValueError) as exc:
-                    if not _is_transient_model_load_error(exc, self.model_name):
-                        raise
-                    raise RerankTransientError(
-                        f"FastEmbed reranker model download failed temporarily: {self.model_name}"
-                    ) from exc
-                logger.info("FastEmbed reranker loaded: model_name={model}", model=self.model_name)
-            return self._model
+            if self._model is not None:
+                return self._model
+            if self._model_load_task is None:
+                load_task = asyncio.create_task(self._load_model_once())
+                load_task.add_done_callback(_consume_model_load_exception)
+                self._model_load_task = load_task
+            else:
+                load_task = self._model_load_task
+
+        # Shield the shared construction from request cancellation. The cancelled
+        # caller still exits promptly while the next caller joins the same worker.
+        return await asyncio.shield(load_task)
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         if not documents:

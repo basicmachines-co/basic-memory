@@ -164,6 +164,22 @@ def test_litellm_provider_accepts_explicit_model():
     assert provider.model_name == "cohere/rerank-v3.5"
 
 
+def test_litellm_provider_normalizes_model_whitespace():
+    """Accepted provider/model identifiers are stored in their routable form."""
+    config = _config(
+        reranker_enabled=True,
+        reranker_provider=" LiteLLM ",
+        reranker_model=" cohere/rerank-v3.5 ",
+    )
+
+    provider = create_rerank_provider(config)
+
+    assert config.reranker_provider == "litellm"
+    assert config.reranker_model == "cohere/rerank-v3.5"
+    assert isinstance(provider, LiteLLMRerankProvider)
+    assert provider.model_name == "cohere/rerank-v3.5"
+
+
 def test_litellm_provider_rejects_unroutable_model_name():
     """LiteLLM model names include the provider routing prefix."""
     with pytest.raises(ValidationError, match="requires an explicit reranker_model"):

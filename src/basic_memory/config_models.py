@@ -935,6 +935,8 @@ class BasicMemoryConfig(BaseSettings):
         model = self.reranker_model.strip()
         if not model:
             raise ValueError("reranker_model must not be blank when reranker_enabled=True")
+        self.reranker_provider = provider
+        self.reranker_model = model
         if provider == "fastembed":
             try:
                 from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -947,10 +949,10 @@ class BasicMemoryConfig(BaseSettings):
             supported_models = {
                 entry["model"] for entry in TextCrossEncoder.list_supported_models()
             }
-            if self.reranker_model not in supported_models:
+            if model not in supported_models:
                 supported_names = ", ".join(sorted(supported_models))
                 raise ValueError(
-                    f"Unsupported FastEmbed reranker model {self.reranker_model!r}. "
+                    f"Unsupported FastEmbed reranker model {model!r}. "
                     f"Supported models: {supported_names}"
                 )
         if provider == "litellm" and model == DEFAULT_FASTEMBED_RERANK_MODEL:

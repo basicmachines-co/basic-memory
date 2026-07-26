@@ -16,13 +16,13 @@ from basic_memory.repository.semantic_errors import RerankProviderContractError
 def build_rerank_document(title: str | None, body: str | None, max_chars: int) -> str:
     """Assemble the text handed to the cross-encoder for one candidate.
 
-    Prepend the title so short or title-only candidates still carry a usable
-    signal. Truncate to ``max_chars`` (when positive) so long notes don't inflate
-    cross-encoder latency — the leading text carries the strongest signal.
+    Lead with the matched body because it carries the retrieval signal, then append
+    the title so short or title-only candidates still provide context. Truncate to
+    ``max_chars`` (when positive) so long notes don't inflate cross-encoder latency.
     """
     title = title or ""
     body = body or ""
-    text = f"{title}\n{body}" if (title and body) else (body or title)
+    text = f"{body}\n{title}" if (title and body) else (body or title)
     if max_chars > 0 and len(text) > max_chars:
         text = text[:max_chars]
     return text

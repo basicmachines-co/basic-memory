@@ -202,10 +202,10 @@ def test_should_rerank_gating():
 
 def test_rerank_document_text_fallbacks():
     repo = _unit_repo()
-    assert repo._rerank_document_text(_row(title="T", matched_chunk_text="chunk")) == "T\nchunk"
+    assert repo._rerank_document_text(_row(title="T", matched_chunk_text="chunk")) == "chunk\nT"
     assert (
         repo._rerank_document_text(_row(title="T", matched_chunk_text=None, content_snippet="snip"))
-        == "T\nsnip"
+        == "snip\nT"
     )
     assert (
         repo._rerank_document_text(_row(title=None, matched_chunk_text="only-body")) == "only-body"
@@ -218,14 +218,22 @@ def test_rerank_document_text_fallbacks():
 
 def test_rerank_document_text_truncation():
     repo = _unit_repo()
-    row = _row(title="T", matched_chunk_text="x" * 500)  # full text = "T\n" + 500 = 502 chars
+    row = _row(title="T", matched_chunk_text="x" * 500)  # full text = 500 + "\nT" = 502 chars
     repo._reranker_max_document_chars = 0  # disabled
     assert len(repo._rerank_document_text(row)) == 502
     repo._reranker_max_document_chars = 100  # trims to the leading (most-relevant) text
     trimmed = repo._rerank_document_text(row)
-    assert len(trimmed) == 100 and trimmed.startswith("T\nxxx")
+    assert len(trimmed) == 100 and trimmed == "x" * 100
     repo._reranker_max_document_chars = 10_000  # no-op when already under the cap
     assert len(repo._rerank_document_text(row)) == 502
+
+
+def test_rerank_document_text_cap_preserves_matched_body_with_long_title():
+    repo = _unit_repo()
+    repo._reranker_max_document_chars = 8
+    row = _row(title="title-" * 20, matched_chunk_text="MATCHED body")
+
+    assert "MATCHED" in repo._rerank_document_text(row)
 
 
 def test_demoted_tail_scores_are_stable_as_the_tail_grows():

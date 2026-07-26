@@ -6,6 +6,7 @@ from typing import Annotated, List, Optional, Dict, Any, Literal, cast
 from uuid import UUID
 
 import logfire
+from httpx import HTTPStatusError
 from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
@@ -38,6 +39,8 @@ from basic_memory.schemas.search import (
     SearchRetrievalMode,
 )
 
+_SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
+
 
 def _default_search_type() -> str:
     """Pick default search mode from config, falling back to auto-detection.
@@ -53,6 +56,31 @@ def _default_search_type() -> str:
         return config.default_search_type
 
     return "hybrid" if config.semantic_search_enabled else "text"
+
+
+def _is_service_unavailable_error(error: BaseException) -> bool:
+    """Return whether an explicit HTTP cause marks a retryable service outage."""
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, HTTPStatusError):
+            return current.response.status_code == 503
+        current = current.__cause__
+    return False
+
+
+def _format_service_unavailable_response(project: str, error_message: str, query: str) -> str:
+    """Keep retryable outages distinct so fan-out never turns them into partial success."""
+    return dedent(f"""
+        {_SERVICE_UNAVAILABLE_HEADING}
+
+        Search for '{query}' in project '{project}' could not complete: {error_message}
+
+        No partial results were returned because retrying with a changing project set
+        could duplicate or skip results across pages.
+
+        ## Next step
+        Retry the same search after the service recovers.
+        """).strip()
 
 
 def _format_search_error_response(
@@ -593,6 +621,8 @@ async def _search_all_projects(
             continue
 
         if isinstance(results, str):
+            if results.startswith(_SERVICE_UNAVAILABLE_HEADING):
+                return results
             if not results.startswith("# Search Failed"):
                 return results
             logger.warning(
@@ -1182,6 +1212,10 @@ async def search_notes(
                 logger.error(
                     f"Search failed for query '{query or ''}': {e}, project: {active_project.name}"
                 )
+                if _is_service_unavailable_error(e):
+                    return _format_service_unavailable_response(
+                        active_project.name, str(e), query or ""
+                    )
                 # Return formatted error message as string for better user experience
                 return _format_search_error_response(
                     active_project.name, str(e), query or "", effective_search_type
