@@ -13,7 +13,7 @@ from basic_memory.runtime.note_content_deletes import (
     RuntimeDeletedNoteResponse,
     RuntimeMaterializedNoteSource,
     RuntimePendingNoteFileDelete,
-    plan_previous_materialized_note_file_delete,
+    plan_previous_note_file_delete,
     select_deleted_note_file_checksum,
 )
 from basic_memory.runtime.note_content_responses import (
@@ -33,6 +33,7 @@ from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectId,
     RuntimeEntityId,
+    RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeIntegrityErrorMessage,
     RuntimeNoteActorKind,
@@ -64,6 +65,10 @@ class RuntimeAcceptedNoteContentWriteSource(
     Protocol,
 ):
     """Minimal note_content row shape needed to plan accepted writes."""
+
+    @property
+    def db_checksum(self) -> RuntimeFileChecksum:
+        """Return the accepted checksum that identifies the source bytes."""
 
 
 class RuntimeAcceptedNoteWriteContentSource(
@@ -130,14 +135,25 @@ def plan_accepted_note_content_write(
     existing_file_path: RuntimeFilePath | None = None,
 ) -> RuntimeAcceptedNoteContentWritePlan:
     """Plan accepted DB versioning and old-file cleanup for a note_content write."""
+    source_checksum = None
+    if current_note_content is not None:
+        # A source write can reach storage before its publisher records file_checksum. The
+        # accepted DB checksum still identifies those exact bytes, so enqueue guarded cleanup
+        # with it; an absent source then retires the move-vacate marker instead of leaving it
+        # capable of suppressing a future legitimate note.
+        source_checksum = (
+            current_note_content.file_checksum
+            if current_note_content.file_checksum is not None
+            else current_note_content.db_checksum
+        )
     return RuntimeAcceptedNoteContentWritePlan(
         db_version=next_runtime_note_content_version(current_note_content),
-        previous_file_delete=plan_previous_materialized_note_file_delete(
+        previous_file_delete=plan_previous_note_file_delete(
             project_id=project_id,
             entity_id=entity_id,
             existing_file_path=existing_file_path,
             accepted_file_path=accepted_file_path,
-            current_note_content=current_note_content,
+            file_checksum=source_checksum,
         ),
     )
 

@@ -293,7 +293,9 @@ async def test_storage_current_file_checksum_source_loads_metadata_checksum() ->
 async def test_storage_current_file_checksum_source_treats_file_errors_as_missing() -> None:
     class VanishingMetadataSource:
         async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
-            raise FileOperationError(f"file vanished: {file_path}")
+            raise FileOperationError(f"file vanished: {file_path}") from FileNotFoundError(
+                file_path
+            )
 
     source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
 
@@ -304,11 +306,25 @@ async def test_storage_current_file_checksum_source_treats_file_errors_as_missin
 async def test_storage_current_file_checksum_source_treats_checksum_race_as_missing() -> None:
     class VanishingMetadataSource:
         async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
-            raise FileError(f"checksum target vanished: {file_path}")
+            raise FileError(f"checksum target vanished: {file_path}") from FileNotFoundError(
+                file_path
+            )
 
     source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
 
     assert await source.load_current_file_checksum("vanished.md") is None
+
+
+@pytest.mark.asyncio
+async def test_storage_current_file_checksum_source_propagates_non_missing_failures() -> None:
+    class UnreadableMetadataSource:
+        async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
+            raise FileError(f"permission denied: {file_path}") from PermissionError(file_path)
+
+    source = StorageCurrentFileChecksumSource(metadata_source=UnreadableMetadataSource())
+
+    with pytest.raises(FileError, match="permission denied"):
+        await source.load_current_file_checksum("unreadable.md")
 
 
 def _orphan_checker(
@@ -327,6 +343,49 @@ def _orphan_checker(
         move_vacate_source=vacate,
     )
     return checker, moved, vacate
+
+
+@pytest.mark.asyncio
+async def test_checker_forced_full_hashes_only_marked_create_candidates() -> None:
+    """Forced-full keeps its one content-read pass for paths with no move evidence."""
+    current = StubCurrentChecksumSource({"notes/marked.md": "vacated-checksum"})
+    moved = StubMovedEntitySource(
+        facts_by_id={
+            42: MovedEntityFacts(
+                file_path="archive/marked.md",
+                checksum="vacated-checksum",
+            )
+        }
+    )
+    vacate = StubMoveVacateSource(
+        markers={
+            "notes/marked.md": MoveVacateMarker(
+                entity_id=42,
+                checksum="vacated-checksum",
+            )
+        }
+    )
+    checker = FileIndexChecker(
+        indexed_checksum_source=StubIndexedChecksumSource(
+            {"notes/existing.md": "accepted-checksum"}
+        ),
+        current_checksum_source=current,
+        moved_entity_source=moved,
+        move_vacate_source=vacate,
+    )
+
+    plan = await checker.detect(
+        [
+            FileIndexTarget(path="notes/marked.md"),
+            FileIndexTarget(path="notes/unmarked.md"),
+            FileIndexTarget(path="notes/existing.md"),
+        ]
+    )
+
+    assert plan.paths_to_read == ("notes/unmarked.md", "notes/existing.md")
+    assert current.requested_paths == ["notes/marked.md"]
+    assert vacate.calls == [("notes/marked.md", "notes/unmarked.md")]
+    assert moved.calls == [(42,)]
 
 
 @pytest.mark.asyncio

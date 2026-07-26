@@ -175,6 +175,66 @@ async def test_move_note_lingering_source_is_not_reindexed(
         assert moved.id == moved_entity_id
 
 
+@pytest.mark.asyncio
+async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
+    mcp_server,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+):
+    """Accepted DB checksum schedules cleanup even when no file checksum was published."""
+    del app
+    source_relative = "source/Absent Before Move.md"
+    destination_relative = "archive/absent-before-move.md"
+    source_path = project_config.home / source_relative
+    destination_path = project_config.home / destination_relative
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    note_content_repository = NoteContentRepository(project_id=test_project.id)
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Absent Before Move",
+                "directory": "source",
+                "content": "# Absent Before Move\n\nCleanup should retire its marker.",
+            },
+        )
+
+        source_checksum = sha256(source_path.read_bytes()).hexdigest()
+        async with db.scoped_session(session_maker) as session:
+            entity = await entity_repository.get_by_file_path(session, source_relative)
+            assert entity is not None
+            note_content = await note_content_repository.get_by_entity_id(session, entity.id)
+            assert note_content is not None
+            assert note_content.db_checksum == source_checksum
+            entity.checksum = None
+            note_content.file_checksum = None
+
+        # Reproduce the no-materialized-source side of the publisher race. The accepted checksum
+        # still drives a cleanup job, which observes the missing source and clears the marker.
+        source_path.unlink()
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Absent Before Move",
+                "destination_path": destination_relative,
+            },
+        )
+
+    assert "✅ Note moved successfully" in move_result.content[0].text
+    assert not source_path.exists()
+    assert destination_path.exists()
+    async with db.scoped_session(session_maker) as session:
+        markers = await vacate_repository.load_vacate_markers(session, [source_relative])
+    assert markers == {}
+
+
 @pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
 @pytest.mark.asyncio
 async def test_put_rename_lingering_source_is_not_reindexed(

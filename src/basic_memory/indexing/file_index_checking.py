@@ -197,8 +197,15 @@ class StorageCurrentFileChecksumSource:
         """Return the current storage checksum for one file."""
         try:
             current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
-        except (FileError, FileOperationError):
-            return None
+        except (FileError, FileOperationError) as exc:
+            # A local checksum read wraps the race where a file vanishes after exists() as
+            # FileError. Only that concrete disappearance is a missing target; permission and
+            # transient I/O failures must fail the indexing job instead of silently leaving stale
+            # database/search state.
+            cause = exc.__cause__ if exc.__cause__ is not None else exc.__context__
+            if isinstance(cause, FileNotFoundError):
+                return None
+            raise
         return current_metadata.checksum if current_metadata is not None else None
 
 
@@ -287,6 +294,15 @@ class FileIndexChecker:
         indexed_checksum_by_path = await self.indexed_checksum_source.load_indexed_file_checksums(
             tuple(target.path for target in targets)
         )
+        legacy_markers: Mapping[FileIndexPath, MoveVacateMarker] | None = None
+        if legacy_targets:
+            # Forced-full reads every non-orphan target regardless of freshness. Query the cheap
+            # marker table first, then hash only DB-absent paths that could actually be move
+            # orphans; the later content reader remains the single checksum pass for all others.
+            assert self.move_vacate_source is not None
+            legacy_markers = await self.move_vacate_source.load_vacate_markers(
+                [target.path for target in targets if target.path not in indexed_checksum_by_path]
+            )
         inspected: list[_InspectedTarget] = []
         for target in targets:
             if not legacy_targets:
@@ -302,8 +318,10 @@ class FileIndexChecker:
                     status=FileIndexDecisionStatus.read,
                     reason=f"legacy target requires indexing: {target.path}",
                 )
-                current_checksum = await self.current_checksum_source.load_current_file_checksum(
-                    target.path
+                current_checksum = (
+                    await self.current_checksum_source.load_current_file_checksum(target.path)
+                    if legacy_markers is not None and target.path in legacy_markers
+                    else None
                 )
             inspected.append(
                 _InspectedTarget(
@@ -316,7 +334,10 @@ class FileIndexChecker:
                 )
             )
 
-        decisions = await self._apply_move_orphan_gate(inspected)
+        decisions = await self._apply_move_orphan_gate(
+            inspected,
+            prefetched_markers=legacy_markers,
+        )
         return build_file_index_plan(decisions)
 
     async def inspect_target(
@@ -346,6 +367,8 @@ class FileIndexChecker:
     async def _apply_move_orphan_gate(
         self,
         inspected: Sequence[_InspectedTarget],
+        *,
+        prefetched_markers: Mapping[FileIndexPath, MoveVacateMarker] | None = None,
     ) -> list[FileIndexDecision]:
         """Downgrade a move's leftover source object to `current` in one batch (#1601).
 
@@ -371,8 +394,12 @@ class FileIndexChecker:
         if not candidates:
             return decisions
 
-        markers = await self.move_vacate_source.load_vacate_markers(
-            [item.target.path for _, item in candidates]
+        markers = (
+            prefetched_markers
+            if prefetched_markers is not None
+            else await self.move_vacate_source.load_vacate_markers(
+                [item.target.path for _, item in candidates]
+            )
         )
         marked_entity_ids = [
             marker.entity_id for marker in markers.values() if marker.entity_id is not None

@@ -180,8 +180,8 @@ def test_plan_accepted_note_content_write_advances_and_cleans_moved_materialized
     )
 
 
-def test_plan_accepted_note_content_write_skips_unmaterialized_file_cleanup() -> None:
-    assert plan_accepted_note_content_write(
+def test_plan_accepted_note_content_write_uses_db_checksum_for_unpublished_file_cleanup() -> None:
+    plan = plan_accepted_note_content_write(
         project_id=7,
         entity_id=42,
         existing_file_path="notes/old.md",
@@ -192,7 +192,18 @@ def test_plan_accepted_note_content_write_skips_unmaterialized_file_cleanup() ->
             last_source="api",
             file_checksum=None,
         ),
-    ) == RuntimeAcceptedNoteContentWritePlan(db_version=5)
+    )
+
+    assert plan == RuntimeAcceptedNoteContentWritePlan(
+        db_version=5,
+        previous_file_delete=RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="db-checksum",
+            live_file_path="notes/new.md",
+        ),
+    )
 
 
 def test_plan_accepted_note_materialization_change_wraps_response_and_marker() -> None:

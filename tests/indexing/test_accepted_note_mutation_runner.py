@@ -1542,12 +1542,11 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert change.materialization is not None
     assert change.materialization.previous_file_path == "notes/accepted.md"
     cleanup = change.materialization.cleanup_after_write
-    if file_checksum is None:
-        assert cleanup is None
-    else:
-        assert cleanup is not None
-        assert cleanup.file_path == "notes/accepted.md"
-        assert cleanup.file_checksum == "file-checksum"
+    assert cleanup is not None
+    assert cleanup.file_path == "notes/accepted.md"
+    assert cleanup.file_checksum == (
+        "file-checksum" if file_checksum is not None else "old-checksum"
+    )
     assert persistence_calls[0].await_count == 0
     assert persistence_calls[1].await_count == 1
 
