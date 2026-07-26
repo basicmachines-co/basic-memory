@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.basicmachines-co%2Fbasic-memory.svg)](https://mcptoplist.com/server/io.github.basicmachines-co%2Fbasic-memory)
+
 <!-- mcp-name: io.github.basicmachines-co/basic-memory -->
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![PyPI version](https://badge.fury.io/py/basic-memory.svg)](https://badge.fury.io/py/basic-memory)
