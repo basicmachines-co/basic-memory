@@ -870,14 +870,13 @@ class SearchRepositoryBase(ABC):
         """
         if self._should_rerank(query_text) and offset < self._reranker_candidates:
             # Trigger: the requested page intersects the reranked pool.
-            # Why: including offset in this window lets later pages discover new
-            # documents that the reranker can promote ahead of page-one results,
-            # causing duplicates or skips across otherwise identical page sizes.
-            # Outcome: every page intersecting the pool reranks the same retrieval
-            # window; page size still controls how much tail headroom is available.
+            # Why: changing either offset or a growing-prefix limit lets later pages
+            # discover documents that the reranker can promote ahead of page-one
+            # results, causing duplicates or skips.
+            # Outcome: every request intersecting the pool reranks one retrieval
+            # window determined only by the configured reranker capacity.
             return max(
                 self._semantic_vector_k,
-                limit * 10,
                 self._reranker_candidates * RERANK_POOL_CHUNK_FANOUT,
             )
         return max(self._semantic_vector_k, (limit + offset) * 10)

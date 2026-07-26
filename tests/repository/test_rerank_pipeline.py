@@ -9,6 +9,7 @@ import pytest
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.rerank_provider import validate_rerank_scores
+from basic_memory.repository.search_repository_base import RERANK_POOL_CHUNK_FANOUT
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
     RerankTransientError,
@@ -211,8 +212,6 @@ def test_rerank_document_text_truncation():
 
 def test_candidate_limit_over_fetches_chunks_for_rerank_pool():
     """With reranking active, over-fetch chunks so dedup can't starve the rerank window."""
-    from basic_memory.repository.search_repository_base import RERANK_POOL_CHUNK_FANOUT
-
     repo = _unit_repo()
     repo._semantic_vector_k = 5
     repo._reranker_candidates = 20
@@ -227,8 +226,8 @@ def test_candidate_limit_over_fetches_chunks_for_rerank_pool():
     assert repo._candidate_limit(limit=1, offset=0, query_text="") == 10  # no query → no bump
 
 
-def test_candidate_limit_is_stable_across_pages_that_intersect_rerank_pool():
-    """Offset pagination must rerank the same candidate window on every pool page."""
+def test_candidate_limit_is_stable_across_reranked_pagination_requests():
+    """Offset and growing-prefix pagination must rerank one candidate window."""
     repo = _unit_repo()
     repo._semantic_vector_k = 5
     repo._reranker_candidates = 20
@@ -236,7 +235,8 @@ def test_candidate_limit_is_stable_across_pages_that_intersect_rerank_pool():
 
     first_page_limit = repo._candidate_limit(limit=10, offset=0, query_text="auth")
 
-    assert first_page_limit == 100
+    assert first_page_limit == 20 * RERANK_POOL_CHUNK_FANOUT
+    assert repo._candidate_limit(limit=20, offset=0, query_text="auth") == first_page_limit
     assert repo._candidate_limit(limit=10, offset=10, query_text="auth") == first_page_limit
     assert repo._candidate_limit(limit=10, offset=19, query_text="auth") == first_page_limit
     # Once the requested page is entirely beyond the rerank pool, normal
@@ -519,7 +519,10 @@ async def test_hybrid_search_preserves_candidate_windows(
     assert candidate_limits == [1000]
 
     candidate_limits.clear()
-    search_repository._rerank_provider = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    search_repository._semantic_vector_k = 5
+    search_repository._reranker_candidates = 20
+    reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    search_repository._rerank_provider = reranker
     reranked_results = await search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.HYBRID,
@@ -527,7 +530,18 @@ async def test_hybrid_search_preserves_candidate_windows(
     )
 
     assert reranked_results
-    assert candidate_limits == [400]
+    assert candidate_limits == [80]
+
+    candidate_limits.clear()
+    growing_prefix_results = await search_repository.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.HYBRID,
+        limit=21,
+    )
+
+    assert growing_prefix_results
+    assert reranker.calls == 2
+    assert candidate_limits == [80]
 
 
 @pytest.mark.asyncio

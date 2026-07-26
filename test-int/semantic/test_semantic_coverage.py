@@ -183,6 +183,8 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     assert candidate_limits == [1000]
 
     candidate_limits.clear()
+    repo._semantic_vector_k = 5
+    repo._reranker_candidates = 20
     reranker = _RecordingReranker()
     repo._rerank_provider = reranker
     reranked_results = await search_service.search(
@@ -195,8 +197,21 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     )
 
     assert reranked_results
-    assert reranker.calls == 1
-    assert candidate_limits == [400]
+    assert candidate_limits == [80]
+
+    candidate_limits.clear()
+    growing_prefix_results = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+        ),
+        limit=21,
+    )
+
+    assert growing_prefix_results
+    assert reranker.calls == 2
+    assert candidate_limits == [80]
 
 
 @pytest.mark.asyncio
